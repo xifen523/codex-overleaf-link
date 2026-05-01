@@ -672,6 +672,102 @@
     });
   }
 
+  function renderDiffReview(syncChanges) {
+    return new Promise(resolve => {
+      const container = document.createElement('div');
+      container.className = 'codex-diff-review';
+      const fileStates = new Map();
+
+      for (const change of syncChanges) {
+        fileStates.set(change.path, true);
+        const card = document.createElement('div');
+        card.className = 'codex-diff-file';
+        card.dataset.path = change.path;
+        card.dataset.accepted = 'true';
+
+        const header = document.createElement('div');
+        header.className = 'codex-diff-file-header';
+        const pathEl = document.createElement('span');
+        pathEl.className = 'codex-diff-file-path';
+        pathEl.textContent = change.type === 'delete' ? `[delete] ${change.path}` : change.path;
+        const actions = document.createElement('div');
+        actions.className = 'codex-diff-file-actions';
+        const acceptBtn = document.createElement('button');
+        acceptBtn.type = 'button';
+        acceptBtn.dataset.diffAccept = '';
+        acceptBtn.textContent = '✓';
+        acceptBtn.title = '接受';
+        const rejectBtn = document.createElement('button');
+        rejectBtn.type = 'button';
+        rejectBtn.dataset.diffReject = '';
+        rejectBtn.textContent = '✗';
+        rejectBtn.title = '拒绝';
+
+        acceptBtn.addEventListener('click', () => {
+          card.dataset.accepted = 'true';
+          fileStates.set(change.path, true);
+        });
+        rejectBtn.addEventListener('click', () => {
+          card.dataset.accepted = 'false';
+          fileStates.set(change.path, false);
+        });
+
+        actions.append(acceptBtn, rejectBtn);
+        header.append(pathEl, actions);
+        card.append(header);
+
+        if (change.diff?.length) {
+          const body = document.createElement('div');
+          body.className = 'codex-diff-body';
+          for (const hunk of change.diff) {
+            const hunkEl = document.createElement('div');
+            hunkEl.className = 'codex-diff-hunk';
+            for (const line of hunk.lines) {
+              const lineEl = document.createElement('div');
+              lineEl.className = 'codex-diff-line';
+              lineEl.dataset.type = line.type;
+              lineEl.textContent = line.text;
+              hunkEl.append(lineEl);
+            }
+            body.append(hunkEl);
+          }
+          card.append(body);
+        }
+
+        container.append(card);
+      }
+
+      const toolbar = document.createElement('div');
+      toolbar.className = 'codex-diff-toolbar';
+      const applyBtn = document.createElement('button');
+      applyBtn.type = 'button';
+      applyBtn.dataset.diffApplyAll = '';
+      applyBtn.textContent = '应用选中';
+      const rejectAllBtn = document.createElement('button');
+      rejectAllBtn.type = 'button';
+      rejectAllBtn.textContent = '全部拒绝';
+
+      applyBtn.addEventListener('click', () => {
+        container.remove();
+        const accepted = syncChanges.filter(c => fileStates.get(c.path) === true);
+        resolve(accepted);
+      });
+      rejectAllBtn.addEventListener('click', () => {
+        container.remove();
+        resolve([]);
+      });
+
+      toolbar.append(rejectAllBtn, applyBtn);
+      container.append(toolbar);
+
+      if (currentRunView?.events) {
+        currentRunView.events.append(container);
+        const log = panel.querySelector('[data-log]');
+        log.scrollTop = log.scrollHeight;
+      }
+    });
+  }
+
   async function applySyncChangesToOverleaf(syncChanges = [], project = {}) {
     let operations = buildSyncApplyOperations(syncChanges, project);
     if (!operations.length) {
@@ -694,14 +790,12 @@
     }
 
     if (state.mode === 'confirm') {
-      const approved = window.confirm([
-        '将本地 Codex 改动同步回 Overleaf？',
-        '',
-        formatOperationFiles(operations),
-        '',
-        '取消后 Overleaf 不会被修改，本地 mirror 中的改动会保留。'
-      ].join('\n'));
-      if (!approved) {
+      appendRunEvent({
+        title: `本地 Codex 产生了 ${operations.length} 项改动，请查看差异后确认。`,
+        status: 'running'
+      });
+      const accepted = await renderDiffReview(syncChanges);
+      if (!accepted.length) {
         appendRunEvent({
           title: '已取消同步：Overleaf 没有被修改。',
           status: 'completed'
@@ -719,6 +813,7 @@
           hasSkippedOperations: false
         };
       }
+      operations = buildSyncApplyOperations(accepted, project);
     }
 
     const deleteOperations = operations.filter(operation => operation.type === 'delete');
@@ -733,6 +828,13 @@
       if (!approved) {
         operations = operations.filter(operation => operation.type !== 'delete');
       }
+    }
+
+    if (state.mode === 'auto' && syncChanges.some(c => c.diff?.length)) {
+      appendRunEvent({
+        title: `本地 Codex 改动预览：${syncChanges.filter(c => c.diff?.length).length} 个文件有差异。`,
+        status: 'completed'
+      });
     }
 
     appendOperationsPreview(operations, '同步本地 Codex 改动到 Overleaf');
