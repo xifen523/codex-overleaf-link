@@ -8,8 +8,28 @@ function computeLineDiff(oldText, newText, contextLines = 3) {
     return [];
   }
 
+  const MAX_LINES = 5000;
+  const MAX_DIFF_PRODUCT = 4000000;
+
+  if (oldLines.length > MAX_LINES || newLines.length > MAX_LINES || oldLines.length * newLines.length > MAX_DIFF_PRODUCT) {
+    return buildTruncatedResult(oldLines.length, newLines.length);
+  }
+
   const edits = myersDiff(oldLines, newLines);
+  if (edits === null) {
+    return buildTruncatedResult(oldLines.length, newLines.length);
+  }
+
   return buildHunks(oldLines, newLines, edits, contextLines);
+}
+
+function buildTruncatedResult(oldCount, newCount) {
+  return [{
+    startA: 1,
+    startB: 1,
+    truncated: true,
+    lines: [{ type: 'context', text: `文件改动较大（${oldCount} → ${newCount} 行），请在 Overleaf 中查看完整差异。` }]
+  }];
 }
 
 function splitLines(text) {
@@ -33,7 +53,12 @@ function myersDiff(oldLines, newLines) {
   let v = new Array(vSize).fill(0);
   const trace = [];
 
+  const MAX_EDIT_DISTANCE = 1500;
+
   for (let d = 0; d <= max; d++) {
+    if (d > MAX_EDIT_DISTANCE) {
+      return null;
+    }
     trace.push([...v]);
     const newV = [...v];
     for (let k = -d; k <= d; k += 2) {

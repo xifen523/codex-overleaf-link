@@ -61,3 +61,31 @@ test('handles empty new content (all removals)', () => {
   assert.equal(hunks.length, 1);
   assert.ok(hunks[0].lines.every(l => l.type === 'remove'));
 });
+
+test('returns fallback hunk for files exceeding line threshold', () => {
+  const oldLines = Array.from({ length: 6000 }, (_, i) => `line ${i}`).join('\n');
+  const newLines = Array.from({ length: 6000 }, (_, i) => `modified ${i}`).join('\n');
+  const hunks = computeLineDiff(oldLines, newLines);
+  assert.equal(hunks.length, 1);
+  assert.equal(hunks[0].truncated, true);
+  assert.ok(hunks[0].lines.length <= 1);
+  assert.ok(hunks[0].lines[0].type === 'context');
+  assert.match(hunks[0].lines[0].text, /改动较大/);
+});
+
+test('returns fallback hunk when edit distance would be too large', () => {
+  const oldLines = Array.from({ length: 3000 }, (_, i) => `old ${i}`).join('\n');
+  const newLines = Array.from({ length: 3000 }, (_, i) => `new ${i}`).join('\n');
+  const hunks = computeLineDiff(oldLines, newLines);
+  assert.equal(hunks.length, 1);
+  assert.equal(hunks[0].truncated, true);
+});
+
+test('still computes diff for moderately sized files', () => {
+  const oldLines = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n');
+  const newLines = Array.from({ length: 200 }, (_, i) => i === 100 ? 'CHANGED' : `line ${i}`).join('\n');
+  const hunks = computeLineDiff(oldLines, newLines);
+  assert.ok(hunks.length >= 1);
+  assert.equal(hunks[0].truncated, undefined);
+  assert.ok(hunks[0].lines.some(l => l.type === 'add' && l.text === 'CHANGED'));
+});
