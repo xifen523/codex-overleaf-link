@@ -6,6 +6,7 @@ const { runCodexSession } = require('./codexSessionRunner');
 const { logDebug, truncateText } = require('./debugLog');
 const { HOST_NAME } = require('./manifest');
 
+const activeProjectLocks = new Set();
 const pendingPlans = new Map();
 
 async function handleRequest(request, env = process.env, emit = () => {}) {
@@ -41,9 +42,12 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
 }
 
 async function handleCodexRun(request, env, emit) {
+  const params = request.params || {};
+  const projectKey = resolveProjectKey(params);
+  activeProjectLocks.add(projectKey);
   try {
     const result = await runCodexSession({
-      params: request.params || {},
+      params,
       env,
       emit,
       rootDir: env.CODEX_OVERLEAF_MIRROR_ROOT
@@ -59,6 +63,8 @@ async function handleCodexRun(request, env, emit) {
       stack: error.stack
     });
     return errorResponse(request.id, 'codex_run_failed', truncateText(error.message, 12000));
+  } finally {
+    activeProjectLocks.delete(projectKey);
   }
 }
 
@@ -66,7 +72,12 @@ async function handleMirrorSync(request, env) {
   const { syncOverleafToMirror } = require('./mirrorWorkspace');
   const params = request.params || {};
   const projectId = params.projectId || 'unknown';
+  const projectKey = resolveProjectKey(params);
   const rootDir = env.CODEX_OVERLEAF_MIRROR_ROOT;
+
+  if (activeProjectLocks.has(projectKey)) {
+    return errorResponse(request.id, 'project_locked', `Project ${projectKey} is currently in use by codex.run`);
+  }
 
   try {
     const result = await syncOverleafToMirror({
@@ -376,6 +387,14 @@ function collectResultOperations(result) {
     combined.push(operation);
   }
   return combined;
+}
+
+function resolveProjectKey(params = {}) {
+  const projectId = params.projectId || params.project?.projectId || params.project?.id || params.project?.url || 'unknown';
+  const raw = String(projectId).trim();
+  const fromUrl = raw.match(/\/project\/([^/?#]+)/)?.[1];
+  const candidate = fromUrl || raw.split(/[/?#]/).filter(Boolean).pop() || 'unknown';
+  return candidate.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'unknown';
 }
 
 function resolveExternalAgent(env) {

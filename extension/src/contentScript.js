@@ -1316,7 +1316,7 @@
             if (!panel?.querySelector('[data-context-tray]')?.hidden) {
               renderContextFiles(contextProject);
             }
-            sendNative({
+            sendBackgroundNative({
               method: 'mirror.sync',
               params: {
                 projectId: getCurrentProjectId(),
@@ -1517,6 +1517,17 @@
   function sendNative(payload) {
     const id = crypto.randomUUID();
     activeNativeRequestId = id;
+    return chrome.runtime.sendMessage({
+      type: 'codex-overleaf/native-request',
+      payload: {
+        id,
+        ...payload
+      }
+    });
+  }
+
+  function sendBackgroundNative(payload) {
+    const id = crypto.randomUUID();
     return chrome.runtime.sendMessage({
       type: 'codex-overleaf/native-request',
       payload: {
