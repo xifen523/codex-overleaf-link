@@ -2,6 +2,7 @@
 
 const { spawn } = require('node:child_process');
 const { collectMirrorChanges, syncOverleafToMirror } = require('./mirrorWorkspace');
+const { computeLineDiff } = require('./diffEngine');
 const { truncateText } = require('./debugLog');
 
 async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex } = {}) {
@@ -36,9 +37,19 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     emit
   });
 
-  const syncChanges = await collectMirrorChanges({
+  const rawSyncChanges = await collectMirrorChanges({
     projectId,
     rootDir
+  });
+
+  const syncChanges = rawSyncChanges.map(change => {
+    if (change.type === 'write' && typeof change.previousContent === 'string') {
+      return {
+        ...change,
+        diff: computeLineDiff(change.previousContent, change.content)
+      };
+    }
+    return change;
   });
 
   emitCodexEvent(emit, 'overleaf.sync.changes', 'Local Codex changes collected for Overleaf sync', {
