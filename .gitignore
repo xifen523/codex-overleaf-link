@@ -1,0 +1,12 @@
+.DS_Store
+.local/
+node_modules/
+dist/
+build/
+*.log
+*.zip
+*.crx
+*.pem
+*.key
+*.p12
+*.sqlite

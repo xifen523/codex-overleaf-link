@@ -1,0 +1,43 @@
+const assert = require('node:assert/strict');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+
+const {
+  buildHostManifest,
+  getChromeNativeHostManifestPath,
+  validateChromeExtensionId
+} = require('../native-host/src/manifest');
+
+test('validates Chrome extension ids', () => {
+  assert.equal(validateChromeExtensionId('abcdefghijklmnopabcdefghijklmnop'), true);
+  assert.equal(validateChromeExtensionId('ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP'), false);
+  assert.equal(validateChromeExtensionId('short'), false);
+  assert.equal(validateChromeExtensionId('abcdefghijklmnopabcdefghijklmno1'), false);
+});
+
+test('builds a Chrome Native Messaging host manifest locked to one extension origin', () => {
+  const manifest = buildHostManifest({
+    extensionId: 'abcdefghijklmnopabcdefghijklmnop',
+    bridgePath: '/Applications/CodexOverleaf/codex-overleaf-bridge'
+  });
+
+  assert.deepEqual(manifest, {
+    name: 'com.codex.overleaf',
+    description: 'Codex Overleaf local bridge',
+    path: '/Applications/CodexOverleaf/codex-overleaf-bridge',
+    type: 'stdio',
+    allowed_origins: ['chrome-extension://abcdefghijklmnopabcdefghijklmnop/']
+  });
+});
+
+test('returns the user-level macOS Chrome native host manifest path', () => {
+  assert.equal(
+    getChromeNativeHostManifestPath(),
+    path.join(os.homedir(), 'Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.overleaf.json')
+  );
+});
+
+test('rejects invalid extension ids when building the manifest', () => {
+  assert.throws(() => buildHostManifest({ extensionId: 'bad', bridgePath: '/tmp/bridge' }), /Invalid Chrome extension id/);
+});

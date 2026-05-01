@@ -1,0 +1,82 @@
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const {
+  buildUndoCheckpoint,
+  buildUndoOperations
+} = require('../extension/src/shared/undoOperations');
+
+test('builds undo operations from the pre-run project snapshot', () => {
+  const project = {
+    files: [
+      { path: 'main.tex', content: 'alpha' },
+      { path: 'old.tex', content: 'old body' },
+      { path: 'unused.tex', content: 'unused body' }
+    ]
+  };
+
+  const undo = buildUndoOperations(project, [
+    { type: 'edit', path: 'main.tex', find: 'alpha', replace: 'beta' },
+    { type: 'create', path: 'new.tex', content: 'new body' },
+    { type: 'rename', path: 'old.tex', to: 'renamed.tex' },
+    { type: 'delete', path: 'unused.tex', reason: 'not referenced' }
+  ]);
+
+  assert.deepEqual(undo, [
+    { type: 'create', path: 'unused.tex', to: null, find: null, replace: null, replaceAll: null, content: 'unused body', reason: 'Undo delete' },
+    { type: 'rename', path: 'renamed.tex', to: 'old.tex', find: null, replace: null, replaceAll: null, content: null, reason: 'Undo rename' },
+    { type: 'delete', path: 'new.tex', to: null, find: null, replace: null, replaceAll: null, content: null, reason: 'Undo create' },
+    { type: 'edit', path: 'main.tex', to: null, find: null, replace: null, replaceAll: 'alpha', content: null, reason: 'Undo edit' }
+  ]);
+});
+
+test('coalesces multiple edits to the same file into one full-file restore', () => {
+  const undo = buildUndoOperations({
+    files: [{ path: 'main.tex', content: 'original' }]
+  }, [
+    { type: 'edit', path: 'main.tex', find: 'a', replace: 'b' },
+    { type: 'edit', path: 'main.tex', find: 'c', replace: 'd' }
+  ]);
+
+  assert.deepEqual(undo, [
+    { type: 'edit', path: 'main.tex', to: null, find: null, replace: null, replaceAll: 'original', content: null, reason: 'Undo edit' }
+  ]);
+});
+
+test('skips undo operations that need unavailable original content', () => {
+  const undo = buildUndoOperations({
+    files: []
+  }, [
+    { type: 'edit', path: 'missing.tex', find: 'a', replace: 'b' },
+    { type: 'delete', path: 'missing.tex' }
+  ]);
+
+  assert.deepEqual(undo, []);
+});
+
+test('builds an undo checkpoint guarded by the expected post-apply project state', () => {
+  const checkpoint = buildUndoCheckpoint({
+    files: [
+      { path: 'main.tex', content: 'alpha old' },
+      { path: 'old.tex', content: 'old body' },
+      { path: 'deleted.tex', content: 'delete me' }
+    ]
+  }, [
+    { type: 'edit', path: 'main.tex', find: 'old', replace: 'new' },
+    { type: 'create', path: 'created.tex', content: 'created body' },
+    { type: 'rename', path: 'old.tex', to: 'renamed.tex' },
+    { type: 'delete', path: 'deleted.tex', reason: 'cleanup' }
+  ]);
+
+  assert.deepEqual(checkpoint.undoBaseFiles, [
+    { path: 'main.tex', content: 'alpha new' },
+    { path: 'created.tex', content: 'created body' },
+    { path: 'renamed.tex', content: 'old body' }
+  ]);
+  assert.deepEqual(checkpoint.undoOperations, [
+    { type: 'create', path: 'deleted.tex', to: null, find: null, replace: null, replaceAll: null, content: 'delete me', reason: 'Undo delete' },
+    { type: 'rename', path: 'renamed.tex', to: 'old.tex', find: null, replace: null, replaceAll: null, content: null, reason: 'Undo rename' },
+    { type: 'delete', path: 'created.tex', to: null, find: null, replace: null, replaceAll: null, content: null, reason: 'Undo create' },
+    { type: 'edit', path: 'main.tex', to: null, find: null, replace: null, replaceAll: 'alpha old', content: null, reason: 'Undo edit' }
+  ]);
+});

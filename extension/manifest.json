@@ -1,0 +1,59 @@
+{
+  "manifest_version": 3,
+  "name": "Codex Overleaf Link",
+  "version": "0.1.0",
+  "description": "Connect the active Overleaf project to a local Codex bridge.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlvUmSiwPTRFSmr9fVJ8HTtlCaYP34o4zrLvqqJV3Ha4+QWQuBTkLmbONvDm7heCh8sDqUzMBA7yPtLu5kGtx85FnHBxWcasgLMmdSfGKcfApVyQGfEJ9WoRYsr1QVG9xTdAmtIa5zdFFHdfLN3OrBgxLDSt2jjpiEZbs9w3VLlsJlVY2y+98L86RywHQzk/l2OEwIJ2Waa7ef0mRnNMQ0k7S1xJNFV5YOMHEc06+OkCg32zJlfGhHY+NVzpxgCYvJEPB/SR2JLLi1U43jvIStCXBZeQ1cT10tXvgwV1F7RPbA9cjelzyamW9yhK3XlyD7TnPiYfvOOYxDByP9s8H7QIDAQAB",
+  "permissions": [
+    "nativeMessaging",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.overleaf.com/project/*",
+    "https://overleaf.com/project/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.overleaf.com/project/*",
+        "https://overleaf.com/project/*"
+      ],
+      "js": [
+        "src/shared/summary.js",
+        "src/shared/agentTranscript.js",
+        "src/shared/reviewing.js",
+        "src/shared/projectFiles.js",
+        "src/shared/undoOperations.js",
+        "src/shared/sessionState.js",
+        "src/shared/storageKeys.js",
+        "src/shared/staleGuard.js",
+        "src/contentScript.js"
+      ],
+      "css": [
+        "styles/panel.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/shared/reviewing.js",
+        "src/shared/projectFiles.js",
+        "src/shared/staleGuard.js",
+        "src/pageBridge.js"
+      ],
+      "matches": [
+        "https://www.overleaf.com/*",
+        "https://overleaf.com/*"
+      ]
+    }
+  ],
+  "action": {
+    "default_title": "Codex Overleaf Link",
+    "default_popup": "popup.html"
+  }
+}

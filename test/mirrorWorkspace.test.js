@@ -1,0 +1,113 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+
+const {
+  collectMirrorChanges,
+  getProjectMirror,
+  syncOverleafToMirror
+} = require('../native-host/src/mirrorWorkspace');
+
+test('maps the same Overleaf project to a stable local mirror workspace', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const first = getProjectMirror('https://www.overleaf.com/project/aabbccddeeff001122334455', { rootDir });
+    const second = getProjectMirror('aabbccddeeff001122334455', { rootDir });
+
+    assert.equal(first.workspacePath, second.workspacePath);
+    assert.equal(first.projectKey, 'aabbccddeeff001122334455');
+    assert.equal(first.workspacePath.startsWith(rootDir), true);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('syncs Overleaf text files to the mirror and removes files missing from the next snapshot', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const first = await syncOverleafToMirror({
+      projectId: 'project-a',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: 'hello' },
+          { path: 'sections/old.tex', content: 'old' }
+        ]
+      }
+    });
+
+    assert.equal(fs.readFileSync(path.join(first.workspacePath, 'main.tex'), 'utf8'), 'hello');
+    assert.equal(fs.existsSync(path.join(first.workspacePath, 'sections/old.tex')), true);
+
+    const second = await syncOverleafToMirror({
+      projectId: 'project-a',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: 'hello again' }
+        ]
+      }
+    });
+
+    assert.equal(fs.readFileSync(path.join(second.workspacePath, 'main.tex'), 'utf8'), 'hello again');
+    assert.equal(fs.existsSync(path.join(second.workspacePath, 'sections/old.tex')), false);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('collects local mirror writes and deletes as sync changes, not Codex operation JSON', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-b',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: 'before' },
+          { path: 'refs.bib', content: '@article{x}' }
+        ]
+      }
+    });
+
+    fs.writeFileSync(path.join(mirror.workspacePath, 'main.tex'), 'after', 'utf8');
+    fs.writeFileSync(path.join(mirror.workspacePath, 'new.tex'), 'new file', 'utf8');
+    fs.rmSync(path.join(mirror.workspacePath, 'refs.bib'));
+
+    const changes = await collectMirrorChanges({ projectId: 'project-b', rootDir });
+
+    assert.deepEqual(changes.map(change => [change.type, change.path]), [
+      ['write', 'main.tex'],
+      ['write', 'new.tex'],
+      ['delete', 'refs.bib']
+    ]);
+    assert.equal(changes[0].content, 'after');
+    assert.equal(changes[0].previousContent, 'before');
+    assert.equal(Object.hasOwn(changes[0], 'find'), false);
+    assert.equal(Object.hasOwn(changes[0], 'replace'), false);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('rejects project paths that would escape the local mirror', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    await assert.rejects(
+      syncOverleafToMirror({
+        projectId: 'project-c',
+        rootDir,
+        project: {
+          files: [
+            { path: '../outside.tex', content: 'bad' }
+          ]
+        }
+      }),
+      /Unsafe project path/
+    );
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});

@@ -1,0 +1,942 @@
+:root.codex-overleaf-panel-mounted {
+  --codex-overleaf-panel-width: 340px;
+}
+
+:root.codex-overleaf-panel-mounted body {
+  box-sizing: border-box;
+  width: calc(100vw - var(--codex-overleaf-panel-width)) !important;
+  max-width: calc(100vw - var(--codex-overleaf-panel-width)) !important;
+  overflow-x: hidden !important;
+}
+
+#codex-overleaf-panel {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 2147483647;
+  display: none;
+  box-sizing: border-box;
+  width: var(--codex-overleaf-panel-width);
+  height: 100vh;
+  border-left: 1px solid #2b2b2b;
+  background: #181818;
+  color: #cccccc;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+
+#codex-overleaf-panel.is-open {
+  display: flex;
+  flex-direction: column;
+}
+
+#codex-overleaf-panel button,
+#codex-overleaf-panel select,
+#codex-overleaf-panel textarea {
+  font: inherit;
+}
+
+#codex-overleaf-panel button {
+  border: 0;
+  background: transparent;
+  color: #cccccc;
+  cursor: pointer;
+}
+
+#codex-overleaf-panel button:hover {
+  background: #2a2d2e;
+}
+
+#codex-overleaf-panel button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+#codex-overleaf-panel .codex-vscode-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  border-bottom: 1px solid #2b2b2b;
+  padding: 0 8px 0 12px;
+}
+
+#codex-overleaf-panel .codex-vscode-title {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #8ab4f8;
+  color: #cccccc;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+#codex-overleaf-panel .codex-vscode-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+#codex-overleaf-panel .codex-diagnostics-wrap {
+  position: relative;
+}
+
+#codex-overleaf-panel .codex-vscode-head-actions button {
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  color: #a7a7a7;
+}
+
+#codex-overleaf-panel .codex-vscode-head-actions [data-diagnostics-menu][data-active="true"] {
+  background: #2a2d2e;
+  color: #d4d4d4;
+}
+
+#codex-overleaf-panel .codex-diagnostics-menu {
+  position: absolute;
+  z-index: 2147483647;
+  top: 30px;
+  right: 0;
+  min-width: 150px;
+  border: 1px solid #3a3d41;
+  border-radius: 6px;
+  background: #252526;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
+  padding: 4px;
+}
+
+#codex-overleaf-panel .codex-diagnostics-menu[hidden] {
+  display: none;
+}
+
+#codex-overleaf-panel .codex-diagnostics-menu button {
+  justify-content: flex-start;
+  width: 100%;
+  height: 28px;
+  color: #cccccc;
+  padding: 0 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .codex-vscode-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px 0;
+}
+
+#codex-overleaf-panel .codex-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  color: #9d9d9d;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#codex-overleaf-panel .codex-session-list {
+  display: grid;
+  gap: 1px;
+}
+
+#codex-overleaf-panel .codex-session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  min-height: 26px;
+  border-radius: 4px;
+  padding: 0 2px;
+}
+
+#codex-overleaf-panel .codex-session-row[data-active="true"] {
+  background: #2a2d2e;
+}
+
+#codex-overleaf-panel .codex-session-switch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  min-width: 0;
+  min-height: 26px;
+  gap: 8px;
+  border-radius: 4px;
+  padding: 3px 4px;
+  text-align: left;
+}
+
+#codex-overleaf-panel .codex-session-row-title {
+  overflow: hidden;
+  color: #c8c8c8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .codex-session-row time {
+  color: #8a8a8a;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .codex-session-delete {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: #858585;
+  opacity: 0.45;
+}
+
+#codex-overleaf-panel .codex-session-row:hover .codex-session-delete,
+#codex-overleaf-panel .codex-session-delete:focus-visible {
+  opacity: 1;
+}
+
+#codex-overleaf-panel .codex-session-delete:hover {
+  color: #cccccc;
+}
+
+#codex-overleaf-panel .codex-view-all {
+  margin-top: 4px;
+  min-height: 24px;
+  border-radius: 4px;
+  color: #7aa2d8;
+  padding: 2px 4px;
+  text-align: left;
+}
+
+#codex-overleaf-panel .codex-thread-section {
+  margin-top: 14px;
+}
+
+#codex-overleaf-panel .codex-thread-title {
+  min-height: 20px;
+  overflow: hidden;
+  color: #9d9d9d;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .col-log {
+  min-height: 180px;
+  color: #cccccc;
+}
+
+#codex-overleaf-panel .empty-runs {
+  display: grid;
+  min-height: 180px;
+  place-content: center;
+  gap: 12px;
+  color: #7f7f7f;
+  text-align: center;
+}
+
+#codex-overleaf-panel .codex-empty-icon {
+  position: relative;
+  box-sizing: border-box;
+  width: 42px;
+  height: 42px;
+  margin: 0 auto;
+  border: 1px solid #34383c;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #202426, #181818);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+#codex-overleaf-panel .codex-empty-icon::before,
+#codex-overleaf-panel .codex-empty-icon::after {
+  content: "";
+  position: absolute;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #4ec9b0;
+  border-radius: 50%;
+  transform: rotate(-35deg);
+}
+
+#codex-overleaf-panel .codex-empty-icon::before {
+  top: 9px;
+  left: 9px;
+  border-right-color: transparent;
+}
+
+#codex-overleaf-panel .codex-empty-icon::after {
+  right: 9px;
+  bottom: 9px;
+  border-color: #7aa2d8;
+  border-left-color: transparent;
+}
+
+#codex-overleaf-panel .codex-empty-icon span {
+  position: absolute;
+  top: 20px;
+  left: 15px;
+  width: 13px;
+  height: 2px;
+  border-radius: 999px;
+  background: #6aa99a;
+  transform: rotate(-35deg);
+}
+
+#codex-overleaf-panel .log-line + .log-line,
+#codex-overleaf-panel .transcript-turn + .transcript-turn,
+#codex-overleaf-panel .log-line + .transcript-turn,
+#codex-overleaf-panel .transcript-turn + .log-line {
+  margin-top: 8px;
+}
+
+#codex-overleaf-panel .log-line {
+  border-left: 2px solid #3a3a3a;
+  color: #a7a7a7;
+  padding: 4px 0 4px 8px;
+}
+
+#codex-overleaf-panel .run-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+#codex-overleaf-panel .transcript-turn {
+  border-bottom: 1px solid #242424;
+  padding: 8px 0 10px;
+}
+
+#codex-overleaf-panel .transcript-turn:last-child {
+  border-bottom: 0;
+}
+
+#codex-overleaf-panel .transcript-turn-main {
+  min-width: 0;
+}
+
+#codex-overleaf-panel .run-prompt {
+  box-sizing: border-box;
+  border: 1px solid #2f3336;
+  border-radius: 8px;
+  background: #202426;
+  color: #d4d4d4;
+  padding: 7px 9px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#codex-overleaf-panel .run-turn-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  margin: 6px 0 2px;
+  color: #858585;
+  font-size: 11px;
+}
+
+#codex-overleaf-panel .run-turn-meta [data-run-undo] {
+  margin-left: auto;
+}
+
+#codex-overleaf-panel [data-run-undo] {
+  min-height: 22px;
+  border: 1px solid #3a3d41;
+  border-radius: 4px;
+  background: #252526;
+  color: #cccccc;
+  padding: 1px 7px;
+  font-size: 11px;
+}
+
+#codex-overleaf-panel [data-run-undo]:disabled {
+  opacity: 0.65;
+}
+
+#codex-overleaf-panel .run-status {
+  flex: 0 0 auto;
+  color: #7aa2d8 !important;
+  font-size: 11px !important;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .transcript-turn[data-status="running"] .run-status {
+  color: #4ec9b0 !important;
+}
+
+#codex-overleaf-panel .transcript-turn[data-status="failed"] .run-status {
+  color: #f48771 !important;
+}
+
+#codex-overleaf-panel .run-activity-list {
+  display: grid;
+  gap: 0;
+  margin-top: 2px;
+}
+
+#codex-overleaf-panel .run-activity {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+  color: #cfcfcf;
+  padding: 1px 0;
+}
+
+#codex-overleaf-panel .run-activity-dot {
+  justify-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6a6a6a;
+}
+
+#codex-overleaf-panel .run-activity[data-status="running"] .run-activity-dot {
+  background: #4ec9b0;
+  box-shadow: 0 0 0 3px rgba(78, 201, 176, 0.14);
+}
+
+#codex-overleaf-panel .run-activity[data-status="completed"] .run-activity-dot {
+  background: #89d185;
+}
+
+#codex-overleaf-panel .run-activity[data-status="failed"] .run-activity-dot {
+  background: #f48771;
+}
+
+#codex-overleaf-panel .run-activity-title {
+  min-width: 0;
+  overflow: hidden;
+  color: #cccccc;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .run-activity-time {
+  display: none;
+}
+
+#codex-overleaf-panel .run-stream {
+  margin: 6px 0 2px;
+  color: #d4d4d4;
+}
+
+#codex-overleaf-panel .run-stream-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.48;
+}
+
+#codex-overleaf-panel .run-stream[data-stream-role="reasoning"] .run-stream-text {
+  color: #bdbdbd;
+}
+
+#codex-overleaf-panel .run-completion-report pre {
+  margin: 0;
+  background: #181818;
+  color: #bdbdbd;
+  padding: 8px 9px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#codex-overleaf-panel .run-completion-report {
+  margin-top: 8px;
+  border: 1px solid #2d3b34;
+  border-radius: 6px;
+  background: #1d241f;
+  overflow: hidden;
+}
+
+#codex-overleaf-panel .run-completion-report[data-status="failed"] {
+  border-color: #5a3430;
+  background: #241d1c;
+}
+
+#codex-overleaf-panel .run-completion-report h4 {
+  margin: 0;
+  border-bottom: 1px solid #2b2b2b;
+  color: #d4d4d4;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+#codex-overleaf-panel .run-completion-report pre {
+  border-top: 0;
+}
+
+#codex-overleaf-panel .run-technical-log summary {
+  cursor: pointer;
+  color: #858585;
+  padding: 5px 0;
+  font-size: 11px;
+  list-style: none;
+}
+
+#codex-overleaf-panel .run-technical-log {
+  margin-top: 4px;
+  color: #858585;
+}
+
+#codex-overleaf-panel .run-technical-log[hidden] {
+  display: none;
+}
+
+#codex-overleaf-panel .run-technical-log summary::-webkit-details-marker {
+  display: none;
+}
+
+#codex-overleaf-panel .run-technical-log summary::before {
+  content: "›";
+  display: inline-block;
+  margin-right: 4px;
+  color: #858585;
+}
+
+#codex-overleaf-panel .run-technical-log[open] summary::before {
+  transform: rotate(90deg);
+}
+
+#codex-overleaf-panel .run-technical-event {
+  border-left: 1px solid #333333;
+  padding: 3px 0 5px 8px;
+}
+
+#codex-overleaf-panel .run-technical-event + .run-technical-event {
+  margin-top: 5px;
+}
+
+#codex-overleaf-panel .run-technical-event-title {
+  overflow: hidden;
+  color: #9d9d9d;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .run-technical-event pre {
+  margin: 3px 0 0;
+  color: #8f8f8f;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#codex-overleaf-panel .codex-probe-line {
+  flex: 0 0 auto;
+  min-height: 18px;
+  overflow: hidden;
+  border-top: 1px solid #2b2b2b;
+  color: #858585;
+  padding: 4px 12px 0;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .codex-probe-line[data-ok="true"] {
+  color: #89d185;
+}
+
+#codex-overleaf-panel .codex-composer {
+  position: relative;
+  flex: 0 0 auto;
+  margin: 8px 8px 6px;
+  border: 1px solid #3c3c3c;
+  border-radius: 8px;
+  background: #1e1e1e;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.02);
+}
+
+#codex-overleaf-panel .codex-composer:focus-within {
+  border-color: #007fd4;
+}
+
+#codex-overleaf-panel .codex-composer textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 58px;
+  max-height: 160px;
+  border: 0;
+  outline: none;
+  resize: vertical;
+  background: transparent;
+  color: #d4d4d4;
+  padding: 10px 10px 6px;
+}
+
+#codex-overleaf-panel .codex-composer textarea::placeholder {
+  color: #6f6f6f;
+}
+
+#codex-overleaf-panel .codex-mode-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  border-top: 1px solid #2b2b2b;
+  padding: 5px 8px 0;
+}
+
+#codex-overleaf-panel .codex-mode-label {
+  color: #858585;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .codex-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  min-width: 0;
+}
+
+#codex-overleaf-panel [data-mode-choice] {
+  min-width: 0;
+  min-height: 24px;
+  overflow: hidden;
+  border-radius: 5px;
+  color: #bdbdbd;
+  padding: 0 4px;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel [data-mode-choice][data-active="true"] {
+  background: #2a2d2e;
+  color: #ffffff;
+  box-shadow: inset 0 0 0 1px #4ec9b0;
+}
+
+#codex-overleaf-panel .codex-context-summary {
+  display: flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 5px;
+  border-top: 1px solid #2b2b2b;
+  padding: 4px 8px 0;
+  overflow-x: auto;
+}
+
+#codex-overleaf-panel .codex-context-summary[hidden] {
+  display: none;
+}
+
+#codex-overleaf-panel .codex-context-summary-label {
+  flex: 0 0 auto;
+  color: #858585;
+  font-size: 11px;
+}
+
+#codex-overleaf-panel .codex-context-summary-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 118px;
+  overflow: hidden;
+  border: 1px solid #34383c;
+  border-radius: 999px;
+  background: #252526;
+  color: #c8c8c8;
+  padding: 2px 7px;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .codex-context-summary-clear {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  border-radius: 50%;
+  color: #9d9d9d;
+  opacity: 0;
+  transition: opacity 120ms ease, background-color 120ms ease;
+}
+
+#codex-overleaf-panel .codex-context-summary:hover .codex-context-summary-clear,
+#codex-overleaf-panel .codex-context-summary:focus-within .codex-context-summary-clear {
+  opacity: 1;
+}
+
+#codex-overleaf-panel .codex-composer-toolbar {
+  display: grid;
+  grid-template-columns: 26px 26px minmax(0, 1fr) minmax(54px, 66px) 28px;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 6px;
+}
+
+#codex-overleaf-panel .codex-composer-toolbar button,
+#codex-overleaf-panel .codex-review-toggle,
+#codex-overleaf-panel .codex-composer-toolbar select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  border-radius: 5px;
+  color: #bdbdbd;
+}
+
+#codex-overleaf-panel .codex-composer-toolbar button {
+  min-width: 26px;
+}
+
+#codex-overleaf-panel .codex-review-toggle {
+  position: relative;
+  min-width: 26px;
+  padding: 0;
+  cursor: pointer;
+}
+
+#codex-overleaf-panel .codex-review-toggle:hover {
+  background: #2a2d2e;
+}
+
+#codex-overleaf-panel .codex-review-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#codex-overleaf-panel .codex-review-icon {
+  position: relative;
+  width: 14px;
+  height: 16px;
+}
+
+#codex-overleaf-panel .codex-review-icon::before {
+  content: "";
+  position: absolute;
+  inset: 1px 2px 0;
+  border: 1px solid #858585;
+  border-radius: 2px 2px 5px 5px;
+  clip-path: polygon(50% 0, 100% 18%, 100% 58%, 50% 100%, 0 58%, 0 18%);
+}
+
+#codex-overleaf-panel .codex-review-icon::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 5px;
+  width: 4px;
+  height: 7px;
+  border: solid #89d185;
+  border-width: 0 1.5px 1.5px 0;
+  opacity: 0;
+  transform: rotate(45deg);
+}
+
+#codex-overleaf-panel .codex-review-toggle input:checked + .codex-review-icon::before {
+  border-color: #89d185;
+}
+
+#codex-overleaf-panel .codex-review-toggle input:checked + .codex-review-icon::after {
+  opacity: 1;
+}
+
+#codex-overleaf-panel .codex-review-toggle input:focus-visible + .codex-review-icon::before {
+  outline: 1px solid #007fd4;
+  outline-offset: 2px;
+}
+
+#codex-overleaf-panel .codex-composer-toolbar select {
+  width: 100%;
+  min-width: 0;
+  max-width: 78px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #bdbdbd;
+  padding: 0 3px;
+}
+
+#codex-overleaf-panel .codex-composer-toolbar [data-model] {
+  max-width: none;
+}
+
+#codex-overleaf-panel .codex-composer-toolbar [data-run] {
+  position: relative;
+  grid-column: 5;
+  width: 28px;
+  min-width: 28px;
+  padding: 0;
+  border-radius: 999px;
+  background: #c8c8c8;
+  color: #181818;
+  font-weight: 600;
+}
+
+#codex-overleaf-panel .codex-composer-toolbar [data-run]:hover {
+  background: #ffffff;
+}
+
+#codex-overleaf-panel[data-running="true"] .codex-composer-toolbar [data-run] {
+  color: transparent;
+}
+
+#codex-overleaf-panel[data-running="true"] .codex-composer-toolbar [data-run]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  box-sizing: border-box;
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(24, 24, 24, 0.25);
+  border-top-color: #181818;
+  border-radius: 50%;
+  animation: codex-run-spin 800ms linear infinite;
+  transform: translate(-50%, -50%);
+}
+
+@keyframes codex-run-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+#codex-overleaf-panel .codex-composer-toolbar [data-add-context][data-active="true"],
+#codex-overleaf-panel .codex-composer-toolbar [data-add-context][data-has-focus="true"] {
+  background: #2a2d2e;
+  color: #d4d4d4;
+}
+
+#codex-overleaf-panel .codex-composer-toolbar [data-add-context][data-has-focus="true"] {
+  color: #89d185;
+}
+
+#codex-overleaf-panel .codex-context-tray {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 2147483647;
+  border: 1px solid #3a3d41;
+  border-radius: 7px;
+  background: #252526;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+  padding: 7px 8px 8px;
+}
+
+#codex-overleaf-panel .codex-context-tray[hidden] {
+  display: none;
+}
+
+#codex-overleaf-panel .codex-context-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #cccccc;
+  font-size: 12px;
+}
+
+#codex-overleaf-panel .codex-context-head button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: #9d9d9d;
+}
+
+#codex-overleaf-panel .codex-context-selection {
+  margin-top: 6px;
+}
+
+#codex-overleaf-panel .codex-context-chip {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #34383c;
+  border-radius: 999px;
+  background: #252526;
+  color: #c8c8c8;
+  padding: 3px 7px;
+  font-size: 11px;
+}
+
+#codex-overleaf-panel .codex-context-chip span:last-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .codex-context-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ec9b0;
+}
+
+#codex-overleaf-panel .codex-context-chip [data-context-clear] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: #9d9d9d;
+}
+
+#codex-overleaf-panel .codex-context-status {
+  margin-top: 6px;
+  color: #858585;
+  font-size: 11px;
+}
+
+#codex-overleaf-panel .codex-context-files {
+  display: grid;
+  max-height: 150px;
+  margin-top: 6px;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+#codex-overleaf-panel .codex-context-file {
+  display: flex;
+  width: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: #1b1b1b;
+  color: #cccccc;
+  padding: 4px 7px;
+  text-align: left;
+}
+
+#codex-overleaf-panel .codex-context-file:hover {
+  background: #2a2d2e;
+}
+
+#codex-overleaf-panel .codex-context-file[data-selected="true"] {
+  border-color: #4ec9b0;
+  background: #20302d;
+}
+
+#codex-overleaf-panel .codex-context-file-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .codex-context-file-meta {
+  flex: 0 0 auto;
+  color: #858585;
+  font-size: 10px;
+}
