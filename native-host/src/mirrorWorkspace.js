@@ -40,10 +40,18 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
     }
   }
 
+  let writtenCount = 0;
+  const previousByPath = new Map((previous.files || []).map(f => [f.path, f]));
+
   for (const file of files) {
     const target = resolveWorkspacePath(mirror.workspacePath, file.path);
+    const prev = previousByPath.get(file.path);
+    if (prev && prev.hash === hashText(file.content)) {
+      continue;
+    }
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, file.content, 'utf8');
+    writtenCount++;
   }
 
   writeBaseline(mirror.baselinePath, {
@@ -58,7 +66,8 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
 
   return {
     ...mirror,
-    fileCount: files.length
+    fileCount: files.length,
+    writtenCount
   };
 }
 
