@@ -35,6 +35,7 @@
   let contextProject = null;
   let contextLoadId = 0;
   let projectSyncTimer = null;
+  let lastMirrorSyncAt = 0;
 
   chrome.runtime.onMessage.addListener(message => {
     if (message?.type === 'codex-overleaf/open-panel') {
@@ -46,6 +47,7 @@
   });
 
   init();
+  setInterval(updateMirrorAge, 10000);
 
   async function init() {
     storageKey = getProjectStorageKey(LEGACY_STORAGE_KEY, window.location.href);
@@ -1183,6 +1185,18 @@
     return '需要开启 Reviewing 并打开文件';
   }
 
+  function updateMirrorAge() {
+    const status = panel?.querySelector('[data-probe-status]');
+    if (!status || !lastMirrorSyncAt) {
+      return;
+    }
+    const seconds = Math.round((Date.now() - lastMirrorSyncAt) / 1000);
+    const age = seconds < 5 ? '刚刚' : `${seconds}s`;
+    const current = status.textContent || '';
+    const withoutMirror = current.replace(/ · Mirror:.*$/, '');
+    status.textContent = `${withoutMirror} · Mirror: ${age}`;
+  }
+
   function formatModeLabel(mode) {
     if (mode === 'ask') {
       return '只问不改';
@@ -1302,6 +1316,16 @@
             if (!panel?.querySelector('[data-context-tray]')?.hidden) {
               renderContextFiles(contextProject);
             }
+            sendNative({
+              method: 'mirror.sync',
+              params: {
+                projectId: getCurrentProjectId(),
+                project
+              }
+            }).then(() => {
+              lastMirrorSyncAt = Date.now();
+              updateMirrorAge();
+            }).catch(() => {});
           }
         }
       } catch {

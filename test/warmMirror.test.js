@@ -70,3 +70,63 @@ test('returns writtenCount of all files on first sync (no baseline)', async () =
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+const { handleRequest } = require('../native-host/src/taskRunner');
+
+test('mirror.sync method syncs project files without running Codex', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bg-sync-'));
+  try {
+    const response = await handleRequest({
+      id: 'sync-1',
+      method: 'mirror.sync',
+      params: {
+        projectId: 'bg-sync-test',
+        project: {
+          files: [
+            { path: 'main.tex', content: 'synced content' },
+            { path: 'ch1.tex', content: 'chapter 1' }
+          ]
+        }
+      }
+    }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
+
+    assert.equal(response.ok, true);
+    assert.equal(response.result.fileCount, 2);
+    assert.equal(typeof response.result.writtenCount, 'number');
+
+    const mirror = getProjectMirror('bg-sync-test', { rootDir });
+    assert.equal(
+      fs.readFileSync(path.join(mirror.workspacePath, 'main.tex'), 'utf8'),
+      'synced content'
+    );
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('mirror.sync skips unchanged files on second call', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bg-sync-'));
+  try {
+    const files = [
+      { path: 'main.tex', content: 'content A' },
+      { path: 'refs.bib', content: 'bib A' }
+    ];
+
+    await handleRequest({
+      id: 'sync-first',
+      method: 'mirror.sync',
+      params: { projectId: 'bg-skip-test', project: { files } }
+    }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
+
+    const response = await handleRequest({
+      id: 'sync-second',
+      method: 'mirror.sync',
+      params: { projectId: 'bg-skip-test', project: { files } }
+    }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
+
+    assert.equal(response.ok, true);
+    assert.equal(response.result.writtenCount, 0);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});

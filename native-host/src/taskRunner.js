@@ -21,6 +21,10 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
     });
   }
 
+  if (request.method === 'mirror.sync') {
+    return handleMirrorSync(request, env);
+  }
+
   if (request.method === 'codex.run') {
     return handleCodexRun(request, env, emit);
   }
@@ -55,6 +59,28 @@ async function handleCodexRun(request, env, emit) {
       stack: error.stack
     });
     return errorResponse(request.id, 'codex_run_failed', truncateText(error.message, 12000));
+  }
+}
+
+async function handleMirrorSync(request, env) {
+  const { syncOverleafToMirror } = require('./mirrorWorkspace');
+  const params = request.params || {};
+  const projectId = params.projectId || 'unknown';
+  const rootDir = env.CODEX_OVERLEAF_MIRROR_ROOT;
+
+  try {
+    const result = await syncOverleafToMirror({
+      projectId,
+      project: params.project || { files: [] },
+      rootDir
+    });
+    return okResponse(request.id, {
+      fileCount: result.fileCount,
+      writtenCount: result.writtenCount || 0,
+      projectKey: result.projectKey
+    });
+  } catch (error) {
+    return errorResponse(request.id, 'mirror_sync_failed', error.message);
   }
 }
 
