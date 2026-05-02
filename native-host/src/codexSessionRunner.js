@@ -432,6 +432,9 @@ function isAllowedLocalCommand(params = {}) {
 
   const allowed = new Set([
     'rg', 'grep', 'cat', 'sed', 'head', 'tail', 'nl', 'find', 'ls',
+    'wc', 'diff', 'sort', 'tr', 'awk', 'printf', 'cut', 'uniq',
+    'stat', 'file', 'basename', 'dirname', 'realpath',
+    'shasum', 'md5', 'md5sum',
     'latexmk', 'pdflatex', 'xelatex', 'lualatex', 'bibtex', 'biber',
     'kpsewhich', 'chktex', 'lacheck'
   ]);

@@ -227,3 +227,53 @@ test('command execution approvals only allow known local inspection and LaTeX co
     'decline'
   );
 });
+
+test('newly added analysis utilities are accepted in auto mode', () => {
+  const newCommands = [
+    'wc -l main.tex',
+    'diff main.tex main-backup.tex',
+    'sort references.bib',
+    'tr A-Z a-z',
+    'awk {print $1} main.tex',
+    'printf %s hello',
+    'cut -d: -f1 data.csv',
+    'uniq sorted.txt',
+    'stat main.tex',
+    'file main.pdf',
+    'basename /path/to/main.tex',
+    'dirname /path/to/main.tex',
+    'realpath main.tex',
+    'shasum main.tex',
+    'md5 main.tex',
+    'md5sum main.tex'
+  ];
+  for (const cmd of newCommands) {
+    assert.deepEqual(
+      decideCommandApproval({ mode: 'auto', params: { command: cmd } }),
+      { decision: 'accept' },
+      `expected "${cmd}" to be accepted`
+    );
+  }
+});
+
+test('tee is still rejected even in auto mode', () => {
+  assert.equal(
+    decideCommandApproval({ mode: 'auto', params: { command: 'tee output.log' } }).decision,
+    'decline'
+  );
+});
+
+test('allowed commands with pipe operators are rejected (safety check)', () => {
+  assert.equal(
+    decideCommandApproval({ mode: 'auto', params: { command: 'awk {print} main.tex | sort' } }).decision,
+    'decline'
+  );
+  assert.equal(
+    decideCommandApproval({ mode: 'auto', params: { command: 'sort main.tex > output.txt' } }).decision,
+    'decline'
+  );
+  assert.equal(
+    decideCommandApproval({ mode: 'auto', params: { command: 'wc -l main.tex && rm main.tex' } }).decision,
+    'decline'
+  );
+});
