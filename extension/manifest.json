@@ -37,6 +37,7 @@
         "src/shared/storageKeys.js",
         "src/shared/staleGuard.js",
         "src/shared/storageDb.js",
+        "src/shared/compileAdapter.js",
         "src/contentScript.js"
       ],
       "css": [
@@ -52,6 +53,7 @@
         "src/shared/reviewing.js",
         "src/shared/projectFiles.js",
         "src/shared/staleGuard.js",
+        "src/shared/compileAdapter.js",
         "src/pageBridge.js"
       ],
       "matches": [
