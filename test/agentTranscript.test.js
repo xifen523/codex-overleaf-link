@@ -219,6 +219,27 @@ test('formats userReport as a readable final report', () => {
   assert.doesNotMatch(report.text, /"type"|"find"|"replace"|old|new/);
 });
 
+test('preserves markdown sections in Codex final assistant reports', () => {
+  const finalAnswer = [
+    '我检查了主稿 [main.tex](/Users/example/.codex-overleaf/projects/p/workspace/main.tex:1)。',
+    '',
+    '**优先改**',
+    '- [main.tex:117](/Users/example/.codex-overleaf/projects/p/workspace/main.tex:117)：`\\label{fig: example}` 应改成 `\\label{fig:example}`。',
+    '- [checklist.tex:56](/Users/example/.codex-overleaf/projects/p/workspace/checklist.tex:56)：`In general.` 应改成 `In general,`。'
+  ].join('\n');
+
+  const report = buildHumanCompletionReport({
+    status: 'completed',
+    conclusion: finalAnswer,
+    operations: [],
+    applyResults: []
+  });
+
+  assert.match(report.text, /结论：我检查了主稿 \[main\.tex\]/);
+  assert.match(report.text, /\n\n\*\*优先改\*\*\n- \[main\.tex:117\]/);
+  assert.doesNotMatch(report.text, /\*\*优先改\*\* - \[main\.tex:117\]/);
+});
+
 test('builds fallback final reports without raw operation JSON', () => {
   const report = buildHumanCompletionReport({
     status: 'completed',

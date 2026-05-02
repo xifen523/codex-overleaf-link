@@ -4,6 +4,23 @@ const test = require('node:test');
 
 const { handleRequest } = require('../native-host/src/taskRunner');
 
+function loadTaskRunnerWithFakeRunner(fakeRunner) {
+  const runnerPath = require.resolve('../native-host/src/codexSessionRunner');
+  const taskRunnerPath = require.resolve('../native-host/src/taskRunner');
+  const originalRunner = require(runnerPath);
+
+  delete require.cache[taskRunnerPath];
+  require.cache[runnerPath].exports = {
+    ...originalRunner,
+    runCodexSession: fakeRunner
+  };
+
+  const taskRunner = require(taskRunnerPath);
+  require.cache[runnerPath].exports = originalRunner;
+  delete require.cache[taskRunnerPath];
+  return taskRunner;
+}
+
 test('bridge.ping returns bridge metadata', async () => {
   const response = await handleRequest({ id: '1', method: 'bridge.ping', params: {} }, {
     CODEX_OVERLEAF_CODEX_PATH: '/opt/homebrew/bin/codex',
@@ -16,6 +33,32 @@ test('bridge.ping returns bridge metadata', async () => {
   assert.equal(response.result.platform, 'darwin');
   assert.equal(response.result.environment.codex.ok, true);
   assert.deepEqual(response.result.environment.latex.available, ['latexmk']);
+});
+
+test('codex.run returns a clear error before spawning when Codex is missing', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-missing',
+    method: 'codex.run',
+    params: {
+      projectId: 'missing-codex-project',
+      mode: 'ask',
+      task: '检查 citation',
+      project: { files: [{ path: 'main.tex', content: 'hello' }] }
+    }
+  }, {
+    CODEX_OVERLEAF_ENV_READY: '1',
+    CODEX_OVERLEAF_CODEX_PATH: ''
+  });
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, 'codex_not_found');
+  assert.equal(calls, 0);
 });
 
 test('task.run rejects Auto Mode when neither checkpoint nor Reviewing is verified', async () => {

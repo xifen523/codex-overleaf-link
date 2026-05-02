@@ -45,6 +45,14 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
 
 async function handleCodexRun(request, env, emit) {
   const params = request.params || {};
+  if (isCodexMissing(env)) {
+    return errorResponse(
+      request.id,
+      'codex_not_found',
+      'Codex CLI was not found. Install Codex or make sure the `codex` command is available in your login shell.'
+    );
+  }
+
   const projectKey = resolveProjectKey(params);
   const lockToken = acquireProjectLock(projectKey);
   if (!lockToken) {
@@ -71,6 +79,13 @@ async function handleCodexRun(request, env, emit) {
   } finally {
     releaseProjectLock(projectKey, lockToken);
   }
+}
+
+function isCodexMissing(env = process.env) {
+  return (
+    env.CODEX_OVERLEAF_ENV_READY === '1' ||
+    Object.prototype.hasOwnProperty.call(env, 'CODEX_OVERLEAF_CODEX_PATH')
+  ) && !env.CODEX_OVERLEAF_CODEX_PATH;
 }
 
 async function handleMirrorSync(request, env) {

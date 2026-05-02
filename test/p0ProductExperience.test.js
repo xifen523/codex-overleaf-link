@@ -192,10 +192,13 @@ test('run log autoscroll follows realtime output unless the user scrolls upward'
   assert.match(contentScript, /let logAutoFollow = true/);
   assert.match(contentScript, /let userScrollIntentUntil = 0/);
   assert.match(contentScript, /function bindLogAutoFollow\(/);
+  assert.match(contentScript, /function getLogScrollContainer\(/);
+  assert.match(contentScript, /querySelector\('\[data-main\]'\)/);
   assert.match(contentScript, /function isLogNearBottom\(/);
   assert.match(contentScript, /function markUserScrollIntent\(/);
   assert.match(contentScript, /Date\.now\(\) <= userScrollIntentUntil/);
   assert.match(contentScript, /function scrollLogToBottom\(/);
+  assert.match(contentScript, /requestAnimationFrame/);
   assert.match(contentScript, /scrollLogToBottom\(\{ force: true \}\)/);
   assert.match(contentScript, /scrollLogToBottom\(\)/);
 });
@@ -265,9 +268,25 @@ test('Codex realtime deltas update one stream instead of appending raw event row
   assert.match(contentScript, /function upsertRunStreamRecordEvent\(/);
   assert.match(contentScript, /function upsertStreamEvent\(/);
   assert.match(contentScript, /className = 'run-stream'/);
+  assert.match(contentScript, /function renderMarkdownInlineText\(/);
+  assert.match(contentScript, /document\.createElement\('strong'\)/);
+  assert.doesNotMatch(contentScript, /run-stream-text[\s\S]{0,240}\.innerHTML/);
   assert.match(css, /\.run-stream-text/);
   assert.match(agentTranscript, /if \(method === 'item\/reasoning\/textDelta'\) \{\s*return technicalOnly\(event\);\s*\}/);
   assert.doesNotMatch(contentScript, /technicalDetail:\s*normalizeRawAgentEvent\(event\)/);
+});
+
+test('final assistant summary is collected from all assistant stream messages', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /function getAssistantAnswerForCurrentRun\(/);
+  assert.match(contentScript, /\.filter\(event =>[\s\S]*event\.streamRole === 'assistant'/);
+  assert.match(contentScript, /\.map\(event => cleanFinalAnswer\(event\.title\)\)/);
+  assert.match(contentScript, /\.join\('\\n\\n'\)/);
+  assert.doesNotMatch(contentScript, /function getLatestAssistantAnswerForCurrentRun\(/);
 });
 
 test('completion report is structured around user outcomes rather than a one-line status', () => {
@@ -279,13 +298,24 @@ test('completion report is structured around user outcomes rather than a one-lin
     path.join(__dirname, '../extension/src/shared/agentTranscript.js'),
     'utf8'
   );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
 
   assert.match(contentScript, /function appendCompletionReport\(/);
   assert.match(contentScript, /buildHumanCompletionReport/);
   assert.match(contentScript, /translateRawError/);
   assert.match(contentScript, /assistantMessage/);
-  assert.match(contentScript, /getLatestAssistantAnswerForCurrentRun/);
+  assert.match(contentScript, /getAssistantAnswerForCurrentRun/);
   assert.match(contentScript, /className = 'run-final-answer'/);
+  assert.match(contentScript, /renderMarkdownBlockText\(body/);
+  assert.match(contentScript, /function renderMarkdownBlockText\(/);
+  assert.match(contentScript, /function formatMarkdownHref\(/);
+  assert.match(contentScript, /workspace\/\$\{fileLabel\}:\$\{line\}/);
+  assert.match(css, /\.run-final-answer ul/);
+  assert.match(css, /\.run-final-answer a/);
+  assert.doesNotMatch(contentScript, /body\.textContent = formatEventDetail\(event\.detail \|\| \{\}\)/);
   assert.match(agentTranscript, /结论/);
   assert.match(agentTranscript, /检查范围/);
   assert.match(agentTranscript, /发现/);
@@ -295,6 +325,25 @@ test('completion report is structured around user outcomes rather than a one-lin
   assert.doesNotMatch(contentScript, /nextStep: response\.error\.message/);
   assert.doesNotMatch(contentScript, /本地 Codex 返回错误/);
   assert.doesNotMatch(contentScript, /Summary:/);
+});
+
+test('auto mode shows a readonly diff after applying Codex changes', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const applySyncBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
+
+  assert.match(contentScript, /function renderReadOnlyDiffReview\(/);
+  assert.match(applySyncBody, /const applied = operations\.length[\s\S]*renderReadOnlyDiffReview\(getAppliedSyncChanges\(syncChanges, applied\)/);
+  assert.match(contentScript, /function getAppliedSyncChanges\(/);
+  assert.match(contentScript, /dataset\.readonly = 'true'/);
+  assert.match(css, /\.codex-diff-review\[data-readonly="true"\]/);
+  assert.doesNotMatch(applySyncBody, /本地 Codex 改动预览：\$\{syncChanges\.filter/);
 });
 
 test('change preview is grouped by file with edit evidence instead of raw operation counts', () => {

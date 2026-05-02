@@ -462,6 +462,12 @@
         nextStep: '请缩小 @context 后重试，或在技术详情中查看输出限制。'
       };
     }
+    if (/codex_not_found|Codex CLI was not found|ENOENT/i.test(text)) {
+      return {
+        conclusion: '这轮没有启动：本机没有找到 Codex CLI。',
+        nextStep: '请确认终端里可以运行 `codex`，然后重新安装 native host 或刷新扩展后重试。'
+      };
+    }
     if (/checkpoint/i.test(text)) {
       return {
         conclusion: '这轮没有自动写入：Codex 没有拿到可恢复版本。',
@@ -514,7 +520,7 @@
 
   function formatHumanReport(report = {}) {
     const sections = [];
-    const conclusion = cleanVisibleText(report.conclusion || '');
+    const conclusion = cleanVisibleMarkdownText(report.conclusion || '');
     if (conclusion) {
       sections.push(`结论：${conclusion}`);
     }
@@ -594,7 +600,7 @@
       return null;
     }
     return {
-      conclusion: cleanVisibleText(report.conclusion || ''),
+      conclusion: cleanVisibleMarkdownText(report.conclusion || ''),
       checked: normalizeStringList(report.checked),
       findings: normalizeStringList(report.findings),
       plannedChanges: normalizeStringList(report.plannedChanges),
@@ -801,6 +807,17 @@
 
   function cleanVisibleText(text) {
     return String(text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function cleanVisibleMarkdownText(text) {
+    return String(text || '')
+      .replace(/\r\n?/g, '\n')
+      .replace(/[^\S\n]+/g, ' ')
+      .split('\n')
+      .map(line => line.trim())
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   function addListSection(sections, label, values) {

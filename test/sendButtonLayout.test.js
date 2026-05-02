@@ -36,6 +36,21 @@ test('composer sends through a form submit path with a guarded run handler', () 
   assert.match(contentScript, /runTask\(\)\.catch/);
 });
 
+test('composer textarea sends on Enter while preserving Shift Enter and IME composition', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /\[data-task\]'\)\.addEventListener\('keydown', handleTaskInputKeydown\)/);
+  assert.match(contentScript, /function handleTaskInputKeydown\(event\)/);
+  assert.match(contentScript, /event\.key !== 'Enter'/);
+  assert.match(contentScript, /event\.shiftKey/);
+  assert.match(contentScript, /event\.isComposing/);
+  assert.match(contentScript, /event\.preventDefault\(\);\s*panel\.querySelector\('\[data-composer-form\]'\)\?\.requestSubmit\(\);/);
+  assert.doesNotMatch(contentScript, /event\.key === 'Enter' && \(event\.metaKey \|\| event\.ctrlKey\)/);
+});
+
 test('starting a run is not blocked by asynchronous state persistence', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),

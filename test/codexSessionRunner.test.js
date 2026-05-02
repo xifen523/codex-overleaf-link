@@ -4,7 +4,11 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { buildThreadStartParams, runCodexSession } = require('../native-host/src/codexSessionRunner');
+const {
+  buildFinalAssistantMessage,
+  buildThreadStartParams,
+  runCodexSession
+} = require('../native-host/src/codexSessionRunner');
 
 test('runs Codex against a local mirror and returns sync changes instead of operation JSON', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
@@ -105,6 +109,18 @@ test('returns the final assistant message from the Codex runner', async () => {
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
+});
+
+test('builds a final assistant report from multiple Codex message items', () => {
+  const messages = new Map([
+    ['msg-1', '我先检查 main.tex 和 references.bib。'],
+    ['msg-2', '结论：没有发现缺失 citation key，也没有修改文件。']
+  ]);
+
+  assert.equal(
+    buildFinalAssistantMessage(messages, ['msg-1', 'msg-2']),
+    '我先检查 main.tex 和 references.bib。\n\n结论：没有发现缺失 citation key，也没有修改文件。'
+  );
 });
 
 test('thread start params avoid experimental app-server capabilities', () => {

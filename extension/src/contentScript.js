@@ -164,12 +164,7 @@
         event.preventDefault();
         panel.querySelector('[data-composer-form]')?.requestSubmit();
       });
-      panel.querySelector('[data-task]').addEventListener('keydown', event => {
-        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-          event.preventDefault();
-          panel.querySelector('[data-composer-form]')?.requestSubmit();
-        }
-      });
+      panel.querySelector('[data-task]').addEventListener('keydown', handleTaskInputKeydown);
       panel.addEventListener('click', event => event.stopPropagation());
       panel.addEventListener('mousedown', event => event.stopPropagation());
       panel.querySelector('[data-refresh]').addEventListener('click', () => refreshProbe());
@@ -256,28 +251,32 @@
   }
 
   function bindLogAutoFollow() {
-    const log = panel?.querySelector('[data-log]');
-    if (!log || log.dataset.autoFollowBound === 'true') {
+    const scroller = getLogScrollContainer();
+    if (!scroller || scroller.dataset.autoFollowBound === 'true') {
       return;
     }
-    log.dataset.autoFollowBound = 'true';
-    log.addEventListener('wheel', markUserScrollIntent, { passive: true });
-    log.addEventListener('touchmove', markUserScrollIntent, { passive: true });
-    log.addEventListener('pointerdown', markUserScrollIntent, { passive: true });
-    log.addEventListener('keydown', event => {
+    scroller.dataset.autoFollowBound = 'true';
+    scroller.addEventListener('wheel', markUserScrollIntent, { passive: true });
+    scroller.addEventListener('touchmove', markUserScrollIntent, { passive: true });
+    scroller.addEventListener('pointerdown', markUserScrollIntent, { passive: true });
+    scroller.addEventListener('keydown', event => {
       if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
         markUserScrollIntent();
       }
     });
-    log.addEventListener('scroll', () => {
+    scroller.addEventListener('scroll', () => {
       if (Date.now() <= userScrollIntentUntil) {
-        logAutoFollow = isLogNearBottom(log);
+        logAutoFollow = isLogNearBottom(scroller);
         return;
       }
-      if (isLogNearBottom(log)) {
+      if (isLogNearBottom(scroller)) {
         logAutoFollow = true;
       }
     }, { passive: true });
+  }
+
+  function getLogScrollContainer() {
+    return panel?.querySelector('[data-main]') || panel?.querySelector('[data-log]');
   }
 
   function markUserScrollIntent() {
@@ -292,14 +291,23 @@
   }
 
   function scrollLogToBottom(options = {}) {
-    const log = panel?.querySelector('[data-log]');
-    if (!log) {
+    const scroller = getLogScrollContainer();
+    if (!scroller) {
       return;
     }
-    if (options.force || logAutoFollow || isLogNearBottom(log)) {
-      log.scrollTop = log.scrollHeight;
-      logAutoFollow = true;
+    if (!(options.force || logAutoFollow || isLogNearBottom(scroller))) {
+      return;
     }
+
+    logAutoFollow = true;
+    setLogScrollPosition(scroller);
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => setLogScrollPosition(scroller));
+    }
+  }
+
+  function setLogScrollPosition(scroller) {
+    scroller.scrollTop = scroller.scrollHeight;
   }
 
   function isContextTrayClickTarget(target) {
@@ -758,26 +766,44 @@
     });
   }
 
-  function renderDiffReview(syncChanges) {
-    return new Promise(resolve => {
-      const container = document.createElement('div');
-      container.className = 'codex-diff-review';
-      const fileStates = new Map();
+  function handleTaskInputKeydown(event) {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) {
+      return;
+    }
+    event.preventDefault();
+    panel.querySelector('[data-composer-form]')?.requestSubmit();
+  }
 
-      for (const change of syncChanges) {
-        fileStates.set(change.path, true);
-        const card = document.createElement('div');
-        card.className = 'codex-diff-file';
-        card.dataset.path = change.path;
-        card.dataset.accepted = 'true';
+  function createDiffReviewElement(syncChanges, options = {}) {
+    const readonly = Boolean(options.readonly);
+    const container = document.createElement('div');
+    container.className = 'codex-diff-review';
+    if (readonly) {
+      container.dataset.readonly = 'true';
+    }
+    const fileStates = new Map();
 
-        const header = document.createElement('div');
-        header.className = 'codex-diff-file-header';
-        const pathEl = document.createElement('span');
-        pathEl.className = 'codex-diff-file-path';
-        pathEl.textContent = change.type === 'delete' ? `[delete] ${change.path}` : change.path;
-        const actions = document.createElement('div');
-        actions.className = 'codex-diff-file-actions';
+    for (const change of syncChanges) {
+      fileStates.set(change.path, true);
+      const card = document.createElement('div');
+      card.className = 'codex-diff-file';
+      card.dataset.path = change.path;
+      card.dataset.accepted = 'true';
+
+      const header = document.createElement('div');
+      header.className = 'codex-diff-file-header';
+      const pathEl = document.createElement('span');
+      pathEl.className = 'codex-diff-file-path';
+      pathEl.textContent = change.type === 'delete' ? `[delete] ${change.path}` : change.path;
+      const actions = document.createElement('div');
+      actions.className = 'codex-diff-file-actions';
+
+      if (readonly) {
+        const status = document.createElement('span');
+        status.className = 'codex-diff-readonly-label';
+        status.textContent = '已写入';
+        actions.append(status);
+      } else {
         const acceptBtn = document.createElement('button');
         acceptBtn.type = 'button';
         acceptBtn.dataset.diffAccept = '';
@@ -799,29 +825,41 @@
         });
 
         actions.append(acceptBtn, rejectBtn);
-        header.append(pathEl, actions);
-        card.append(header);
-
-        if (change.diff?.length) {
-          const body = document.createElement('div');
-          body.className = 'codex-diff-body';
-          for (const hunk of change.diff) {
-            const hunkEl = document.createElement('div');
-            hunkEl.className = 'codex-diff-hunk';
-            for (const line of hunk.lines) {
-              const lineEl = document.createElement('div');
-              lineEl.className = 'codex-diff-line';
-              lineEl.dataset.type = line.type;
-              lineEl.textContent = line.text;
-              hunkEl.append(lineEl);
-            }
-            body.append(hunkEl);
-          }
-          card.append(body);
-        }
-
-        container.append(card);
       }
+
+      header.append(pathEl, actions);
+      card.append(header);
+
+      if (change.diff?.length) {
+        const body = document.createElement('div');
+        body.className = 'codex-diff-body';
+        for (const hunk of change.diff) {
+          const hunkEl = document.createElement('div');
+          hunkEl.className = 'codex-diff-hunk';
+          for (const line of hunk.lines) {
+            const lineEl = document.createElement('div');
+            lineEl.className = 'codex-diff-line';
+            lineEl.dataset.type = line.type;
+            lineEl.textContent = line.text;
+            hunkEl.append(lineEl);
+          }
+          body.append(hunkEl);
+        }
+        card.append(body);
+      }
+
+      container.append(card);
+    }
+
+    return {
+      container,
+      fileStates
+    };
+  }
+
+  function renderDiffReview(syncChanges) {
+    return new Promise(resolve => {
+      const { container, fileStates } = createDiffReviewElement(syncChanges);
 
       const toolbar = document.createElement('div');
       toolbar.className = 'codex-diff-toolbar';
@@ -853,8 +891,23 @@
     });
   }
 
+  function renderReadOnlyDiffReview(syncChanges, title = '已写入的 Codex 改动') {
+    const visibleChanges = (syncChanges || []).filter(change => change?.diff?.length);
+    if (!visibleChanges.length || !currentRunView?.events) {
+      return;
+    }
+
+    appendRunEvent({
+      title,
+      status: 'completed'
+    });
+    const { container } = createDiffReviewElement(visibleChanges, { readonly: true });
+    currentRunView.events.append(container);
+    scrollLogToBottom();
+  }
+
   async function applySyncChangesToOverleaf(syncChanges = [], project = {}, options = {}) {
-    const assistantMessage = cleanFinalAnswer(options.assistantMessage || getLatestAssistantAnswerForCurrentRun());
+    const assistantMessage = cleanFinalAnswer(options.assistantMessage || getAssistantAnswerForCurrentRun());
     let operations = buildSyncApplyOperations(syncChanges, project);
     if (!operations.length) {
       appendRunEvent({
@@ -917,13 +970,6 @@
       }
     }
 
-    if (state.mode === 'auto' && syncChanges.some(c => c.diff?.length)) {
-      appendRunEvent({
-        title: `本地 Codex 改动预览：${syncChanges.filter(c => c.diff?.length).length} 个文件有差异。`,
-        status: 'completed'
-      });
-    }
-
     appendOperationsPreview(operations, '同步本地 Codex 改动到 Overleaf');
     const applied = operations.length
       ? await callPageBridge('applyOperations', {
@@ -931,6 +977,9 @@
         baseFiles: project?.files || []
       })
       : { ok: true, applied: [], skipped: [] };
+    if (state.mode === 'auto') {
+      renderReadOnlyDiffReview(getAppliedSyncChanges(syncChanges, applied));
+    }
     appendApplyResult(applied);
     recordUndoFromApply(project, applied);
     const summaryLine = appendChangeSummary({
@@ -981,6 +1030,13 @@
         reason: '同步本地 Codex workspace 中的新文件。'
       };
     }).filter(operation => operation.path);
+  }
+
+  function getAppliedSyncChanges(syncChanges = [], applied = {}) {
+    const appliedPaths = new Set((applied.applied || [])
+      .map(item => item.operation?.path || item.operation?.to || item.operation?.from)
+      .filter(Boolean));
+    return (syncChanges || []).filter(change => appliedPaths.has(change.path));
   }
 
   function getCurrentProjectId() {
@@ -2080,19 +2136,26 @@
     return `${left}${right}`;
   }
 
-  function getLatestAssistantAnswerForCurrentRun() {
+  function getAssistantAnswerForCurrentRun() {
     const record = currentRunView?.recordId ? findRunRecord(currentRunView.recordId) : null;
     const events = Array.isArray(record?.events) ? record.events : [];
-    const assistant = [...events].reverse().find(event =>
-      event.kind === 'stream' &&
-      event.streamRole === 'assistant' &&
-      cleanFinalAnswer(event.title)
-    );
-    return cleanFinalAnswer(assistant?.title || '');
+    const answers = events
+      .filter(event =>
+        event.kind === 'stream' &&
+        event.streamRole === 'assistant' &&
+        cleanFinalAnswer(event.title)
+      )
+      .map(event => cleanFinalAnswer(event.title))
+      .filter(Boolean);
+    return dedupeTextValues(answers).join('\n\n');
   }
 
   function cleanFinalAnswer(value) {
     return String(value || '').trim();
+  }
+
+  function dedupeTextValues(values = []) {
+    return values.filter((value, index) => values.indexOf(value) === index);
   }
 
   function renderSessionList({ showAll = false } = {}) {
@@ -2243,7 +2306,7 @@
       existing.dataset.streamRole = event.streamRole || '';
       const text = existing.querySelector('[data-stream-text]');
       if (text) {
-        text.textContent = event.title || '';
+        renderMarkdownInlineText(text, event.title || '');
       }
       return;
     }
@@ -2260,10 +2323,200 @@
     const text = document.createElement('div');
     text.className = 'run-stream-text';
     text.dataset.streamText = '';
-    text.textContent = event.title || '';
+    renderMarkdownInlineText(text, event.title || '');
 
     row.append(text);
     return row;
+  }
+
+  function renderMarkdownInlineText(target, value) {
+    target.replaceChildren(...buildMarkdownInlineNodes(value));
+  }
+
+  function buildMarkdownInlineNodes(value) {
+    const source = String(value || '');
+    const nodes = [];
+    let index = 0;
+
+    while (index < source.length) {
+      const next = findNextInlineMarkdown(source, index);
+      if (!next) {
+        nodes.push(document.createTextNode(source.slice(index)));
+        break;
+      }
+
+      if (next.start > index) {
+        nodes.push(document.createTextNode(source.slice(index, next.start)));
+      }
+
+      if (next.type === 'strong') {
+        const strong = document.createElement('strong');
+        strong.append(...buildMarkdownInlineNodes(next.text));
+        nodes.push(strong);
+      } else if (next.type === 'code') {
+        const code = document.createElement('code');
+        code.textContent = next.text;
+        nodes.push(code);
+      } else if (next.type === 'link') {
+        const link = document.createElement('a');
+        link.href = formatMarkdownHref(next.href);
+        link.textContent = formatMarkdownLinkLabel(next.text, next.href);
+        link.title = next.href;
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+        nodes.push(link);
+      }
+
+      index = next.end;
+    }
+
+    return nodes;
+  }
+
+  function findNextInlineMarkdown(source, index) {
+    const candidates = [
+      findStrongMarkdown(source, index),
+      findCodeMarkdown(source, index),
+      findLinkMarkdown(source, index)
+    ].filter(Boolean);
+    candidates.sort((left, right) => left.start - right.start);
+    return candidates[0] || null;
+  }
+
+  function findStrongMarkdown(source, index) {
+    const start = source.indexOf('**', index);
+    if (start === -1) {
+      return null;
+    }
+    const end = source.indexOf('**', start + 2);
+    if (end === -1) {
+      return null;
+    }
+    return {
+      type: 'strong',
+      start,
+      end: end + 2,
+      text: source.slice(start + 2, end)
+    };
+  }
+
+  function findCodeMarkdown(source, index) {
+    const start = source.indexOf('`', index);
+    if (start === -1) {
+      return null;
+    }
+    const end = source.indexOf('`', start + 1);
+    if (end === -1) {
+      return null;
+    }
+    return {
+      type: 'code',
+      start,
+      end: end + 1,
+      text: source.slice(start + 1, end)
+    };
+  }
+
+  function findLinkMarkdown(source, index) {
+    const linkPattern = /\[([^\]]+)\]\(([^)]+)\)/g;
+    linkPattern.lastIndex = index;
+    const match = linkPattern.exec(source);
+    if (!match) {
+      return null;
+    }
+    return {
+      type: 'link',
+      start: match.index,
+      end: match.index + match[0].length,
+      text: match[1],
+      href: match[2]
+    };
+  }
+
+  function formatMarkdownLinkLabel(text, href) {
+    const source = String(text || '');
+    const target = String(href || '');
+    const workspaceMatch = target.match(/\/workspace\/([^:)]+)(?::(\d+))?/);
+    if (workspaceMatch) {
+      const fileLabel = workspaceMatch[1];
+      const line = workspaceMatch[2];
+      return line ? `workspace/${fileLabel}:${line}` : `workspace/${fileLabel}`;
+    }
+    return source || target;
+  }
+
+  function formatMarkdownHref(href) {
+    const target = String(href || '');
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
+      return target;
+    }
+    if (target.startsWith('/')) {
+      return `file://${target}`;
+    }
+    return target || '#';
+  }
+
+  function renderMarkdownBlockText(target, value) {
+    const source = String(value || '').trim();
+    target.replaceChildren();
+    if (!source) {
+      return;
+    }
+
+    const lines = source.split(/\r?\n/);
+    let index = 0;
+
+    while (index < lines.length) {
+      const line = lines[index];
+      if (!line.trim()) {
+        index++;
+        continue;
+      }
+
+      if (isMarkdownHeadingLine(line)) {
+        const heading = document.createElement('p');
+        heading.className = 'run-final-heading';
+        heading.append(...buildMarkdownInlineNodes(line.replace(/^\s*#{1,6}\s+/, '').trim()));
+        target.append(heading);
+        index++;
+        continue;
+      }
+
+      if (isMarkdownListLine(line)) {
+        const list = document.createElement('ul');
+        while (index < lines.length && isMarkdownListLine(lines[index])) {
+          const item = document.createElement('li');
+          item.append(...buildMarkdownInlineNodes(lines[index].replace(/^\s*-\s+/, '')));
+          list.append(item);
+          index++;
+        }
+        target.append(list);
+        continue;
+      }
+
+      const paragraphLines = [];
+      while (
+        index < lines.length &&
+        lines[index].trim() &&
+        !isMarkdownListLine(lines[index]) &&
+        !isMarkdownHeadingLine(lines[index])
+      ) {
+        paragraphLines.push(lines[index].trim());
+        index++;
+      }
+
+      const paragraph = document.createElement('p');
+      paragraph.append(...buildMarkdownInlineNodes(paragraphLines.join(' ')));
+      target.append(paragraph);
+    }
+  }
+
+  function isMarkdownListLine(line) {
+    return /^\s*-\s+/.test(line);
+  }
+
+  function isMarkdownHeadingLine(line) {
+    return /^\s*(#{1,6}\s+\S|\*\*[^*]+\*\*:?\s*)$/.test(line);
   }
 
   function renderActivityLine(event) {
@@ -2361,7 +2614,7 @@
 
     const body = document.createElement('div');
     body.className = 'run-final-answer';
-    body.textContent = formatEventDetail(event.detail || {});
+    renderMarkdownBlockText(body, formatEventDetail(event.detail || {}));
     report.append(body);
     return report;
   }

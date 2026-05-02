@@ -92,7 +92,13 @@ function buildThreadStartParams(input = {}) {
 
 function runCodexAppServerSession(input) {
   return new Promise((resolve, reject) => {
-    const child = spawn('codex', ['app-server', '--listen', 'stdio://'], {
+    const codexCommand = resolveCodexCommand(input.env || process.env);
+    if (!codexCommand) {
+      reject(new Error('Codex CLI was not found. Install Codex or make sure the `codex` command is available in your login shell.'));
+      return;
+    }
+
+    const child = spawn(codexCommand, ['app-server', '--listen', 'stdio://'], {
       env: input.env || process.env,
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -102,8 +108,8 @@ function runCodexAppServerSession(input) {
     let stderr = '';
     let activeThreadId = '';
     let activeTurnId = '';
-    let latestAssistantMessage = '';
     const assistantMessages = new Map();
+    const assistantMessageOrder = [];
     let settled = false;
     const timeoutMs = 10 * 60 * 1000;
     const timeout = setTimeout(() => {
@@ -257,15 +263,20 @@ function runCodexAppServerSession(input) {
       if (method === 'item/agentMessage/delta') {
         const itemId = String(params.itemId || item.id || 'current');
         const next = `${assistantMessages.get(itemId) || ''}${String(params.delta || '')}`;
-        assistantMessages.set(itemId, next);
-        latestAssistantMessage = next;
+        setAssistantMessage(itemId, next);
         return;
       }
       if (item.type === 'agentMessage' && typeof item.text === 'string' && item.text.trim()) {
         const itemId = String(item.id || params.itemId || 'current');
-        assistantMessages.set(itemId, item.text);
-        latestAssistantMessage = item.text;
+        setAssistantMessage(itemId, item.text);
       }
+    }
+
+    function setAssistantMessage(itemId, text) {
+      if (!assistantMessages.has(itemId)) {
+        assistantMessageOrder.push(itemId);
+      }
+      assistantMessages.set(itemId, text);
     }
 
     function succeed() {
@@ -276,7 +287,7 @@ function runCodexAppServerSession(input) {
       clearTimeout(timeout);
       child.kill('SIGTERM');
       resolve({
-        assistantMessage: cleanAssistantMessage(latestAssistantMessage)
+        assistantMessage: buildFinalAssistantMessage(assistantMessages, assistantMessageOrder)
       });
     }
 
@@ -296,6 +307,41 @@ function runCodexAppServerSession(input) {
       reject(error);
     }
   });
+}
+
+function resolveCodexCommand(env = process.env) {
+  if (
+    env.CODEX_OVERLEAF_ENV_READY === '1' ||
+    Object.prototype.hasOwnProperty.call(env, 'CODEX_OVERLEAF_CODEX_PATH')
+  ) {
+    return env.CODEX_OVERLEAF_CODEX_PATH || '';
+  }
+  return 'codex';
+}
+
+function buildFinalAssistantMessage(messages = new Map(), order = []) {
+  const values = [];
+  const seenIds = new Set();
+  const ids = order.length ? order : Array.from(messages.keys());
+
+  for (const id of ids) {
+    seenIds.add(id);
+    addAssistantMessage(values, messages.get(id));
+  }
+  for (const [id, value] of messages) {
+    if (!seenIds.has(id)) {
+      addAssistantMessage(values, value);
+    }
+  }
+
+  return values.join('\n\n');
+}
+
+function addAssistantMessage(values, value) {
+  const clean = cleanAssistantMessage(value);
+  if (clean && !values.includes(clean)) {
+    values.push(clean);
+  }
 }
 
 function emitCodexEvent(emit, type, title, detail = {}, status = 'running') {
@@ -324,6 +370,7 @@ function cleanAssistantMessage(value) {
 }
 
 module.exports = {
+  buildFinalAssistantMessage,
   buildCodexSettings,
   buildThreadStartParams,
   runCodexAppServerSession,
