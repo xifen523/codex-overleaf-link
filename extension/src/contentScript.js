@@ -41,6 +41,14 @@
   let logAutoFollow = true;
   let userScrollIntentUntil = 0;
   let runCancellationRequested = false;
+  let warmMirrorState = {
+    warmInterval: null,
+    warmBackoffMs: 120000,
+    warmFailures: 0,
+    prefetchTimer: null,
+    lastPrefetchAt: 0,
+    coldStartDone: false
+  };
 
   chrome.runtime.onMessage.addListener(message => {
     if (message?.type === 'codex-overleaf/open-panel') {
@@ -58,6 +66,7 @@
     state = normalizePanelState(await loadStoredState());
     ensurePanelOpen();
     applyStateToPanel();
+    initWarmMirror();
     await refreshProbe();
     scheduleProbeRefresh(1200);
     scheduleProbeRefresh(4000);
@@ -198,6 +207,7 @@
         panel.querySelector(selector).addEventListener('change', persistPanelInputs);
         panel.querySelector(selector).addEventListener('input', persistPanelInputs);
       }
+      panel.querySelector('[data-task]').addEventListener('input', scheduleMirrorPrefetch);
 
       installInteractionRefresh();
       installDiagnosticsDismiss();
@@ -788,20 +798,59 @@
         appendLog(`提示：${formatProjectSnapshotWarning(warning)}`);
       }
 
+      // Warm mirror path decision
+      let useExistingMirror = false;
+      let fileOverlays = null;
+      const focusFiles = getActiveFocusFiles();
+
+      if (focusFiles.length > 0 && state.mode !== 'ask') {
+        const mirrorStatus = await getMirrorFreshness();
+        if (mirrorStatus && mirrorStatus.exists && mirrorStatus.ageMs < 15000) {
+          const focusFileContents = (project.files || []).filter(f => focusFiles.includes(f.path));
+          if (focusFileContents.length === focusFiles.length) {
+            fileOverlays = focusFileContents.map(f => ({ path: f.path, content: f.content }));
+            useExistingMirror = true;
+            appendRunEvent({ title: '使用已预热的本地 workspace（仅同步焦点文件差异）。', status: 'completed' });
+          }
+        }
+      }
+
       appendRunEvent({ title: '本地 Codex session 开始运行。', status: 'running' });
-      const response = await sendNative({
+      let response = await sendNative({
         method: 'codex.run',
         params: {
           projectId: getCurrentProjectId(),
           mode: state.mode,
           task,
-          project,
-          focusFiles: getActiveFocusFiles(),
+          project: useExistingMirror ? undefined : project,
+          useExistingMirror: useExistingMirror || undefined,
+          fileOverlays: useExistingMirror ? fileOverlays : undefined,
+          expectedMirrorFreshness: useExistingMirror ? 15000 : undefined,
+          focusFiles,
           model: state.model,
           reasoningEffort: state.reasoningEffort,
           session: state.session
         }
       });
+
+      // Handle mirror_stale error by retrying with full sync
+      if (!response.ok && response.error?.code === 'mirror_stale' && useExistingMirror) {
+        appendRunEvent({ title: '预热 workspace 已过期，正在重新完整同步。', status: 'running' });
+        useExistingMirror = false;
+        response = await sendNative({
+          method: 'codex.run',
+          params: {
+            projectId: getCurrentProjectId(),
+            mode: state.mode,
+            task,
+            project,
+            focusFiles,
+            model: state.model,
+            reasoningEffort: state.reasoningEffort,
+            session: state.session
+          }
+        });
+      }
 
       if (!response.ok) {
         if (runCancellationRequested || isRunCancellationError(response.error)) {
@@ -1975,6 +2024,91 @@
     });
     return project;
   }
+
+  // --- Warm Mirror Controller ---
+
+  function initWarmMirror() {
+    const delay = 2000 + Math.random() * 3000;
+    setTimeout(async () => {
+      if (warmMirrorState.coldStartDone) return;
+      warmMirrorState.coldStartDone = true;
+      await syncMirrorBackground();
+      startWarmInterval();
+    }, delay);
+  }
+
+  async function syncMirrorBackground() {
+    if (currentRunView) return;
+    try {
+      const project = await callPageBridge('getProjectSnapshot', {
+        force: false,
+        preferLightweight: false,
+        allowZipFallback: true,
+        allowEditorNavigation: false,
+        requireFullProject: true,
+        maxAgeMs: 30000
+      });
+      if (!project?.capabilities?.fullProjectSnapshot) return;
+      if (!project?.files?.length) return;
+
+      await sendBackgroundNative({
+        method: 'mirror.sync',
+        params: {
+          projectId: getCurrentProjectId(),
+          project
+        }
+      });
+      warmMirrorState.warmFailures = 0;
+      warmMirrorState.warmBackoffMs = 120000;
+    } catch (error) {
+      warmMirrorState.warmFailures++;
+      warmMirrorState.warmBackoffMs = Math.min(warmMirrorState.warmBackoffMs * 2, 600000);
+    }
+  }
+
+  function startWarmInterval() {
+    stopWarmInterval();
+    warmMirrorState.warmInterval = setInterval(() => {
+      if (document.hidden) return;
+      if (currentRunView) return;
+      syncMirrorBackground();
+    }, warmMirrorState.warmBackoffMs);
+  }
+
+  function stopWarmInterval() {
+    if (warmMirrorState.warmInterval) {
+      clearInterval(warmMirrorState.warmInterval);
+      warmMirrorState.warmInterval = null;
+    }
+  }
+
+  function scheduleMirrorPrefetch() {
+    if (warmMirrorState.prefetchTimer) {
+      clearTimeout(warmMirrorState.prefetchTimer);
+    }
+    warmMirrorState.prefetchTimer = setTimeout(async () => {
+      warmMirrorState.prefetchTimer = null;
+      const now = Date.now();
+      if (now - warmMirrorState.lastPrefetchAt < 30000) return;
+      warmMirrorState.lastPrefetchAt = now;
+      await syncMirrorBackground();
+    }, 1200);
+  }
+
+  async function getMirrorFreshness() {
+    try {
+      const response = await sendBackgroundNative({
+        method: 'mirror.status',
+        params: { projectId: getCurrentProjectId() }
+      });
+      if (response?.ok) {
+        return response.result;
+      }
+    } catch (error) { /* fall through */ }
+    return null;
+  }
+
+  // --- End Warm Mirror Controller ---
 
   function scheduleDebouncedProbeRefresh(delayMs) {
     window.clearTimeout(interactionRefreshTimer);
