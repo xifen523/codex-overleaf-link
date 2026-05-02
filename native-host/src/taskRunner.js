@@ -30,6 +30,10 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
     return handleMirrorSync(request, env);
   }
 
+  if (request.method === 'mirror.status') {
+    return handleMirrorStatus(request, env);
+  }
+
   if (request.method === 'codex.run') {
     return handleCodexRun(request, env, emit);
   }
@@ -73,8 +77,27 @@ async function handleCodexRun(request, env, emit) {
     activeRunControllers.set(request.id, abortController);
   }
   try {
+    if (params.useExistingMirror) {
+      const { getMirrorStatus, applyFileOverlays } = require('./mirrorWorkspace');
+      const rootDir = env.CODEX_OVERLEAF_MIRROR_ROOT;
+      const status = getMirrorStatus(projectKey, { rootDir });
+      const maxFreshness = params.expectedMirrorFreshness || 15000;
+
+      if (!status.exists || status.ageMs > maxFreshness) {
+        releaseProjectLock(projectKey, lockToken);
+        if (request.id && activeRunControllers.get(request.id) === abortController) {
+          activeRunControllers.delete(request.id);
+        }
+        return errorResponse(request.id, 'mirror_stale', `Mirror is ${status.ageMs}ms old (max ${maxFreshness}ms)`);
+      }
+
+      if (Array.isArray(params.fileOverlays) && params.fileOverlays.length) {
+        await applyFileOverlays({ projectId: projectKey, overlays: params.fileOverlays, rootDir });
+      }
+    }
+
     const result = await runCodexSession({
-      params,
+      params: params.useExistingMirror ? { ...params, skipMirrorSync: true } : params,
       env,
       emit,
       rootDir: env.CODEX_OVERLEAF_MIRROR_ROOT,
@@ -174,6 +197,15 @@ async function handleMirrorSync(request, env) {
   } catch (error) {
     return errorResponse(request.id, 'mirror_sync_failed', error.message);
   }
+}
+
+function handleMirrorStatus(request, env) {
+  const { getMirrorStatus } = require('./mirrorWorkspace');
+  const params = request.params || {};
+  const projectId = params.projectId || 'unknown';
+  const rootDir = env.CODEX_OVERLEAF_MIRROR_ROOT;
+  const status = getMirrorStatus(projectId, { rootDir });
+  return okResponse(request.id, status);
 }
 
 async function handleTaskRun(request, env, emit) {

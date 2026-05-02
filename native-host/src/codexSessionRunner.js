@@ -1,7 +1,7 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
-const { collectMirrorChangesDetailed, syncOverleafToMirror } = require('./mirrorWorkspace');
+const { collectMirrorChangesDetailed, getProjectMirror, syncOverleafToMirror } = require('./mirrorWorkspace');
 const { computeLineDiff } = require('./diffEngine');
 const { computeTextPatches } = require('./textPatch');
 const { buildCodexHomeEnv } = require('./codexHome');
@@ -10,23 +10,30 @@ const { truncateText } = require('./debugLog');
 async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex, signal } = {}) {
   throwIfAborted(signal);
   const projectId = params.projectId || params.project?.projectId || params.project?.id || params.project?.url || 'overleaf-project';
-  emitCodexEvent(emit, 'overleaf.sync.started', 'Syncing Overleaf project to local workspace', {
-    projectId,
-    fileCount: Array.isArray(params.project?.files) ? params.project.files.length : 0
-  });
 
-  const mirror = await syncOverleafToMirror({
-    projectId,
-    project: params.project || { files: [] },
-    rootDir
-  });
-  throwIfAborted(signal);
+  let mirror;
+  if (params.skipMirrorSync) {
+    mirror = getProjectMirror(projectId, { rootDir });
+    mirror.fileCount = 0;
+  } else {
+    emitCodexEvent(emit, 'overleaf.sync.started', 'Syncing Overleaf project to local workspace', {
+      projectId,
+      fileCount: Array.isArray(params.project?.files) ? params.project.files.length : 0
+    });
 
-  emitCodexEvent(emit, 'overleaf.sync.completed', 'Overleaf project synced to local workspace', {
-    projectId: mirror.projectKey,
-    workspacePath: mirror.workspacePath,
-    fileCount: mirror.fileCount
-  }, 'completed');
+    mirror = await syncOverleafToMirror({
+      projectId,
+      project: params.project || { files: [] },
+      rootDir
+    });
+    throwIfAborted(signal);
+
+    emitCodexEvent(emit, 'overleaf.sync.completed', 'Overleaf project synced to local workspace', {
+      projectId: mirror.projectKey,
+      workspacePath: mirror.workspacePath,
+      fileCount: mirror.fileCount
+    }, 'completed');
+  }
 
   const settings = buildCodexSettings(params);
   const runner = executeCodex || runCodexAppServerSession;

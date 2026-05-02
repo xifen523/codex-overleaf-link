@@ -60,6 +60,7 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
   writeBaseline(mirror.baselinePath, {
     projectKey: mirror.projectKey,
     capturedAt: new Date().toISOString(),
+    lastFullSyncAt: new Date().toISOString(),
     files: files.map(file => buildBaselineFile(file))
   });
 
@@ -357,9 +358,56 @@ function hashBytes(bytes) {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
+function getMirrorStatus(projectId, options = {}) {
+  const mirror = getProjectMirror(projectId, options);
+  const baseline = readBaseline(mirror.baselinePath);
+  if (!baseline.lastFullSyncAt && !baseline.capturedAt) {
+    return { exists: false, fileCount: 0, ageMs: Infinity, baselineCapturedAt: '' };
+  }
+  const lastFullSyncAt = baseline.lastFullSyncAt || baseline.capturedAt;
+  const ageMs = Date.now() - new Date(lastFullSyncAt).getTime();
+  return {
+    exists: true,
+    fileCount: (baseline.files || []).length,
+    ageMs: Math.max(0, ageMs),
+    baselineCapturedAt: lastFullSyncAt
+  };
+}
+
+async function applyFileOverlays({ projectId, overlays, rootDir }) {
+  const mirror = getProjectMirror(projectId, { rootDir });
+  const baseline = readBaseline(mirror.baselinePath);
+  const filesByPath = new Map((baseline.files || []).map(f => [f.path, f]));
+
+  for (const overlay of overlays || []) {
+    if (!overlay?.path || typeof overlay.content !== 'string') {
+      continue;
+    }
+    const normalizedPath = normalizeRelativePath(overlay.path);
+    const target = resolveWorkspacePath(mirror.workspacePath, normalizedPath);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, overlay.content, 'utf8');
+
+    filesByPath.set(normalizedPath, {
+      path: normalizedPath,
+      kind: 'text',
+      hash: overlay.hash || hashText(overlay.content),
+      content: overlay.content
+    });
+  }
+
+  // Write baseline preserving lastFullSyncAt unchanged
+  writeBaseline(mirror.baselinePath, {
+    ...baseline,
+    files: Array.from(filesByPath.values())
+  });
+}
+
 module.exports = {
+  applyFileOverlays,
   collectMirrorChangesDetailed,
   collectMirrorChanges,
+  getMirrorStatus,
   getProjectMirror,
   syncOverleafToMirror
 };
