@@ -1,5 +1,6 @@
 .DS_Store
 .local/
+docs/
 native-host/bin/
 node_modules/
 dist/
