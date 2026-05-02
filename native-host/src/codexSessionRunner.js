@@ -35,6 +35,7 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     task: buildCodexTurnPrompt(params, mirror),
     userTask: String(params.task || ''),
     session: params.session || null,
+    threadId: params.threadId || '',
     mode: params.mode || 'auto',
     model: params.model || '',
     reasoningEffort: params.reasoningEffort || '',
@@ -77,6 +78,7 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     projectId: mirror.projectKey,
     workspacePath: mirror.workspacePath,
     assistantMessage: cleanAssistantMessage(runnerResult?.assistantMessage),
+    threadId: runnerResult?.threadId || '',
     syncChanges,
     unsupportedChanges
   };
@@ -173,6 +175,16 @@ function buildThreadStartParams(input = {}) {
   };
 }
 
+function buildThreadResumeParams(input = {}) {
+  return {
+    threadId: input.threadId,
+    cwd: input.workspacePath,
+    model: input.model || null,
+    approvalPolicy: input.approvalPolicy,
+    sandbox: input.sandboxMode
+  };
+}
+
 function runCodexAppServerSession(input) {
   return new Promise((resolve, reject) => {
     if (input.signal?.aborted) {
@@ -243,11 +255,24 @@ function runCodexAppServerSession(input) {
         capabilities: null
       });
       notify('initialized');
-      const threadResponse = await request('thread/start', buildThreadStartParams(input));
-      activeThreadId = threadResponse?.thread?.id || threadResponse?.threadId || '';
-      if (!activeThreadId) {
-        throw new Error('Codex app-server did not return a thread id');
+
+      if (input.threadId) {
+        try {
+          const resumeResponse = await request('thread/resume', buildThreadResumeParams(input));
+          activeThreadId = resumeResponse?.thread?.id || resumeResponse?.threadId || input.threadId;
+        } catch (resumeError) {
+          const error = new Error(resumeError.message || 'thread/resume failed');
+          error.code = 'thread_resume_failed';
+          throw error;
+        }
+      } else {
+        const threadResponse = await request('thread/start', buildThreadStartParams(input));
+        activeThreadId = threadResponse?.thread?.id || threadResponse?.threadId || '';
+        if (!activeThreadId) {
+          throw new Error('Codex app-server did not return a thread id');
+        }
       }
+
       const turnResponse = await request('turn/start', {
         threadId: activeThreadId,
         input: [
@@ -378,7 +403,8 @@ function runCodexAppServerSession(input) {
       cleanup();
       child.kill('SIGTERM');
       resolve({
-        assistantMessage: buildFinalAssistantMessage(assistantMessages, assistantMessageOrder)
+        assistantMessage: buildFinalAssistantMessage(assistantMessages, assistantMessageOrder),
+        threadId: activeThreadId
       });
     }
 
@@ -635,6 +661,7 @@ module.exports = {
   buildFinalAssistantMessage,
   buildCodexSettings,
   buildThreadStartParams,
+  buildThreadResumeParams,
   createOptionalTimeout,
   decideCommandApproval,
   runCodexAppServerSession,
