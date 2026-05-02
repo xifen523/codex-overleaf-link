@@ -75,6 +75,51 @@ test('task runs sync the full project only when a Codex run starts', () => {
   assert.match(contentScript, /async function applySyncChangesToOverleaf/);
 });
 
+test('task run snapshots request binary assets so local LaTeX can see Figures directories', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const getRunProjectSnapshotBody = contentScript.match(/async function getRunProjectSnapshot\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(getRunProjectSnapshotBody, /includeBinaryFiles:\s*true/);
+  assert.match(contentScript, /资源文件/);
+});
+
+test('task run snapshots bypass cache so Codex sees the latest Overleaf state', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const getRunProjectSnapshotBody = contentScript.match(/async function getRunProjectSnapshot\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(getRunProjectSnapshotBody, /force:\s*true/);
+  assert.match(getRunProjectSnapshotBody, /maxAgeMs:\s*0/);
+});
+
+test('task run blocks partial project snapshots before they can rewrite the local mirror', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const warningsBody = contentScript.match(/function getProjectSnapshotWarnings\(project\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(warningsBody, /fullProjectSnapshot/);
+  assert.match(contentScript, /没有读到完整的 Overleaf 项目/);
+});
+
+test('successful Overleaf writeback refreshes page snapshot cache and native mirror baseline', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
+
+  assert.match(applyBody, /refreshProjectMirrorAfterWriteback/);
+  assert.match(contentScript, /invalidateProjectSnapshot/);
+  assert.match(contentScript, /method:\s*'mirror\.sync'/);
+});
+
 test('idle background sync does not poll or touch the Overleaf editor', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -83,8 +128,8 @@ test('idle background sync does not poll or touch the Overleaf editor', () => {
   const initBody = contentScript.match(/async function init\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
   assert.doesNotMatch(initBody, /scheduleProjectSync/);
+  assert.doesNotMatch(initBody, /mirror\.sync/);
   assert.doesNotMatch(contentScript, /function scheduleProjectSync/);
-  assert.doesNotMatch(contentScript, /sendBackgroundNative\(\{\s*method: 'mirror\.sync'/);
 });
 
 test('ask mode is not blocked by write-safety preconditions', () => {
@@ -117,6 +162,18 @@ test('composer clears the submitted task as soon as Codex accepts the run', () =
   assert.match(contentScript, /function clearTaskComposer\(/);
   assert.match(contentScript, /taskInput\.value = ''/);
   assert.match(contentScript, /task: ''/);
+});
+
+test('deleting a UI session also clears plugin-isolated Codex history', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
+
+  assert.match(deleteBody, /codex\.history\.clearPlugin/);
+  assert.match(deleteBody, /插件隔离的本地 Codex 历史/);
+  assert.doesNotMatch(deleteBody, /This deletes local session history/);
 });
 
 test('run history renders as a compact single-column transcript without persistent speaker rails', () => {
@@ -333,8 +390,23 @@ test('same UI session records final assistant summary for the next Codex turn', 
   );
 
   assert.match(contentScript, /function buildSessionHistoryResult/);
-  assert.match(contentScript, /result:\s*buildSessionHistoryResult\(\{[\s\S]*assistantMessage:\s*response\.result\.assistantMessage/);
+  assert.match(contentScript, /const assistantMessage = response\.result\.assistantMessage \|\| getAssistantAnswerForCurrentRun\(\)/);
+  assert.match(contentScript, /result:\s*buildSessionHistoryResult\(\{[\s\S]*assistantMessage,/);
   assert.match(contentScript, /syncChanges:\s*response\.result\.syncChanges/);
+});
+
+test('post-run session persistence failures do not turn ask results into failed analysis', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const successPath = contentScript.match(/const syncOutcome = await applySyncChangesToOverleaf[\s\S]*?Codex 结果已生成，但保存本地会话记录失败[\s\S]*?\}\);/)?.[0] || '';
+
+  assert.match(successPath, /try\s*\{/);
+  assert.match(successPath, /await saveState\(\)/);
+  assert.match(successPath, /catch \(persistenceError\)/);
+  assert.match(successPath, /Codex 结果已生成，但保存本地会话记录失败/);
+  assert.doesNotMatch(successPath, /throw persistenceError/);
 });
 
 test('completion report is structured around user outcomes rather than a one-line status', () => {
@@ -373,6 +445,17 @@ test('completion report is structured around user outcomes rather than a one-lin
   assert.doesNotMatch(contentScript, /nextStep: response\.error\.message/);
   assert.doesNotMatch(contentScript, /本地 Codex 返回错误/);
   assert.doesNotMatch(contentScript, /Summary:/);
+});
+
+test('completion report renderer turns inline numbered findings into readable ordered lists', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /function normalizeInlineOrderedLists\(/);
+  assert.match(contentScript, /document\.createElement\('ol'\)/);
+  assert.match(contentScript, /isMarkdownOrderedListLine/);
 });
 
 test('auto mode shows a readonly diff after applying Codex changes', () => {

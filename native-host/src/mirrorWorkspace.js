@@ -46,22 +46,18 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
   for (const file of files) {
     const target = resolveWorkspacePath(mirror.workspacePath, file.path);
     const prev = previousByPath.get(file.path);
-    if (prev && prev.hash === hashText(file.content)) {
+    if (prev && prev.hash === hashProjectFile(file)) {
       continue;
     }
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, file.content, 'utf8');
+    writeProjectFile(target, file);
     writtenCount++;
   }
 
   writeBaseline(mirror.baselinePath, {
     projectKey: mirror.projectKey,
     capturedAt: new Date().toISOString(),
-    files: files.map(file => ({
-      path: file.path,
-      content: file.content,
-      hash: hashText(file.content)
-    }))
+    files: files.map(file => buildBaselineFile(file))
   });
 
   return {
@@ -79,7 +75,11 @@ async function collectMirrorChanges({ projectId, rootDir }) {
   const currentByPath = new Map();
 
   for (const filePath of currentPaths) {
-    if (!baselineByPath.has(filePath) && isGeneratedArtifactPath(filePath)) {
+    const previous = baselineByPath.get(filePath);
+    if (previous?.kind === 'binary') {
+      continue;
+    }
+    if (!previous && (isGeneratedArtifactPath(filePath) || !isTextMirrorPath(filePath))) {
       continue;
     }
     const content = fs.readFileSync(resolveWorkspacePath(mirror.workspacePath, filePath), 'utf8');
@@ -100,6 +100,9 @@ async function collectMirrorChanges({ projectId, rootDir }) {
   }
 
   for (const [filePath, previous] of baselineByPath) {
+    if (previous.kind === 'binary') {
+      continue;
+    }
     if (!currentByPath.has(filePath)) {
       changes.push({
         type: 'delete',
@@ -114,11 +117,68 @@ async function collectMirrorChanges({ projectId, rootDir }) {
 
 function normalizeProjectFiles(files) {
   return files
-    .filter(file => file && typeof file.path === 'string' && typeof file.content === 'string')
-    .map(file => ({
-      path: normalizeRelativePath(file.path),
+    .map(file => normalizeProjectFile(file))
+    .filter(Boolean);
+}
+
+function normalizeProjectFile(file) {
+  if (!file || typeof file.path !== 'string') {
+    return null;
+  }
+  const normalizedPath = normalizeRelativePath(file.path);
+  if (typeof file.content === 'string') {
+    return {
+      path: normalizedPath,
+      kind: 'text',
       content: file.content
-    }));
+    };
+  }
+  if (typeof file.contentBase64 === 'string') {
+    return {
+      path: normalizedPath,
+      kind: 'binary',
+      contentBase64: file.contentBase64,
+      size: Number.isFinite(Number(file.size)) ? Number(file.size) : undefined
+    };
+  }
+  return null;
+}
+
+function writeProjectFile(target, file) {
+  if (file.kind === 'binary') {
+    fs.writeFileSync(target, decodeBase64File(file.contentBase64));
+    return;
+  }
+  fs.writeFileSync(target, file.content, 'utf8');
+}
+
+function buildBaselineFile(file) {
+  const baseline = {
+    path: file.path,
+    kind: file.kind,
+    hash: hashProjectFile(file)
+  };
+  if (file.kind === 'binary') {
+    baseline.size = file.size;
+  } else {
+    baseline.content = file.content;
+  }
+  return baseline;
+}
+
+function hashProjectFile(file) {
+  return hashBytes(getProjectFileBytes(file));
+}
+
+function getProjectFileBytes(file) {
+  if (file.kind === 'binary') {
+    return decodeBase64File(file.contentBase64);
+  }
+  return Buffer.from(String(file.content || ''), 'utf8');
+}
+
+function decodeBase64File(contentBase64) {
+  return Buffer.from(String(contentBase64 || ''), 'base64');
 }
 
 function normalizeProjectKey(projectId) {
@@ -216,8 +276,21 @@ function isGeneratedArtifactPath(filePath) {
   return /\.(aux|bbl|bcf|blg|brf|fdb_latexmk|fls|lof|log|lot|out|pdf|run\.xml|synctex(?:\.gz)?|toc|xdv)$/i.test(normalized);
 }
 
+function isTextMirrorPath(filePath) {
+  const normalized = normalizeRelativePath(filePath).toLowerCase();
+  const basename = path.posix.basename(normalized);
+  if (basename === '.latexmkrc') {
+    return true;
+  }
+  return /\.(tex|bib|bst|cls|sty|clo|cfg|def|bbx|cbx|lbx|ist|tikz|pgf|asy|txt|md|csv|tsv|dat|json|ya?ml|py|r|m|sh)$/i.test(normalized);
+}
+
 function hashText(text) {
-  return crypto.createHash('sha256').update(String(text || '')).digest('hex');
+  return hashBytes(Buffer.from(String(text || ''), 'utf8'));
+}
+
+function hashBytes(bytes) {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
 module.exports = {

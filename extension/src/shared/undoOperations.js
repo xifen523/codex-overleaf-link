@@ -80,9 +80,11 @@
   }
 
   function buildUndoCheckpoint(project, appliedOperations) {
+    const undoOperations = buildUndoOperations(project, appliedOperations);
+    const expectedFiles = buildExpectedFilesAfterOperations(project, appliedOperations);
     return {
-      undoOperations: buildUndoOperations(project, appliedOperations),
-      undoBaseFiles: filesMapToList(buildExpectedFilesAfterOperations(project, appliedOperations))
+      undoOperations,
+      undoBaseFiles: filesMapToList(selectUndoBaseFiles(expectedFiles, undoOperations))
     };
   }
 
@@ -140,6 +142,26 @@
       path,
       content
     }));
+  }
+
+  function selectUndoBaseFiles(expectedFilesByPath, undoOperations) {
+    const neededPaths = new Set();
+    for (const operation of undoOperations || []) {
+      if (!operation?.path) {
+        continue;
+      }
+      if (operation.type === 'edit' || operation.type === 'delete' || operation.type === 'rename' || operation.type === 'move') {
+        neededPaths.add(operation.path);
+      }
+    }
+
+    const selected = new Map();
+    for (const [path, content] of expectedFilesByPath.entries()) {
+      if (neededPaths.has(path)) {
+        selected.set(path, content);
+      }
+    }
+    return selected;
   }
 
   function normalizeUndoOperation(operation) {

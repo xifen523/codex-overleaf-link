@@ -4,6 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  DEFAULT_CHROME_EXTENSION_ID,
   buildHostManifest,
   getChromeNativeHostManifestPath,
   validateChromeExtensionId
@@ -11,6 +12,7 @@ const {
 
 test('validates Chrome extension ids', () => {
   assert.equal(validateChromeExtensionId('abcdefghijklmnopabcdefghijklmnop'), true);
+  assert.equal(validateChromeExtensionId(DEFAULT_CHROME_EXTENSION_ID), true);
   assert.equal(validateChromeExtensionId('ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP'), false);
   assert.equal(validateChromeExtensionId('short'), false);
   assert.equal(validateChromeExtensionId('abcdefghijklmnopabcdefghijklmno1'), false);

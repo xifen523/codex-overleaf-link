@@ -3,6 +3,7 @@
 const { spawn } = require('node:child_process');
 const { buildOperationSummary, splitDeletePlan } = require('../../extension/src/shared/summary');
 const { runCodexSession } = require('./codexSessionRunner');
+const { clearPluginCodexHistory } = require('./codexHome');
 const { logDebug, truncateText } = require('./debugLog');
 const { HOST_NAME } = require('./manifest');
 const { summarizeNativeEnvironment } = require('./nativeEnvironment');
@@ -35,6 +36,10 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
 
   if (request.method === 'codex.cancel') {
     return handleCodexCancel(request);
+  }
+
+  if (request.method === 'codex.history.clearPlugin') {
+    return handleCodexHistoryClear(request, env);
   }
 
   if (request.method === 'task.run') {
@@ -115,6 +120,14 @@ function handleCodexCancel(request) {
     cancelled: true,
     requestId: targetId
   });
+}
+
+function handleCodexHistoryClear(request, env) {
+  try {
+    return okResponse(request.id, clearPluginCodexHistory(env));
+  } catch (error) {
+    return errorResponse(request.id, 'codex_history_clear_failed', error.message);
+  }
 }
 
 function createCancellationError() {

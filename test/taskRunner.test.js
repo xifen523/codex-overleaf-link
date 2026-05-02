@@ -61,6 +61,33 @@ test('codex.run returns a clear error before spawning when Codex is missing', as
   assert.equal(calls, 0);
 });
 
+test('codex.history.clearPlugin removes only plugin-isolated Codex history', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-history-'));
+  const pluginSessionFile = path.join(home, '.codex-overleaf', 'codex-home', 'sessions', '2026', '05', '02', 'plugin.jsonl');
+  const userSessionFile = path.join(home, '.codex', 'sessions', '2026', '05', '02', 'user.jsonl');
+  try {
+    fs.mkdirSync(path.dirname(pluginSessionFile), { recursive: true });
+    fs.mkdirSync(path.dirname(userSessionFile), { recursive: true });
+    fs.writeFileSync(pluginSessionFile, '{"plugin":true}\n', 'utf8');
+    fs.writeFileSync(userSessionFile, '{"user":true}\n', 'utf8');
+
+    const response = await handleRequest({
+      id: 'clear-history',
+      method: 'codex.history.clearPlugin',
+      params: {}
+    }, { HOME: home });
+
+    assert.equal(response.ok, true);
+    assert.deepEqual(response.result.removed, ['sessions']);
+    assert.equal(fs.existsSync(pluginSessionFile), false);
+    assert.equal(fs.existsSync(userSessionFile), true);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('task.run rejects Auto Mode when neither checkpoint nor Reviewing is verified', async () => {
   const response = await handleRequest({
     id: '2',

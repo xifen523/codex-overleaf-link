@@ -468,6 +468,12 @@
         nextStep: '请确认终端里可以运行 `codex`，然后重新安装 native host 或刷新扩展后重试。'
       };
     }
+    if (/quota|kQuotaBytes|QUOTA_BYTES/i.test(text)) {
+      return {
+        conclusion: 'Codex 结果已经生成，但本地会话记录超出 Chrome 存储配额。',
+        nextStep: '请删除一些旧 session，或刷新扩展后重试；这不是论文分析本身失败。'
+      };
+    }
     if (/checkpoint/i.test(text)) {
       return {
         conclusion: '这轮没有自动写入：Codex 没有拿到可恢复版本。',
@@ -483,7 +489,7 @@
 
     return {
       conclusion: context.mode === 'ask'
-        ? '这轮分析失败：本地 Codex 没有返回可用说明。'
+        ? '这轮只问不改没有完成：本地 Codex 没有正常完成，因此没有生成最终说明。'
         : '这轮任务失败：本地 Codex 没有返回可用结果，未确认任何写入。',
       nextStep: '请查看技术详情，处理本地 Codex 错误后重试。'
     };

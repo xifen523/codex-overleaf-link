@@ -4,6 +4,7 @@ const { spawn } = require('node:child_process');
 const { collectMirrorChanges, syncOverleafToMirror } = require('./mirrorWorkspace');
 const { computeLineDiff } = require('./diffEngine');
 const { computeTextPatches } = require('./textPatch');
+const { buildCodexHomeEnv } = require('./codexHome');
 const { truncateText } = require('./debugLog');
 
 async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex, signal } = {}) {
@@ -173,14 +174,15 @@ function runCodexAppServerSession(input) {
       reject(getAbortReason(input.signal));
       return;
     }
-    const codexCommand = resolveCodexCommand(input.env || process.env);
+    const childEnv = buildCodexHomeEnv(input.env || process.env);
+    const codexCommand = resolveCodexCommand(childEnv);
     if (!codexCommand) {
       reject(new Error('Codex CLI was not found. Install Codex or make sure the `codex` command is available in your login shell.'));
       return;
     }
 
     const child = spawn(codexCommand, ['app-server', '--listen', 'stdio://'], {
-      env: input.env || process.env,
+      env: childEnv,
       stdio: ['pipe', 'pipe', 'pipe']
     });
     const pending = new Map();
@@ -192,7 +194,7 @@ function runCodexAppServerSession(input) {
     const assistantMessages = new Map();
     const assistantMessageOrder = [];
     let settled = false;
-    const timeout = createOptionalTimeout(input.env?.CODEX_OVERLEAF_CODEX_TIMEOUT_MS, timeoutMs => {
+    const timeout = createOptionalTimeout(childEnv.CODEX_OVERLEAF_CODEX_TIMEOUT_MS, timeoutMs => {
       fail(new Error(`Codex app-server did not complete within configured timeout (${timeoutMs}ms)`));
     });
     const onAbort = () => {

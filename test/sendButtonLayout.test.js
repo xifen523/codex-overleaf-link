@@ -117,3 +117,17 @@ test('undo button is visually prominent when a run has reversible writes', () =>
   assert.match(css, /#codex-overleaf-panel \[data-run-undo\]\s*\{[\s\S]*font-weight:\s*700/);
   assert.match(css, /#codex-overleaf-panel \[data-run-undo\]\s*\{[\s\S]*box-shadow:/);
 });
+
+test('panel persistence is compacted before writing to chrome storage quota', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /prepareStateForStorage/);
+  assert.match(contentScript, /chrome\.storage\.local\.set\(\{ \[storageKey\]: prepareStateForStorage\(state\) \}\)/);
+  assert.match(contentScript, /isStorageQuotaError\(error\)/);
+  assert.match(contentScript, /prepareStateForStorage\(state, \{ aggressive: true \}\)/);
+  assert.match(contentScript, /saveState\(\)\.catch/);
+  assert.match(contentScript, /本地会话记录过大，已自动压缩旧任务记录后继续/);
+});

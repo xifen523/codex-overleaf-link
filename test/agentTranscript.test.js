@@ -23,6 +23,14 @@ test('timeout remediation does not tell users to raise a default Codex timeout',
   assert.doesNotMatch(translated.nextStep, /提高超时时间|timeout/i);
 });
 
+test('unknown ask-mode errors explain local Codex failure without implying the analysis succeeded silently', () => {
+  const translated = translateRawError('unexpected app-server failure', { mode: 'ask' });
+
+  assert.doesNotMatch(translated.conclusion, /没有返回可用说明/);
+  assert.match(translated.conclusion, /本地 Codex 没有正常完成/);
+  assert.match(translated.nextStep, /技术详情/);
+});
+
 test('keeps schema-only lifecycle events out of the visible transcript', () => {
   for (const event of [
     { type: 'codex.prompt.ready', title: 'Codex prompt prepared' },
@@ -292,6 +300,21 @@ test('builds fallback final reports without raw operation JSON', () => {
   assert.match(report.text, /写入结果：已写入 1 项，跳过 0 项/);
   assert.match(report.text, /可撤销：可撤销本轮 1 项写入/);
   assert.doesNotMatch(report.text, /"type"|"find"|"replace"|old|new/);
+});
+
+test('storage quota errors are not presented as missing ask-mode analysis', () => {
+  const report = buildHumanCompletionReport({
+    status: 'failed',
+    mode: 'ask',
+    errorMessage: 'Resource::kQuotaBytes quota exceeded',
+    operations: [],
+    applyResults: [],
+    includeWriteResult: true
+  });
+
+  assert.doesNotMatch(report.text, /本地 Codex 没有返回可用说明/);
+  assert.match(report.text, /本地会话记录/);
+  assert.match(report.text, /只问不改/);
 });
 
 test('formatHumanReport omits empty sections', () => {

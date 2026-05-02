@@ -8,6 +8,7 @@
     "agent:codex": "node scripts/codex-json-agent.mjs",
     "test": "node --test test/*.test.js",
     "install:native": "node scripts/install-native-host.mjs",
+    "uninstall:native": "node scripts/uninstall-native-host.mjs",
     "bridge": "node native-host/src/index.js"
   },
   "engines": {

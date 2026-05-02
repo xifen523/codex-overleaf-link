@@ -58,6 +58,40 @@ test('syncs Overleaf text files to the mirror and removes files missing from the
   }
 });
 
+test('syncs binary Overleaf assets to the mirror without treating them as editable text changes', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const binary = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff]);
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-assets',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: '\\includegraphics{Figures/plot.pdf}' },
+          {
+            path: 'Figures/plot.pdf',
+            kind: 'binary',
+            contentBase64: binary.toString('base64')
+          }
+        ]
+      }
+    });
+
+    assert.deepEqual(fs.readFileSync(path.join(mirror.workspacePath, 'Figures/plot.pdf')), binary);
+    assert.equal(fs.existsSync(path.join(mirror.workspacePath, 'Figures')), true);
+
+    fs.writeFileSync(path.join(mirror.workspacePath, 'main.tex'), '\\includegraphics{Figures/plot.pdf}\n% note', 'utf8');
+    fs.writeFileSync(path.join(mirror.workspacePath, 'Figures/plot.pdf'), Buffer.from([0x00, 0x01]));
+
+    const changes = await collectMirrorChanges({ projectId: 'project-assets', rootDir });
+    assert.deepEqual(changes.map(change => [change.type, change.path]), [
+      ['write', 'main.tex']
+    ]);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('collects local mirror writes and deletes as sync changes, not Codex operation JSON', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
   try {

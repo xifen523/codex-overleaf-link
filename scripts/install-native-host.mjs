@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  DEFAULT_CHROME_EXTENSION_ID,
   buildHostManifest,
   getChromeNativeHostManifestPath,
   validateChromeExtensionId
@@ -11,9 +12,10 @@ import {
 import { buildLauncherScript } from '../native-host/src/launcher.js';
 
 const args = parseArgs(process.argv.slice(2));
+const extensionId = args.extensionId || DEFAULT_CHROME_EXTENSION_ID;
 
-if (!args.extensionId || !validateChromeExtensionId(args.extensionId)) {
-  console.error('Usage: npm run install:native -- --extension-id <32-letter-chrome-extension-id>');
+if (!validateChromeExtensionId(extensionId)) {
+  console.error('Usage: npm run install:native -- [--extension-id <32-letter-chrome-extension-id>]');
   process.exit(2);
 }
 
@@ -27,7 +29,7 @@ const defaultBridgePath = path.join(os.homedir(), '.codex-overleaf', 'codex-over
 const bridgePath = path.resolve(args.bridgePath || defaultBridgePath);
 const manifestPath = getChromeNativeHostManifestPath();
 const manifest = buildHostManifest({
-  extensionId: args.extensionId,
+  extensionId,
   bridgePath
 });
 
@@ -45,6 +47,7 @@ fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
 console.log(`Installed Native Messaging host manifest: ${manifestPath}`);
 console.log(`Bridge executable: ${bridgePath}`);
 console.log(`Runtime root: ${installRoot}`);
+console.log(`Allowed Chrome extension id: ${extensionId}`);
 
 function installRuntime(targetRoot) {
   fs.rmSync(targetRoot, { recursive: true, force: true });

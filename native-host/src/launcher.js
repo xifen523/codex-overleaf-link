@@ -4,7 +4,7 @@ function buildLauncherScript({ nodePath, bridgeEntryPath, agentPath }) {
   return [
     '#!/bin/sh',
     'set -eu',
-    'HOME_DIR="${HOME:-/Users/example}"',
+    'HOME_DIR="${HOME:-/tmp}"',
     'LOG_DIR="$HOME_DIR/.codex-overleaf"',
     'mkdir -p "$LOG_DIR" 2>/dev/null || true',
     '{',

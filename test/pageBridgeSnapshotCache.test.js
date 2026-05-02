@@ -282,6 +282,58 @@ test('run snapshots can require full project and fall back to ZIP without editor
   assert.deepEqual(Array.from(result.files, file => file.path), ['main.tex', 'refs.bib']);
 });
 
+test('run snapshots can include binary project assets for local LaTeX compilation', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\includegraphics{Figures/plot.pdf}',
+      'Figures/plot.pdf': '%PDF-test'
+    }
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    allowZipFallback: true,
+    allowEditorNavigation: false,
+    requireFullProject: true,
+    includeBinaryFiles: true,
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.capabilities.method, 'overleaf-zip');
+  assert.deepEqual(Array.from(result.files, file => [file.path, file.kind]), [
+    ['main.tex', 'text'],
+    ['Figures/plot.pdf', 'binary']
+  ]);
+  assert.equal(result.files[1].contentBase64, Buffer.from('%PDF-test').toString('base64'));
+  assert.equal(result.files[1].size, Buffer.byteLength('%PDF-test'));
+});
+
+test('full run snapshots prefer live active editor text over stale ZIP content', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': 'live unsaved editor text',
+      'refs.bib': '@article{x}'
+    },
+    zipFiles: {
+      'main.tex': 'stale zip text',
+      'refs.bib': '@article{x}'
+    }
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    preferLightweight: true,
+    allowZipFallback: true,
+    allowEditorNavigation: false,
+    requireFullProject: true,
+    includeBinaryFiles: true,
+    force: true,
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.capabilities.method, 'overleaf-zip');
+  assert.equal(result.files.find(file => file.path === 'main.tex')?.content, 'live unsaved editor text');
+  assert.equal(result.files.find(file => file.path === 'main.tex')?.source, 'active-editor');
+});
+
 test('run snapshots never open inactive Overleaf files when ZIP fallback is unavailable', async () => {
   const bridge = createSnapshotHarness({
     files: {
@@ -349,9 +401,9 @@ test('project snapshot falls back when the Overleaf ZIP download hangs', async (
   assert.match(result.capabilities.skipped[0].reason, /timed out/i);
 });
 
-function createSnapshotHarness({ files, fetchMode = 'zip', treePaths = null, internalState = {}, windowExtra = {} }) {
+function createSnapshotHarness({ files, zipFiles = null, fetchMode = 'zip', treePaths = null, internalState = {}, windowExtra = {} }) {
   const fileMap = new Map(Object.entries(files));
-  const zipBuffer = createStoredZip(files);
+  const zipBuffer = createStoredZip(zipFiles || files);
   let listener = null;
   let fetchCount = 0;
   let openClickCount = 0;
@@ -426,6 +478,9 @@ function createSnapshotHarness({ files, fetchMode = 'zip', treePaths = null, int
     CodexOverleafStaleGuard: staleGuard,
     _ide: internalState,
     ...windowExtra,
+    btoa(value) {
+      return Buffer.from(value, 'binary').toString('base64');
+    },
     fetch: async (_endpoint, options = {}) => {
       fetchCount += 1;
       if (fetchMode === 'hang') {
@@ -477,6 +532,9 @@ function createSnapshotHarness({ files, fetchMode = 'zip', treePaths = null, int
     fetch: window.fetch,
     setTimeout,
     clearTimeout,
+    btoa(value) {
+      return Buffer.from(value, 'binary').toString('base64');
+    },
     console
   });
 

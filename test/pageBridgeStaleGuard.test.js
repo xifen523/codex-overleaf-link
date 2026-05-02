@@ -169,6 +169,37 @@ test('page bridge rejects stale patch expected text before editing', async () =>
   assert.equal(bridge.getFile('main.tex'), 'alpha user gamma');
 });
 
+test('page bridge rejects edits when Overleaf readback does not match the intended content', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    dispatchApplies: false,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.code, 'write_verification_failed');
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+});
+
 test('page bridge can activate Reviewing before write operations', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -203,7 +234,7 @@ test('page bridge rejects write-safety confirmation when Reviewing click does no
 });
 
 
-function createPageBridgeHarness({ activePath, files, reviewingOk = true, reviewingClickActivates = true }) {
+function createPageBridgeHarness({ activePath, files, reviewingOk = true, reviewingClickActivates = true, dispatchApplies = true }) {
   const fileMap = new Map(Object.entries(files));
   let selectedPath = activePath;
   let listener = null;
@@ -326,7 +357,9 @@ function createPageBridgeHarness({ activePath, files, reviewingOk = true, review
       state: { doc },
       dispatch(transaction) {
         lastDispatchChanges = transaction.changes;
-        fileMap.set(selectedPath, applyEditorChanges(fileMap.get(selectedPath) || '', transaction.changes));
+        if (dispatchApplies) {
+          fileMap.set(selectedPath, applyEditorChanges(fileMap.get(selectedPath) || '', transaction.changes));
+        }
       }
     };
   }

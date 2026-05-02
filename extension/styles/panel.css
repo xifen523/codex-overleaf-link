@@ -471,12 +471,18 @@
 
 #codex-overleaf-panel .run-final-answer p + p,
 #codex-overleaf-panel .run-final-answer p + ul,
+#codex-overleaf-panel .run-final-answer p + ol,
 #codex-overleaf-panel .run-final-answer ul + p,
-#codex-overleaf-panel .run-final-answer ul + ul {
+#codex-overleaf-panel .run-final-answer ol + p,
+#codex-overleaf-panel .run-final-answer ul + ul,
+#codex-overleaf-panel .run-final-answer ul + ol,
+#codex-overleaf-panel .run-final-answer ol + ul,
+#codex-overleaf-panel .run-final-answer ol + ol {
   margin-top: 8px;
 }
 
-#codex-overleaf-panel .run-final-answer ul {
+#codex-overleaf-panel .run-final-answer ul,
+#codex-overleaf-panel .run-final-answer ol {
   margin: 6px 0 0;
   padding-left: 18px;
 }

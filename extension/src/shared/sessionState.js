@@ -24,6 +24,34 @@
   const VALID_MODES = new Set(['ask', 'confirm', 'auto']);
   const VALID_REASONING = new Set(['low', 'medium', 'high', 'xhigh']);
   const MAX_RUN_EVENTS = 300;
+  const STORAGE_DEFAULT_LIMITS = {
+    maxSessions: 12,
+    maxRunsPerSession: 10,
+    maxEventsPerRun: 120,
+    maxUndoRunsPerSession: 2,
+    maxUndoBytesPerRun: 320 * 1024,
+    targetBytes: 4 * 1024 * 1024,
+    titleChars: 6000,
+    detailChars: 3000,
+    historyChars: 1800,
+    taskChars: 12000,
+    sessionTitleChars: 80,
+    statusTextChars: 800
+  };
+  const STORAGE_AGGRESSIVE_LIMITS = {
+    maxSessions: 4,
+    maxRunsPerSession: 3,
+    maxEventsPerRun: 20,
+    maxUndoRunsPerSession: 1,
+    maxUndoBytesPerRun: 160 * 1024,
+    targetBytes: 768 * 1024,
+    titleChars: 1000,
+    detailChars: 300,
+    historyChars: 400,
+    taskChars: 2000,
+    sessionTitleChars: 80,
+    statusTextChars: 400
+  };
 
   function normalizePanelState(input = {}) {
     const state = {
@@ -351,6 +379,258 @@
     return files.slice(0, 5);
   }
 
+  function prepareStateForStorage(input = {}, options = {}) {
+    const limits = options.aggressive ? STORAGE_AGGRESSIVE_LIMITS : STORAGE_DEFAULT_LIMITS;
+    const compact = compactPanelStateForStorage(input, limits);
+    if (!options.aggressive && estimateJsonBytes(compact) > limits.targetBytes) {
+      return prepareStateForStorage(input, { aggressive: true });
+    }
+    return compact;
+  }
+
+  function compactPanelStateForStorage(input, limits) {
+    const source = {
+      ...DEFAULT_PANEL_STATE,
+      ...(input && typeof input === 'object' ? input : {})
+    };
+    const sourceSessions = getSourceSessions(source);
+    const activeSessionId = typeof source.activeSessionId === 'string'
+      ? source.activeSessionId
+      : source.session?.id;
+    const selectedSessions = selectSessionsForStorage(sourceSessions, activeSessionId, limits.maxSessions);
+    const compactSessions = selectedSessions.map(session => compactSessionForStorage(session, source, limits));
+    const resolvedActiveId = compactSessions.some(session => session.id === activeSessionId)
+      ? activeSessionId
+      : compactSessions[compactSessions.length - 1]?.id || '';
+    const active = compactSessions.find(session => session.id === resolvedActiveId) || compactSessions[0] || null;
+
+    return {
+      mode: VALID_MODES.has(active?.mode) ? active.mode : normalizeMode(source.mode),
+      model: normalizeTextField(active?.model || source.model || DEFAULT_PANEL_STATE.model, 80),
+      reasoningEffort: VALID_REASONING.has(active?.reasoningEffort)
+        ? active.reasoningEffort
+        : normalizeReasoning(source.reasoningEffort),
+      requireReviewing: active ? active.requireReviewing !== false : source.requireReviewing !== false,
+      autoOpen: source.autoOpen !== false,
+      task: normalizeTextField(active?.task || source.task || '', limits.taskChars),
+      focusFiles: normalizeFocusFiles(active?.focusFiles || source.focusFiles),
+      session: active ? {
+        id: active.id,
+        history: compactHistory(active.history, limits),
+        focusFiles: normalizeFocusFiles(active.focusFiles)
+      } : null,
+      runs: [],
+      sessions: compactSessions,
+      activeSessionId: active?.id || ''
+    };
+  }
+
+  function getSourceSessions(source) {
+    if (Array.isArray(source.sessions) && source.sessions.some(session => session?.id)) {
+      return source.sessions;
+    }
+    const legacySession = source.session?.id ? source.session : createSession({
+      mode: source.mode,
+      model: source.model,
+      reasoningEffort: source.reasoningEffort,
+      requireReviewing: source.requireReviewing
+    });
+    return [{
+      ...legacySession,
+      task: source.task,
+      mode: source.mode,
+      model: source.model,
+      reasoningEffort: source.reasoningEffort,
+      requireReviewing: source.requireReviewing,
+      focusFiles: normalizeFocusFiles(source.focusFiles || legacySession.focusFiles),
+      runs: Array.isArray(source.runs) ? source.runs : legacySession.runs,
+      title: legacySession.title || deriveSessionTitle(source.runs, source.task),
+      updatedAt: legacySession.updatedAt
+    }];
+  }
+
+  function selectSessionsForStorage(sessions, activeSessionId, maxSessions) {
+    const filtered = (Array.isArray(sessions) ? sessions : [])
+      .filter(session => session && typeof session.id === 'string');
+    if (filtered.length <= maxSessions) {
+      return filtered;
+    }
+
+    const active = filtered.find(session => session.id === activeSessionId);
+    const recent = filtered.slice(-maxSessions);
+    if (!active || recent.some(session => session.id === active.id)) {
+      return recent;
+    }
+    return [
+      active,
+      ...recent.filter(session => session.id !== active.id).slice(-(maxSessions - 1))
+    ];
+  }
+
+  function compactSessionForStorage(session, fallbackState, limits) {
+    const runs = compactRunsForStorage(session.runs, limits);
+    const title = typeof session.title === 'string' && session.title.trim()
+      ? session.title.trim()
+      : deriveSessionTitle(runs, session.task);
+    return {
+      id: session.id,
+      title: normalizeTextField(title, limits.sessionTitleChars),
+      createdAt: typeof session.createdAt === 'string' ? session.createdAt : new Date().toISOString(),
+      updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : new Date().toISOString(),
+      history: compactHistory(session.history, limits),
+      runs,
+      task: normalizeTextField(session.task, limits.taskChars),
+      mode: normalizeMode(session.mode || fallbackState.mode),
+      model: normalizeTextField(session.model || fallbackState.model || DEFAULT_PANEL_STATE.model, 80),
+      reasoningEffort: normalizeReasoning(session.reasoningEffort || fallbackState.reasoningEffort),
+      requireReviewing: session.requireReviewing !== false,
+      focusFiles: normalizeFocusFiles(session.focusFiles)
+    };
+  }
+
+  function compactHistory(history, limits) {
+    return (Array.isArray(history) ? history : [])
+      .slice(-10)
+      .map(entry => ({
+        task: normalizeTextField(entry?.task, 300),
+        result: normalizeTextField(entry?.result, limits.historyChars),
+        at: typeof entry?.at === 'string' ? entry.at : ''
+      }));
+  }
+
+  function compactRunsForStorage(runs, limits) {
+    const selectedRuns = (Array.isArray(runs) ? runs : [])
+      .filter(run => run && typeof run.id === 'string')
+      .slice(-limits.maxRunsPerSession);
+    const undoRunIds = new Set(selectedRuns
+      .slice()
+      .reverse()
+      .filter(run => Array.isArray(run.undoOperations) && run.undoOperations.length)
+      .slice(0, limits.maxUndoRunsPerSession)
+      .map(run => run.id));
+    return selectedRuns.map(run => compactRunForStorage(run, limits, undoRunIds.has(run.id)));
+  }
+
+  function compactRunForStorage(run, limits, keepUndoPayload) {
+    const undoPayload = compactUndoPayload(run, limits, keepUndoPayload);
+    return {
+      id: run.id,
+      task: normalizeTextField(run.task || 'untitled task', limits.taskChars),
+      mode: typeof run.mode === 'string' ? run.mode : '',
+      model: normalizeTextField(run.model, 80),
+      reasoningEffort: typeof run.reasoningEffort === 'string' ? run.reasoningEffort : '',
+      status: normalizeRunStatus(run.status),
+      statusText: normalizeTextField(run.statusText, limits.statusTextChars),
+      startedAt: typeof run.startedAt === 'string' ? run.startedAt : '',
+      finishedAt: typeof run.finishedAt === 'string' ? run.finishedAt : '',
+      events: compactRunEvents(run.events, limits),
+      appliedOperations: [],
+      undoOperations: undoPayload.undoOperations,
+      undoBaseFiles: undoPayload.undoBaseFiles,
+      undoStatus: typeof run.undoStatus === 'string' ? run.undoStatus : ''
+    };
+  }
+
+  function compactRunEvents(events, limits) {
+    return (Array.isArray(events) ? events : [])
+      .filter(event => event && typeof event.title === 'string')
+      .slice(-limits.maxEventsPerRun)
+      .map(event => {
+        const compact = {
+          title: normalizeTextField(event.title, limits.titleChars),
+          status: typeof event.status === 'string' ? event.status : 'info',
+          timestamp: typeof event.timestamp === 'string' ? event.timestamp : '',
+          kind: typeof event.kind === 'string' ? event.kind : 'activity',
+          streamKey: typeof event.streamKey === 'string' ? event.streamKey : '',
+          streamRole: typeof event.streamRole === 'string' ? event.streamRole : ''
+        };
+        const detail = compactDetailForStorage(event.detail, limits.detailChars);
+        if (detail !== undefined) {
+          compact.detail = detail;
+        }
+        return compact;
+      });
+  }
+
+  function compactDetailForStorage(detail, maxChars) {
+    if (detail === undefined) {
+      return undefined;
+    }
+    if (typeof detail === 'string') {
+      return normalizeTextField(detail, maxChars);
+    }
+    if (detail === null || typeof detail === 'number' || typeof detail === 'boolean') {
+      return detail;
+    }
+    try {
+      return normalizeTextField(JSON.stringify(detail), maxChars);
+    } catch (_error) {
+      return '[detail omitted]';
+    }
+  }
+
+  function compactUndoPayload(run, limits, keepUndoPayload) {
+    if (!keepUndoPayload) {
+      return {
+        undoOperations: [],
+        undoBaseFiles: []
+      };
+    }
+
+    const undoOperations = safeJsonClone(Array.isArray(run.undoOperations) ? run.undoOperations : []);
+    const undoBaseFiles = normalizeRunFiles(run.undoBaseFiles);
+    const payload = {
+      undoOperations,
+      undoBaseFiles
+    };
+    if (!undoOperations.length || estimateJsonBytes(payload) > limits.maxUndoBytesPerRun) {
+      return {
+        undoOperations: [],
+        undoBaseFiles: []
+      };
+    }
+    return payload;
+  }
+
+  function normalizeMode(mode) {
+    return VALID_MODES.has(mode) ? mode : DEFAULT_PANEL_STATE.mode;
+  }
+
+  function normalizeReasoning(reasoningEffort) {
+    return VALID_REASONING.has(reasoningEffort)
+      ? reasoningEffort
+      : DEFAULT_PANEL_STATE.reasoningEffort;
+  }
+
+  function normalizeTextField(value, maxChars) {
+    const text = typeof value === 'string' ? value : '';
+    if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) {
+      return text;
+    }
+    return `${text.slice(0, Math.max(0, maxChars - 1))}…`;
+  }
+
+  function safeJsonClone(value) {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  function estimateJsonBytes(value) {
+    let serialized = '';
+    try {
+      serialized = JSON.stringify(value);
+    } catch (_error) {
+      return Infinity;
+    }
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.byteLength(serialized, 'utf8');
+    }
+    return new Blob([serialized]).size;
+  }
+
   return {
     DEFAULT_PANEL_STATE,
     createSession,
@@ -361,6 +641,8 @@
     recordSessionResult,
     setActiveSession,
     updateActiveSession,
-    normalizeRuns
+    normalizeRuns,
+    prepareStateForStorage,
+    estimateJsonBytes
   };
 });

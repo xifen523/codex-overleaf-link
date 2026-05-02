@@ -8,6 +8,8 @@ const {
   getActiveSession,
   isDisplayableSession,
   normalizePanelState,
+  prepareStateForStorage,
+  estimateJsonBytes,
   recordSessionResult,
   setActiveSession,
   updateActiveSession
@@ -295,4 +297,74 @@ test('marks restored running runs as interrupted', () => {
   assert.equal(state.runs[0].status, 'failed');
   assert.equal(state.runs[0].statusText, 'Interrupted by page reload');
   assert.equal(state.runs[0].events[1].title, 'Run interrupted by page reload');
+});
+
+test('prepares a compact persisted state without storing huge historical payloads', () => {
+  const largeText = 'x'.repeat(20000);
+  const undoText = 'u'.repeat(120000);
+  const state = normalizePanelState({
+    activeSessionId: 'session_heavy',
+    sessions: [{
+      id: 'session_heavy',
+      title: 'Heavy',
+      task: 'Inspect a large manuscript',
+      runs: Array.from({ length: 12 }, (_, index) => ({
+        id: `run_${index}`,
+        task: `task ${index}`,
+        status: 'completed',
+        events: Array.from({ length: 20 }, (__, eventIndex) => ({
+          title: `**reasoning ${eventIndex}** ${largeText}`,
+          detail: { raw: largeText },
+          technicalDetail: { raw: largeText },
+          kind: eventIndex % 2 ? 'stream' : 'activity'
+        })),
+        undoOperations: [{ type: 'edit', path: 'main.tex', replaceAll: undoText }],
+        undoBaseFiles: [
+          { path: 'main.tex', content: undoText }
+        ]
+      }))
+    }]
+  });
+
+  const compact = prepareStateForStorage(state);
+  const activeStoredSession = compact.sessions.find(session => session.id === compact.activeSessionId);
+
+  assert.ok(estimateJsonBytes(compact) < 4 * 1024 * 1024);
+  assert.equal(compact.runs.length, 0);
+  assert.equal(activeStoredSession.runs.length, 10);
+  assert.equal(activeStoredSession.runs[0].events.length, 20);
+  assert.equal(activeStoredSession.runs[0].events[0].technicalDetail, undefined);
+  assert.ok(activeStoredSession.runs[0].events[0].title.length < 6100);
+  assert.equal(activeStoredSession.runs[0].undoOperations.length, 0);
+  assert.equal(activeStoredSession.runs.at(-1).undoOperations.length, 1);
+});
+
+test('aggressive storage preparation preserves the active session essentials under a smaller cap', () => {
+  const state = normalizePanelState({
+    activeSessionId: 'session_active',
+    sessions: Array.from({ length: 16 }, (_, index) => ({
+      id: index === 1 ? 'session_active' : `session_${index}`,
+      title: `Session ${index}`,
+      task: `task ${index} ${'x'.repeat(10000)}`,
+      runs: Array.from({ length: 8 }, (__, runIndex) => ({
+        id: `run_${index}_${runIndex}`,
+        task: `run ${runIndex}`,
+        status: 'completed',
+        events: Array.from({ length: 80 }, (___, eventIndex) => ({
+          title: `event ${eventIndex} ${'y'.repeat(5000)}`,
+          detail: { text: 'z'.repeat(5000) }
+        }))
+      }))
+    }))
+  });
+
+  const compact = prepareStateForStorage(state, { aggressive: true });
+
+  assert.ok(estimateJsonBytes(compact) < 768 * 1024);
+  assert.equal(compact.activeSessionId, 'session_active');
+  assert.equal(compact.sessions.some(session => session.id === 'session_active'), true);
+  const activeStoredSession = compact.sessions.find(session => session.id === compact.activeSessionId);
+  assert.equal(compact.runs.length, 0);
+  assert.ok(activeStoredSession.runs.length <= 3);
+  assert.ok(activeStoredSession.runs.every(run => run.events.length <= 20));
 });

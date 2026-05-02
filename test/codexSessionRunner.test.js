@@ -192,3 +192,10 @@ test('Codex app-server sessions do not impose a default wall-clock timeout', () 
   assert.match(codexSessionRunnerSource, /CODEX_OVERLEAF_CODEX_TIMEOUT_MS/);
   assert.match(codexSessionRunnerSource, /createOptionalTimeout/);
 });
+
+test('Codex app-server runs with plugin-isolated CODEX_HOME', () => {
+  assert.match(codexSessionRunnerSource, /require\('\.\/codexHome'\)/);
+  assert.match(codexSessionRunnerSource, /buildCodexHomeEnv/);
+  assert.match(codexSessionRunnerSource, /env:\s*childEnv/);
+  assert.doesNotMatch(codexSessionRunnerSource, /env:\s*input\.env \|\| process\.env/);
+});

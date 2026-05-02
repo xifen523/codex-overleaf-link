@@ -60,7 +60,8 @@ test('builds an undo checkpoint guarded by the expected post-apply project state
     files: [
       { path: 'main.tex', content: 'alpha old' },
       { path: 'old.tex', content: 'old body' },
-      { path: 'deleted.tex', content: 'delete me' }
+      { path: 'deleted.tex', content: 'delete me' },
+      { path: 'unrelated.tex', content: 'large unrelated file' }
     ]
   }, [
     { type: 'edit', path: 'main.tex', find: 'old', replace: 'new' },

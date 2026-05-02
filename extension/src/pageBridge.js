@@ -55,6 +55,10 @@
     if (method === 'getProjectFileList') {
       return getProjectFileList(params);
     }
+    if (method === 'invalidateProjectSnapshot') {
+      invalidateProjectSnapshot();
+      return { ok: true };
+    }
     if (method === 'createCheckpoint') {
       return createCheckpoint(params.label);
     }
@@ -399,9 +403,10 @@
     const activePath = getActiveFilePath();
     const internalDocRecords = collectDocRecords();
     const docRecordByPath = new Map(internalDocRecords.map(record => [record.path, record]));
+    let lightweightSnapshot = null;
 
     if (params.preferLightweight) {
-      const lightweightSnapshot = await buildPageProjectSnapshot({
+      lightweightSnapshot = await buildPageProjectSnapshot({
         params,
         activePath,
         internalDocRecords,
@@ -419,13 +424,14 @@
 
     const zipSnapshot = await fetchProjectZipSnapshot(params);
     if (zipSnapshot.ok && zipSnapshot.files.length) {
+      const files = mergeSnapshotFiles(zipSnapshot.files, lightweightSnapshot?.files || []);
       return {
         id: getProjectId(),
         url: window.location.href,
         activePath,
-        files: zipSnapshot.files,
+        files,
         capabilities: {
-          fullProjectSnapshot: zipSnapshot.files.length > 1,
+          fullProjectSnapshot: true,
           method: 'overleaf-zip',
           skipped: [],
           diagnostics: {
@@ -591,6 +597,24 @@
     };
   }
 
+  function mergeSnapshotFiles(primaryFiles = [], overrideFiles = []) {
+    const filesByPath = new Map((primaryFiles || []).map(file => [file.path, { ...file }]));
+    for (const file of overrideFiles || []) {
+      if (!file?.path || file.kind === 'binary' || typeof file.content !== 'string') {
+        continue;
+      }
+      if (!window.CodexOverleafProjectFiles.isUsableProjectFileContent(file.content)) {
+        continue;
+      }
+      filesByPath.set(file.path, {
+        ...(filesByPath.get(file.path) || {}),
+        ...file,
+        kind: 'text'
+      });
+    }
+    return Array.from(filesByPath.values());
+  }
+
   function resolvePageSnapshotMethod(files, lightweightOnly) {
     if (files.some(file => /^overleaf-doc-fetch/.test(file.source))) {
       return lightweightOnly ? 'overleaf-doc-fetch-lightweight' : 'overleaf-doc-fetch';
@@ -661,8 +685,17 @@
       window.location.origin,
       getProjectId() || window.location.pathname || window.location.href,
       params.preferLightweight ? 'lightweight' : 'full',
+      params.includeBinaryFiles ? 'binary' : 'text',
+      params.includeContent === false ? 'list' : 'content',
       focusKey
     ].join(':');
+  }
+
+  function invalidateProjectSnapshot() {
+    snapshotCache.key = '';
+    snapshotCache.capturedAt = 0;
+    snapshotCache.value = null;
+    snapshotCache.pending = null;
   }
 
   function getProjectFileListCacheKey(params = {}) {
@@ -805,14 +838,45 @@
     const result = Array.isArray(operation.patches) && operation.patches.length
       ? replaceActiveEditorPatches(operation.patches, nextContent)
       : replaceActiveEditorText(nextContent);
-    if (result.ok) {
-      window.CodexOverleafStaleGuard?.updateExpectedFileContent(
-        options.baseFileLookup,
-        operation.path,
-        nextContent
-      );
+    if (!result.ok) {
+      return result;
     }
-    return result;
+
+    const verified = await verifyActiveEditorText(nextContent, operation.path);
+    if (!verified.ok) {
+      return verified;
+    }
+    window.CodexOverleafStaleGuard?.updateExpectedFileContent(
+      options.baseFileLookup,
+      operation.path,
+      nextContent
+    );
+    return {
+      ...result,
+      verified: true,
+      verifiedContent: nextContent
+    };
+  }
+
+  async function verifyActiveEditorText(expected, filePath, waitMs = 1000) {
+    const deadline = Date.now() + waitMs;
+    let actual = readActiveEditorText();
+    while (actual !== expected && Date.now() < deadline) {
+      await delay(50);
+      actual = readActiveEditorText();
+    }
+    if (actual === expected) {
+      return {
+        ok: true
+      };
+    }
+    return {
+      ok: false,
+      code: 'write_verification_failed',
+      reason: `${filePath || '当前文件'} 写入后读回内容和 Codex 预期不一致，已停止把这次操作标记为成功。请刷新 Overleaf 后重试。`,
+      expectedLength: String(expected || '').length,
+      actualLength: String(actual || '').length
+    };
   }
 
   function applyTextPatches(text, patches) {
@@ -2179,9 +2243,14 @@
 
       if (shouldInclude) {
         const file = { path };
-        if (isText && options.includeContent !== false) {
+        if (options.includeContent !== false && (isText || options.includeBinaryFiles)) {
           const contentBytes = await readZipEntryBytes(view, bytes, localHeaderOffset, compressedSize, compressionMethod);
-          file.content = decoder.decode(contentBytes);
+          if (isText) {
+            file.content = decoder.decode(contentBytes);
+          } else {
+            file.contentBase64 = uint8ArrayToBase64(contentBytes);
+            file.size = contentBytes.byteLength;
+          }
         }
         files.push({
           ...file,
@@ -2193,6 +2262,15 @@
     }
 
     return files;
+  }
+
+  function uint8ArrayToBase64(bytes) {
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+    }
+    return window.btoa(binary);
   }
 
   function findEndOfCentralDirectory(view) {

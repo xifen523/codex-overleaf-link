@@ -12,6 +12,7 @@
     getActiveSession,
     isDisplayableSession,
     normalizePanelState,
+    prepareStateForStorage,
     recordSessionResult,
     setActiveSession,
     updateActiveSession
@@ -833,24 +834,39 @@
       }
 
       throwIfRunCancellationRequested();
+      const assistantMessage = response.result.assistantMessage || getAssistantAnswerForCurrentRun();
       const syncOutcome = await applySyncChangesToOverleaf(response.result.syncChanges || [], project, {
-        assistantMessage: response.result.assistantMessage
+        assistantMessage
       });
       finishRunView(syncOutcome.hasSkippedOperations ? '同步完成但有跳过项' : '同步完成', syncOutcome.hasSkippedOperations ? 'failed' : 'completed');
-      const activeSession = getActiveSession(state);
-      const updatedSession = recordSessionResult(activeSession, {
-        task,
-        result: buildSessionHistoryResult({
-          assistantMessage: response.result.assistantMessage,
-          syncOutcome,
-          syncChanges: response.result.syncChanges || []
-        })
-      });
-      state = updateActiveSession(state, {
-        history: updatedSession.history
-      });
-      await saveState();
-      applyStateToPanel();
+      try {
+        const activeSession = getActiveSession(state);
+        const updatedSession = recordSessionResult(activeSession, {
+          task,
+          result: buildSessionHistoryResult({
+            assistantMessage,
+            syncOutcome,
+            syncChanges: response.result.syncChanges || []
+          })
+        });
+        state = updateActiveSession(state, {
+          history: updatedSession.history
+        });
+        await saveState();
+        applyStateToPanel();
+      } catch (persistenceError) {
+        appendRunEvent({
+          title: 'Codex 结果已生成，但保存本地会话记录失败。',
+          status: 'failed',
+          detail: {
+            '影响': '本轮回答已经显示；刷新页面后，这轮可能不会出现在历史 session 里。'
+          },
+          technicalDetail: {
+            message: persistenceError.message,
+            stack: persistenceError.stack
+          }
+        });
+      }
     } catch (error) {
       if (runCancellationRequested || isRunCancellationError(error)) {
         appendRunCancelledReport();
@@ -1220,6 +1236,7 @@
         baseFiles: project?.files || []
       })
       : { ok: true, applied: [], skipped: [] };
+    await refreshProjectMirrorAfterWriteback(project, applied);
     if (state.mode === 'auto') {
       renderReadOnlyDiffReview(getAppliedSyncChanges(syncChanges, applied));
     }
@@ -1245,6 +1262,120 @@
     return {
       summaryLine,
       hasSkippedOperations: hasSkippedApplyOperations([applied])
+    };
+  }
+
+  async function refreshProjectMirrorAfterWriteback(project = {}, applied = {}) {
+    if (!applied?.applied?.length) {
+      return;
+    }
+
+    appendRunEvent({
+      title: '正在确认 Overleaf 最新内容，并刷新本地 Codex workspace。',
+      status: 'running'
+    });
+
+    await callPageBridge('invalidateProjectSnapshot', {});
+    const freshProject = await callPageBridge('getProjectSnapshot', {
+      force: true,
+      maxAgeMs: 0,
+      preferLightweight: true,
+      allowZipFallback: true,
+      allowEditorNavigation: false,
+      requireFullProject: true,
+      includeBinaryFiles: true,
+      focusFiles: getAppliedOperationPaths(applied)
+    });
+    if (!freshProject?.files?.length) {
+      appendRunEvent({
+        title: 'Overleaf 已写入，但刷新本地 workspace 时没有读到完整项目；下一轮会重新读取。',
+        status: 'failed'
+      });
+      return;
+    }
+
+    const syncedProject = mergeVerifiedAppliedFiles(freshProject, project, applied);
+    contextProject = null;
+    const response = await sendBackgroundNative({
+      method: 'mirror.sync',
+      params: {
+        projectId: getCurrentProjectId(),
+        project: syncedProject
+      }
+    });
+    if (response?.ok) {
+      appendRunEvent({
+        title: '已刷新本地 Codex workspace，下一轮会从最新 Overleaf 内容开始。',
+        status: 'completed'
+      });
+      return;
+    }
+
+    appendRunEvent({
+      title: `Overleaf 已写入，但刷新本地 workspace 失败：${response?.error?.message || 'native host 没有响应'}`,
+      status: 'failed'
+    });
+  }
+
+  function getAppliedOperationPaths(applied = {}) {
+    return Array.from(new Set((applied.applied || [])
+      .map(item => item?.operation?.path)
+      .filter(Boolean)));
+  }
+
+  function mergeVerifiedAppliedFiles(freshProject = {}, originalProject = {}, applied = {}) {
+    const filesByPath = new Map((freshProject.files || []).map(file => [file.path, { ...file }]));
+    const originalByPath = new Map((originalProject.files || []).map(file => [file.path, file]));
+
+    for (const item of applied.applied || []) {
+      const operation = item?.operation || {};
+      const result = item?.result || {};
+      if (!operation.path) {
+        continue;
+      }
+
+      if (operation.type === 'delete') {
+        filesByPath.delete(operation.path);
+        continue;
+      }
+
+      if ((operation.type === 'rename' || operation.type === 'move') && operation.to) {
+        const previous = filesByPath.get(operation.path) || originalByPath.get(operation.path);
+        filesByPath.delete(operation.path);
+        filesByPath.set(operation.to, {
+          ...(previous || {}),
+          path: operation.to,
+          kind: 'text',
+          content: result.verifiedContent || previous?.content || '',
+          source: 'verified-writeback'
+        });
+        continue;
+      }
+
+      if (operation.type === 'create') {
+        filesByPath.set(operation.path, {
+          path: operation.path,
+          kind: 'text',
+          content: result.verifiedContent || operation.content || '',
+          source: 'verified-writeback'
+        });
+        continue;
+      }
+
+      if (operation.type === 'edit' && typeof result.verifiedContent === 'string') {
+        filesByPath.set(operation.path, {
+          ...(filesByPath.get(operation.path) || originalByPath.get(operation.path) || {}),
+          path: operation.path,
+          kind: 'text',
+          content: result.verifiedContent,
+          source: 'verified-writeback'
+        });
+      }
+    }
+
+    return {
+      ...freshProject,
+      files: Array.from(filesByPath.values())
     };
   }
 
@@ -1802,11 +1933,13 @@
 
   async function getRunProjectSnapshot() {
     const project = await callPageBridge('getProjectSnapshot', {
-      maxAgeMs: RUN_PROJECT_SYNC_MAX_AGE_MS,
+      force: true,
+      maxAgeMs: 0,
       preferLightweight: true,
       allowZipFallback: true,
       allowEditorNavigation: false,
       requireFullProject: true,
+      includeBinaryFiles: true,
       focusFiles: getActiveFocusFiles()
     });
     return project;
@@ -1824,7 +1957,7 @@
     const skipped = project.capabilities?.skipped || [];
     const mode = project.capabilities?.fullProjectSnapshot ? 'project' : 'active file';
     const fileNames = files.slice(0, 5)
-      .map(file => `${file.path}:${String(file.content || '').length}/${file.source || 'unknown'}`)
+      .map(file => `${file.path}:${formatProjectSnapshotFileSize(file)}/${file.source || 'unknown'}`)
       .join(', ');
     const suffix = files.length > 5 ? `, +${files.length - 5} more` : '';
     const skippedText = skipped.length
@@ -1842,15 +1975,31 @@
       return '还没有读到 Overleaf 项目文件。请确认项目已加载完成，或在 Overleaf 点开一个 .tex 文件后重试。';
     }
 
+    const textCount = files.filter(isTextSnapshotFile).length;
+    const binaryCount = files.length - textCount;
+    const resourceText = binaryCount ? `，${binaryCount} 个资源文件` : '';
     const activePath = project.activePath ? `，当前文件：${project.activePath}` : '';
     const focusFiles = getActiveFocusFiles();
     const focusText = focusFiles.length ? `，优先处理：${focusFiles.join(', ')}` : '';
-    return `已读取 Overleaf 项目：${files.length} 个文本文件${activePath}${focusText}。`;
+    return `已读取 Overleaf 项目：${textCount} 个文本文件${resourceText}${activePath}${focusText}。`;
+  }
+
+  function formatProjectSnapshotFileSize(file) {
+    if (isTextSnapshotFile(file)) {
+      return `${String(file.content || '').length} chars`;
+    }
+    if (Number.isFinite(Number(file?.size))) {
+      return `${Number(file.size)} bytes`;
+    }
+    return file?.contentBase64 ? `${String(file.contentBase64).length} base64` : 'binary';
   }
 
   function formatProjectSnapshotWarning(warning) {
     if (/No source files were captured/i.test(warning)) {
       return '没有读取到项目源文件。请确认 Overleaf 页面加载完成，或点开一个 .tex 文件后重试。';
+    }
+    if (/Full project snapshot was not captured/i.test(warning)) {
+      return '没有读到完整的 Overleaf 项目。为了避免本地 workspace 用残缺快照覆盖项目，请刷新 Overleaf 或稍后重试。';
     }
     if (/empty or still loading/i.test(warning)) {
       return '读取到的文件内容还在加载中。请等 Overleaf 加载完成后重试。';
@@ -1916,6 +2065,7 @@
   function getProjectSnapshotWarnings(project) {
     const files = project?.files || [];
     const skipped = project?.capabilities?.skipped || [];
+    const textFiles = files.filter(isTextSnapshotFile);
     const blocking = [];
     const nonBlocking = [];
 
@@ -1924,21 +2074,30 @@
       return { blocking, nonBlocking };
     }
 
-    const unusable = files.filter(file => !window.CodexOverleafProjectFiles.isUsableProjectFileContent(file.content));
-    if (unusable.length === files.length) {
+    if (!textFiles.length) {
+      blocking.push('No source files were captured.');
+      return { blocking, nonBlocking };
+    }
+
+    if (project?.capabilities?.fullProjectSnapshot === false) {
+      blocking.push('Full project snapshot was not captured.');
+    }
+
+    const unusable = textFiles.filter(file => !window.CodexOverleafProjectFiles.isUsableProjectFileContent(file.content));
+    if (unusable.length === textFiles.length) {
       blocking.push('Captured file contents are empty or still loading.');
     } else if (unusable.length) {
       nonBlocking.push(`${unusable.length} file(s) have empty/loading content.`);
     }
 
-    const shortFiles = files.filter(file => String(file.content || '').trim().length < 80);
-    if (shortFiles.length === files.length) {
+    const shortFiles = textFiles.filter(file => String(file.content || '').trim().length < 80);
+    if (shortFiles.length === textFiles.length) {
       blocking.push('Every captured file is suspiciously short; Overleaf editor content was not read correctly.');
     } else if (shortFiles.length) {
       nonBlocking.push(`${shortFiles.length} captured file(s) are shorter than 80 characters.`);
     }
 
-    if (files.length > 1 && uniqueContentSignatures(files).length <= 1) {
+    if (textFiles.length > 1 && uniqueContentSignatures(textFiles).length <= 1) {
       blocking.push('Multiple paths have identical captured content; file switching likely failed.');
     }
 
@@ -1947,6 +2106,10 @@
     }
 
     return { blocking, nonBlocking };
+  }
+
+  function isTextSnapshotFile(file) {
+    return Boolean(file && file.kind !== 'binary' && typeof file.content === 'string');
   }
 
   function uniqueContentSignatures(files) {
@@ -2089,7 +2252,28 @@
   }
 
   async function saveState() {
-    await chrome.storage.local.set({ [storageKey]: state });
+    if (storageKey !== LEGACY_STORAGE_KEY) {
+      await chrome.storage.local.remove(LEGACY_STORAGE_KEY).catch(() => {});
+    }
+    try {
+      await chrome.storage.local.set({ [storageKey]: prepareStateForStorage(state) });
+    } catch (error) {
+      if (!isStorageQuotaError(error)) {
+        throw error;
+      }
+      await chrome.storage.local.remove(storageKey).catch(() => {});
+      try {
+        await chrome.storage.local.set({
+          [storageKey]: prepareStateForStorage(state, { aggressive: true })
+        });
+        appendPlainLog('本地会话记录过大，已自动压缩旧任务记录后继续。');
+      } catch (retryError) {
+        if (!isStorageQuotaError(retryError)) {
+          throw retryError;
+        }
+        appendPlainLog('本地会话记录仍超出 Chrome 配额；当前页面会继续使用新的设置，但刷新后可能不会保留。');
+      }
+    }
   }
 
   function saveStateSoon() {
@@ -2098,8 +2282,21 @@
     }
     saveStateTimer = setTimeout(() => {
       saveStateTimer = null;
-      saveState();
+      saveState().catch(error => {
+        appendPlainLog(`保存会话状态失败：${formatStateSaveError(error)}`);
+      });
     }, 120);
+  }
+
+  function isStorageQuotaError(error) {
+    return /quota|kQuotaBytes|QUOTA_BYTES/i.test(String(error?.message || error || ''));
+  }
+
+  function formatStateSaveError(error) {
+    if (isStorageQuotaError(error)) {
+      return '本地会话记录太大，请删除一些旧任务后重试。';
+    }
+    return error?.message || String(error);
   }
 
   async function persistPanelInputs() {
@@ -2217,11 +2414,11 @@
     }
 
     const approved = window.confirm([
-      'Delete this Codex session?',
+      '删除这个 Codex 会话？',
       '',
       target.title || 'New task',
       '',
-      'This deletes local session history and run records for this Overleaf project. It does not modify Overleaf files.'
+      '这会删除当前 Overleaf 项目的插件会话、运行记录，并清理插件隔离的本地 Codex 历史。不会修改 Overleaf 文件。'
     ].join('\n'));
     if (!approved) {
       return;
@@ -2230,6 +2427,18 @@
     state = deleteSession(state, sessionId);
     await saveState();
     applyStateToPanel();
+
+    try {
+      const response = await sendBackgroundNative({
+        method: 'codex.history.clearPlugin',
+        params: { sessionId }
+      });
+      if (!response?.ok) {
+        appendPlainLog(`已删除这个插件会话，但插件隔离的本地 Codex 历史没有清理完成：${response?.error?.message || 'native host 没有返回成功状态'}`);
+      }
+    } catch (error) {
+      appendPlainLog(`已删除这个插件会话，但插件隔离的本地 Codex 历史没有清理完成：${error.message}`);
+    }
   }
 
   function setRunning(running) {
@@ -2785,7 +2994,7 @@
   }
 
   function renderMarkdownBlockText(target, value) {
-    const source = String(value || '').trim();
+    const source = normalizeInlineOrderedLists(String(value || '').trim());
     target.replaceChildren();
     if (!source) {
       return;
@@ -2811,10 +3020,11 @@
       }
 
       if (isMarkdownListLine(line)) {
-        const list = document.createElement('ul');
-        while (index < lines.length && isMarkdownListLine(lines[index])) {
+        const ordered = isMarkdownOrderedListLine(line);
+        const list = ordered ? document.createElement('ol') : document.createElement('ul');
+        while (index < lines.length && isSameMarkdownListKind(lines[index], ordered)) {
           const item = document.createElement('li');
-          item.append(...buildMarkdownInlineNodes(lines[index].replace(/^\s*-\s+/, '')));
+          item.append(...buildMarkdownInlineNodes(stripMarkdownListMarker(lines[index])));
           list.append(item);
           index++;
         }
@@ -2840,7 +3050,61 @@
   }
 
   function isMarkdownListLine(line) {
+    return isMarkdownUnorderedListLine(line) || isMarkdownOrderedListLine(line);
+  }
+
+  function isMarkdownUnorderedListLine(line) {
     return /^\s*-\s+/.test(line);
+  }
+
+  function isMarkdownOrderedListLine(line) {
+    return /^\s*\d+\.\s+/.test(line);
+  }
+
+  function isSameMarkdownListKind(line, ordered) {
+    return ordered ? isMarkdownOrderedListLine(line) : isMarkdownUnorderedListLine(line);
+  }
+
+  function stripMarkdownListMarker(line) {
+    return String(line || '').replace(/^\s*(?:-\s+|\d+\.\s+)/, '');
+  }
+
+  function normalizeInlineOrderedLists(source) {
+    return String(source || '').split(/\r?\n/).map(line => {
+      if (isMarkdownListLine(line) || !/\s1\.\s+\S/.test(line) || !/\s2\.\s+\S/.test(line)) {
+        return line;
+      }
+
+      const markers = [];
+      const pattern = /(^|\s)(\d{1,2})\.\s+(?=\S)/g;
+      let match;
+      while ((match = pattern.exec(line)) !== null) {
+        markers.push({
+          number: Number(match[2]),
+          start: match.index + match[1].length
+        });
+      }
+      if (markers.length < 2 || markers[0].number !== 1) {
+        return line;
+      }
+      for (let index = 1; index < markers.length; index++) {
+        if (markers[index].number !== markers[index - 1].number + 1) {
+          return line;
+        }
+      }
+
+      const parts = [];
+      const prefix = line.slice(0, markers[0].start).trim();
+      if (prefix) {
+        parts.push(prefix);
+      }
+      for (let index = 0; index < markers.length; index++) {
+        const start = markers[index].start;
+        const end = index + 1 < markers.length ? markers[index + 1].start : line.length;
+        parts.push(line.slice(start, end).trim());
+      }
+      return parts.join('\n');
+    }).join('\n');
   }
 
   function isMarkdownHeadingLine(line) {
