@@ -28,7 +28,11 @@ test('attaches line diffs to sync changes in codex.run result', async () => {
     assert.equal(change.path, 'main.tex');
     assert.equal(change.type, 'write');
     assert.ok(Array.isArray(change.diff), 'syncChange should have a diff array');
+    assert.ok(Array.isArray(change.patches), 'syncChange should have text patches');
     assert.equal(change.diff.length, 1);
+    assert.deepEqual(change.patches, [
+      { from: 0, to: 3, expected: 'old', insert: 'new' }
+    ]);
     assert.ok(change.diff[0].lines.some(l => l.type === 'remove' && l.text === 'old title'));
     assert.ok(change.diff[0].lines.some(l => l.type === 'add' && l.text === 'new title'));
   } finally {
@@ -61,6 +65,7 @@ test('does not attach diff for delete changes', async () => {
     const deleteChange = result.syncChanges.find(c => c.type === 'delete');
     assert.ok(deleteChange);
     assert.equal(deleteChange.diff, undefined);
+    assert.equal(deleteChange.patches, undefined);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

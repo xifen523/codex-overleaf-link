@@ -10,6 +10,11 @@ const {
   runCodexSession
 } = require('../native-host/src/codexSessionRunner');
 
+const codexSessionRunnerSource = fs.readFileSync(
+  path.join(__dirname, '../native-host/src/codexSessionRunner.js'),
+  'utf8'
+);
+
 test('runs Codex against a local mirror and returns sync changes instead of operation JSON', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
   const events = [];
@@ -77,12 +82,51 @@ test('passes Codex mode, model, and reasoning settings to the runner boundary', 
       }
     });
 
-    assert.equal(received.task, '检查 citation');
+    assert.equal(received.userTask, '检查 citation');
+    assert.match(received.task, /Current user request:\n检查 citation/);
     assert.equal(received.mode, 'ask');
     assert.equal(received.model, 'gpt-5.4');
     assert.equal(received.reasoningEffort, 'high');
     assert.equal(received.sandboxMode, 'read-only');
     assert.equal(received.approvalPolicy, 'never');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('passes recent UI session history into the Codex turn prompt', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  let received = null;
+  try {
+    await runCodexSession({
+      params: {
+        projectId: 'project-session-history',
+        task: '继续刚才的检查',
+        mode: 'ask',
+        model: 'gpt-5.5',
+        reasoningEffort: 'xhigh',
+        session: {
+          id: 'session_shared',
+          history: [
+            { task: '先检查 citation', result: '发现 main.tex 有两个缺失引用' }
+          ],
+          focusFiles: ['main.tex']
+        },
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async input => {
+        received = input;
+      }
+    });
+
+    assert.match(received.task, /Same Codex Overleaf session/);
+    assert.match(received.task, /Session id: session_shared/);
+    assert.match(received.task, /先检查 citation/);
+    assert.match(received.task, /发现 main\.tex 有两个缺失引用/);
+    assert.match(received.task, /Current user request:\n继续刚才的检查/);
+    assert.match(received.task, /Focus files:\n- main\.tex/);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
@@ -140,4 +184,11 @@ test('thread start params avoid experimental app-server capabilities', () => {
   });
   assert.equal(Object.hasOwn(params, 'persistExtendedHistory'), false);
   assert.equal(Object.hasOwn(params, 'persistFullHistory'), false);
+});
+
+test('Codex app-server sessions do not impose a default wall-clock timeout', () => {
+  assert.doesNotMatch(codexSessionRunnerSource, /10\s*\*\s*60\s*\*\s*1000/);
+  assert.doesNotMatch(codexSessionRunnerSource, /Codex app-server timed out after/);
+  assert.match(codexSessionRunnerSource, /CODEX_OVERLEAF_CODEX_TIMEOUT_MS/);
+  assert.match(codexSessionRunnerSource, /createOptionalTimeout/);
 });

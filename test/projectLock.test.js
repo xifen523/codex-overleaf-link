@@ -55,6 +55,30 @@ function createBlockingRunner() {
   };
 }
 
+function createAbortAwareRunner() {
+  const calls = [];
+  let resolveStarted;
+  const started = new Promise(resolve => {
+    resolveStarted = resolve;
+  });
+
+  async function runCodexSession(input) {
+    calls.push(input);
+    resolveStarted();
+    return new Promise((_resolve, reject) => {
+      input.signal?.addEventListener('abort', () => {
+        reject(input.signal.reason || new Error('cancelled'));
+      }, { once: true });
+    });
+  }
+
+  return {
+    calls,
+    started,
+    runCodexSession
+  };
+}
+
 test('mirror.sync is rejected while codex.run holds the project lock', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
   const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
@@ -188,6 +212,55 @@ test('codex.run is rejected while another codex.run holds the same project lock'
     assert.equal(firstResponse.ok, true);
   } finally {
     runner.releaseFirst();
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('codex.cancel aborts an active codex.run and releases the project lock', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
+  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
+  const runner = createAbortAwareRunner();
+  const { handleRequest } = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
+
+  try {
+    const codexRunPromise = handleRequest({
+      id: 'run-cancel-1',
+      method: 'codex.run',
+      params: {
+        projectId: 'cancel-project',
+        mode: 'ask',
+        task: 'long run',
+        project: { files: [{ path: 'main.tex', content: 'hello' }] }
+      }
+    }, env);
+
+    await runner.started;
+
+    const cancelResponse = await handleRequest({
+      id: 'cancel-1',
+      method: 'codex.cancel',
+      params: { requestId: 'run-cancel-1' }
+    }, env);
+
+    assert.equal(cancelResponse.ok, true);
+    assert.equal(cancelResponse.result.cancelled, true);
+
+    const runResponse = await codexRunPromise;
+    assert.equal(runResponse.ok, false);
+    assert.equal(runResponse.error.code, 'codex_cancelled');
+    assert.equal(runner.calls[0].signal.aborted, true);
+
+    const syncAfter = await handleRequest({
+      id: 'sync-after-cancel',
+      method: 'mirror.sync',
+      params: {
+        projectId: 'cancel-project',
+        project: { files: [{ path: 'main.tex', content: 'safe now' }] }
+      }
+    }, env);
+
+    assert.equal(syncAfter.ok, true);
+  } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });

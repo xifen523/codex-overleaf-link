@@ -56,6 +56,30 @@ test('does not treat a generic review panel tab as active Reviewing mode', () =>
   assert.equal(result.status, 'not-detected');
 });
 
+test('does not treat hidden Reviewing menu text as active Reviewing mode', () => {
+  const result = detectReviewingFromSignals({
+    bodyText: 'Editing Source Rich Text Reviewing Track Changes',
+    controls: []
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 'not-detected');
+});
+
+test('does not treat false internal reviewing flags as active Reviewing mode', () => {
+  const result = detectReviewingFromSignals({
+    bodyText: '',
+    controls: [],
+    internalStates: [
+      'reviewing:false',
+      'trackChanges:false'
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 'not-detected');
+});
+
 test('manual override is explicit and auditable', () => {
   const result = detectReviewingFromSignals({
     manualOverride: true,

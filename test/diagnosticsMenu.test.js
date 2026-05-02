@@ -23,5 +23,7 @@ test('project snapshot action lives in the diagnostics menu instead of the heade
   assert.match(contentScript, /本机环境诊断/);
   assert.match(contentScript, /function toggleDiagnosticsMenu\(/);
   assert.match(contentScript, /function closeDiagnosticsMenu\(/);
+  assert.match(contentScript, /function inspectProjectSnapshot\(/);
+  assert.match(contentScript, /allowEditorNavigation:\s*false/);
   assert.match(css, /\.codex-diagnostics-menu/);
 });

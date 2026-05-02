@@ -5,6 +5,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const projectFiles = require('../extension/src/shared/projectFiles');
+const reviewing = require('../extension/src/shared/reviewing');
 const staleGuard = require('../extension/src/shared/staleGuard');
 
 const pageBridgeSource = fs.readFileSync(
@@ -107,15 +108,119 @@ test('page bridge normalizes operation paths before opening and guarding files',
   assert.equal(bridge.getFile('sections/main.tex'), 'beta');
 });
 
+test('page bridge applies edit patches as local CodeMirror changes', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
 
-function createPageBridgeHarness({ activePath, files }) {
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.applied.length, 1);
+  assert.equal(result.applied[0].result.method, 'codemirror-view-patch');
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+  assert.deepEqual(bridge.getLastDispatchChanges(), [
+    { from: 6, to: 10, insert: 'delta' }
+  ]);
+});
+
+test('page bridge rejects stale patch expected text before editing', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'alpha user gamma'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha user gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped[0].result.code, 'stale_patch');
+  assert.equal(bridge.getFile('main.tex'), 'alpha user gamma');
+});
+
+test('page bridge can activate Reviewing before write operations', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: false,
+    files: {
+      'main.tex': 'alpha'
+    }
+  });
+
+  const result = await bridge.call('ensureReviewing', {});
+
+  assert.equal(result.ok, true);
+  assert.equal(result.activated, true);
+  assert.equal(bridge.getReviewingClickCount(), 1);
+});
+
+test('page bridge rejects write-safety confirmation when Reviewing click does not activate', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: false,
+    reviewingClickActivates: false,
+    files: {
+      'main.tex': 'alpha'
+    }
+  });
+
+  const result = await bridge.call('ensureReviewing', { waitMs: 0 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'reviewing_not_enabled');
+  assert.equal(bridge.getReviewingClickCount(), 1);
+});
+
+
+function createPageBridgeHarness({ activePath, files, reviewingOk = true, reviewingClickActivates = true }) {
   const fileMap = new Map(Object.entries(files));
   let selectedPath = activePath;
   let listener = null;
   let pendingResult = null;
+  let lastDispatchChanges = null;
+  let reviewingActive = reviewingOk;
+  let reviewingClickCount = 0;
 
   const document = {
-    body: { innerText: '', textContent: '' },
+    body: {
+      get innerText() {
+        return reviewingActive ? 'Reviewing' : 'Editing';
+      },
+      get textContent() {
+        return reviewingActive ? 'Reviewing' : 'Editing';
+      }
+    },
     querySelector(selector) {
       if (/\[aria-selected="true"\]|\.selected/.test(selector)) {
         return makeTreeNode(selectedPath);
@@ -125,6 +230,11 @@ function createPageBridgeHarness({ activePath, files }) {
     querySelectorAll(selector) {
       if (/treeitem|role="row"|file-tree|project-tree|data-entity-id|data-doc-id|data-id|data-file-id/.test(selector)) {
         return Array.from(fileMap.keys(), makeTreeNode);
+      }
+      if (/aria-label|title|review|track|button|\*/i.test(selector)) {
+        return [
+          makeReviewingButton()
+        ];
       }
       return [];
     },
@@ -140,11 +250,7 @@ function createPageBridgeHarness({ activePath, files }) {
       pathname: '/project/test-project'
     },
     CodexOverleafProjectFiles: projectFiles,
-    CodexOverleafReviewing: {
-      detectReviewingFromSignals() {
-        return { ok: true, status: 'enabled', source: 'test' };
-      }
-    },
+    CodexOverleafReviewing: reviewing,
     CodexOverleafStaleGuard: staleGuard,
     _ide: {
       editorView: createEditorView(),
@@ -198,6 +304,12 @@ function createPageBridgeHarness({ activePath, files }) {
     },
     getFile(filePath) {
       return fileMap.get(filePath);
+    },
+    getLastDispatchChanges() {
+      return JSON.parse(JSON.stringify(lastDispatchChanges));
+    },
+    getReviewingClickCount() {
+      return reviewingClickCount;
     }
   };
 
@@ -213,9 +325,22 @@ function createPageBridgeHarness({ activePath, files }) {
     return {
       state: { doc },
       dispatch(transaction) {
-        fileMap.set(selectedPath, transaction.changes.insert);
+        lastDispatchChanges = transaction.changes;
+        fileMap.set(selectedPath, applyEditorChanges(fileMap.get(selectedPath) || '', transaction.changes));
       }
     };
+  }
+
+  function applyEditorChanges(text, changes) {
+    if (!changes) {
+      return text;
+    }
+    if (!Array.isArray(changes)) {
+      return text.slice(0, changes.from) + changes.insert + text.slice(changes.to);
+    }
+    return changes.slice().sort((a, b) => b.from - a.from).reduce((next, change) => {
+      return next.slice(0, change.from) + change.insert + next.slice(change.to);
+    }, text);
   }
 
   function createFileTreeManager() {
@@ -236,6 +361,40 @@ function createPageBridgeHarness({ activePath, files }) {
       },
       deleteEntity(filePath) {
         fileMap.delete(filePath);
+      }
+    };
+  }
+
+  function makeReviewingButton() {
+    return {
+      tagName: 'BUTTON',
+      textContent: 'Reviewing',
+      innerText: 'Reviewing',
+      id: 'reviewing-mode',
+      className: 'toolbar-reviewing-button',
+      disabled: false,
+      parentElement: null,
+      getAttribute(attribute) {
+        if (attribute === 'aria-label' || attribute === 'title') {
+          return 'Reviewing';
+        }
+        if (attribute === 'aria-disabled') {
+          return 'false';
+        }
+        if (attribute === 'aria-pressed' || attribute === 'aria-selected' || attribute === 'aria-current') {
+          return reviewingActive ? 'true' : 'false';
+        }
+        return '';
+      },
+      click() {
+        reviewingClickCount += 1;
+        if (reviewingClickActivates) {
+          reviewingActive = true;
+        }
+      },
+      dispatchEvent() {
+        this.click();
+        return true;
       }
     };
   }

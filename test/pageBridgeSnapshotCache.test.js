@@ -12,19 +12,190 @@ const pageBridgeSource = fs.readFileSync(
   'utf8'
 );
 
-test('context file list does not download or unzip the Overleaf project', async () => {
+test('context file list uses the exact Overleaf ZIP file tree and caches it', async () => {
   const bridge = createSnapshotHarness({
     files: {
       'main.tex': '\\documentclass{article}',
-      'refs.bib': '@article{x}'
+      'sections/intro.tex': 'Intro',
+      'refs/library.bib': '@article{x}',
+      'figures/plot.pdf': '%PDF-test'
+    },
+    treePaths: [
+      ['main.tex'],
+      ['ghost.tex']
+    ]
+  });
+
+  const first = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    maxAgeMs: 300000
+  });
+  const second = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    maxAgeMs: 300000
+  });
+
+  assert.equal(first.ok, true);
+  assert.equal(first.capabilities.method, 'overleaf-zip-file-list');
+  assert.equal(second.capabilities.diagnostics.fileListCache, 'memory');
+  assert.deepEqual(Array.from(first.files, file => file.path), [
+    'main.tex',
+    'sections/intro.tex',
+    'refs/library.bib',
+    'figures/plot.pdf'
+  ]);
+  assert.deepEqual(Array.from(second.files, file => file.path), [
+    'main.tex',
+    'sections/intro.tex',
+    'refs/library.bib',
+    'figures/plot.pdf'
+  ]);
+  assert.deepEqual(Array.from(first.files, file => file.selectable), [true, true, true, false]);
+  assert.deepEqual(Array.from(first.files, file => file.kind), ['text', 'text', 'text', 'binary']);
+  assert.equal(bridge.getFetchCount(), 1);
+});
+
+test('context file list falls back to strict project tree when ZIP is unavailable', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'sections/intro.tex': 'Intro'
+    },
+    treePaths: [
+      ['main.tex'],
+      ['sections', 'intro.tex']
+    ],
+    fetchMode: 'hang'
+  });
+
+  const result = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    zipTimeoutMs: 5,
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.capabilities.method, 'overleaf-file-tree');
+  assert.deepEqual(Array.from(result.files, file => file.path), [
+    'main.tex',
+    'sections/intro.tex'
+  ]);
+});
+
+test('context file list reconstructs nested folder paths from the Overleaf file tree', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'sections/intro.tex': 'Intro',
+      'refs/library.bib': '@article{x}'
+    },
+    treePaths: [
+      ['main.tex'],
+      ['sections', 'intro.tex'],
+      ['refs', 'library.bib']
+    ]
+  });
+
+  const result = await bridge.call('getProjectFileList', { preferExact: false });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(Array.from(result.files, file => file.path), [
+    'main.tex',
+    'sections/intro.tex',
+    'refs/library.bib'
+  ]);
+  assert.equal(result.capabilities.method, 'overleaf-file-tree');
+});
+
+test('context file list ignores loose Overleaf globals that are not in the project tree', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'sections/intro.tex': 'Intro'
+    },
+    treePaths: [
+      ['main.tex'],
+      ['sections', 'intro.tex']
+    ],
+    internalState: {
+      project: {
+        cachedNames: ['ghost.tex', 'old/removed.bib', 'main.tex'],
+        buildOutput: {
+          file: 'compile-output.log',
+          path: 'not-in-project.tex'
+        }
+      }
     }
   });
 
-  const result = await bridge.call('getProjectFileList', {});
+  const result = await bridge.call('getProjectFileList', { preferExact: false });
 
   assert.equal(result.ok, true);
-  assert.deepEqual(Array.from(result.files, file => file.path), ['main.tex', 'refs.bib']);
-  assert.equal(bridge.getFetchCount(), 0);
+  assert.deepEqual(Array.from(result.files, file => file.path), [
+    'main.tex',
+    'sections/intro.tex'
+  ]);
+});
+
+test('context file list includes internal project doc records that are not currently rendered', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}'
+    },
+    treePaths: [
+      ['main.tex']
+    ],
+    internalState: {
+      project: {
+        rootFolder: {
+          name: '',
+          children: [
+            {
+              name: 'appendix',
+              children: [
+                {
+                  name: 'extra.tex',
+                  id: 'aaaaaaaaaaaaaaaaaaaaaaaa'
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  });
+
+  const result = await bridge.call('getProjectFileList', { preferExact: false });
+
+  assert.deepEqual(Array.from(result.files, file => file.path), [
+    'main.tex',
+    'appendix/extra.tex'
+  ]);
+});
+
+test('context file list ignores stale doc records from arbitrary window caches', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}'
+    },
+    treePaths: [
+      ['main.tex']
+    ],
+    windowExtra: {
+      docCache: {
+        docs: [
+          {
+            name: 'stale.tex',
+            id: 'bbbbbbbbbbbbbbbbbbbbbbbb'
+          }
+        ]
+      }
+    }
+  });
+
+  const result = await bridge.call('getProjectFileList', { preferExact: false });
+
+  assert.deepEqual(Array.from(result.files, file => file.path), ['main.tex']);
 });
 
 test('project snapshots reuse the same Overleaf ZIP package within maxAgeMs', async () => {
@@ -44,6 +215,118 @@ test('project snapshots reuse the same Overleaf ZIP package within maxAgeMs', as
   assert.deepEqual(Array.from(second.files, file => file.path), ['main.tex', 'refs.bib']);
   assert.equal(bridge.getFetchCount(), 1);
   assert.equal(second.capabilities.diagnostics.snapshotCache, 'memory');
+});
+
+test('preferred lightweight project snapshots read editor state without ZIP download', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'refs.bib': '@article{x}'
+    }
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    preferLightweight: true,
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.files.length, 1);
+  assert.equal(result.files[0].path, 'main.tex');
+  assert.equal(result.files[0].content, '\\documentclass{article}');
+  assert.equal(bridge.getFetchCount(), 0);
+  assert.notEqual(result.capabilities.method, 'overleaf-zip');
+});
+
+test('non-invasive lightweight snapshots do not open inactive focus files', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'refs.bib': '@article{x}'
+    }
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    preferLightweight: true,
+    allowZipFallback: false,
+    allowEditorNavigation: false,
+    focusFiles: ['refs.bib'],
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.files.length, 1);
+  assert.equal(result.files[0].path, 'main.tex');
+  assert.equal(bridge.getFetchCount(), 0);
+  assert.equal(bridge.getOpenClickCount(), 0);
+  assert.equal(bridge.getActivePath(), 'main.tex');
+});
+
+test('run snapshots can require full project and fall back to ZIP without editor navigation', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'refs.bib': '@article{x}'
+    }
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    preferLightweight: true,
+    allowZipFallback: true,
+    allowEditorNavigation: false,
+    requireFullProject: true,
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.capabilities.method, 'overleaf-zip');
+  assert.equal(bridge.getFetchCount(), 1);
+  assert.equal(bridge.getOpenClickCount(), 0);
+  assert.deepEqual(Array.from(result.files, file => file.path), ['main.tex', 'refs.bib']);
+});
+
+test('run snapshots never open inactive Overleaf files when ZIP fallback is unavailable', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'sections/intro.tex': 'Intro'
+    },
+    fetchMode: 'hang'
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    preferLightweight: true,
+    allowZipFallback: true,
+    allowEditorNavigation: false,
+    requireFullProject: true,
+    zipTimeoutMs: 5,
+    maxAgeMs: 0
+  });
+
+  assert.equal(bridge.getOpenClickCount(), 0);
+  assert.equal(bridge.getActivePath(), 'main.tex');
+  assert.equal(result.capabilities.fullProjectSnapshot, false);
+  assert.notEqual(result.capabilities.method, 'open-file-tree-text-files');
+  assert.match(result.capabilities.skipped[0].reason, /timed out/i);
+});
+
+test('lightweight snapshots do not poison the full-project ZIP cache', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'refs.bib': '@article{x}'
+    }
+  });
+
+  const lightweight = await bridge.call('getProjectSnapshot', {
+    preferLightweight: true,
+    maxAgeMs: 5000
+  });
+  const full = await bridge.call('getProjectSnapshot', {
+    maxAgeMs: 5000
+  });
+
+  assert.equal(lightweight.capabilities.method, 'active-editor-lightweight');
+  assert.equal(full.capabilities.method, 'overleaf-zip');
+  assert.equal(bridge.getFetchCount(), 1);
+  assert.deepEqual(Array.from(full.files, file => file.path), ['main.tex', 'refs.bib']);
 });
 
 test('project snapshot falls back when the Overleaf ZIP download hangs', async () => {
@@ -66,15 +349,25 @@ test('project snapshot falls back when the Overleaf ZIP download hangs', async (
   assert.match(result.capabilities.skipped[0].reason, /timed out/i);
 });
 
-function createSnapshotHarness({ files, fetchMode = 'zip' }) {
+function createSnapshotHarness({ files, fetchMode = 'zip', treePaths = null, internalState = {}, windowExtra = {} }) {
   const fileMap = new Map(Object.entries(files));
   const zipBuffer = createStoredZip(files);
   let listener = null;
   let fetchCount = 0;
+  let openClickCount = 0;
+  let selectedPath = Array.from(fileMap.keys())[0];
+  const treeNodes = treePaths
+    ? treePaths.flatMap(parts => makeNestedTreeNodes(parts))
+    : null;
   const pendingResults = new Map();
   const editorTextarea = {
     tagName: 'TEXTAREA',
-    value: Array.from(fileMap.values())[0],
+    get value() {
+      return fileMap.get(selectedPath) || '';
+    },
+    set value(nextValue) {
+      fileMap.set(selectedPath, String(nextValue ?? ''));
+    },
     textContent: '',
     innerText: '',
     parentElement: null,
@@ -94,7 +387,7 @@ function createSnapshotHarness({ files, fetchMode = 'zip' }) {
     body: { innerText: '', textContent: '' },
     querySelector(selector) {
       if (/\[aria-selected="true"\]|\.selected/.test(selector)) {
-        return makeTreeNode(Array.from(fileMap.keys())[0]);
+        return makeTreeNode(selectedPath);
       }
       return null;
     },
@@ -103,6 +396,9 @@ function createSnapshotHarness({ files, fetchMode = 'zip' }) {
         return [editorTextarea];
       }
       if (/treeitem|role="row"|file-tree|project-tree|data-entity-id|data-doc-id|data-id|data-file-id/.test(selector)) {
+        if (treeNodes) {
+          return treeNodes;
+        }
         return Array.from(fileMap.keys(), makeTreeNode);
       }
       if (selector === '*') {
@@ -128,7 +424,8 @@ function createSnapshotHarness({ files, fetchMode = 'zip' }) {
       }
     },
     CodexOverleafStaleGuard: staleGuard,
-    _ide: {},
+    _ide: internalState,
+    ...windowExtra,
     fetch: async (_endpoint, options = {}) => {
       fetchCount += 1;
       if (fetchMode === 'hang') {
@@ -205,6 +502,12 @@ function createSnapshotHarness({ files, fetchMode = 'zip' }) {
     },
     getFetchCount() {
       return fetchCount;
+    },
+    getOpenClickCount() {
+      return openClickCount;
+    },
+    getActivePath() {
+      return selectedPath;
     }
   };
 
@@ -219,9 +522,42 @@ function createSnapshotHarness({ files, fetchMode = 'zip' }) {
         return '';
       },
       dispatchEvent() {
+        openClickCount += 1;
+        selectedPath = filePath;
         return true;
       }
     };
+  }
+
+  function makeNestedTreeNodes(parts) {
+    let parentElement = null;
+    const nodes = [];
+    let currentPath = '';
+    parts.forEach((part, index) => {
+      const isFile = index === parts.length - 1;
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      const node = {
+        textContent: part,
+        parentElement,
+        getAttribute(attribute) {
+          if (attribute === 'data-name' || attribute === 'aria-label' || attribute === 'title') {
+            return part;
+          }
+          if (attribute === 'data-path') {
+            return isFile && parts.length === 1 ? currentPath : '';
+          }
+          return '';
+        },
+        dispatchEvent() {
+          openClickCount += 1;
+          selectedPath = currentPath;
+          return true;
+        }
+      };
+      nodes.push(node);
+      parentElement = node;
+    });
+    return nodes;
   }
 }
 

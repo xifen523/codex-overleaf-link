@@ -7,8 +7,15 @@
   window.__codexOverleafPageBridgeInstalled = true;
   const SNAPSHOT_DEFAULT_MAX_AGE_MS = 2500;
   const SNAPSHOT_MAX_CACHE_MS = 15000;
+  const FILE_LIST_DEFAULT_MAX_AGE_MS = 300000;
   const ZIP_FETCH_TIMEOUT_MS = 10000;
   const snapshotCache = {
+    key: '',
+    capturedAt: 0,
+    value: null,
+    pending: null
+  };
+  const fileListCache = {
     key: '',
     capturedAt: 0,
     value: null,
@@ -46,10 +53,13 @@
       return getProjectSnapshot(params);
     }
     if (method === 'getProjectFileList') {
-      return getProjectFileList();
+      return getProjectFileList(params);
     }
     if (method === 'createCheckpoint') {
       return createCheckpoint(params.label);
+    }
+    if (method === 'ensureReviewing') {
+      return ensureReviewing(params);
     }
     if (method === 'applyOperations') {
       return applyOperations(params.operations || [], {
@@ -81,8 +91,147 @@
     };
   }
 
+  async function ensureReviewing(params = {}) {
+    const initial = getReviewingState(params);
+    if (isReviewingConfirmedForWrite(initial)) {
+      return {
+        ok: true,
+        activated: false,
+        reviewing: initial.reviewing
+      };
+    }
+
+    const control = findReviewingActivationControl();
+    if (!control) {
+      return {
+        ok: false,
+        code: 'reviewing_not_enabled',
+        reason: 'Overleaf Reviewing/Track Changes is not enabled, and Codex could not find a Reviewing control to activate.',
+        reviewing: initial.reviewing
+      };
+    }
+
+    clickNode(control);
+    const after = await waitForReviewingState(params);
+    if (isReviewingConfirmedForWrite(after)) {
+      return {
+        ok: true,
+        activated: true,
+        reviewing: after.reviewing
+      };
+    }
+
+    return {
+      ok: false,
+      code: 'reviewing_not_enabled',
+      reason: 'Codex clicked the Reviewing control, but Overleaf still did not report Reviewing/Track Changes as enabled.',
+      reviewing: after.reviewing
+    };
+  }
+
+  function getReviewingState(params = {}) {
+    const signals = collectReviewingSignals({ ...params, manualOverride: false });
+    return {
+      signals,
+      reviewing: window.CodexOverleafReviewing.detectReviewingFromSignals(signals)
+    };
+  }
+
+  async function waitForReviewingState(params = {}) {
+    const waitMs = Number.isFinite(Number(params.waitMs)) ? Number(params.waitMs) : 1600;
+    const deadline = Date.now() + Math.max(0, waitMs);
+    let current = getReviewingState(params);
+    while (!isReviewingConfirmedForWrite(current) && Date.now() < deadline) {
+      await delay(120);
+      current = getReviewingState(params);
+    }
+    return current;
+  }
+
+  function isReviewingConfirmedForWrite(state = {}) {
+    const reviewing = state.reviewing || {};
+    if (!reviewing.ok || reviewing.status === 'manual-override') {
+      return false;
+    }
+    if (reviewing.source !== 'control-text') {
+      return true;
+    }
+    return (state.signals?.controls || []).some(control => {
+      const text = [
+        control.text,
+        control.innerText,
+        control.ariaLabel,
+        control.title,
+        control.id,
+        control.className
+      ].filter(Boolean).join(' ');
+      const active = ['ariaPressed', 'ariaSelected', 'ariaCurrent']
+        .some(key => /^(true|page|step|location)$/i.test(control[key] || ''));
+      return active && /\breviewing\b|\btrack(?:ed)? changes?\b|\bsuggest(?:ing|ions?)\b/i.test(text);
+    });
+  }
+
+  function findReviewingActivationControl() {
+    const nodes = collectReviewingControlNodes();
+    const candidates = nodes
+      .filter(node => isReviewingActivationCandidate(node))
+      .sort((left, right) => scoreReviewingControl(right) - scoreReviewingControl(left));
+    return candidates[0] || null;
+  }
+
+  function collectReviewingControlNodes() {
+    const selector = [
+      'button',
+      '[role="button"]',
+      '[role="menuitem"]',
+      '[role="option"]',
+      '[aria-label]',
+      '[title]',
+      '[id*="review" i]',
+      '[class*="review" i]',
+      '[id*="track" i]',
+      '[class*="track" i]'
+    ].join(',');
+    return uniqueNodes([
+      ...collectElements(selector, 1200),
+      ...collectElements('*', 3500).filter(node => /reviewing|track changes|suggesting/i.test(readNodeSignalText(node)))
+    ]).slice(0, 1500);
+  }
+
+  function isReviewingActivationCandidate(node) {
+    if (!node || node.disabled || node.getAttribute?.('aria-disabled') === 'true') {
+      return false;
+    }
+    const text = readNodeSignalText(node);
+    return /\breviewing\b|\btrack(?:ed)? changes?\b|\bsuggest(?:ing|ions?)\b/i.test(text)
+      && !/\breview panel\b/i.test(text);
+  }
+
+  function scoreReviewingControl(node) {
+    const text = readNodeSignalText(node);
+    let score = 0;
+    if (/^\s*reviewing\s*$/i.test(node.innerText || node.textContent || '')) score += 5;
+    if (/\breviewing\b/i.test(text)) score += 4;
+    if (/\btrack(?:ed)? changes?\b/i.test(text)) score += 3;
+    if (/\bsuggest(?:ing|ions?)\b/i.test(text)) score += 2;
+    if (node.tagName === 'BUTTON') score += 1;
+    return score;
+  }
+
+  function clickNode(node) {
+    if (typeof node.click === 'function') {
+      node.click();
+      return;
+    }
+    node.dispatchEvent?.(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+
+  function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   async function getProjectSnapshot(params = {}) {
-    const cacheKey = getSnapshotCacheKey();
+    const cacheKey = getSnapshotCacheKey(params);
     const maxAgeMs = normalizeSnapshotMaxAge(params.maxAgeMs);
     const now = Date.now();
 
@@ -113,11 +262,81 @@
     return pending;
   }
 
-  function getProjectFileList() {
+  async function getProjectFileList(params = {}) {
+    const cacheKey = getProjectFileListCacheKey(params);
+    const maxAgeMs = normalizeFileListMaxAge(params.maxAgeMs);
+    const now = Date.now();
+
+    if (fileListCache.key === cacheKey && fileListCache.pending) {
+      return fileListCache.pending;
+    }
+
+    if (!params.force && fileListCache.key === cacheKey && fileListCache.value && now - fileListCache.capturedAt <= maxAgeMs) {
+      return withFileListCacheMetadata(fileListCache.value, 'memory', fileListCache.capturedAt);
+    }
+
+    const pending = buildProjectFileList(params)
+      .then(fileList => {
+        const capturedAt = Date.now();
+        fileListCache.key = cacheKey;
+        fileListCache.value = fileList;
+        fileListCache.capturedAt = capturedAt;
+        return withFileListCacheMetadata(fileList, 'fresh', capturedAt);
+      })
+      .finally(() => {
+        if (fileListCache.pending === pending) {
+          fileListCache.pending = null;
+        }
+      });
+
+    fileListCache.key = cacheKey;
+    fileListCache.pending = pending;
+    return pending;
+  }
+
+  async function buildProjectFileList(params = {}) {
     const activePath = getActiveFilePath();
-    const internalDocRecords = collectDocRecords();
+    const internalDocRecords = collectDocRecords({ includeWindowGlobals: false });
     const docRecordByPath = new Map(internalDocRecords.map(record => [record.path, record]));
-    const paths = collectProjectTextPaths(activePath);
+    if (params.preferExact !== false) {
+      const zipSnapshot = await fetchProjectZipSnapshot({
+        ...params,
+        includeBinaryFiles: true,
+        includeContent: false
+      });
+      if (zipSnapshot.ok && zipSnapshot.files.length) {
+        const paths = collectUniqueProjectPaths(zipSnapshot.files.map(file => file.path), 1000);
+        return {
+          ok: true,
+          id: getProjectId(),
+          url: window.location.href,
+          activePath,
+          files: paths.map(path => {
+            const isText = window.CodexOverleafProjectFiles.isTextProjectPath(path);
+            return {
+              path,
+              active: path === activePath,
+              source: 'overleaf-zip',
+              kind: isText ? 'text' : 'binary',
+              selectable: isText
+            };
+          }),
+          capabilities: {
+            fullProjectSnapshot: true,
+            method: 'overleaf-zip-file-list',
+            skipped: [],
+            diagnostics: {
+              zipEndpoint: zipSnapshot.endpoint,
+              docRecordCount: internalDocRecords.length,
+              docRecords: internalDocRecords.slice(0, 8)
+            },
+            note: 'Listed Overleaf project files from the exact source ZIP file tree.'
+          }
+        };
+      }
+    }
+
+    const paths = collectProjectFileListPaths(activePath, internalDocRecords);
     return {
       ok: true,
       id: getProjectId(),
@@ -130,7 +349,7 @@
       })),
       capabilities: {
         fullProjectSnapshot: false,
-        method: 'overleaf-file-list',
+        method: 'overleaf-file-tree',
         skipped: [],
         diagnostics: {
           docRecordCount: internalDocRecords.length,
@@ -141,10 +360,63 @@
     };
   }
 
+  function collectProjectFileListPaths(activePath, docRecords = []) {
+    const domPaths = collectDomProjectPaths();
+    const domPathSet = new Set(domPaths);
+    const docPaths = docRecords
+      .map(record => record.path)
+      .filter(path => window.CodexOverleafProjectFiles.isTextProjectPath(path));
+    const activePaths = domPathSet.has(activePath) ? [activePath] : [];
+    return window.CodexOverleafProjectFiles.collectUniqueTextPaths([
+      ...activePaths,
+      ...domPaths,
+      ...docPaths
+    ], 160);
+  }
+
+  function collectUniqueProjectPaths(paths, limit = 1000) {
+    const seen = new Set();
+    const result = [];
+    for (const rawPath of paths || []) {
+      const path = window.CodexOverleafProjectFiles.normalizePath(rawPath);
+      if (!isSafeProjectPath(path) || seen.has(path)) {
+        continue;
+      }
+      seen.add(path);
+      result.push(path);
+      if (result.length >= limit) {
+        break;
+      }
+    }
+    return result;
+  }
+
+  function isSafeProjectPath(path) {
+    return Boolean(path && !path.endsWith('/') && !/(^|\/)\.{1,2}(\/|$)/.test(path));
+  }
+
   async function buildProjectSnapshot(params = {}) {
     const activePath = getActiveFilePath();
     const internalDocRecords = collectDocRecords();
     const docRecordByPath = new Map(internalDocRecords.map(record => [record.path, record]));
+
+    if (params.preferLightweight) {
+      const lightweightSnapshot = await buildPageProjectSnapshot({
+        params,
+        activePath,
+        internalDocRecords,
+        docRecordByPath,
+        zipSnapshot: null,
+        lightweightOnly: true
+      });
+      if (
+        params.allowZipFallback === false
+        || lightweightSnapshot.files.length && (!params.requireFullProject || lightweightSnapshot.capabilities.fullProjectSnapshot)
+      ) {
+        return lightweightSnapshot;
+      }
+    }
+
     const zipSnapshot = await fetchProjectZipSnapshot(params);
     if (zipSnapshot.ok && zipSnapshot.files.length) {
       return {
@@ -166,10 +438,43 @@
       };
     }
 
-    const projectPaths = collectProjectTextPaths(activePath);
+    if (params.allowEditorNavigation === false) {
+      return buildPageProjectSnapshot({
+        params,
+        activePath,
+        internalDocRecords,
+        docRecordByPath,
+        zipSnapshot,
+        lightweightOnly: true
+      });
+    }
+
+    return buildPageProjectSnapshot({
+      params,
+      activePath,
+      internalDocRecords,
+      docRecordByPath,
+      zipSnapshot,
+      lightweightOnly: false
+    });
+  }
+
+  async function buildPageProjectSnapshot({
+    params = {},
+    activePath,
+    internalDocRecords,
+    docRecordByPath,
+    zipSnapshot,
+    lightweightOnly
+  }) {
+    const projectPaths = window.CodexOverleafProjectFiles.collectUniqueTextPaths([
+      activePath,
+      ...(Array.isArray(params.focusFiles) ? params.focusFiles : []),
+      ...collectProjectTextPaths(activePath)
+    ], 80);
     const files = [];
     const skipped = [];
-    if (!zipSnapshot.ok) {
+    if (zipSnapshot && !zipSnapshot.ok) {
       skipped.push({
         path: 'project.zip',
         reason: zipSnapshot.reason
@@ -214,6 +519,14 @@
         continue;
       }
 
+      if (!canOpenInactiveFileForSnapshot(filePath, params, lightweightOnly, docRecord)) {
+        skipped.push({
+          path: filePath,
+          reason: 'Lightweight snapshot skipped opening inactive files'
+        });
+        continue;
+      }
+
       const opened = await openFileByPath(filePath);
       if (!opened.ok) {
         skipped.push({
@@ -248,7 +561,7 @@
       await waitForActiveEditorText(activePath, 5000);
     }
 
-    if (!files.length) {
+    if (!files.length && (!lightweightOnly || params.allowZipFallback === false)) {
       files.push({
         path: activePath,
         content: readActiveEditorText(),
@@ -262,20 +575,52 @@
       activePath,
       files,
       capabilities: {
-        fullProjectSnapshot: files.length > 1,
-        method: files.some(file => /^overleaf-doc-fetch/.test(file.source))
-          ? 'overleaf-doc-fetch'
-          : (files.length > 1 ? 'open-file-tree-text-files' : 'active-editor'),
+        fullProjectSnapshot: isCompleteProjectSnapshot(files, projectPaths),
+        method: resolvePageSnapshotMethod(files, lightweightOnly),
         skipped,
         diagnostics: {
           docRecordCount: internalDocRecords.length,
           docRecords: internalDocRecords.slice(0, 8)
         },
-        note: files.length > 1
-          ? 'Captured text project files from Overleaf document data, with editor fallback when needed.'
-          : 'Only the active editor was captured; no additional visible text files were detected.'
+        note: lightweightOnly
+          ? 'Captured current Overleaf text from page/editor state without downloading the source ZIP.'
+          : (files.length > 1
+            ? 'Captured text project files from Overleaf document data, with editor fallback when needed.'
+            : 'Only the active editor was captured; no additional visible text files were detected.')
       }
     };
+  }
+
+  function resolvePageSnapshotMethod(files, lightweightOnly) {
+    if (files.some(file => /^overleaf-doc-fetch/.test(file.source))) {
+      return lightweightOnly ? 'overleaf-doc-fetch-lightweight' : 'overleaf-doc-fetch';
+    }
+    if (files.length > 1) {
+      return lightweightOnly ? 'page-text-files-lightweight' : 'open-file-tree-text-files';
+    }
+    return lightweightOnly ? 'active-editor-lightweight' : 'active-editor';
+  }
+
+  function isFocusSnapshotPath(filePath, params = {}) {
+    return Array.isArray(params.focusFiles) && params.focusFiles.includes(filePath);
+  }
+
+  function canOpenInactiveFileForSnapshot(filePath, params = {}, lightweightOnly, docRecord) {
+    if (!lightweightOnly) {
+      return true;
+    }
+    if (docRecord) {
+      return true;
+    }
+    return params.allowEditorNavigation === true && isFocusSnapshotPath(filePath, params);
+  }
+
+  function isCompleteProjectSnapshot(files, projectPaths) {
+    if (!Array.isArray(projectPaths) || !projectPaths.length) {
+      return false;
+    }
+    const capturedPaths = new Set((files || []).map(file => file.path));
+    return projectPaths.every(filePath => capturedPaths.has(filePath));
   }
 
   async function createCheckpoint(label) {
@@ -308,10 +653,23 @@
     };
   }
 
-  function getSnapshotCacheKey() {
+  function getSnapshotCacheKey(params = {}) {
+    const focusKey = Array.isArray(params.focusFiles)
+      ? params.focusFiles.map(path => window.CodexOverleafProjectFiles.normalizePath(path)).filter(Boolean).sort().join(',')
+      : '';
     return [
       window.location.origin,
-      getProjectId() || window.location.pathname || window.location.href
+      getProjectId() || window.location.pathname || window.location.href,
+      params.preferLightweight ? 'lightweight' : 'full',
+      focusKey
+    ].join(':');
+  }
+
+  function getProjectFileListCacheKey(params = {}) {
+    return [
+      window.location.origin,
+      getProjectId() || window.location.pathname || window.location.href,
+      params.preferExact === false ? 'tree' : 'exact'
     ].join(':');
   }
 
@@ -326,6 +684,17 @@
     return Math.max(0, Math.min(number, SNAPSHOT_MAX_CACHE_MS));
   }
 
+  function normalizeFileListMaxAge(value) {
+    if (value === 0) {
+      return 0;
+    }
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return FILE_LIST_DEFAULT_MAX_AGE_MS;
+    }
+    return Math.max(0, Math.min(number, FILE_LIST_DEFAULT_MAX_AGE_MS));
+  }
+
   function withSnapshotCacheMetadata(snapshot, cacheState, capturedAt) {
     const capabilities = snapshot?.capabilities || {};
     return {
@@ -336,6 +705,21 @@
           ...(capabilities.diagnostics || {}),
           snapshotCache: cacheState,
           snapshotCapturedAt: new Date(capturedAt).toISOString()
+        }
+      }
+    };
+  }
+
+  function withFileListCacheMetadata(fileList, cacheState, capturedAt) {
+    const capabilities = fileList?.capabilities || {};
+    return {
+      ...fileList,
+      capabilities: {
+        ...capabilities,
+        diagnostics: {
+          ...(capabilities.diagnostics || {}),
+          fileListCache: cacheState,
+          fileListCapturedAt: new Date(capturedAt).toISOString()
         }
       }
     };
@@ -395,7 +779,13 @@
     }
 
     let nextContent = null;
-    if (typeof operation.replaceAll === 'string') {
+    if (Array.isArray(operation.patches) && operation.patches.length) {
+      const patched = applyTextPatches(current, operation.patches);
+      if (!patched.ok) {
+        return patched;
+      }
+      nextContent = patched.text;
+    } else if (typeof operation.replaceAll === 'string') {
       nextContent = operation.replaceAll;
     } else if (typeof operation.find === 'string' && typeof operation.replace === 'string') {
       if (!current.includes(operation.find)) {
@@ -408,11 +798,13 @@
     } else {
       return {
         ok: false,
-        reason: 'Edit operation must provide replaceAll or find/replace fields'
+        reason: 'Edit operation must provide patches, replaceAll, or find/replace fields'
       };
     }
 
-    const result = replaceActiveEditorText(nextContent);
+    const result = Array.isArray(operation.patches) && operation.patches.length
+      ? replaceActiveEditorPatches(operation.patches, nextContent)
+      : replaceActiveEditorText(nextContent);
     if (result.ok) {
       window.CodexOverleafStaleGuard?.updateExpectedFileContent(
         options.baseFileLookup,
@@ -421,6 +813,64 @@
       );
     }
     return result;
+  }
+
+  function applyTextPatches(text, patches) {
+    const normalized = normalizeTextPatches(patches, text.length);
+    if (!normalized.ok) {
+      return normalized;
+    }
+
+    let next = text;
+    for (const patch of normalized.patches.slice().sort((left, right) => right.from - left.from)) {
+      if (next.slice(patch.from, patch.to) !== patch.expected) {
+        return {
+          ok: false,
+          code: 'stale_patch',
+          reason: '这处内容已经和 Codex 读取时不同，所以没有写入。请重新运行，让 Codex 先读取你的最新 Overleaf 内容。'
+        };
+      }
+      next = next.slice(0, patch.from) + patch.insert + next.slice(patch.to);
+    }
+    return {
+      ok: true,
+      text: next,
+      patches: normalized.patches
+    };
+  }
+
+  function normalizeTextPatches(patches, length) {
+    const normalized = [];
+    let previousTo = 0;
+    for (const rawPatch of patches || []) {
+      const from = Number(rawPatch?.from);
+      const to = Number(rawPatch?.to);
+      if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to > length) {
+        return {
+          ok: false,
+          code: 'invalid_patch',
+          reason: 'Codex 生成的局部写入范围无效。'
+        };
+      }
+      if (from < previousTo) {
+        return {
+          ok: false,
+          code: 'invalid_patch',
+          reason: 'Codex 生成的局部写入范围有重叠。'
+        };
+      }
+      previousTo = to;
+      normalized.push({
+        from,
+        to,
+        expected: String(rawPatch.expected ?? ''),
+        insert: String(rawPatch.insert ?? '')
+      });
+    }
+    return {
+      ok: true,
+      patches: normalized
+    };
   }
 
   async function applyFileTreeOperation(operation, options = {}) {
@@ -974,6 +1424,54 @@
     };
   }
 
+  function replaceActiveEditorPatches(patches, nextContent) {
+    const normalized = normalizeTextPatches(patches, readActiveEditorText().length);
+    if (!normalized.ok) {
+      return normalized;
+    }
+
+    const editorView = getCodeMirrorEditorView();
+    if (editorView) {
+      editorView.dispatch({
+        changes: normalized.patches.map(patch => ({
+          from: patch.from,
+          to: patch.to,
+          insert: patch.insert
+        }))
+      });
+      return {
+        ok: true,
+        method: 'codemirror-view-patch'
+      };
+    }
+
+    const active = getDeepActiveElement();
+    const textarea = active?.tagName === 'TEXTAREA' && !isInsideCodexPanel(active)
+      ? active
+      : findEditorTextArea();
+
+    if (textarea && typeof textarea.setRangeText === 'function') {
+      textarea.focus();
+      for (const patch of normalized.patches.slice().sort((left, right) => right.from - left.from)) {
+        textarea.setRangeText(patch.insert, patch.from, patch.to, 'end');
+      }
+      textarea.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertReplacementText', data: '' }));
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+      return {
+        ok: true,
+        method: 'textarea-patch'
+      };
+    }
+
+    const result = replaceActiveEditorText(nextContent);
+    return result.ok
+      ? {
+        ...result,
+        method: `${result.method}-patch-fallback`
+      }
+      : result;
+  }
+
   function getCodeMirrorEditorView() {
     return findCodeMirrorEditorView()?.view || null;
   }
@@ -1292,10 +1790,10 @@
     return window.CodexOverleafProjectFiles.collectUniqueTextPaths(rawPaths, 80);
   }
 
-  function collectDocRecords() {
+  function collectDocRecords(options = {}) {
     const seen = new Set();
     const records = [];
-    for (const record of [...collectInternalDocRecords(), ...collectDomDocRecords()]) {
+    for (const record of [...collectInternalDocRecords(options), ...collectDomDocRecords()]) {
       if (!record?.id || !window.CodexOverleafProjectFiles.isTextProjectPath(record.path)) {
         continue;
       }
@@ -1312,11 +1810,11 @@
     return records;
   }
 
-  function collectInternalDocRecords() {
+  function collectInternalDocRecords(options = {}) {
     const records = [];
     const seenObjects = new WeakSet();
     const seenRecords = new Set();
-    const roots = collectInternalRoots();
+    const roots = collectInternalRoots(options);
 
     for (const root of roots) {
       walkInternalDocTree(root, '', 0);
@@ -1380,8 +1878,11 @@
     }
   }
 
-  function collectInternalRoots() {
+  function collectInternalRoots(options = {}) {
     const roots = [window._ide, window.Overleaf, window.overleaf, window.OL].filter(Boolean);
+    if (options.includeWindowGlobals === false) {
+      return uniqueNodes(roots);
+    }
     for (const key of Object.keys(window).slice(0, 2500)) {
       if (!/ide|overleaf|sharelatex|project|root|folder|doc|file|entity|state|meta|bootstrap|ol/i.test(key)) {
         continue;
@@ -1564,7 +2065,10 @@
           errors.push(`${endpoint} returned ${response.status}`);
           continue;
         }
-        const files = await extractTextFilesFromZip(buffer);
+        const files = await extractFilesFromZip(buffer, {
+          includeBinaryFiles: Boolean(params.includeBinaryFiles),
+          includeContent: params.includeContent !== false
+        });
         if (!files.length) {
           errors.push(`${endpoint} returned no text files (${contentType || 'unknown content type'})`);
           continue;
@@ -1643,7 +2147,7 @@
     return ZIP_FETCH_TIMEOUT_MS;
   }
 
-  async function extractTextFilesFromZip(buffer) {
+  async function extractFilesFromZip(buffer, options = {}) {
     const view = new DataView(buffer);
     const bytes = new Uint8Array(buffer);
     const eocdOffset = findEndOfCentralDirectory(view);
@@ -1670,12 +2174,18 @@
       const localHeaderOffset = view.getUint32(offset + 42, true);
       const rawName = bytes.slice(offset + 46, offset + 46 + fileNameLength);
       const path = window.CodexOverleafProjectFiles.normalizePath(decoder.decode(rawName));
+      const isText = window.CodexOverleafProjectFiles.isTextProjectPath(path);
+      const shouldInclude = path && !path.endsWith('/') && (isText || options.includeBinaryFiles);
 
-      if (path && !path.endsWith('/') && window.CodexOverleafProjectFiles.isTextProjectPath(path)) {
-        const contentBytes = await readZipEntryBytes(view, bytes, localHeaderOffset, compressedSize, compressionMethod);
+      if (shouldInclude) {
+        const file = { path };
+        if (isText && options.includeContent !== false) {
+          const contentBytes = await readZipEntryBytes(view, bytes, localHeaderOffset, compressedSize, compressionMethod);
+          file.content = decoder.decode(contentBytes);
+        }
         files.push({
-          path,
-          content: decoder.decode(contentBytes)
+          ...file,
+          kind: isText ? 'text' : 'binary'
         });
       }
 
@@ -1825,13 +2335,67 @@
       node.getAttribute('title')
     ].find(value => window.CodexOverleafProjectFiles.isTextProjectPath(value));
     if (attrPath) {
-      return window.CodexOverleafProjectFiles.normalizePath(attrPath);
+      const normalizedAttrPath = window.CodexOverleafProjectFiles.normalizePath(attrPath);
+      if (normalizedAttrPath && !normalizedAttrPath.includes('/')) {
+        return inferPathFromTreeAncestors(node, normalizedAttrPath) || normalizedAttrPath;
+      }
+      return normalizedAttrPath;
     }
 
     const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
     const matches = text.match(/[^\s]+?\.(?:tex|bib|sty|cls|bst|bbx|cbx|lbx|cfg|def|clo|ist|txt|md|latex)\b/gi);
     const match = matches?.find(value => window.CodexOverleafProjectFiles.isTextProjectPath(value));
-    return match ? window.CodexOverleafProjectFiles.normalizePath(match) : '';
+    if (!match) {
+      return '';
+    }
+    const normalizedMatch = window.CodexOverleafProjectFiles.normalizePath(match);
+    if (normalizedMatch && !normalizedMatch.includes('/')) {
+      return inferPathFromTreeAncestors(node, normalizedMatch) || normalizedMatch;
+    }
+    return normalizedMatch;
+  }
+
+  function inferPathFromTreeAncestors(node, fileName) {
+    const folders = [];
+    let current = node?.parentElement || null;
+    for (let depth = 0; current && depth < 8; depth += 1) {
+      const folderName = readFolderNameFromNode(current);
+      if (folderName) {
+        folders.unshift(folderName);
+      }
+      current = current.parentElement;
+    }
+    if (!folders.length) {
+      return '';
+    }
+    const path = window.CodexOverleafProjectFiles.normalizePath([...folders, fileName].join('/'));
+    return window.CodexOverleafProjectFiles.isTextProjectPath(path) ? path : '';
+  }
+
+  function readFolderNameFromNode(node) {
+    const candidates = [
+      node.getAttribute?.('data-name'),
+      node.getAttribute?.('aria-label'),
+      node.getAttribute?.('title')
+    ];
+    for (const value of candidates) {
+      const folderName = normalizeFolderName(value);
+      if (folderName) {
+        return folderName;
+      }
+    }
+    return '';
+  }
+
+  function normalizeFolderName(value) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text || /[\\/]/.test(text) || window.CodexOverleafProjectFiles.isTextProjectPath(text)) {
+      return '';
+    }
+    if (!/^[\w .@+-]+$/.test(text) || text.length > 80) {
+      return '';
+    }
+    return text;
   }
 
   async function waitForActiveFile(filePath, timeoutMs) {

@@ -16,6 +16,13 @@ test('translates raw write-mode errors into user-facing remediation', () => {
   assert.doesNotMatch(JSON.stringify(translated), /Mode must be/);
 });
 
+test('timeout remediation does not tell users to raise a default Codex timeout', () => {
+  const translated = translateRawError('Codex app-server timed out after 600000ms');
+
+  assert.equal(translated.conclusion, '这轮没有写入：本地 Codex 长时间没有完成。');
+  assert.doesNotMatch(translated.nextStep, /提高超时时间|timeout/i);
+});
+
 test('keeps schema-only lifecycle events out of the visible transcript', () => {
   for (const event of [
     { type: 'codex.prompt.ready', title: 'Codex prompt prepared' },
@@ -153,6 +160,30 @@ test('maps assistant message deltas to one updatable stream', () => {
   assert.equal(second.streamKey, 'agent:msg_1');
   assert.equal(first.appendText, true);
   assert.equal(first.technicalDetail, undefined);
+});
+
+test('preserves spaces at Codex stream delta boundaries', () => {
+  const first = mapAgentEventToActivity({
+    type: 'codex.session.event',
+    title: 'item/reasoning/summaryTextDelta',
+    detail: {
+      method: 'item/reasoning/summaryTextDelta',
+      params: { itemId: 'reason_1', delta: 'Deciding on file deletion ' }
+    }
+  });
+  const second = mapAgentEventToActivity({
+    type: 'codex.session.event',
+    title: 'item/reasoning/summaryTextDelta',
+    detail: {
+      method: 'item/reasoning/summaryTextDelta',
+      params: { itemId: 'reason_1', delta: 'I’m wondering if main.pdf existed before' }
+    }
+  });
+
+  assert.equal(first.kind, 'stream');
+  assert.equal(second.kind, 'stream');
+  assert.equal(first.title, 'Deciding on file deletion ');
+  assert.equal(second.title, 'I’m wondering if main.pdf existed before');
 });
 
 test('maps Codex command events to visible natural progress without raw commands', () => {

@@ -3,9 +3,11 @@
 const { spawn } = require('node:child_process');
 const { collectMirrorChanges, syncOverleafToMirror } = require('./mirrorWorkspace');
 const { computeLineDiff } = require('./diffEngine');
+const { computeTextPatches } = require('./textPatch');
 const { truncateText } = require('./debugLog');
 
-async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex } = {}) {
+async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex, signal } = {}) {
+  throwIfAborted(signal);
   const projectId = params.projectId || params.project?.projectId || params.project?.id || params.project?.url || 'overleaf-project';
   emitCodexEvent(emit, 'overleaf.sync.started', 'Syncing Overleaf project to local workspace', {
     projectId,
@@ -17,6 +19,7 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     project: params.project || { files: [] },
     rootDir
   });
+  throwIfAborted(signal);
 
   emitCodexEvent(emit, 'overleaf.sync.completed', 'Overleaf project synced to local workspace', {
     projectId: mirror.projectKey,
@@ -28,26 +31,32 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
   const runner = executeCodex || runCodexAppServerSession;
   const runnerResult = await runner({
     workspacePath: mirror.workspacePath,
-    task: String(params.task || ''),
+    task: buildCodexTurnPrompt(params, mirror),
+    userTask: String(params.task || ''),
+    session: params.session || null,
     mode: params.mode || 'auto',
     model: params.model || '',
     reasoningEffort: params.reasoningEffort || '',
     sandboxMode: settings.sandboxMode,
     approvalPolicy: settings.approvalPolicy,
     env,
-    emit
+    emit,
+    signal
   });
+  throwIfAborted(signal);
 
   const rawSyncChanges = await collectMirrorChanges({
     projectId,
     rootDir
   });
+  throwIfAborted(signal);
 
   const syncChanges = rawSyncChanges.map(change => {
     if (change.type === 'write' && typeof change.previousContent === 'string') {
       return {
         ...change,
-        diff: computeLineDiff(change.previousContent, change.content)
+        diff: computeLineDiff(change.previousContent, change.content),
+        patches: computeTextPatches(change.previousContent, change.content)
       };
     }
     return change;
@@ -65,6 +74,74 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     assistantMessage: cleanAssistantMessage(runnerResult?.assistantMessage),
     syncChanges
   };
+}
+
+function buildCodexTurnPrompt(params = {}, mirror = {}) {
+  const userTask = String(params.task || '').trim();
+  const mode = params.mode || 'auto';
+  const session = params.session || {};
+  const focusFiles = normalizeFocusFiles(params.focusFiles || session.focusFiles);
+
+  return [
+    'Same Codex Overleaf session context:',
+    `Session id: ${session.id || 'none'}`,
+    '',
+    'Recent turns in this UI session:',
+    formatSessionHistory(session.history),
+    '',
+    'Current Overleaf workspace:',
+    `- Project: ${mirror.projectKey || params.projectId || params.project?.id || 'unknown'}`,
+    `- Local workspace: ${mirror.workspacePath || 'current cwd'}`,
+    '- The local workspace was synced from Overleaf immediately before this turn.',
+    '- If the recent session history conflicts with the files in the workspace, trust the files.',
+    '',
+    'Focus files:',
+    formatFocusFiles(focusFiles),
+    '',
+    'Mode for this turn:',
+    `- ${mode}`,
+    '- ask: inspect and explain only; do not edit files.',
+    '- confirm/auto: edit the local workspace directly when the request calls for changes. The browser bridge handles review, confirmation, deletion approval, and syncing back to Overleaf.',
+    '',
+    'Current user request:',
+    userTask || '(empty request)'
+  ].join('\n');
+}
+
+function normalizeFocusFiles(value) {
+  const seen = new Set();
+  const files = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    const filePath = String(item || '').trim();
+    if (!filePath || seen.has(filePath)) {
+      continue;
+    }
+    seen.add(filePath);
+    files.push(filePath);
+    if (files.length >= 8) {
+      break;
+    }
+  }
+  return files;
+}
+
+function formatFocusFiles(files) {
+  if (!files.length) {
+    return '- none; use the whole project when needed.';
+  }
+  return files.map(filePath => `- ${filePath}`).join('\n');
+}
+
+function formatSessionHistory(history) {
+  const turns = Array.isArray(history) ? history.slice(-8) : [];
+  if (!turns.length) {
+    return '- none';
+  }
+  return turns.map((turn, index) => {
+    const task = truncateText(String(turn?.task || 'untitled task'), 600);
+    const result = truncateText(String(turn?.result || turn?.status || 'no result recorded'), 1200);
+    return `${index + 1}. User asked: ${task}\n   Previous outcome: ${result}`;
+  }).join('\n');
 }
 
 function buildCodexSettings(params = {}) {
@@ -92,6 +169,10 @@ function buildThreadStartParams(input = {}) {
 
 function runCodexAppServerSession(input) {
   return new Promise((resolve, reject) => {
+    if (input.signal?.aborted) {
+      reject(getAbortReason(input.signal));
+      return;
+    }
     const codexCommand = resolveCodexCommand(input.env || process.env);
     if (!codexCommand) {
       reject(new Error('Codex CLI was not found. Install Codex or make sure the `codex` command is available in your login shell.'));
@@ -111,10 +192,13 @@ function runCodexAppServerSession(input) {
     const assistantMessages = new Map();
     const assistantMessageOrder = [];
     let settled = false;
-    const timeoutMs = 10 * 60 * 1000;
-    const timeout = setTimeout(() => {
-      fail(new Error(`Codex app-server timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+    const timeout = createOptionalTimeout(input.env?.CODEX_OVERLEAF_CODEX_TIMEOUT_MS, timeoutMs => {
+      fail(new Error(`Codex app-server did not complete within configured timeout (${timeoutMs}ms)`));
+    });
+    const onAbort = () => {
+      fail(getAbortReason(input.signal));
+    };
+    input.signal?.addEventListener('abort', onAbort, { once: true });
 
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
@@ -284,7 +368,7 @@ function runCodexAppServerSession(input) {
         return;
       }
       settled = true;
-      clearTimeout(timeout);
+      cleanup();
       child.kill('SIGTERM');
       resolve({
         assistantMessage: buildFinalAssistantMessage(assistantMessages, assistantMessageOrder)
@@ -296,7 +380,7 @@ function runCodexAppServerSession(input) {
         return;
       }
       settled = true;
-      clearTimeout(timeout);
+      cleanup();
       for (const pendingRequest of pending.values()) {
         pendingRequest.reject(error);
       }
@@ -306,7 +390,51 @@ function runCodexAppServerSession(input) {
       }
       reject(error);
     }
+
+    function cleanup() {
+      timeout.cancel();
+      input.signal?.removeEventListener('abort', onAbort);
+    }
   });
+}
+
+function createOptionalTimeout(value, onTimeout) {
+  const timeoutMs = parseOptionalPositiveInteger(value);
+  if (!timeoutMs) {
+    return {
+      cancel() {}
+    };
+  }
+  const timer = setTimeout(() => onTimeout(timeoutMs), timeoutMs);
+  return {
+    cancel() {
+      clearTimeout(timer);
+    }
+  };
+}
+
+function parseOptionalPositiveInteger(value) {
+  if (value === undefined || value === null || value === '') {
+    return 0;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+function throwIfAborted(signal) {
+  if (!signal?.aborted) {
+    return;
+  }
+  throw getAbortReason(signal);
+}
+
+function getAbortReason(signal) {
+  if (signal?.reason instanceof Error) {
+    return signal.reason;
+  }
+  const error = new Error('Codex run was cancelled by the user');
+  error.code = 'codex_cancelled';
+  return error;
 }
 
 function resolveCodexCommand(env = process.env) {
@@ -370,9 +498,11 @@ function cleanAssistantMessage(value) {
 }
 
 module.exports = {
+  buildCodexTurnPrompt,
   buildFinalAssistantMessage,
   buildCodexSettings,
   buildThreadStartParams,
+  createOptionalTimeout,
   runCodexAppServerSession,
   runCodexSession
 };

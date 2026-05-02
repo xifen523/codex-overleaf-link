@@ -92,6 +92,46 @@ test('collects local mirror writes and deletes as sync changes, not Codex operat
   }
 });
 
+test('removes and ignores unmanaged LaTeX build artifacts in the local mirror', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-generated-artifacts',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: '\\documentclass{article}\n' }
+        ]
+      }
+    });
+
+    fs.writeFileSync(path.join(mirror.workspacePath, 'main.pdf'), '%PDF-1.7 generated', 'utf8');
+    fs.writeFileSync(path.join(mirror.workspacePath, 'main.aux'), '\\relax\n', 'utf8');
+    fs.writeFileSync(path.join(mirror.workspacePath, 'main.log'), 'latex log\n', 'utf8');
+    fs.writeFileSync(path.join(mirror.workspacePath, 'new.tex'), 'new source', 'utf8');
+
+    const changes = await collectMirrorChanges({ projectId: 'project-generated-artifacts', rootDir });
+    assert.deepEqual(changes.map(change => change.path), ['new.tex']);
+
+    await syncOverleafToMirror({
+      projectId: 'project-generated-artifacts',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: '\\documentclass{article}\n' }
+        ]
+      }
+    });
+
+    assert.equal(fs.existsSync(path.join(mirror.workspacePath, 'main.pdf')), false);
+    assert.equal(fs.existsSync(path.join(mirror.workspacePath, 'main.aux')), false);
+    assert.equal(fs.existsSync(path.join(mirror.workspacePath, 'main.log')), false);
+    assert.equal(fs.existsSync(path.join(mirror.workspacePath, 'new.tex')), false);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('rejects project paths that would escape the local mirror', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
   try {

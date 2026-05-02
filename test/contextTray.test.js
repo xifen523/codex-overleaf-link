@@ -21,6 +21,8 @@ test('add context button opens a visible Overleaf project file picker', () => {
   assert.match(contentScript, /function toggleContextTray\(/);
   assert.match(contentScript, /function isContextTrayClickTarget\(/);
   assert.match(contentScript, /function renderContextFiles\(/);
+  assert.match(contentScript, /function buildContextTree\(/);
+  assert.match(contentScript, /function renderContextTreeNode\(/);
   assert.match(contentScript, /function selectFocusFile\(/);
   assert.match(contentScript, /function renderContextSummary\(/);
   assert.match(contentScript, /nextFocusFiles/);
@@ -35,11 +37,67 @@ test('add context button opens a visible Overleaf project file picker', () => {
   assert.match(css, /\.codex-context-tray\s*\{[\s\S]*position: absolute/);
   assert.match(css, /\.codex-composer\s*\{[\s\S]*position: relative/);
   assert.match(css, /\.codex-context-file/);
+  assert.match(css, /\.codex-context-folder/);
+  assert.match(css, /\.codex-context-folder-name/);
   assert.match(css, /\.codex-context-file\[data-selected="true"\]/);
   assert.match(css, /\.codex-context-summary/);
   assert.match(css, /\.codex-context-summary-chip/);
   assert.match(css, /\.codex-context-summary-clear/);
   assert.match(css, /\.codex-context-summary:hover \.codex-context-summary-clear/);
+});
+
+test('context picker preserves project folder hierarchy instead of flattening by file type', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  const renderContextFilesBody = contentScript.match(/function renderContextFiles\(project\) \{[\s\S]*?\n  function renderContextSelection/)?.[0] || '';
+
+  assert.match(renderContextFilesBody, /buildContextTree\(files\)/);
+  assert.match(renderContextFilesBody, /renderContextTreeNode/);
+  assert.doesNotMatch(renderContextFilesBody, /sortContextFiles\(project\?\.files/);
+  assert.match(contentScript, /file\.path\.split\('\/'\)/);
+});
+
+test('context picker uses only dedicated file-list results, not task snapshots', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const loadContextFilesBody = contentScript.match(/async function loadContextFiles\(options = \{\}\) \{[\s\S]*?\n  function renderContextFiles/)?.[0] || '';
+  const getRunProjectSnapshotBody = contentScript.match(/async function getRunProjectSnapshot\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(contentScript, /function isContextFileListProject\(/);
+  assert.match(loadContextFilesBody, /isContextFileListProject\(contextProject\)/);
+  assert.doesNotMatch(getRunProjectSnapshotBody, /contextProject\s*=\s*project/);
+});
+
+test('context picker renders folders as collapsed expandable tree controls', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const renderContextTreeNodeBody = contentScript.match(/function renderContextTreeNode\(node, container, selected, depth\) \{[\s\S]*?\n  function renderContextSelection/)?.[0] || '';
+
+  assert.match(renderContextTreeNodeBody, /document\.createElement\('details'\)/);
+  assert.match(renderContextTreeNodeBody, /document\.createElement\('summary'\)/);
+  assert.match(contentScript, /contextExpandedFolders = new Set\(\)/);
+  assert.match(renderContextTreeNodeBody, /folder\.open = contextExpandedFolders\.has\(node\.path\)/);
+  assert.match(renderContextTreeNodeBody, /folder\.addEventListener\('toggle'/);
+  assert.doesNotMatch(renderContextTreeNodeBody, /folder\.open = true/);
+});
+
+test('context picker shows non-text resources but does not allow selecting them as Codex focus files', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const renderContextTreeNodeBody = contentScript.match(/function renderContextTreeNode\(node, container, selected, depth\) \{[\s\S]*?\n  function renderContextSelection/)?.[0] || '';
+
+  assert.match(renderContextTreeNodeBody, /file\.selectable !== false/);
+  assert.match(renderContextTreeNodeBody, /button\.disabled = !selectable/);
+  assert.match(renderContextTreeNodeBody, /selectable \? file\.path :/);
 });
 
 test('context picker closes when clicking anywhere outside the picker and plus button', () => {

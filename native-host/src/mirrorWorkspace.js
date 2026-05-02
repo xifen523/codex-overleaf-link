@@ -29,11 +29,11 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
   fs.mkdirSync(mirror.workspacePath, { recursive: true });
   fs.mkdirSync(mirror.metadataPath, { recursive: true });
 
-  for (const file of previous.files || []) {
-    if (nextPaths.has(file.path)) {
+  for (const filePath of listWorkspaceFiles(mirror.workspacePath)) {
+    if (nextPaths.has(filePath)) {
       continue;
     }
-    const target = resolveWorkspacePath(mirror.workspacePath, file.path);
+    const target = resolveWorkspacePath(mirror.workspacePath, filePath);
     if (fs.existsSync(target)) {
       fs.rmSync(target, { force: true });
       removeEmptyParents(path.dirname(target), mirror.workspacePath);
@@ -79,6 +79,9 @@ async function collectMirrorChanges({ projectId, rootDir }) {
   const currentByPath = new Map();
 
   for (const filePath of currentPaths) {
+    if (!baselineByPath.has(filePath) && isGeneratedArtifactPath(filePath)) {
+      continue;
+    }
     const content = fs.readFileSync(resolveWorkspacePath(mirror.workspacePath, filePath), 'utf8');
     currentByPath.set(filePath, content);
   }
@@ -202,6 +205,15 @@ function compareSyncChanges(left, right) {
     return left.type === 'write' ? -1 : 1;
   }
   return left.path.localeCompare(right.path);
+}
+
+function isGeneratedArtifactPath(filePath) {
+  const normalized = normalizeRelativePath(filePath).toLowerCase();
+  const basename = path.posix.basename(normalized);
+  if (/^(?:\.|__latexindent_temp)/.test(basename)) {
+    return true;
+  }
+  return /\.(aux|bbl|bcf|blg|brf|fdb_latexmk|fls|lof|log|lot|out|pdf|run\.xml|synctex(?:\.gz)?|toc|xdv)$/i.test(normalized);
 }
 
 function hashText(text) {

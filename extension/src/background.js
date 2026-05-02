@@ -10,6 +10,28 @@
       return undefined;
     }
 
+    if (message.payload?.method === 'codex.cancel') {
+      try {
+        const id = sendNativeCancel(message.payload);
+        sendResponse({
+          ok: true,
+          result: {
+            sent: true,
+            id
+          }
+        });
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          error: {
+            code: 'native_connection_failed',
+            message: error.message
+          }
+        });
+      }
+      return undefined;
+    }
+
     sendNativeRequest(message.payload, _sender)
       .then(result => sendResponse(result))
       .catch(error => {
@@ -38,6 +60,13 @@
       });
       nativePort.postMessage(request);
     });
+  }
+
+  function sendNativeCancel(payload) {
+    const nativePort = ensurePort();
+    const id = payload.id || crypto.randomUUID();
+    nativePort.postMessage({ ...payload, id });
+    return id;
   }
 
   function ensurePort() {

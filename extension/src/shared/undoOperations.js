@@ -113,6 +113,11 @@
       }
       if (typeof operation.replaceAll === 'string') {
         filesByPath.set(operation.path, operation.replaceAll);
+      } else if (Array.isArray(operation.patches) && operation.patches.length) {
+        const patched = applyTextPatches(current, operation.patches);
+        if (patched.ok) {
+          filesByPath.set(operation.path, patched.text);
+        }
       } else if (typeof operation.find === 'string' && typeof operation.replace === 'string') {
         filesByPath.set(operation.path, current.split(operation.find).join(operation.replace));
       }
@@ -147,6 +152,60 @@
       replaceAll: operation.replaceAll ?? null,
       content: operation.content ?? null,
       reason: operation.reason || null
+    };
+  }
+
+  function applyTextPatches(text, patches) {
+    const normalized = normalizeTextPatches(patches, text.length);
+    if (!normalized.ok) {
+      return normalized;
+    }
+
+    let next = text;
+    for (const patch of normalized.patches.slice().sort((left, right) => right.from - left.from)) {
+      if (next.slice(patch.from, patch.to) !== patch.expected) {
+        return {
+          ok: false,
+          reason: 'Patch expected text did not match'
+        };
+      }
+      next = next.slice(0, patch.from) + patch.insert + next.slice(patch.to);
+    }
+    return {
+      ok: true,
+      text: next
+    };
+  }
+
+  function normalizeTextPatches(patches, length) {
+    const normalized = [];
+    let previousTo = 0;
+    for (const rawPatch of patches || []) {
+      const from = Number(rawPatch?.from);
+      const to = Number(rawPatch?.to);
+      if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to > length) {
+        return {
+          ok: false,
+          reason: 'Invalid patch range'
+        };
+      }
+      if (from < previousTo) {
+        return {
+          ok: false,
+          reason: 'Overlapping patch ranges'
+        };
+      }
+      previousTo = to;
+      normalized.push({
+        from,
+        to,
+        expected: String(rawPatch.expected ?? ''),
+        insert: String(rawPatch.insert ?? '')
+      });
+    }
+    return {
+      ok: true,
+      patches: normalized
     };
   }
 

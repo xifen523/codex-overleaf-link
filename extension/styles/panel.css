@@ -121,10 +121,20 @@
 }
 
 #codex-overleaf-panel .codex-vscode-main {
+  display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 8px 10px 0;
+}
+
+#codex-overleaf-panel .codex-task-section {
+  flex: 0 0 auto;
+  max-height: min(34vh, 220px);
+  overflow-y: auto;
+  border-bottom: 1px solid #242424;
+  padding-bottom: 8px;
 }
 
 #codex-overleaf-panel .codex-section-head {
@@ -207,6 +217,10 @@
 }
 
 #codex-overleaf-panel .codex-thread-section {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
   margin-top: 14px;
 }
 
@@ -220,7 +234,10 @@
 }
 
 #codex-overleaf-panel .col-log {
-  min-height: 180px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
   color: #cccccc;
 }
 
@@ -301,13 +318,19 @@
 }
 
 #codex-overleaf-panel [data-run-undo] {
-  min-height: 22px;
-  border: 1px solid #3a3d41;
+  min-height: 30px;
+  border: 1px solid #f0883e;
   border-radius: 4px;
-  background: #252526;
-  color: #cccccc;
-  padding: 1px 7px;
-  font-size: 11px;
+  background: #a14b00;
+  color: #ffffff;
+  padding: 3px 11px;
+  box-shadow: 0 0 0 1px rgba(240, 136, 62, 0.34), 0 4px 12px rgba(0, 0, 0, 0.24);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#codex-overleaf-panel [data-run-undo]:hover {
+  background: #c65d00;
 }
 
 #codex-overleaf-panel [data-run-undo]:disabled {
@@ -829,8 +852,41 @@
   display: grid;
   max-height: 150px;
   margin-top: 6px;
-  gap: 4px;
+  gap: 2px;
   overflow-y: auto;
+}
+
+#codex-overleaf-panel .codex-context-folder {
+  display: grid;
+  gap: 2px;
+}
+
+#codex-overleaf-panel .codex-context-folder-children {
+  display: grid;
+  gap: 2px;
+}
+
+#codex-overleaf-panel .codex-context-folder-name {
+  display: block;
+  min-height: 20px;
+  color: #9d9d9d;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 20px;
+  list-style: none;
+}
+
+#codex-overleaf-panel .codex-context-folder-name::-webkit-details-marker {
+  display: none;
+}
+
+#codex-overleaf-panel .codex-context-folder-name::before {
+  content: "▸ ";
+  color: #6f6f6f;
+}
+
+#codex-overleaf-panel .codex-context-folder[open] > .codex-context-folder-name::before {
+  content: "▾ ";
 }
 
 #codex-overleaf-panel .codex-context-file {
@@ -855,6 +911,15 @@
 #codex-overleaf-panel .codex-context-file[data-selected="true"] {
   border-color: #4ec9b0;
   background: #20302d;
+}
+
+#codex-overleaf-panel .codex-context-file[data-selectable="false"] {
+  cursor: default;
+  opacity: 0.62;
+}
+
+#codex-overleaf-panel .codex-context-file[data-selectable="false"]:hover {
+  background: #1b1b1b;
 }
 
 #codex-overleaf-panel .codex-context-file-name {

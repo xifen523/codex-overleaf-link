@@ -7,10 +7,15 @@
 })(typeof globalThis !== 'undefined' ? globalThis : window, function reviewingFactory() {
   'use strict';
 
-  const ACTIVE_REVIEW_PATTERNS = [
+  const CONTROL_REVIEW_PATTERNS = [
     /\breviewing\b/i,
     /\btrack(?:ed)? changes?\s*(?:on|enabled)\b/i,
     /\bsuggest(?:ing|ions?)\s*(?:on|enabled)\b/i
+  ];
+
+  const INTERNAL_ACTIVE_REVIEW_PATTERNS = [
+    /\b(?:reviewing|track(?:ed)?Changes?|suggest(?:ing|ions?))\s*:\s*true\b/i,
+    /\b(?:mode|editingMode|reviewMode)\s*:\s*(?:reviewing|suggesting|track(?:ed)? changes?)\b/i
   ];
 
   const GENERIC_REVIEW_PATTERNS = [
@@ -24,15 +29,6 @@
         ok: true,
         status: 'manual-override',
         source: 'user-confirmed'
-      };
-    }
-
-    const bodyText = normalize(signals.bodyText);
-    if (matchesActiveReview(bodyText)) {
-      return {
-        ok: true,
-        status: 'detected',
-        source: 'body-text'
       };
     }
 
@@ -55,7 +51,7 @@
         control.ariaPressed === 'true' ? 'pressed' : ''
       ].filter(Boolean).join(' '));
 
-      if (matchesActiveReview(controlText) && !isGenericReviewOnly(controlText)) {
+      if (matchesControlReview(controlText) && !isGenericReviewOnly(controlText)) {
         return {
           ok: true,
           status: 'detected',
@@ -66,7 +62,7 @@
 
     for (const stateText of signals.internalStates || []) {
       const normalized = normalize(stateText);
-      if (matchesActiveReview(normalized)) {
+      if (matchesInternalActiveReview(normalized)) {
         return {
           ok: true,
           status: 'detected',
@@ -82,8 +78,12 @@
     };
   }
 
-  function matchesActiveReview(text) {
-    return ACTIVE_REVIEW_PATTERNS.some(pattern => pattern.test(text));
+  function matchesControlReview(text) {
+    return CONTROL_REVIEW_PATTERNS.some(pattern => pattern.test(text));
+  }
+
+  function matchesInternalActiveReview(text) {
+    return INTERNAL_ACTIVE_REVIEW_PATTERNS.some(pattern => pattern.test(text));
   }
 
   function isGenericReviewOnly(text) {

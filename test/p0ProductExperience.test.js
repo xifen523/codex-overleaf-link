@@ -56,7 +56,7 @@ test('run timeline uses user-facing action transcript and undo language', () => 
   assert.doesNotMatch(contentScript, /Undo checkpoint recorded:/);
 });
 
-test('task runs reuse the project snapshot cache before Codex starts and refresh asynchronously after writes', () => {
+test('task runs sync the full project only when a Codex run starts', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -64,27 +64,27 @@ test('task runs reuse the project snapshot cache before Codex starts and refresh
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
 
   assert.match(runTaskBody, /getRunProjectSnapshot\(\)/);
-  assert.match(contentScript, /getProjectSnapshot', \{ maxAgeMs: RUN_PROJECT_SYNC_MAX_AGE_MS \}/);
+  assert.match(contentScript, /preferLightweight:\s*true/);
+  assert.match(contentScript, /allowZipFallback:\s*true/);
+  assert.match(contentScript, /requireFullProject:\s*true/);
   assert.doesNotMatch(runTaskBody, /getProjectSnapshot', \{ force: true \}/);
   assert.match(runTaskBody, /method: 'codex\.run'/);
   assert.match(runTaskBody, /syncChanges/);
   assert.match(runTaskBody, /applySyncChangesToOverleaf/);
-  assert.match(runTaskBody, /scheduleProjectSync\(1500\)/);
+  assert.doesNotMatch(runTaskBody, /scheduleProjectSync\(/);
   assert.match(contentScript, /async function applySyncChangesToOverleaf/);
-  assert.match(contentScript, /function scheduleProjectSync/);
 });
 
-test('background mirror sync only marks the mirror fresh after native success', () => {
+test('idle background sync does not poll or touch the Overleaf editor', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
-  const scheduleProjectSyncBody = contentScript.match(/function scheduleProjectSync\(delayMs = 30000\) \{[\s\S]*?\n  async function getRunProjectSnapshot/)?.[0] || '';
+  const initBody = contentScript.match(/async function init\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
-  assert.match(scheduleProjectSyncBody, /sendBackgroundNative\(/);
-  assert.match(scheduleProjectSyncBody, /\.then\(response => \{/);
-  assert.match(scheduleProjectSyncBody, /if \(!response\?\.ok\) \{\s*return;\s*\}/);
-  assert.doesNotMatch(scheduleProjectSyncBody, /\.then\(\(\) => \{/);
+  assert.doesNotMatch(initBody, /scheduleProjectSync/);
+  assert.doesNotMatch(contentScript, /function scheduleProjectSync/);
+  assert.doesNotMatch(contentScript, /sendBackgroundNative\(\{\s*method: 'mirror\.sync'/);
 });
 
 test('ask mode is not blocked by write-safety preconditions', () => {
@@ -193,7 +193,8 @@ test('run log autoscroll follows realtime output unless the user scrolls upward'
   assert.match(contentScript, /let userScrollIntentUntil = 0/);
   assert.match(contentScript, /function bindLogAutoFollow\(/);
   assert.match(contentScript, /function getLogScrollContainer\(/);
-  assert.match(contentScript, /querySelector\('\[data-main\]'\)/);
+  assert.match(contentScript, /querySelector\('\[data-log\]'\)/);
+  assert.doesNotMatch(contentScript, /querySelector\('\[data-main\]'\)\s*\|\| panel\?\.querySelector\('\[data-log\]'\)/);
   assert.match(contentScript, /function isLogNearBottom\(/);
   assert.match(contentScript, /function markUserScrollIntent\(/);
   assert.match(contentScript, /Date\.now\(\) <= userScrollIntentUntil/);
@@ -201,6 +202,23 @@ test('run log autoscroll follows realtime output unless the user scrolls upward'
   assert.match(contentScript, /requestAnimationFrame/);
   assert.match(contentScript, /scrollLogToBottom\(\{ force: true \}\)/);
   assert.match(contentScript, /scrollLogToBottom\(\)/);
+});
+
+test('task session navigation stays pinned while the transcript scrolls', () => {
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+
+  assert.match(css, /\.codex-vscode-main\s*\{[\s\S]*display:\s*flex/);
+  assert.match(css, /\.codex-vscode-main\s*\{[\s\S]*flex-direction:\s*column/);
+  assert.match(css, /\.codex-vscode-main\s*\{[\s\S]*overflow:\s*hidden/);
+  assert.match(css, /\.codex-task-section\s*\{[\s\S]*flex:\s*0 0 auto/);
+  assert.match(css, /\.codex-task-section\s*\{[\s\S]*max-height:/);
+  assert.match(css, /\.codex-task-section\s*\{[\s\S]*overflow-y:\s*auto/);
+  assert.match(css, /\.codex-thread-section\s*\{[\s\S]*flex:\s*1 1 auto/);
+  assert.match(css, /\.codex-thread-section\s*\{[\s\S]*min-height:\s*0/);
+  assert.match(css, /\.col-log\s*\{[\s\S]*overflow-y:\s*auto/);
 });
 
 test('reviewing safety toggle is labeled instead of a mysterious check icon', () => {
@@ -214,8 +232,27 @@ test('reviewing safety toggle is labeled instead of a mysterious check icon', ()
   );
 
   assert.match(contentScript, />留痕</);
-  assert.match(contentScript, /开启后，写入前会要求 Overleaf 留痕\/Reviewing 可用；删除仍需确认。/);
+  assert.match(contentScript, /开启后，写入前会确认并尝试切到 Overleaf Reviewing\/Track Changes；删除仍需确认。/);
   assert.match(css, /\.codex-review-label/);
+});
+
+test('write paths enforce Overleaf Reviewing before applying changes when requested', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const pageBridge = fs.readFileSync(
+    path.join(__dirname, '../extension/src/pageBridge.js'),
+    'utf8'
+  );
+  const applySyncBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
+  const applyTaskBody = contentScript.match(/async function applyTaskOperations[\s\S]*?\n  function partitionOperationsForApply/)?.[0] || '';
+
+  assert.match(contentScript, /async function ensureReviewingBeforeWrite/);
+  assert.match(applySyncBody, /await ensureReviewingBeforeWrite\(operations\)/);
+  assert.match(applyTaskBody, /await ensureReviewingBeforeWrite\(partitioned\.safe\)/);
+  assert.match(pageBridge, /method === 'ensureReviewing'/);
+  assert.match(pageBridge, /function ensureReviewing\(/);
 });
 
 test('native and raw agent events go through the human transcript mapper', () => {
@@ -289,6 +326,17 @@ test('final assistant summary is collected from all assistant stream messages', 
   assert.doesNotMatch(contentScript, /function getLatestAssistantAnswerForCurrentRun\(/);
 });
 
+test('same UI session records final assistant summary for the next Codex turn', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /function buildSessionHistoryResult/);
+  assert.match(contentScript, /result:\s*buildSessionHistoryResult\(\{[\s\S]*assistantMessage:\s*response\.result\.assistantMessage/);
+  assert.match(contentScript, /syncChanges:\s*response\.result\.syncChanges/);
+});
+
 test('completion report is structured around user outcomes rather than a one-line status', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -354,8 +402,11 @@ test('change preview is grouped by file with edit evidence instead of raw operat
 
   assert.match(contentScript, /function groupOperationsByFile\(/);
   assert.match(contentScript, /function formatFileChangePreview\(/);
+  assert.match(contentScript, /patches/);
+  assert.match(contentScript, /局部修改/);
   assert.match(contentScript, /find/);
   assert.match(contentScript, /replace/);
+  assert.doesNotMatch(contentScript, /replaceAll: change\.content \|\| ''/);
   assert.doesNotMatch(contentScript, /修改计划：编辑 \$\{summary\.counts\.edit/);
 });
 

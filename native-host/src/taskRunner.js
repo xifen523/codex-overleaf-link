@@ -8,6 +8,7 @@ const { HOST_NAME } = require('./manifest');
 const { summarizeNativeEnvironment } = require('./nativeEnvironment');
 
 const activeProjectLocks = new Map();
+const activeRunControllers = new Map();
 const pendingPlans = new Map();
 
 async function handleRequest(request, env = process.env, emit = () => {}) {
@@ -30,6 +31,10 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
 
   if (request.method === 'codex.run') {
     return handleCodexRun(request, env, emit);
+  }
+
+  if (request.method === 'codex.cancel') {
+    return handleCodexCancel(request);
   }
 
   if (request.method === 'task.run') {
@@ -58,12 +63,17 @@ async function handleCodexRun(request, env, emit) {
   if (!lockToken) {
     return errorResponse(request.id, 'project_locked', `Project ${projectKey} is currently in use by codex.run`);
   }
+  const abortController = new AbortController();
+  if (request.id) {
+    activeRunControllers.set(request.id, abortController);
+  }
   try {
     const result = await runCodexSession({
       params,
       env,
       emit,
-      rootDir: env.CODEX_OVERLEAF_MIRROR_ROOT
+      rootDir: env.CODEX_OVERLEAF_MIRROR_ROOT,
+      signal: abortController.signal
     });
     const syncChanges = Array.isArray(result.syncChanges) ? result.syncChanges : [];
     return okResponse(request.id, {
@@ -71,14 +81,52 @@ async function handleCodexRun(request, env, emit) {
       syncChanges
     });
   } catch (error) {
+    if (isCancellationError(error)) {
+      logDebug('codex.run.cancelled', {
+        message: error.message
+      });
+      return errorResponse(request.id, 'codex_cancelled', 'Codex run was cancelled by the user');
+    }
     logDebug('codex.run.failed', {
       message: error.message,
       stack: error.stack
     });
     return errorResponse(request.id, 'codex_run_failed', truncateText(error.message, 12000));
   } finally {
+    if (request.id && activeRunControllers.get(request.id) === abortController) {
+      activeRunControllers.delete(request.id);
+    }
     releaseProjectLock(projectKey, lockToken);
   }
+}
+
+function handleCodexCancel(request) {
+  const targetId = request.params?.requestId || request.params?.id;
+  if (!targetId || !activeRunControllers.has(targetId)) {
+    return okResponse(request.id, {
+      cancelled: false,
+      reason: 'No active Codex run matched the cancellation request'
+    });
+  }
+
+  const controller = activeRunControllers.get(targetId);
+  controller.abort(createCancellationError());
+  return okResponse(request.id, {
+    cancelled: true,
+    requestId: targetId
+  });
+}
+
+function createCancellationError() {
+  const error = new Error('Codex run was cancelled by the user');
+  error.code = 'codex_cancelled';
+  return error;
+}
+
+function isCancellationError(error = {}) {
+  return error.code === 'codex_cancelled'
+    || error.name === 'AbortError'
+    || /cancelled by the user|was cancelled/i.test(error.message || '');
 }
 
 function isCodexMissing(env = process.env) {
@@ -163,7 +211,7 @@ async function handleTaskRun(request, env, emit) {
       });
       const result = await runExternalAgent(agentSpec, params, emit, {
         env,
-        timeoutMs: parsePositiveInteger(env.CODEX_OVERLEAF_AGENT_TIMEOUT_MS, 10 * 60 * 1000),
+        timeoutMs: parseOptionalPositiveInteger(env.CODEX_OVERLEAF_AGENT_TIMEOUT_MS),
         outputMaxBytes: parsePositiveInteger(env.CODEX_OVERLEAF_AGENT_OUTPUT_MAX_BYTES, 1024 * 1024)
       });
       logDebug('agent.run.ok', {
@@ -481,7 +529,7 @@ function runExternalAgent(agentSpec, params, emit = () => {}, options = {}) {
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe']
     });
-    const timeoutMs = parsePositiveInteger(options.timeoutMs, 10 * 60 * 1000);
+    const timeoutMs = parseOptionalPositiveInteger(options.timeoutMs);
     const outputMaxBytes = parsePositiveInteger(options.outputMaxBytes, 1024 * 1024);
     let stdout = '';
     let stderr = '';
@@ -489,9 +537,11 @@ function runExternalAgent(agentSpec, params, emit = () => {}, options = {}) {
     let outputBytes = 0;
     let settled = false;
 
-    const timeout = setTimeout(() => {
-      fail(new Error(`Agent command timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
+    const timeout = timeoutMs
+      ? setTimeout(() => {
+        fail(new Error(`Agent command timed out after ${timeoutMs}ms`));
+      }, timeoutMs)
+      : null;
 
     function trackOutputBytes(chunk) {
       outputBytes += Buffer.byteLength(String(chunk), 'utf8');
@@ -507,7 +557,9 @@ function runExternalAgent(agentSpec, params, emit = () => {}, options = {}) {
         return;
       }
       settled = true;
-      clearTimeout(timeout);
+      if (timeout) {
+        clearTimeout(timeout);
+      }
       if (child.exitCode === null && !child.killed) {
         child.kill('SIGTERM');
       }
@@ -519,7 +571,9 @@ function runExternalAgent(agentSpec, params, emit = () => {}, options = {}) {
         return;
       }
       settled = true;
-      clearTimeout(timeout);
+      if (timeout) {
+        clearTimeout(timeout);
+      }
       resolve(result);
     }
 
@@ -574,6 +628,11 @@ function runExternalAgent(agentSpec, params, emit = () => {}, options = {}) {
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseOptionalPositiveInteger(value) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 function parseAgentEventLines(text) {

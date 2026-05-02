@@ -11,7 +11,7 @@ const runtimeEnv = buildNativeRuntimeEnv(process.env);
 Object.assign(process.env, runtimeEnv);
 logDebug('environment.ready', summarizeNativeEnvironment(runtimeEnv));
 
-process.stdin.on('data', async chunk => {
+process.stdin.on('data', chunk => {
   logDebug('stdin.data', { bytes: chunk.length, bufferedBytes: buffered.length });
   buffered = Buffer.concat([buffered, chunk]);
 
@@ -32,31 +32,35 @@ process.stdin.on('data', async chunk => {
 
   buffered = decoded.remainder;
   for (const message of decoded.messages) {
-    try {
-      logDebug('request.received', summarizeRequest(message));
-      const response = await handleRequest(message, runtimeEnv, event => {
-        writeResponse({
-          id: message?.id,
-          ok: true,
-          event
-        });
-      });
-      logDebug('response.ready', summarizeResponse(response));
-      writeResponse(response);
-    } catch (error) {
-      const response = {
-        id: message?.id,
-        ok: false,
-        error: {
-          code: 'internal_error',
-          message: error.message
-        }
-      };
-      logDebug('response.internal_error', summarizeResponse(response));
-      writeResponse(response);
-    }
+    handleDecodedMessage(message);
   }
 });
+
+async function handleDecodedMessage(message) {
+  try {
+    logDebug('request.received', summarizeRequest(message));
+    const response = await handleRequest(message, runtimeEnv, event => {
+      writeResponse({
+        id: message?.id,
+        ok: true,
+        event
+      });
+    });
+    logDebug('response.ready', summarizeResponse(response));
+    writeResponse(response);
+  } catch (error) {
+    const response = {
+      id: message?.id,
+      ok: false,
+      error: {
+        code: 'internal_error',
+        message: error.message
+      }
+    };
+    logDebug('response.internal_error', summarizeResponse(response));
+    writeResponse(response);
+  }
+}
 
 process.stdin.on('error', error => {
   logDebug('stdin.error', { message: error.message });

@@ -74,3 +74,46 @@ test('send button shows a spinner while a Codex run is active', () => {
   assert.match(css, /animation:\s*codex-run-spin/);
   assert.match(css, /@keyframes codex-run-spin/);
 });
+
+test('clicking the running spinner requests cancellation instead of being disabled', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const clickHandler = contentScript.match(/\[data-run\]'\)\.addEventListener\('click'[\s\S]*?\n      \}\);/)?.[0] || '';
+  const setRunningBody = contentScript.match(/function setRunning\(running\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(clickHandler, /if \(currentRunView\)/);
+  assert.match(clickHandler, /cancelActiveRun\(\)/);
+  assert.match(contentScript, /async function cancelActiveRun\(/);
+  assert.match(contentScript, /method:\s*'codex\.cancel'/);
+  assert.doesNotMatch(setRunningBody, /\[data-run\]'\)\.disabled = running/);
+  assert.match(setRunningBody, /aria-label', running \? '中断当前任务' : '发送'/);
+});
+
+test('task failures after a user cancellation request render as interrupted', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /if \(runCancellationRequested \|\| isRunCancellationError\(response\.error\)\)/);
+  assert.match(contentScript, /if \(runCancellationRequested \|\| isRunCancellationError\(error\)\)/);
+});
+
+test('undo button is visually prominent when a run has reversible writes', () => {
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /撤销改动/);
+  assert.match(css, /#codex-overleaf-panel \[data-run-undo\]\s*\{[\s\S]*background:\s*#a14b00/);
+  assert.match(css, /#codex-overleaf-panel \[data-run-undo\]\s*\{[\s\S]*border:\s*1px solid #f0883e/);
+  assert.match(css, /#codex-overleaf-panel \[data-run-undo\]\s*\{[\s\S]*font-weight:\s*700/);
+  assert.match(css, /#codex-overleaf-panel \[data-run-undo\]\s*\{[\s\S]*box-shadow:/);
+});

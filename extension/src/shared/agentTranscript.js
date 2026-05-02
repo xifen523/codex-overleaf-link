@@ -232,8 +232,8 @@
       return mapThreadItemEvent(params.item, method === 'item/started', event);
     }
     if (method === 'item/agentMessage/delta' || method === 'item/reasoning/summaryTextDelta') {
-      const title = cleanVisibleText(params.delta || '');
-      if (!title) {
+      const title = cleanStreamDeltaText(params.delta || '');
+      if (!title.length) {
         return technicalOnly(event);
       }
       return {
@@ -452,8 +452,8 @@
     }
     if (/timed out/i.test(text)) {
       return {
-        conclusion: '这轮没有写入：本地 Codex 运行超时。',
-        nextStep: '请缩小 @context 或提高超时时间后重试。'
+        conclusion: '这轮没有写入：本地 Codex 长时间没有完成。',
+        nextStep: '请检查本机 Codex 是否仍在运行；如果没有进展，可以中断后缩小 @context 再重试。'
       };
     }
     if (/output limit exceeded/i.test(text)) {
@@ -807,6 +807,12 @@
 
   function cleanVisibleText(text) {
     return String(text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function cleanStreamDeltaText(text) {
+    return String(text || '')
+      .replace(/\r\n?/g, '\n')
+      .replace(/\u00a0/g, ' ');
   }
 
   function cleanVisibleMarkdownText(text) {

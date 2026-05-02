@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {
   buildUndoCheckpoint,
+  buildExpectedFilesAfterOperations,
   buildUndoOperations
 } = require('../extension/src/shared/undoOperations');
 
@@ -78,5 +79,25 @@ test('builds an undo checkpoint guarded by the expected post-apply project state
     { type: 'rename', path: 'renamed.tex', to: 'old.tex', find: null, replace: null, replaceAll: null, content: null, reason: 'Undo rename' },
     { type: 'delete', path: 'created.tex', to: null, find: null, replace: null, replaceAll: null, content: null, reason: 'Undo create' },
     { type: 'edit', path: 'main.tex', to: null, find: null, replace: null, replaceAll: 'alpha old', content: null, reason: 'Undo edit' }
+  ]);
+});
+
+test('builds post-apply undo base files from local edit patches', () => {
+  const expected = buildExpectedFilesAfterOperations({
+    files: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ]
+  }, [
+    {
+      type: 'edit',
+      path: 'main.tex',
+      patches: [
+        { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+      ]
+    }
+  ]);
+
+  assert.deepEqual(Array.from(expected.entries()), [
+    ['main.tex', 'alpha delta gamma']
   ]);
 });
