@@ -23,6 +23,7 @@
 
   const VALID_MODES = new Set(['ask', 'confirm', 'auto']);
   const VALID_REASONING = new Set(['low', 'medium', 'high', 'xhigh']);
+  const MAX_RUN_EVENTS = 300;
 
   function normalizePanelState(input = {}) {
     const state = {
@@ -296,7 +297,7 @@
       statusText: wasRunning ? 'Interrupted by page reload' : typeof run.statusText === 'string' ? run.statusText : '',
       startedAt: typeof run.startedAt === 'string' ? run.startedAt : '',
       finishedAt: wasRunning ? new Date().toISOString() : typeof run.finishedAt === 'string' ? run.finishedAt : '',
-      events: events.slice(-80),
+      events: events.slice(-MAX_RUN_EVENTS),
       appliedOperations: Array.isArray(run.appliedOperations) ? run.appliedOperations : [],
       undoOperations: Array.isArray(run.undoOperations) ? run.undoOperations : [],
       undoBaseFiles: normalizeRunFiles(run.undoBaseFiles),
@@ -315,9 +316,13 @@
         title: event.title,
         status: typeof event.status === 'string' ? event.status : 'info',
         detail: event.detail,
-        timestamp: typeof event.timestamp === 'string' ? event.timestamp : ''
+        timestamp: typeof event.timestamp === 'string' ? event.timestamp : '',
+        kind: typeof event.kind === 'string' ? event.kind : 'activity',
+        technicalDetail: event.technicalDetail,
+        streamKey: typeof event.streamKey === 'string' ? event.streamKey : '',
+        streamRole: typeof event.streamRole === 'string' ? event.streamRole : ''
       }))
-      .slice(-80);
+      .slice(-MAX_RUN_EVENTS);
   }
 
   function normalizeRunFiles(files) {

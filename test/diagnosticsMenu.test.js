@@ -15,8 +15,12 @@ test('project snapshot action lives in the diagnostics menu instead of the heade
 
   assert.equal(contentScript.includes('data-snapshot'), false);
   assert.match(contentScript, /data-diagnostics-menu/);
+  assert.match(contentScript, /data-diagnostics-native-env/);
   assert.match(contentScript, /data-diagnostics-page-state/);
   assert.match(contentScript, /data-diagnostics-snapshot/);
+  assert.match(contentScript, /function inspectNativeEnvironment\(/);
+  assert.match(contentScript, /function formatNativeEnvironmentLog\(/);
+  assert.match(contentScript, /本机环境诊断/);
   assert.match(contentScript, /function toggleDiagnosticsMenu\(/);
   assert.match(contentScript, /function closeDiagnosticsMenu\(/);
   assert.match(css, /\.codex-diagnostics-menu/);

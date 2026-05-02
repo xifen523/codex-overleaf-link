@@ -4,8 +4,12 @@
 const { decodeFrames, encodeMessage } = require('./nativeMessaging');
 const { logDebug } = require('./debugLog');
 const { handleRequest } = require('./taskRunner');
+const { buildNativeRuntimeEnv, summarizeNativeEnvironment } = require('./nativeEnvironment');
 
 let buffered = Buffer.alloc(0);
+const runtimeEnv = buildNativeRuntimeEnv(process.env);
+Object.assign(process.env, runtimeEnv);
+logDebug('environment.ready', summarizeNativeEnvironment(runtimeEnv));
 
 process.stdin.on('data', async chunk => {
   logDebug('stdin.data', { bytes: chunk.length, bufferedBytes: buffered.length });
@@ -30,7 +34,7 @@ process.stdin.on('data', async chunk => {
   for (const message of decoded.messages) {
     try {
       logDebug('request.received', summarizeRequest(message));
-      const response = await handleRequest(message, process.env, event => {
+      const response = await handleRequest(message, runtimeEnv, event => {
         writeResponse({
           id: message?.id,
           ok: true,

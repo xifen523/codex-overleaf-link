@@ -11,7 +11,7 @@ function buildLauncherScript({ nodePath, bridgeEntryPath, agentPath }) {
     '  printf \'%s launcher.start pid=%s ppid=%s home=%s path=%s\\n\' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "${PPID:-}" "$HOME_DIR" "${PATH:-}"',
     '  printf \'%s launcher.node=%s\\n\' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "' + escapeShellSingleQuoted(nodePath) + '"',
     '} >> "$LOG_DIR/native-host-launcher.log" 2>/dev/null || true',
-    'export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"',
+    'export PATH="/Library/TeX/texbin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"',
     `export CODEX_OVERLEAF_AGENT_FILE=${shellSingleQuoted(nodePath)}`,
     `export CODEX_OVERLEAF_AGENT_ARGS_JSON=${shellSingleQuoted(JSON.stringify([agentPath]))}`,
     `export CODEX_OVERLEAF_AGENT_CMD="${escapeDoubleQuoted(nodePath)} ${escapeDoubleQuoted(agentPath)}"`,

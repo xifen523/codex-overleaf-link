@@ -5,12 +5,17 @@ const test = require('node:test');
 const { handleRequest } = require('../native-host/src/taskRunner');
 
 test('bridge.ping returns bridge metadata', async () => {
-  const response = await handleRequest({ id: '1', method: 'bridge.ping', params: {} }, {});
+  const response = await handleRequest({ id: '1', method: 'bridge.ping', params: {} }, {
+    CODEX_OVERLEAF_CODEX_PATH: '/opt/homebrew/bin/codex',
+    CODEX_OVERLEAF_LATEXMK_PATH: '/Library/TeX/texbin/latexmk'
+  });
 
   assert.equal(response.id, '1');
   assert.equal(response.ok, true);
   assert.equal(response.result.host, 'com.codex.overleaf');
   assert.equal(response.result.platform, 'darwin');
+  assert.equal(response.result.environment.codex.ok, true);
+  assert.deepEqual(response.result.environment.latex.available, ['latexmk']);
 });
 
 test('task.run rejects Auto Mode when neither checkpoint nor Reviewing is verified', async () => {

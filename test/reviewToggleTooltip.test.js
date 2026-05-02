@@ -9,5 +9,6 @@ test('reviewing safety toggle has a clear hover tooltip', () => {
     'utf8'
   );
 
-  assert.match(contentScript, /codex-review-toggle[^>]+title="要求 Reviewing\/Track Changes，验证失败时阻止写入"/);
+  assert.match(contentScript, /codex-review-toggle[^>]+title="开启后，写入前会要求 Overleaf 留痕\/Reviewing 可用；删除仍需确认。"/);
+  assert.match(contentScript, /codex-review-label">留痕</);
 });

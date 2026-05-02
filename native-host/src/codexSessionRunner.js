@@ -26,7 +26,7 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
 
   const settings = buildCodexSettings(params);
   const runner = executeCodex || runCodexAppServerSession;
-  await runner({
+  const runnerResult = await runner({
     workspacePath: mirror.workspacePath,
     task: String(params.task || ''),
     mode: params.mode || 'auto',
@@ -34,6 +34,7 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     reasoningEffort: params.reasoningEffort || '',
     sandboxMode: settings.sandboxMode,
     approvalPolicy: settings.approvalPolicy,
+    env,
     emit
   });
 
@@ -61,6 +62,7 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     status: 'completed',
     projectId: mirror.projectKey,
     workspacePath: mirror.workspacePath,
+    assistantMessage: cleanAssistantMessage(runnerResult?.assistantMessage),
     syncChanges
   };
 }
@@ -91,6 +93,7 @@ function buildThreadStartParams(input = {}) {
 function runCodexAppServerSession(input) {
   return new Promise((resolve, reject) => {
     const child = spawn('codex', ['app-server', '--listen', 'stdio://'], {
+      env: input.env || process.env,
       stdio: ['pipe', 'pipe', 'pipe']
     });
     const pending = new Map();
@@ -99,6 +102,8 @@ function runCodexAppServerSession(input) {
     let stderr = '';
     let activeThreadId = '';
     let activeTurnId = '';
+    let latestAssistantMessage = '';
+    const assistantMessages = new Map();
     let settled = false;
     const timeoutMs = 10 * 60 * 1000;
     const timeout = setTimeout(() => {
@@ -214,6 +219,7 @@ function runCodexAppServerSession(input) {
       }
 
       if (message.method) {
+        recordAssistantMessage(message);
         emitCodexEvent(input.emit, 'codex.session.event', message.method, {
           method: message.method,
           params: message.params || {}
@@ -244,6 +250,24 @@ function runCodexAppServerSession(input) {
       response(message.id, { decision: 'decline' });
     }
 
+    function recordAssistantMessage(message) {
+      const method = String(message.method || '');
+      const params = message.params || {};
+      const item = params.item || {};
+      if (method === 'item/agentMessage/delta') {
+        const itemId = String(params.itemId || item.id || 'current');
+        const next = `${assistantMessages.get(itemId) || ''}${String(params.delta || '')}`;
+        assistantMessages.set(itemId, next);
+        latestAssistantMessage = next;
+        return;
+      }
+      if (item.type === 'agentMessage' && typeof item.text === 'string' && item.text.trim()) {
+        const itemId = String(item.id || params.itemId || 'current');
+        assistantMessages.set(itemId, item.text);
+        latestAssistantMessage = item.text;
+      }
+    }
+
     function succeed() {
       if (settled) {
         return;
@@ -251,7 +275,9 @@ function runCodexAppServerSession(input) {
       settled = true;
       clearTimeout(timeout);
       child.kill('SIGTERM');
-      resolve();
+      resolve({
+        assistantMessage: cleanAssistantMessage(latestAssistantMessage)
+      });
     }
 
     function fail(error) {
@@ -291,6 +317,10 @@ function inferNotificationStatus(message) {
 
 function normalizeReasoningEffort(value) {
   return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value) ? value : null;
+}
+
+function cleanAssistantMessage(value) {
+  return String(value || '').trim();
 }
 
 module.exports = {

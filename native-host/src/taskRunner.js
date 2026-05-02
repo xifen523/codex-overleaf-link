@@ -5,8 +5,9 @@ const { buildOperationSummary, splitDeletePlan } = require('../../extension/src/
 const { runCodexSession } = require('./codexSessionRunner');
 const { logDebug, truncateText } = require('./debugLog');
 const { HOST_NAME } = require('./manifest');
+const { summarizeNativeEnvironment } = require('./nativeEnvironment');
 
-const activeProjectLocks = new Set();
+const activeProjectLocks = new Map();
 const pendingPlans = new Map();
 
 async function handleRequest(request, env = process.env, emit = () => {}) {
@@ -18,7 +19,8 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
     return okResponse(request.id, {
       host: HOST_NAME,
       platform: 'darwin',
-      protocolVersion: 1
+      protocolVersion: 1,
+      environment: summarizeNativeEnvironment(env)
     });
   }
 
@@ -44,7 +46,10 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
 async function handleCodexRun(request, env, emit) {
   const params = request.params || {};
   const projectKey = resolveProjectKey(params);
-  activeProjectLocks.add(projectKey);
+  const lockToken = acquireProjectLock(projectKey);
+  if (!lockToken) {
+    return errorResponse(request.id, 'project_locked', `Project ${projectKey} is currently in use by codex.run`);
+  }
   try {
     const result = await runCodexSession({
       params,
@@ -64,7 +69,7 @@ async function handleCodexRun(request, env, emit) {
     });
     return errorResponse(request.id, 'codex_run_failed', truncateText(error.message, 12000));
   } finally {
-    activeProjectLocks.delete(projectKey);
+    releaseProjectLock(projectKey, lockToken);
   }
 }
 
@@ -75,7 +80,7 @@ async function handleMirrorSync(request, env) {
   const projectKey = resolveProjectKey(params);
   const rootDir = env.CODEX_OVERLEAF_MIRROR_ROOT;
 
-  if (activeProjectLocks.has(projectKey)) {
+  if (isProjectLocked(projectKey)) {
     return errorResponse(request.id, 'project_locked', `Project ${projectKey} is currently in use by codex.run`);
   }
 
@@ -142,6 +147,7 @@ async function handleTaskRun(request, env, emit) {
         fileCount
       });
       const result = await runExternalAgent(agentSpec, params, emit, {
+        env,
         timeoutMs: parsePositiveInteger(env.CODEX_OVERLEAF_AGENT_TIMEOUT_MS, 10 * 60 * 1000),
         outputMaxBytes: parsePositiveInteger(env.CODEX_OVERLEAF_AGENT_OUTPUT_MAX_BYTES, 1024 * 1024)
       });
@@ -397,6 +403,25 @@ function resolveProjectKey(params = {}) {
   return candidate.replace(/[^a-zA-Z0-9._-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'unknown';
 }
 
+function acquireProjectLock(projectKey) {
+  if (activeProjectLocks.has(projectKey)) {
+    return null;
+  }
+  const token = Symbol(projectKey);
+  activeProjectLocks.set(projectKey, token);
+  return token;
+}
+
+function releaseProjectLock(projectKey, token) {
+  if (activeProjectLocks.get(projectKey) === token) {
+    activeProjectLocks.delete(projectKey);
+  }
+}
+
+function isProjectLocked(projectKey) {
+  return activeProjectLocks.has(projectKey);
+}
+
 function resolveExternalAgent(env) {
   if (env.CODEX_OVERLEAF_AGENT_FILE) {
     const args = parseAgentArgsJson(env.CODEX_OVERLEAF_AGENT_ARGS_JSON);
@@ -432,10 +457,12 @@ function runExternalAgent(agentSpec, params, emit = () => {}, options = {}) {
   return new Promise((resolve, reject) => {
     const child = agentSpec.command
       ? spawn(agentSpec.command, {
+        env: options.env || process.env,
         shell: true,
         stdio: ['pipe', 'pipe', 'pipe']
       })
       : spawn(agentSpec.file, agentSpec.args || [], {
+      env: options.env || process.env,
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe']
     });

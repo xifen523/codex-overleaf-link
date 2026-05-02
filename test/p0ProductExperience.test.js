@@ -74,6 +74,19 @@ test('task runs reuse the project snapshot cache before Codex starts and refresh
   assert.match(contentScript, /function scheduleProjectSync/);
 });
 
+test('background mirror sync only marks the mirror fresh after native success', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const scheduleProjectSyncBody = contentScript.match(/function scheduleProjectSync\(delayMs = 30000\) \{[\s\S]*?\n  async function getRunProjectSnapshot/)?.[0] || '';
+
+  assert.match(scheduleProjectSyncBody, /sendBackgroundNative\(/);
+  assert.match(scheduleProjectSyncBody, /\.then\(response => \{/);
+  assert.match(scheduleProjectSyncBody, /if \(!response\?\.ok\) \{\s*return;\s*\}/);
+  assert.doesNotMatch(scheduleProjectSyncBody, /\.then\(\(\) => \{/);
+});
+
 test('ask mode is not blocked by write-safety preconditions', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -118,10 +131,12 @@ test('run history renders as a compact single-column transcript without persiste
 
   assert.match(contentScript, /root\.className = 'transcript-turn run-card'/);
   assert.match(contentScript, /class="run-prompt"/);
+  assert.match(contentScript, /data-run-process/);
   assert.match(contentScript, /class="run-activity-list"/);
   assert.match(contentScript, /data-run-report/);
-  assert.match(contentScript, /data-run-technical-log/);
-  assert.match(contentScript, />技术详情</);
+  assert.match(contentScript, /data-run-process-summary/);
+  assert.doesNotMatch(contentScript, /data-run-technical-log/);
+  assert.doesNotMatch(contentScript, />技术详情</);
   assert.doesNotMatch(contentScript, /<summary>Task<\/summary>/);
   assert.doesNotMatch(contentScript, /class="run-speaker"/);
   assert.doesNotMatch(contentScript, />你<\/div>/);
@@ -146,7 +161,58 @@ test('activity rows are compact lines, not per-event cards with persistent times
   assert.doesNotMatch(contentScript, /class="run-event"/);
   assert.match(css, /\.run-activity\s*\{[\s\S]*min-height:\s*20px/);
   assert.match(css, /\.run-activity-time\s*\{[\s\S]*display:\s*none/);
-  assert.match(css, /\.run-technical-log/);
+  assert.match(css, /\.run-process/);
+  assert.doesNotMatch(css, /\.run-technical-log/);
+});
+
+test('completed runs collapse processing history behind a processed summary', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /function finishRunView\(/);
+  assert.match(contentScript, /collapseRunProcess\(currentRunView/);
+  assert.match(contentScript, /formatProcessedSummary/);
+  assert.match(contentScript, /已处理/);
+  assert.match(contentScript, /runProcess\.open = false/);
+  assert.match(css, /\.run-process summary/);
+});
+
+test('run log autoscroll follows realtime output unless the user scrolls upward', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /let logAutoFollow = true/);
+  assert.match(contentScript, /let userScrollIntentUntil = 0/);
+  assert.match(contentScript, /function bindLogAutoFollow\(/);
+  assert.match(contentScript, /function isLogNearBottom\(/);
+  assert.match(contentScript, /function markUserScrollIntent\(/);
+  assert.match(contentScript, /Date\.now\(\) <= userScrollIntentUntil/);
+  assert.match(contentScript, /function scrollLogToBottom\(/);
+  assert.match(contentScript, /scrollLogToBottom\(\{ force: true \}\)/);
+  assert.match(contentScript, /scrollLogToBottom\(\)/);
+});
+
+test('reviewing safety toggle is labeled instead of a mysterious check icon', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+
+  assert.match(contentScript, />留痕</);
+  assert.match(contentScript, /开启后，写入前会要求 Overleaf 留痕\/Reviewing 可用；删除仍需确认。/);
+  assert.match(css, /\.codex-review-label/);
 });
 
 test('native and raw agent events go through the human transcript mapper', () => {
@@ -217,6 +283,9 @@ test('completion report is structured around user outcomes rather than a one-lin
   assert.match(contentScript, /function appendCompletionReport\(/);
   assert.match(contentScript, /buildHumanCompletionReport/);
   assert.match(contentScript, /translateRawError/);
+  assert.match(contentScript, /assistantMessage/);
+  assert.match(contentScript, /getLatestAssistantAnswerForCurrentRun/);
+  assert.match(contentScript, /className = 'run-final-answer'/);
   assert.match(agentTranscript, /结论/);
   assert.match(agentTranscript, /检查范围/);
   assert.match(agentTranscript, /发现/);

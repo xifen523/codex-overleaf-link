@@ -16,6 +16,7 @@ test('builds a macOS launcher with absolute Node and default Codex agent command
   assert.match(script, /CODEX_OVERLEAF_AGENT_ARGS_JSON=/);
   assert.match(script, /\/opt\/homebrew\/bin\/node/);
   assert.match(script, /\/app\/scripts\/codex-json-agent\.mjs/);
+  assert.match(script, /\/Library\/TeX\/texbin/);
   assert.match(script, /exec "\/opt\/homebrew\/bin\/node" "\/app\/native-host\/src\/index\.js"/);
 });
 

@@ -252,6 +252,35 @@ test('normalizes bounded persisted run history for the panel', () => {
   assert.deepEqual(state.runs[19].undoBaseFiles, [{ path: 'main.tex', content: 'after' }]);
 });
 
+test('preserves stream metadata and enough processing history for completed runs', () => {
+  const state = normalizePanelState({
+    runs: [{
+      id: 'run_stream_history',
+      task: 'check references',
+      status: 'completed',
+      events: Array.from({ length: 120 }, (_, index) => index === 119
+        ? {
+          title: 'Final answer',
+          status: 'completed',
+          kind: 'stream',
+          streamKey: 'agent:final',
+          streamRole: 'assistant'
+        }
+        : {
+          title: `process ${index}`,
+          status: 'running',
+          kind: 'activity'
+        })
+    }]
+  });
+
+  assert.equal(state.runs[0].events.length, 120);
+  const final = state.runs[0].events.at(-1);
+  assert.equal(final.kind, 'stream');
+  assert.equal(final.streamKey, 'agent:final');
+  assert.equal(final.streamRole, 'assistant');
+});
+
 test('marks restored running runs as interrupted', () => {
   const state = normalizePanelState({
     runs: [{

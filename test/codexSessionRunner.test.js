@@ -84,6 +84,29 @@ test('passes Codex mode, model, and reasoning settings to the runner boundary', 
   }
 });
 
+test('returns the final assistant message from the Codex runner', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  try {
+    const result = await runCodexSession({
+      params: {
+        projectId: 'project-final-answer',
+        task: '检查 citation',
+        mode: 'ask',
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async () => ({
+        assistantMessage: '我检查了 citation，没有发现缺失引用，也没有修改文件。'
+      })
+    });
+
+    assert.equal(result.assistantMessage, '我检查了 citation，没有发现缺失引用，也没有修改文件。');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('thread start params avoid experimental app-server capabilities', () => {
   const params = buildThreadStartParams({
     workspacePath: '/tmp/overleaf-mirror',

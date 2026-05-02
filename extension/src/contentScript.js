@@ -4,6 +4,7 @@
   const PANEL_ID = 'codex-overleaf-panel';
   const LEGACY_STORAGE_KEY = 'codexOverleafPanelState';
   const RUN_PROJECT_SYNC_MAX_AGE_MS = 30000;
+  const MAX_RUN_EVENTS = 300;
   const pageBridgeReady = injectPageBridge();
   const {
     createSession,
@@ -36,6 +37,8 @@
   let contextLoadId = 0;
   let projectSyncTimer = null;
   let lastMirrorSyncAt = 0;
+  let logAutoFollow = true;
+  let userScrollIntentUntil = 0;
 
   chrome.runtime.onMessage.addListener(message => {
     if (message?.type === 'codex-overleaf/open-panel') {
@@ -73,6 +76,7 @@
             <div class="codex-diagnostics-wrap">
               <button type="button" data-diagnostics-menu title="诊断" aria-label="诊断" aria-expanded="false">⋯</button>
               <div class="codex-diagnostics-menu" data-diagnostics-popover hidden>
+                <button type="button" data-diagnostics-native-env>本机环境诊断</button>
                 <button type="button" data-diagnostics-page-state>页面状态诊断</button>
                 <button type="button" data-diagnostics-snapshot>项目快照诊断</button>
               </div>
@@ -117,9 +121,9 @@
           </div>
           <div class="codex-composer-toolbar">
             <button type="button" data-add-context title="添加 @ 上下文" aria-label="添加 @ 上下文" aria-expanded="false">＋</button>
-            <label class="codex-review-toggle" title="要求 Reviewing/Track Changes，验证失败时阻止写入">
+            <label class="codex-review-toggle" title="开启后，写入前会要求 Overleaf 留痕/Reviewing 可用；删除仍需确认。">
               <input type="checkbox" data-require-reviewing>
-              <span class="codex-review-icon" aria-hidden="true"></span>
+              <span class="codex-review-label">留痕</span>
             </label>
             <select data-model aria-label="Model">
               <option value="gpt-5.5">GPT-5.5</option>
@@ -170,6 +174,10 @@
       panel.addEventListener('mousedown', event => event.stopPropagation());
       panel.querySelector('[data-refresh]').addEventListener('click', () => refreshProbe());
       panel.querySelector('[data-diagnostics-menu]').addEventListener('click', () => toggleDiagnosticsMenu());
+      panel.querySelector('[data-diagnostics-native-env]').addEventListener('click', () => {
+        closeDiagnosticsMenu();
+        inspectNativeEnvironment();
+      });
       panel.querySelector('[data-diagnostics-page-state]').addEventListener('click', () => {
         closeDiagnosticsMenu();
         inspectPageStateDiagnostics();
@@ -195,6 +203,7 @@
       installInteractionRefresh();
       installDiagnosticsDismiss();
       installContextDismiss();
+      bindLogAutoFollow();
       renderSessionList();
       renderRunHistory();
       renderContextSelection();
@@ -244,6 +253,53 @@
       }
       closeContextTray();
     }, true);
+  }
+
+  function bindLogAutoFollow() {
+    const log = panel?.querySelector('[data-log]');
+    if (!log || log.dataset.autoFollowBound === 'true') {
+      return;
+    }
+    log.dataset.autoFollowBound = 'true';
+    log.addEventListener('wheel', markUserScrollIntent, { passive: true });
+    log.addEventListener('touchmove', markUserScrollIntent, { passive: true });
+    log.addEventListener('pointerdown', markUserScrollIntent, { passive: true });
+    log.addEventListener('keydown', event => {
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+        markUserScrollIntent();
+      }
+    });
+    log.addEventListener('scroll', () => {
+      if (Date.now() <= userScrollIntentUntil) {
+        logAutoFollow = isLogNearBottom(log);
+        return;
+      }
+      if (isLogNearBottom(log)) {
+        logAutoFollow = true;
+      }
+    }, { passive: true });
+  }
+
+  function markUserScrollIntent() {
+    userScrollIntentUntil = Date.now() + 1200;
+  }
+
+  function isLogNearBottom(log) {
+    if (!log) {
+      return true;
+    }
+    return log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+  }
+
+  function scrollLogToBottom(options = {}) {
+    const log = panel?.querySelector('[data-log]');
+    if (!log) {
+      return;
+    }
+    if (options.force || logAutoFollow || isLogNearBottom(log)) {
+      log.scrollTop = log.scrollHeight;
+      logAutoFollow = true;
+    }
   }
 
   function isContextTrayClickTarget(target) {
@@ -501,6 +557,32 @@
     appendProjectWarnings(project);
   }
 
+  async function inspectNativeEnvironment() {
+    appendLog('本机环境诊断：正在检查 Codex 和 LaTeX 工具。');
+    const response = await sendBackgroundNative({ method: 'bridge.ping', params: {} });
+    if (!response?.ok) {
+      appendLog(`本机环境诊断失败：${response?.error?.message || 'native host 没有响应'}`);
+      return;
+    }
+
+    appendLog(formatNativeEnvironmentLog(response.result?.environment));
+  }
+
+  function formatNativeEnvironmentLog(environment) {
+    if (!environment) {
+      return '本机环境：native host 已连接，但没有返回环境详情。';
+    }
+
+    const codex = environment.codex?.ok
+      ? `Codex 已连接：${environment.codex.path}`
+      : 'Codex 未找到：请确认终端里可以运行 codex。';
+    const latexTools = environment.latex?.available || [];
+    const latex = latexTools.length
+      ? `LaTeX 可用：${latexTools.join(', ')}`
+      : 'LaTeX 未找到：当前可以编辑文本，但不能本地编译。';
+    return `${codex} ${latex}`;
+  }
+
   async function inspectPageStateDiagnostics() {
     appendLog('页面状态诊断：正在读取 Overleaf 连接细节。');
     const probe = await callPageBridge('probe', {
@@ -611,7 +693,9 @@
         return;
       }
 
-      const syncOutcome = await applySyncChangesToOverleaf(response.result.syncChanges || [], project);
+      const syncOutcome = await applySyncChangesToOverleaf(response.result.syncChanges || [], project, {
+        assistantMessage: response.result.assistantMessage
+      });
       scheduleProjectSync(1500);
       finishRunView(syncOutcome.hasSkippedOperations ? '同步完成但有跳过项' : '同步完成', syncOutcome.hasSkippedOperations ? 'failed' : 'completed');
       const activeSession = getActiveSession(state);
@@ -764,13 +848,13 @@
 
       if (currentRunView?.events) {
         currentRunView.events.append(container);
-        const log = panel.querySelector('[data-log]');
-        log.scrollTop = log.scrollHeight;
+        scrollLogToBottom();
       }
     });
   }
 
-  async function applySyncChangesToOverleaf(syncChanges = [], project = {}) {
+  async function applySyncChangesToOverleaf(syncChanges = [], project = {}, options = {}) {
+    const assistantMessage = cleanFinalAnswer(options.assistantMessage || getLatestAssistantAnswerForCurrentRun());
     let operations = buildSyncApplyOperations(syncChanges, project);
     if (!operations.length) {
       appendRunEvent({
@@ -778,15 +862,16 @@
         status: 'completed'
       });
       appendCompletionReport({
-        conclusion: '本地 Codex session 已结束，没有需要同步回 Overleaf 的改动。',
+        conclusion: assistantMessage || 'Codex 已完成本地处理，没有需要同步回 Overleaf 的改动。',
         status: state.mode === 'ask' ? '只问不改' : 'completed',
         operations: [],
         applyResults: [],
+        unchangedReason: assistantMessage ? '没有产生需要同步回 Overleaf 的文件改动。' : '',
         mode: state.mode,
         nextStep: '可以继续追问，或调整 @context 后重新运行。'
       });
       return {
-        summaryLine: '没有需要同步的改动',
+        summaryLine: assistantMessage || '没有需要同步的改动',
         hasSkippedOperations: false
       };
     }
@@ -1322,7 +1407,10 @@
                 projectId: getCurrentProjectId(),
                 project
               }
-            }).then(() => {
+            }).then(response => {
+              if (!response?.ok) {
+                return;
+              }
               lastMirrorSyncAt = Date.now();
               updateMirrorAge();
             }).catch(() => {});
@@ -1775,6 +1863,8 @@
   }
 
   function startRunView({ task, mode, model, reasoningEffort }) {
+    logAutoFollow = true;
+    userScrollIntentUntil = 0;
     const record = {
       id: createRunId(),
       task,
@@ -1782,7 +1872,7 @@
       model,
       reasoningEffort,
       status: 'running',
-      statusText: 'Running',
+      statusText: '处理中',
       startedAt: new Date().toISOString(),
       finishedAt: '',
       events: [],
@@ -1803,17 +1893,17 @@
     removeEmptyRunsMessage(log);
     const root = renderRunCard(record);
     log.append(root);
-    log.scrollTop = log.scrollHeight;
+    scrollLogToBottom({ force: true });
     renderSessionList();
     applySessionLabel();
 
     return {
       recordId: record.id,
       root,
+      runProcess: root.querySelector('[data-run-process]'),
+      processLabel: root.querySelector('[data-run-process-summary]'),
       events: root.querySelector('[data-run-events]'),
       report: root.querySelector('[data-run-report]'),
-      technicalLog: root.querySelector('[data-run-technical-log]'),
-      technicalEvents: root.querySelector('[data-run-technical-events]'),
       status: root.querySelector('[data-run-status]'),
       startedAt: Date.now()
     };
@@ -1824,15 +1914,44 @@
       return;
     }
     const record = findRunRecord(currentRunView.recordId);
+    const statusText = formatProcessedSummary(status, Date.now() - currentRunView.startedAt);
     if (record) {
       record.status = status;
-      record.statusText = `${text} · ${formatElapsed(Date.now() - currentRunView.startedAt)}`;
+      record.statusText = statusText;
       record.finishedAt = new Date().toISOString();
       saveStateSoon();
       renderSessionList();
     }
     currentRunView.root.dataset.status = status;
-    currentRunView.status.textContent = record?.statusText || `${text} · ${formatElapsed(Date.now() - currentRunView.startedAt)}`;
+    currentRunView.root.title = [
+      text,
+      record?.mode ? `模式：${formatModeLabel(record.mode)}` : '',
+      record?.model,
+      record?.reasoningEffort
+    ].filter(Boolean).join(' · ');
+    collapseRunProcess(currentRunView, statusText);
+  }
+
+  function collapseRunProcess(view, statusText) {
+    const runProcess = view?.runProcess || view?.root?.querySelector('[data-run-process]');
+    if (runProcess) {
+      runProcess.open = false;
+    }
+    const statusEl = view?.status || view?.root?.querySelector('[data-run-status]');
+    if (statusEl) {
+      statusEl.textContent = statusText;
+    }
+  }
+
+  function formatProcessedSummary(status, elapsedMs) {
+    const elapsed = formatElapsed(elapsedMs);
+    if (status === 'failed') {
+      return `处理失败 ${elapsed}`;
+    }
+    if (status === 'running') {
+      return `处理中 ${elapsed}`;
+    }
+    return `已处理 ${elapsed}`;
   }
 
   function appendNativeEvent(event) {
@@ -1842,7 +1961,6 @@
 
     const activity = mapAgentEventToActivity(event);
     if (!activity?.visible || activity.kind === 'technical') {
-      appendTechnicalEvent(event);
       return;
     }
 
@@ -1860,13 +1978,7 @@
   }
 
   function appendTechnicalEvent(event) {
-    appendRunEvent({
-      kind: 'technical',
-      title: '技术详情',
-      status: event?.status || 'info',
-      detail: normalizeRawAgentEvent(event),
-      timestamp: event?.timestamp
-    });
+    void event;
   }
 
   function normalizeRawAgentEvent(event) {
@@ -1905,14 +2017,13 @@
         ? upsertRunStreamRecordEvent(record, event)
         : event;
       if (event.kind !== 'stream') {
-        record.events = [...(record.events || []), event].slice(-80);
+        record.events = [...(record.events || []), event].slice(-MAX_RUN_EVENTS);
       }
       saveStateSoon();
     }
 
     appendRunEventToView(currentRunView, renderedEvent);
-    const log = panel.querySelector('[data-log]');
-    log.scrollTop = log.scrollHeight;
+    scrollLogToBottom();
   }
 
   function appendRunEventToView(view, event) {
@@ -1922,8 +2033,6 @@
       return;
     }
     if (event.kind === 'technical') {
-      view.technicalLog.hidden = false;
-      view.technicalEvents.append(renderTechnicalEvent(event));
       return;
     }
     if (event.kind === 'stream') {
@@ -1955,7 +2064,7 @@
     };
     delete next.appendText;
     delete next.replaceText;
-    record.events = [...events, next].slice(-80);
+    record.events = [...events, next].slice(-MAX_RUN_EVENTS);
     return next;
   }
 
@@ -1969,6 +2078,21 @@
       return left;
     }
     return `${left}${right}`;
+  }
+
+  function getLatestAssistantAnswerForCurrentRun() {
+    const record = currentRunView?.recordId ? findRunRecord(currentRunView.recordId) : null;
+    const events = Array.isArray(record?.events) ? record.events : [];
+    const assistant = [...events].reverse().find(event =>
+      event.kind === 'stream' &&
+      event.streamRole === 'assistant' &&
+      cleanFinalAnswer(event.title)
+    );
+    return cleanFinalAnswer(assistant?.title || '');
+  }
+
+  function cleanFinalAnswer(value) {
+    return String(value || '').trim();
   }
 
   function renderSessionList({ showAll = false } = {}) {
@@ -2022,19 +2146,21 @@
     if (!state.runs?.length) {
       const empty = document.createElement('div');
       empty.className = 'empty-runs';
-      empty.innerHTML = [
-        '<div class="codex-empty-icon" aria-hidden="true">',
-        '<span></span>',
-        '</div>',
-        '<div>开始一个 Codex 任务</div>'
-      ].join('');
+      const icon = document.createElement('img');
+      icon.className = 'codex-empty-icon';
+      icon.alt = '';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.src = chrome.runtime.getURL('assets/icons/codex-overleaf-icon.png');
+      const label = document.createElement('div');
+      label.textContent = '开始一个 Codex 任务';
+      empty.append(icon, label);
       log.append(empty);
       return;
     }
     for (const run of state.runs) {
       log.append(renderRunCard(run));
     }
-    log.scrollTop = log.scrollHeight;
+    scrollLogToBottom({ force: true });
   }
 
   function renderRunCard(run) {
@@ -2052,42 +2178,53 @@
       <div class="transcript-turn-main">
         <div class="run-prompt" data-run-task></div>
         <div class="run-turn-meta">
-          <span class="run-status" data-run-status></span>
           <button type="button" data-run-undo hidden>撤销本轮写入</button>
         </div>
-        <div class="run-activity-list" data-run-events></div>
-        <div class="run-report" data-run-report hidden></div>
-        <details class="run-technical-log" data-run-technical-log hidden>
-          <summary>技术详情</summary>
-          <div data-run-technical-events></div>
+        <details class="run-process" data-run-process>
+          <summary data-run-process-summary>
+            <span class="run-status" data-run-status></span>
+          </summary>
+          <div class="run-activity-list" data-run-events></div>
         </details>
+        <div class="run-report" data-run-report hidden></div>
       </div>
     `;
 
     root.querySelector('[data-run-task]').textContent = run.task || '';
-    root.querySelector('[data-run-status]').textContent = run.statusText || humanizeEventType(run.status || 'completed');
+    root.querySelector('[data-run-status]').textContent = getRunStatusText(run);
+    const process = root.querySelector('[data-run-process]');
+    process.open = run.status === 'running';
 
     const events = root.querySelector('[data-run-events]');
     const report = root.querySelector('[data-run-report]');
-    const technicalLog = root.querySelector('[data-run-technical-log]');
-    const technicalEvents = root.querySelector('[data-run-technical-events]');
     for (const event of run.events || []) {
       if (event.kind === 'report') {
         report.hidden = false;
         report.replaceChildren(renderCompletionReport(event));
       } else if (event.kind === 'technical') {
-        technicalLog.hidden = false;
-        technicalEvents.append(renderTechnicalEvent(event));
+        continue;
       } else if (event.kind === 'stream') {
-        upsertStreamEvent({ events, technicalLog, technicalEvents }, event);
+        upsertStreamEvent({ events }, event);
       } else {
         events.append(renderRunEvent(event));
-        appendEventTechnicalDetail({ technicalLog, technicalEvents }, event);
       }
     }
 
     configureUndoButton(root, run);
     return root;
+  }
+
+  function getRunStatusText(run = {}) {
+    if (run.statusText) {
+      return run.statusText;
+    }
+    if (run.status === 'running') {
+      return '处理中';
+    }
+    if (run.startedAt && run.finishedAt) {
+      return formatProcessedSummary(run.status || 'completed', new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime());
+    }
+    return run.status === 'failed' ? '处理失败' : '已处理';
   }
 
   function renderRunEvent(event) {
@@ -2153,11 +2290,8 @@
   }
 
   function appendEventTechnicalDetail(view, event) {
-    if (!view?.technicalLog || !view?.technicalEvents || !hasEventTechnicalDetail(event)) {
-      return;
-    }
-    view.technicalLog.hidden = false;
-    view.technicalEvents.append(renderTechnicalEvent(event));
+    void view;
+    void event;
   }
 
   function hasEventTechnicalDetail(event) {
@@ -2216,8 +2350,7 @@
   function buildActivityTooltip(event) {
     return [
       event?.title || '',
-      event?.timestamp ? formatEventTime(event.timestamp) : '',
-      hasEventTechnicalDetail(event) ? '技术详情中可查看原始信息。' : ''
+      event?.timestamp ? formatEventTime(event.timestamp) : ''
     ].filter(Boolean).join('\n');
   }
 
@@ -2226,11 +2359,10 @@
     report.className = 'run-completion-report';
     report.dataset.status = event.status || 'completed';
 
-    const title = document.createElement('h4');
-    title.textContent = event.title || '本轮完成报告';
-    const body = document.createElement('pre');
+    const body = document.createElement('div');
+    body.className = 'run-final-answer';
     body.textContent = formatEventDetail(event.detail || {});
-    report.append(title, body);
+    report.append(body);
     return report;
   }
 
@@ -2372,20 +2504,17 @@
       kind: event.kind || 'activity',
       technicalDetail: event.technicalDetail
     };
-    record.events = [...(record.events || []), normalized].slice(-80);
+    record.events = [...(record.events || []), normalized].slice(-MAX_RUN_EVENTS);
     saveStateSoon();
 
     const root = panel?.querySelector(`[data-run-id="${cssEscape(runId)}"]`);
     const view = {
       events: root?.querySelector('[data-run-events]'),
-      report: root?.querySelector('[data-run-report]'),
-      technicalLog: root?.querySelector('[data-run-technical-log]'),
-      technicalEvents: root?.querySelector('[data-run-technical-events]')
+      report: root?.querySelector('[data-run-report]')
     };
     if (view.events) {
       appendRunEventToView(view, normalized);
-      const log = panel.querySelector('[data-log]');
-      log.scrollTop = log.scrollHeight;
+      scrollLogToBottom();
     }
   }
 
@@ -2697,7 +2826,7 @@
     item.className = 'log-line';
     item.textContent = text;
     log.append(item);
-    log.scrollTop = log.scrollHeight;
+    scrollLogToBottom();
   }
 
   function updateProbeNotice(text) {
@@ -2719,7 +2848,7 @@
     if (!existing) {
       log.append(item);
     }
-    log.scrollTop = log.scrollHeight;
+    scrollLogToBottom();
   }
 
   function formatEventDetail(detail) {
