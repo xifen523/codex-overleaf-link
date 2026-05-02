@@ -118,7 +118,7 @@ test('undo button is visually prominent when a run has reversible writes', () =>
   assert.match(css, /#codex-overleaf-panel \[data-run-undo\]\s*\{[\s\S]*box-shadow:/);
 });
 
-test('panel persistence is compacted before writing to chrome storage quota', () => {
+test('panel persistence uses hybrid IndexedDB storage with legacy fallback', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -126,13 +126,14 @@ test('panel persistence is compacted before writing to chrome storage quota', ()
 
   assert.match(contentScript, /prepareStateForStorage/);
   assert.match(contentScript, /chrome\.storage\.local\.set\(\{ \[storageKey\]: prepareStateForStorage\(state\) \}\)/);
-  assert.match(contentScript, /isStorageQuotaError\(error\)/);
-  assert.match(contentScript, /prepareStateForStorage\(state, \{ aggressive: true \}\)/);
   assert.match(contentScript, /saveState\(\)\.catch/);
-  assert.match(contentScript, /本地会话记录过大，已自动压缩旧任务记录后继续/);
+  // Hybrid approach: prefs via Migration, sessions via StorageDb
+  assert.match(contentScript, /Migration\.savePrefs\(prefs\)/);
+  assert.match(contentScript, /StorageDb\.putRecord\('sessions', record\)/);
+  assert.match(contentScript, /StorageDb\.extractLightweightPrefs\(state, projectId\)/);
 });
 
-test('storage quota compaction notice is not appended repeatedly during autosave', () => {
+test('storage notice is not appended repeatedly during autosave', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -143,10 +144,9 @@ test('storage quota compaction notice is not appended repeatedly during autosave
 
   assert.match(contentScript, /storageNoticeKeys = new Set\(\)/);
   assert.match(contentScript, /function appendStorageNoticeOnce\(/);
-  assert.match(saveStateBody, /appendStorageNoticeOnce\('quota-compacted'/);
+  assert.match(saveStateBody, /appendStorageNoticeOnce\('save-failed'/);
   assert.match(appendStorageNoticeBody, /if \(currentRunView\)/);
   assert.match(appendStorageNoticeBody, /appendRunEvent\(\{[\s\S]*kind:\s*'checkpoint'/);
   assert.match(appendPlainLogBody, /lastElementChild/);
   assert.match(appendPlainLogBody, /dataset\.repeatCount/);
-  assert.doesNotMatch(saveStateBody, /appendPlainLog\('本地会话记录过大，已自动压缩旧任务记录后继续。'\)/);
 });

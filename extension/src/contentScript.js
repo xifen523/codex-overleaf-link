@@ -2275,34 +2275,84 @@
   }
 
   async function loadStoredState() {
-    const keys = storageKey === LEGACY_STORAGE_KEY
-      ? [LEGACY_STORAGE_KEY]
-      : [storageKey, LEGACY_STORAGE_KEY];
-    const stored = await chrome.storage.local.get(keys);
-    return stored[storageKey] || stored[LEGACY_STORAGE_KEY] || {};
+    try {
+      const StorageDb = window.CodexOverleafStorageDb;
+      const Migration = window.CodexOverleafStorageMigration;
+      const projectId = getCurrentProjectId();
+      const legacyKey = storageKey;
+
+      const { prefs, sessions, activeSessionId } = await Migration.runMigrationIfNeeded(projectId, legacyKey);
+
+      return {
+        model: prefs.model || '',
+        reasoningEffort: prefs.reasoningEffort || '',
+        mode: prefs.mode || '',
+        requireReviewing: prefs.requireReviewing !== false,
+        autoRecompile: prefs.autoRecompile !== false,
+        sessions: sessions.map(session => ({
+          id: session.id,
+          title: session.title || 'New task',
+          focusFiles: session.focusFiles || [],
+          codexThreadId: session.codexThreadId || '',
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
+          runs: [],
+          history: [],
+          task: '',
+          mode: prefs.mode || 'confirm',
+          model: prefs.model || 'gpt-5.4',
+          reasoningEffort: prefs.reasoningEffort || 'high',
+          requireReviewing: prefs.requireReviewing !== false
+        })),
+        activeSessionId: activeSessionId,
+        runs: []
+      };
+    } catch (error) {
+      // Fallback to legacy loading if IndexedDB fails
+      const keys = storageKey === LEGACY_STORAGE_KEY
+        ? [LEGACY_STORAGE_KEY]
+        : [storageKey, LEGACY_STORAGE_KEY];
+      const stored = await chrome.storage.local.get(keys);
+      return stored[storageKey] || stored[LEGACY_STORAGE_KEY] || {};
+    }
   }
 
   async function saveState() {
-    if (storageKey !== LEGACY_STORAGE_KEY) {
-      await chrome.storage.local.remove(LEGACY_STORAGE_KEY).catch(() => {});
-    }
     try {
-      await chrome.storage.local.set({ [storageKey]: prepareStateForStorage(state) });
-    } catch (error) {
-      if (!isStorageQuotaError(error)) {
-        throw error;
-      }
-      await chrome.storage.local.remove(storageKey).catch(() => {});
-      try {
-        await chrome.storage.local.set({
-          [storageKey]: prepareStateForStorage(state, { aggressive: true })
+      const StorageDb = window.CodexOverleafStorageDb;
+      const Migration = window.CodexOverleafStorageMigration;
+      const projectId = getCurrentProjectId();
+
+      // Save lightweight prefs to chrome.storage.local
+      const prefs = StorageDb.extractLightweightPrefs(state, projectId);
+      prefs.activeSessionByProject = StorageDb.buildActiveSessionByProject(
+        prefs.activeSessionByProject || {},
+        projectId,
+        state.activeSessionId || ''
+      );
+      await Migration.savePrefs(prefs);
+
+      // Save active session to IndexedDB
+      const activeSession = getActiveSession(state);
+      if (activeSession) {
+        const record = StorageDb.buildSessionRecord({
+          id: activeSession.id,
+          projectId,
+          title: activeSession.title || 'New task',
+          codexThreadId: activeSession.codexThreadId || '',
+          status: 'active',
+          focusFiles: Array.isArray(activeSession.focusFiles) ? activeSession.focusFiles : [],
+          createdAt: activeSession.createdAt,
+          updatedAt: new Date().toISOString()
         });
-        appendStorageNoticeOnce('quota-compacted', '本地会话记录过大，已自动压缩旧任务记录后继续。');
-      } catch (retryError) {
-        if (!isStorageQuotaError(retryError)) {
-          throw retryError;
-        }
-        appendStorageNoticeOnce('quota-still-too-large', '本地会话记录仍超出 Chrome 配额；当前页面会继续使用新的设置，但刷新后可能不会保留。');
+        await StorageDb.putRecord('sessions', record);
+      }
+    } catch (error) {
+      // Fallback: try legacy save
+      try {
+        await chrome.storage.local.set({ [storageKey]: prepareStateForStorage(state) });
+      } catch (fallbackError) {
+        appendStorageNoticeOnce('save-failed', `保存会话状态失败：${error.message}`);
       }
     }
   }
