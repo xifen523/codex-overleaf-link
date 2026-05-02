@@ -27,6 +27,10 @@
   function mapAgentEventToActivity(event = {}) {
     const type = String(event.type || '');
 
+    if (isContextCompactionEvent(event)) {
+      return formatContextCompactionCheckpoint(event);
+    }
+
     if (type === 'overleaf.sync.started') {
       const fileCount = Number(event.detail?.fileCount) || 0;
       return {
@@ -169,6 +173,10 @@
     const method = String(event.detail?.method || event.title || '');
     const params = event.detail?.params || {};
 
+    if (isContextCompactionEvent(event)) {
+      return formatContextCompactionCheckpoint(event);
+    }
+
     if (event.type === 'codex.session.request') {
       return {
         kind: 'activity',
@@ -294,6 +302,26 @@
     }
 
     return technicalOnly(event);
+  }
+
+  function isContextCompactionEvent(event = {}) {
+    const type = String(event.type || '');
+    const method = String(event.detail?.method || event.title || '');
+    const label = `${type} ${method}`;
+    return /(compact|compaction|compacted)/i.test(label)
+      && /(context|thread|turn|conversation|codex)/i.test(label);
+  }
+
+  function formatContextCompactionCheckpoint(event = {}) {
+    const method = String(event.detail?.method || event.title || '');
+    const running = event.status === 'running' || /(started|starting|begin|prepar)/i.test(method);
+    return {
+      kind: 'checkpoint',
+      visible: true,
+      title: running ? '正在压缩上下文，Codex 会继续处理。' : '上下文已压缩，Codex 继续处理。',
+      status: running ? 'running' : 'completed',
+      technicalDetail: normalizeRawEvent(event)
+    };
   }
 
   function mapThreadItemEvent(item = {}, started, event) {

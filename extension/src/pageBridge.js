@@ -9,6 +9,8 @@
   const SNAPSHOT_MAX_CACHE_MS = 15000;
   const FILE_LIST_DEFAULT_MAX_AGE_MS = 300000;
   const ZIP_FETCH_TIMEOUT_MS = 10000;
+  const MAX_BINARY_FILE_BYTES = 10 * 1024 * 1024;
+  const MAX_BINARY_TOTAL_BYTES = 80 * 1024 * 1024;
   const snapshotCache = {
     key: '',
     capturedAt: 0,
@@ -433,7 +435,7 @@
         capabilities: {
           fullProjectSnapshot: true,
           method: 'overleaf-zip',
-          skipped: [],
+          skipped: zipSnapshot.skipped || [],
           diagnostics: {
             zipEndpoint: zipSnapshot.endpoint,
             docRecordCount: internalDocRecords.length,
@@ -489,24 +491,6 @@
     let previousSignature = '';
 
     for (const filePath of projectPaths) {
-      const docRecord = docRecordByPath.get(filePath);
-      if (docRecord) {
-        const fetched = await fetchOverleafDocContent(docRecord);
-        if (fetched.ok) {
-          files.push({
-            path: filePath,
-            content: fetched.content,
-            source: fetched.method
-          });
-          previousSignature = contentSignature(fetched.content);
-          continue;
-        }
-        skipped.push({
-          path: filePath,
-          reason: fetched.reason
-        });
-      }
-
       if (filePath === activePath) {
         const ready = await waitForActiveEditorText(filePath, 5000);
         if (!ready.ok) {
@@ -523,6 +507,24 @@
         });
         previousSignature = contentSignature(ready.text);
         continue;
+      }
+
+      const docRecord = docRecordByPath.get(filePath);
+      if (docRecord) {
+        const fetched = await fetchOverleafDocContent(docRecord);
+        if (fetched.ok) {
+          files.push({
+            path: filePath,
+            content: fetched.content,
+            source: fetched.method
+          });
+          previousSignature = contentSignature(fetched.content);
+          continue;
+        }
+        skipped.push({
+          path: filePath,
+          reason: fetched.reason
+        });
       }
 
       if (!canOpenInactiveFileForSnapshot(filePath, params, lightweightOnly, docRecord)) {
@@ -960,10 +962,15 @@
         } else if (operation.type === 'delete') {
           await method.call(manager, operation.path);
         }
+        const verified = await verifyFileTreeOperation(operation);
+        if (!verified.ok) {
+          return verified;
+        }
         recordFileTreeOperationSuccess(operation, options.baseFileLookup);
         return {
           ok: true,
-          method: `fileTreeManager.${methodName}`
+          method: `fileTreeManager.${methodName}`,
+          verified: true
         };
       } catch (_error) {
         // Try the next known method name.
@@ -973,6 +980,58 @@
     return {
       ok: false,
       reason: 'No supported Overleaf file-tree method was detected'
+    };
+  }
+
+  async function verifyFileTreeOperation(operation) {
+    await delay(120);
+    const sourcePath = operation.path;
+    const targetPath = operation.to;
+
+    if (operation.type === 'create') {
+      if (!projectPathExists(sourcePath)) {
+        return fileTreeVerificationFailed(operation, `${sourcePath} 没有出现在 Overleaf 文件树中。`);
+      }
+      if (typeof operation.content === 'string' && window.CodexOverleafProjectFiles.isTextProjectPath(sourcePath)) {
+        const opened = await openFileByPath(sourcePath);
+        if (!opened.ok) {
+          return fileTreeVerificationFailed(operation, `${sourcePath} 创建后无法打开验证内容。`);
+        }
+        const verified = await verifyActiveEditorText(operation.content, sourcePath, 600);
+        if (!verified.ok) {
+          return fileTreeVerificationFailed(operation, `${sourcePath} 创建后内容没有和 Codex 预期一致。`);
+        }
+      }
+      return { ok: true };
+    }
+
+    if (operation.type === 'delete') {
+      return projectPathExists(sourcePath)
+        ? fileTreeVerificationFailed(operation, `${sourcePath} 仍然存在。`)
+        : { ok: true };
+    }
+
+    if (operation.type === 'rename' || operation.type === 'move') {
+      if (!targetPath || !projectPathExists(targetPath)) {
+        return fileTreeVerificationFailed(operation, `${targetPath || '目标路径'} 没有出现在 Overleaf 文件树中。`);
+      }
+      if (projectPathExists(sourcePath)) {
+        return fileTreeVerificationFailed(operation, `${sourcePath} 仍然存在。`);
+      }
+      return { ok: true };
+    }
+
+    return { ok: true };
+  }
+
+  function fileTreeVerificationFailed(operation, reason) {
+    return {
+      ok: false,
+      code: 'file_tree_verification_failed',
+      reason: `Overleaf 文件树操作没有被确认：${reason} Codex 已停止把这次操作标记为成功。`,
+      operationType: operation?.type || '',
+      path: operation?.path || '',
+      to: operation?.to || ''
     };
   }
 
@@ -2129,10 +2188,11 @@
           errors.push(`${endpoint} returned ${response.status}`);
           continue;
         }
-        const files = await extractFilesFromZip(buffer, {
+        const extracted = await extractFilesFromZip(buffer, {
           includeBinaryFiles: Boolean(params.includeBinaryFiles),
           includeContent: params.includeContent !== false
         });
+        const files = extracted.files || [];
         if (!files.length) {
           errors.push(`${endpoint} returned no text files (${contentType || 'unknown content type'})`);
           continue;
@@ -2140,6 +2200,7 @@
         return {
           ok: true,
           endpoint,
+          skipped: extracted.skipped || [],
           files: files.map(file => ({
             ...file,
             source: 'overleaf-zip'
@@ -2223,6 +2284,8 @@
     const centralDirectoryOffset = view.getUint32(eocdOffset + 16, true);
     const decoder = new TextDecoder('utf-8');
     const files = [];
+    const skipped = [];
+    let binaryBytes = 0;
     let offset = centralDirectoryOffset;
 
     for (let index = 0; index < entryCount; index += 1) {
@@ -2232,6 +2295,7 @@
 
       const compressionMethod = view.getUint16(offset + 10, true);
       const compressedSize = view.getUint32(offset + 20, true);
+      const uncompressedSize = view.getUint32(offset + 24, true);
       const fileNameLength = view.getUint16(offset + 28, true);
       const extraLength = view.getUint16(offset + 30, true);
       const commentLength = view.getUint16(offset + 32, true);
@@ -2244,6 +2308,27 @@
       if (shouldInclude) {
         const file = { path };
         if (options.includeContent !== false && (isText || options.includeBinaryFiles)) {
+          if (!isText) {
+            if (uncompressedSize > MAX_BINARY_FILE_BYTES) {
+              skipped.push({
+                path,
+                reason: 'binary_file_too_large',
+                size: uncompressedSize
+              });
+              offset += 46 + fileNameLength + extraLength + commentLength;
+              continue;
+            }
+            if (binaryBytes + uncompressedSize > MAX_BINARY_TOTAL_BYTES) {
+              skipped.push({
+                path,
+                reason: 'binary_project_too_large',
+                size: uncompressedSize
+              });
+              offset += 46 + fileNameLength + extraLength + commentLength;
+              continue;
+            }
+            binaryBytes += uncompressedSize;
+          }
           const contentBytes = await readZipEntryBytes(view, bytes, localHeaderOffset, compressedSize, compressionMethod);
           if (isText) {
             file.content = decoder.decode(contentBytes);
@@ -2261,7 +2346,7 @@
       offset += 46 + fileNameLength + extraLength + commentLength;
     }
 
-    return files;
+    return { files, skipped };
   }
 
   function uint8ArrayToBase64(bytes) {

@@ -334,6 +334,77 @@ test('full run snapshots prefer live active editor text over stale ZIP content',
   assert.equal(result.files.find(file => file.path === 'main.tex')?.source, 'active-editor');
 });
 
+test('full run snapshots prefer live active editor text over stale active doc records', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': 'live unsaved editor text',
+      'refs.bib': '@article{x}'
+    },
+    zipFiles: {
+      'main.tex': 'stale zip text',
+      'refs.bib': '@article{x}'
+    },
+    docFetchFiles: {
+      aaaaaaaaaaaaaaaaaaaaaaaa: 'stale doc record text'
+    },
+    internalState: {
+      project: {
+        rootFolder: {
+          name: '',
+          children: [
+            {
+              name: 'main.tex',
+              id: 'aaaaaaaaaaaaaaaaaaaaaaaa'
+            }
+          ]
+        }
+      }
+    }
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    preferLightweight: true,
+    allowZipFallback: true,
+    allowEditorNavigation: false,
+    requireFullProject: true,
+    includeBinaryFiles: true,
+    force: true,
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.files.find(file => file.path === 'main.tex')?.content, 'live unsaved editor text');
+  assert.equal(result.files.find(file => file.path === 'main.tex')?.source, 'active-editor');
+});
+
+test('file-tree operations are skipped when Overleaf does not reflect the requested path change', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': 'Main'
+    },
+    internalState: {
+      fileTreeManager: {
+        async createDoc() {
+          // Simulate a stale or changed Overleaf internal API that returns but does not create anything.
+        }
+      }
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    operations: [
+      { type: 'create', path: 'new.tex', content: 'New' }
+    ],
+    baseFiles: [
+      { path: 'main.tex', content: 'Main' }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped[0].operation.path, 'new.tex');
+  assert.equal(result.skipped[0].result.code, 'file_tree_verification_failed');
+});
+
 test('run snapshots never open inactive Overleaf files when ZIP fallback is unavailable', async () => {
   const bridge = createSnapshotHarness({
     files: {
@@ -401,7 +472,7 @@ test('project snapshot falls back when the Overleaf ZIP download hangs', async (
   assert.match(result.capabilities.skipped[0].reason, /timed out/i);
 });
 
-function createSnapshotHarness({ files, zipFiles = null, fetchMode = 'zip', treePaths = null, internalState = {}, windowExtra = {} }) {
+function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, fetchMode = 'zip', treePaths = null, internalState = {}, windowExtra = {} }) {
   const fileMap = new Map(Object.entries(files));
   const zipBuffer = createStoredZip(zipFiles || files);
   let listener = null;
@@ -483,6 +554,20 @@ function createSnapshotHarness({ files, zipFiles = null, fetchMode = 'zip', tree
     },
     fetch: async (_endpoint, options = {}) => {
       fetchCount += 1;
+      const endpoint = String(_endpoint || '');
+      const docMatch = endpoint.match(/\/doc\/([^/?#]+)/);
+      if (docMatch && docFetchFiles) {
+        const content = docFetchFiles[decodeURIComponent(docMatch[1])] || '';
+        return {
+          ok: true,
+          headers: {
+            get(name) {
+              return name.toLowerCase() === 'content-type' ? 'application/json' : '';
+            }
+          },
+          json: async () => ({ content })
+        };
+      }
       if (fetchMode === 'hang') {
         return new Promise((_resolve, reject) => {
           options.signal?.addEventListener('abort', () => {

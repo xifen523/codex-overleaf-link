@@ -34,6 +34,7 @@
   let activeNativeRequestId = null;
   let currentRunView = null;
   let saveStateTimer = null;
+  let storageNoticeKeys = new Set();
   let contextProject = null;
   let contextLoadId = 0;
   let contextExpandedFolders = new Set();
@@ -836,7 +837,8 @@
       throwIfRunCancellationRequested();
       const assistantMessage = response.result.assistantMessage || getAssistantAnswerForCurrentRun();
       const syncOutcome = await applySyncChangesToOverleaf(response.result.syncChanges || [], project, {
-        assistantMessage
+        assistantMessage,
+        unsupportedChanges: response.result.unsupportedChanges || []
       });
       finishRunView(syncOutcome.hasSkippedOperations ? '同步完成但有跳过项' : '同步完成', syncOutcome.hasSkippedOperations ? 'failed' : 'completed');
       try {
@@ -1150,6 +1152,8 @@
 
   async function applySyncChangesToOverleaf(syncChanges = [], project = {}, options = {}) {
     const assistantMessage = cleanFinalAnswer(options.assistantMessage || getAssistantAnswerForCurrentRun());
+    const unsupportedChanges = Array.isArray(options.unsupportedChanges) ? options.unsupportedChanges : [];
+    appendUnsupportedLocalChanges(unsupportedChanges);
     let operations = buildSyncApplyOperations(syncChanges, project);
     if (!operations.length) {
       appendRunEvent({
@@ -1161,7 +1165,7 @@
         status: state.mode === 'ask' ? '只问不改' : 'completed',
         operations: [],
         applyResults: [],
-        unchangedReason: assistantMessage ? '没有产生需要同步回 Overleaf 的文件改动。' : '',
+        unchangedReason: assistantMessage ? '没有产生需要同步回 Overleaf 的文件改动。' : formatUnsupportedLocalChangeSummary(unsupportedChanges),
         mode: state.mode,
         nextStep: '可以继续追问，或调整 @context 后重新运行。'
       });
@@ -1248,10 +1252,14 @@
       applyResults: [applied],
       status: 'synced from local Codex workspace'
     });
+    const syncedConclusion = assistantMessage || '本地 Codex 改动已同步回 Overleaf。';
+    const partialSyncConclusion = assistantMessage
+      ? `${assistantMessage}\n\n同步提示：本地 Codex 改动已尝试写回 Overleaf，但有部分项目被跳过。`
+      : '本地 Codex 改动已尝试同步回 Overleaf，但有部分项目被跳过。';
     appendCompletionReport({
       conclusion: applied.skipped?.length
-        ? '本地 Codex 改动已尝试同步回 Overleaf，但有部分项目被跳过。'
-        : '本地 Codex 改动已同步回 Overleaf。',
+        ? partialSyncConclusion
+        : syncedConclusion,
       status: applied.skipped?.length ? 'failed' : 'completed',
       operations,
       applyResults: [applied],
@@ -1286,9 +1294,9 @@
       includeBinaryFiles: true,
       focusFiles: getAppliedOperationPaths(applied)
     });
-    if (!freshProject?.files?.length) {
+    if (!freshProject?.files?.length || freshProject?.capabilities?.fullProjectSnapshot === false) {
       appendRunEvent({
-        title: 'Overleaf 已写入，但刷新本地 workspace 时没有读到完整项目；下一轮会重新读取。',
+        title: 'Overleaf 已写入，但没有读到完整项目；暂不刷新本地 Codex workspace baseline，下一轮会重新读取。',
         status: 'failed'
       });
       return;
@@ -1377,6 +1385,29 @@
       ...freshProject,
       files: Array.from(filesByPath.values())
     };
+  }
+
+  function appendUnsupportedLocalChanges(changes = []) {
+    if (!changes.length) {
+      return;
+    }
+    appendRunEvent({
+      title: formatUnsupportedLocalChangeSummary(changes),
+      status: 'completed'
+    });
+  }
+
+  function formatUnsupportedLocalChangeSummary(changes = []) {
+    if (!changes.length) {
+      return '';
+    }
+    const files = changes
+      .slice(0, 5)
+      .map(change => change.path)
+      .filter(Boolean)
+      .join('、');
+    const suffix = changes.length > 5 ? ` 等 ${changes.length} 个文件` : `${changes.length} 个文件`;
+    return `Codex 在本地生成了不会同步回 Overleaf 的资源或编译产物：${files || suffix}。`;
   }
 
   function buildSyncApplyOperations(syncChanges = [], project = {}) {
@@ -2266,14 +2297,30 @@
         await chrome.storage.local.set({
           [storageKey]: prepareStateForStorage(state, { aggressive: true })
         });
-        appendPlainLog('本地会话记录过大，已自动压缩旧任务记录后继续。');
+        appendStorageNoticeOnce('quota-compacted', '本地会话记录过大，已自动压缩旧任务记录后继续。');
       } catch (retryError) {
         if (!isStorageQuotaError(retryError)) {
           throw retryError;
         }
-        appendPlainLog('本地会话记录仍超出 Chrome 配额；当前页面会继续使用新的设置，但刷新后可能不会保留。');
+        appendStorageNoticeOnce('quota-still-too-large', '本地会话记录仍超出 Chrome 配额；当前页面会继续使用新的设置，但刷新后可能不会保留。');
       }
     }
+  }
+
+  function appendStorageNoticeOnce(key, text) {
+    if (storageNoticeKeys.has(key)) {
+      return;
+    }
+    storageNoticeKeys.add(key);
+    if (currentRunView) {
+      appendRunEvent({
+        kind: 'checkpoint',
+        title: text,
+        status: 'completed'
+      });
+      return;
+    }
+    appendPlainLog(text);
   }
 
   function saveStateSoon() {
@@ -3672,9 +3719,20 @@
     if (!log) {
       return;
     }
+    const value = String(text || '');
+    const last = log.lastElementChild;
+    if (last?.classList?.contains('log-line') && last.dataset.baseText === value) {
+      const repeatCount = Number(last.dataset.repeatCount || '1') + 1;
+      last.dataset.repeatCount = String(repeatCount);
+      last.textContent = `${value}（${repeatCount} 次）`;
+      scrollLogToBottom();
+      return;
+    }
     const item = document.createElement('div');
     item.className = 'log-line';
-    item.textContent = text;
+    item.dataset.baseText = value;
+    item.dataset.repeatCount = '1';
+    item.textContent = value;
     log.append(item);
     scrollLogToBottom();
   }

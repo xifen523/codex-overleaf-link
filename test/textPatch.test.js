@@ -52,3 +52,25 @@ test('keeps distant line edits as separate local patches', () => {
     { from: 53, to: 56, expected: 'old', insert: 'new' }
   ]);
 });
+
+test('keeps distant edits in long LaTeX files as separate patches', () => {
+  const oldLines = Array.from({ length: 1205 }, (_, index) => `line ${index}\n`);
+  const newLines = oldLines.slice();
+  newLines[12] = 'line 12 with local proof fix\n';
+  newLines[1110] = 'line 1110 with local reference fix\n';
+  const oldText = oldLines.join('');
+  const newText = newLines.join('');
+
+  const patches = computeTextPatches(oldText, newText);
+
+  assert.equal(patches.length, 2);
+  assert.equal(applyPatches(oldText, patches), newText);
+  assert.ok(patches.every(patch => patch.to - patch.from < 80));
+});
+
+function applyPatches(text, patches) {
+  return patches.slice().sort((left, right) => right.from - left.from).reduce((next, patch) => {
+    assert.equal(next.slice(patch.from, patch.to), patch.expected);
+    return next.slice(0, patch.from) + patch.insert + next.slice(patch.to);
+  }, text);
+}

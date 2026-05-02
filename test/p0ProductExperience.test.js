@@ -120,6 +120,18 @@ test('successful Overleaf writeback refreshes page snapshot cache and native mir
   assert.match(contentScript, /method:\s*'mirror\.sync'/);
 });
 
+test('post-write mirror refresh refuses partial snapshots before touching native baseline', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const refreshBody = contentScript.match(/async function refreshProjectMirrorAfterWriteback[\s\S]*?\n  function mergeVerifiedAppliedFiles/)?.[0] || '';
+
+  assert.match(refreshBody, /capabilities\?\.fullProjectSnapshot/);
+  assert.match(refreshBody, /没有读到完整项目/);
+  assert.match(refreshBody, /return;\s*\}\s*\n\s*const syncedProject/);
+});
+
 test('idle background sync does not poll or touch the Overleaf editor', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -238,6 +250,29 @@ test('completed runs collapse processing history behind a processed summary', ()
   assert.match(contentScript, /已处理/);
   assert.match(contentScript, /runProcess\.open = false/);
   assert.match(css, /\.run-process summary/);
+});
+
+test('context compaction appears as a lightweight checkpoint inside processed history', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const agentTranscript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/agentTranscript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+
+  assert.match(agentTranscript, /上下文已压缩，Codex 继续处理/);
+  assert.match(agentTranscript, /kind:\s*'checkpoint'/);
+  assert.match(contentScript, /row\.dataset\.kind = event\.kind \|\| 'activity'/);
+  assert.match(contentScript, /collapseRunProcess\(currentRunView/);
+  assert.match(css, /\.run-activity\[data-kind="checkpoint"\]/);
+  assert.match(css, /\.run-activity\[data-kind="checkpoint"\]\s+\.run-activity-title::before/);
+  assert.doesNotMatch(agentTranscript, /技术详情[^']*上下文已压缩/);
 });
 
 test('run log autoscroll follows realtime output unless the user scrolls upward', () => {
@@ -445,6 +480,19 @@ test('completion report is structured around user outcomes rather than a one-lin
   assert.doesNotMatch(contentScript, /nextStep: response\.error\.message/);
   assert.doesNotMatch(contentScript, /本地 Codex 返回错误/);
   assert.doesNotMatch(contentScript, /Summary:/);
+});
+
+test('writeback completion report keeps Codex final summary as the conclusion', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
+  const writebackReportBlock = applyBody.match(/const summaryLine = appendChangeSummary[\s\S]*?appendCompletionReport\(\{[\s\S]*?\n    \}\);/)?.[0] || '';
+
+  assert.match(applyBody, /const assistantMessage = cleanFinalAnswer/);
+  assert.match(writebackReportBlock, /assistantMessage/);
+  assert.doesNotMatch(writebackReportBlock, /conclusion:\s*applied\.skipped\?\.length\s*\?[\s\S]*:\s*'本地 Codex 改动已同步回 Overleaf。'/);
 });
 
 test('completion report renderer turns inline numbered findings into readable ordered lists', () => {

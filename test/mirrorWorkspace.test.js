@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  collectMirrorChangesDetailed,
   collectMirrorChanges,
   getProjectMirror,
   syncOverleafToMirror
@@ -161,6 +162,63 @@ test('removes and ignores unmanaged LaTeX build artifacts in the local mirror', 
     assert.equal(fs.existsSync(path.join(mirror.workspacePath, 'main.aux')), false);
     assert.equal(fs.existsSync(path.join(mirror.workspacePath, 'main.log')), false);
     assert.equal(fs.existsSync(path.join(mirror.workspacePath, 'new.tex')), false);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('reports local files that cannot be synchronized back to Overleaf', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-unsupported-local-files',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: '\\documentclass{article}\n' }
+        ]
+      }
+    });
+
+    fs.writeFileSync(path.join(mirror.workspacePath, 'diagram.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    fs.writeFileSync(path.join(mirror.workspacePath, 'main.pdf'), '%PDF-1.7 generated', 'utf8');
+
+    const result = await collectMirrorChangesDetailed({ projectId: 'project-unsupported-local-files', rootDir });
+
+    assert.deepEqual(result.changes, []);
+    assert.deepEqual(result.unsupportedChanges.map(change => [change.path, change.reason]), [
+      ['diagram.png', 'unsupported_non_text_file'],
+      ['main.pdf', 'generated_artifact']
+    ]);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('skips oversized binary assets instead of mirroring them into the local workspace', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const oversized = Buffer.alloc(11 * 1024 * 1024, 1);
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-large-assets',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: '\\includegraphics{Figures/huge.png}' },
+          {
+            path: 'Figures/huge.png',
+            kind: 'binary',
+            size: oversized.length,
+            contentBase64: oversized.toString('base64')
+          }
+        ]
+      }
+    });
+
+    assert.equal(fs.existsSync(path.join(mirror.workspacePath, 'Figures/huge.png')), false);
+    assert.equal(mirror.fileCount, 1);
+    assert.equal(mirror.skippedFiles[0].path, 'Figures/huge.png');
+    assert.equal(mirror.skippedFiles[0].reason, 'binary_file_too_large');
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

@@ -131,3 +131,22 @@ test('panel persistence is compacted before writing to chrome storage quota', ()
   assert.match(contentScript, /saveState\(\)\.catch/);
   assert.match(contentScript, /本地会话记录过大，已自动压缩旧任务记录后继续/);
 });
+
+test('storage quota compaction notice is not appended repeatedly during autosave', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const saveStateBody = contentScript.match(/async function saveState\(\) \{[\s\S]*?\n  function saveStateSoon/)?.[0] || '';
+  const appendStorageNoticeBody = contentScript.match(/function appendStorageNoticeOnce\(key, text\) \{[\s\S]*?\n  function saveStateSoon/)?.[0] || '';
+  const appendPlainLogBody = contentScript.match(/function appendPlainLog\(text\) \{[\s\S]*?\n  function updateProbeNotice/)?.[0] || '';
+
+  assert.match(contentScript, /storageNoticeKeys = new Set\(\)/);
+  assert.match(contentScript, /function appendStorageNoticeOnce\(/);
+  assert.match(saveStateBody, /appendStorageNoticeOnce\('quota-compacted'/);
+  assert.match(appendStorageNoticeBody, /if \(currentRunView\)/);
+  assert.match(appendStorageNoticeBody, /appendRunEvent\(\{[\s\S]*kind:\s*'checkpoint'/);
+  assert.match(appendPlainLogBody, /lastElementChild/);
+  assert.match(appendPlainLogBody, /dataset\.repeatCount/);
+  assert.doesNotMatch(saveStateBody, /appendPlainLog\('本地会话记录过大，已自动压缩旧任务记录后继续。'\)/);
+});

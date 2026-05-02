@@ -144,6 +144,27 @@ test('keeps raw reasoning text out of the visible transcript', () => {
   assert.doesNotMatch(activity.title || '', /private chain-of-thought/);
 });
 
+test('maps Codex context compaction to a lightweight visible checkpoint', () => {
+  const activity = mapAgentEventToActivity({
+    type: 'codex.session.event',
+    title: 'context/compacted',
+    status: 'completed',
+    detail: {
+      method: 'context/compacted',
+      params: {
+        beforeTokens: 241000,
+        afterTokens: 82000
+      }
+    }
+  });
+
+  assert.equal(activity.kind, 'checkpoint');
+  assert.equal(activity.visible, true);
+  assert.equal(activity.status, 'completed');
+  assert.equal(activity.title, '上下文已压缩，Codex 继续处理。');
+  assert.doesNotMatch(activity.title, /token|schema|JSON|技术详情/i);
+});
+
 test('maps assistant message deltas to one updatable stream', () => {
   const first = mapAgentEventToActivity({
     type: 'codex.session.event',

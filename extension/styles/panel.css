@@ -389,6 +389,33 @@
   background: #f48771;
 }
 
+#codex-overleaf-panel .run-activity[data-kind="checkpoint"] {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 18px;
+  margin: 5px 0;
+  color: #8f8f8f;
+}
+
+#codex-overleaf-panel .run-activity[data-kind="checkpoint"] .run-activity-dot {
+  display: none;
+}
+
+#codex-overleaf-panel .run-activity[data-kind="checkpoint"] .run-activity-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #8f8f8f;
+  font-size: 11px;
+}
+
+#codex-overleaf-panel .run-activity[data-kind="checkpoint"] .run-activity-title::before,
+#codex-overleaf-panel .run-activity[data-kind="checkpoint"] .run-activity-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #333333;
+}
+
 #codex-overleaf-panel .run-activity-title {
   min-width: 0;
   overflow: hidden;

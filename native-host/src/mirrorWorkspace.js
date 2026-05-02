@@ -6,6 +6,7 @@ const path = require('node:path');
 
 const DEFAULT_ROOT = path.join(process.env.HOME || process.cwd(), '.codex-overleaf', 'projects');
 const BASELINE_FILE = 'baseline.json';
+const MAX_BINARY_FILE_BYTES = 10 * 1024 * 1024;
 
 function getProjectMirror(projectId, options = {}) {
   const rootDir = path.resolve(options.rootDir || DEFAULT_ROOT);
@@ -22,7 +23,9 @@ function getProjectMirror(projectId, options = {}) {
 
 async function syncOverleafToMirror({ projectId, project, rootDir }) {
   const mirror = getProjectMirror(projectId, { rootDir });
-  const files = normalizeProjectFiles(project?.files || []);
+  const normalized = normalizeProjectFilesDetailed(project?.files || []);
+  const files = normalized.files;
+  const skippedFiles = normalized.skippedFiles;
   const nextPaths = new Set(files.map(file => file.path));
   const previous = readBaseline(mirror.baselinePath);
 
@@ -63,23 +66,42 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
   return {
     ...mirror,
     fileCount: files.length,
-    writtenCount
+    writtenCount,
+    skippedFiles
   };
 }
 
 async function collectMirrorChanges({ projectId, rootDir }) {
+  return (await collectMirrorChangesDetailed({ projectId, rootDir })).changes;
+}
+
+async function collectMirrorChangesDetailed({ projectId, rootDir }) {
   const mirror = getProjectMirror(projectId, { rootDir });
   const baseline = readBaseline(mirror.baselinePath);
   const baselineByPath = new Map((baseline.files || []).map(file => [file.path, file]));
   const currentPaths = listWorkspaceFiles(mirror.workspacePath);
   const currentByPath = new Map();
+  const unsupportedChanges = [];
 
   for (const filePath of currentPaths) {
     const previous = baselineByPath.get(filePath);
     if (previous?.kind === 'binary') {
       continue;
     }
-    if (!previous && (isGeneratedArtifactPath(filePath) || !isTextMirrorPath(filePath))) {
+    if (!previous && isGeneratedArtifactPath(filePath)) {
+      unsupportedChanges.push({
+        type: 'unsupported-local-file',
+        path: filePath,
+        reason: 'generated_artifact'
+      });
+      continue;
+    }
+    if (!previous && !isTextMirrorPath(filePath)) {
+      unsupportedChanges.push({
+        type: 'unsupported-local-file',
+        path: filePath,
+        reason: 'unsupported_non_text_file'
+      });
       continue;
     }
     const content = fs.readFileSync(resolveWorkspacePath(mirror.workspacePath, filePath), 'utf8');
@@ -112,13 +134,31 @@ async function collectMirrorChanges({ projectId, rootDir }) {
     }
   }
 
-  return changes.sort(compareSyncChanges);
+  return {
+    changes: changes.sort(compareSyncChanges),
+    unsupportedChanges: unsupportedChanges.sort((left, right) => left.path.localeCompare(right.path))
+  };
 }
 
 function normalizeProjectFiles(files) {
-  return files
-    .map(file => normalizeProjectFile(file))
-    .filter(Boolean);
+  return normalizeProjectFilesDetailed(files).files;
+}
+
+function normalizeProjectFilesDetailed(files) {
+  const normalized = [];
+  const skippedFiles = [];
+  for (const file of files) {
+    const result = normalizeProjectFile(file);
+    if (result?.file) {
+      normalized.push(result.file);
+    } else if (result?.skipped) {
+      skippedFiles.push(result.skipped);
+    }
+  }
+  return {
+    files: normalized,
+    skippedFiles
+  };
 }
 
 function normalizeProjectFile(file) {
@@ -128,20 +168,44 @@ function normalizeProjectFile(file) {
   const normalizedPath = normalizeRelativePath(file.path);
   if (typeof file.content === 'string') {
     return {
-      path: normalizedPath,
-      kind: 'text',
-      content: file.content
+      file: {
+        path: normalizedPath,
+        kind: 'text',
+        content: file.content
+      }
     };
   }
   if (typeof file.contentBase64 === 'string') {
+    const size = Number.isFinite(Number(file.size)) ? Number(file.size) : estimateBase64Size(file.contentBase64);
+    if (size > MAX_BINARY_FILE_BYTES) {
+      return {
+        skipped: {
+          path: normalizedPath,
+          kind: 'binary',
+          size,
+          reason: 'binary_file_too_large'
+        }
+      };
+    }
     return {
-      path: normalizedPath,
-      kind: 'binary',
-      contentBase64: file.contentBase64,
-      size: Number.isFinite(Number(file.size)) ? Number(file.size) : undefined
+      file: {
+        path: normalizedPath,
+        kind: 'binary',
+        contentBase64: file.contentBase64,
+        size
+      }
     };
   }
   return null;
+}
+
+function estimateBase64Size(value) {
+  const clean = String(value || '').replace(/\s+/g, '');
+  if (!clean) {
+    return 0;
+  }
+  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor(clean.length * 3 / 4) - padding);
 }
 
 function writeProjectFile(target, file) {
@@ -294,6 +358,7 @@ function hashBytes(bytes) {
 }
 
 module.exports = {
+  collectMirrorChangesDetailed,
   collectMirrorChanges,
   getProjectMirror,
   syncOverleafToMirror

@@ -44,8 +44,8 @@ function computeSingleTextPatch(oldValue, newValue, offset = 0) {
 function computeLineAnchoredPatches(oldValue, newValue) {
   const oldParts = splitTextParts(oldValue);
   const newParts = splitTextParts(newValue);
-  const MAX_PARTS = 1000;
-  const MAX_PRODUCT = 1000000;
+  const MAX_PARTS = 5000;
+  const MAX_PRODUCT = 4000000;
 
   if (
     oldParts.length === 0

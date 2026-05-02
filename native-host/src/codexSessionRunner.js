@@ -1,7 +1,7 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
-const { collectMirrorChanges, syncOverleafToMirror } = require('./mirrorWorkspace');
+const { collectMirrorChangesDetailed, syncOverleafToMirror } = require('./mirrorWorkspace');
 const { computeLineDiff } = require('./diffEngine');
 const { computeTextPatches } = require('./textPatch');
 const { buildCodexHomeEnv } = require('./codexHome');
@@ -46,10 +46,12 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
   });
   throwIfAborted(signal);
 
-  const rawSyncChanges = await collectMirrorChanges({
+  const collected = await collectMirrorChangesDetailed({
     projectId,
     rootDir
   });
+  const rawSyncChanges = collected.changes || [];
+  const unsupportedChanges = collected.unsupportedChanges || [];
   throwIfAborted(signal);
 
   const syncChanges = rawSyncChanges.map(change => {
@@ -65,7 +67,9 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
 
   emitCodexEvent(emit, 'overleaf.sync.changes', 'Local Codex changes collected for Overleaf sync', {
     changedCount: syncChanges.length,
-    files: syncChanges.map(change => change.path)
+    files: syncChanges.map(change => change.path),
+    unsupportedCount: unsupportedChanges.length,
+    unsupportedFiles: unsupportedChanges.map(change => change.path)
   }, 'completed');
 
   return {
@@ -73,7 +77,8 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     projectId: mirror.projectKey,
     workspacePath: mirror.workspacePath,
     assistantMessage: cleanAssistantMessage(runnerResult?.assistantMessage),
-    syncChanges
+    syncChanges,
+    unsupportedChanges
   };
 }
 
@@ -336,7 +341,7 @@ function runCodexAppServerSession(input) {
         return;
       }
       if (/commandExecution\/requestApproval/.test(message.method)) {
-        response(message.id, { decision: input.mode === 'ask' ? 'decline' : 'accept' });
+        response(message.id, decideCommandApproval({ mode: input.mode, params: message.params || {} }));
         return;
       }
       response(message.id, { decision: 'decline' });
@@ -398,6 +403,129 @@ function runCodexAppServerSession(input) {
       input.signal?.removeEventListener('abort', onAbort);
     }
   });
+}
+
+function decideCommandApproval({ mode = 'auto', params = {} } = {}) {
+  if (mode === 'ask') {
+    return { decision: 'decline' };
+  }
+  return isAllowedLocalCommand(params)
+    ? { decision: 'accept' }
+    : {
+      decision: 'decline',
+      reason: 'Command is outside the Codex Overleaf local inspection/LaTeX allowlist.'
+    };
+}
+
+function isAllowedLocalCommand(params = {}) {
+  const command = extractCommandValue(params);
+  const tokens = Array.isArray(command) ? command.map(String) : tokenizeShellCommand(String(command || ''));
+  if (!tokens.length) {
+    return false;
+  }
+
+  const executable = pathBasename(tokens[0]);
+  if (['bash', 'sh', 'zsh'].includes(executable)) {
+    const inline = extractShellInlineCommand(tokens);
+    return inline ? isAllowedLocalCommand({ command: inline }) : false;
+  }
+
+  const allowed = new Set([
+    'rg', 'grep', 'cat', 'sed', 'head', 'tail', 'nl', 'find', 'ls',
+    'latexmk', 'pdflatex', 'xelatex', 'lualatex', 'bibtex', 'biber',
+    'kpsewhich', 'chktex', 'lacheck'
+  ]);
+  if (!allowed.has(executable)) {
+    return false;
+  }
+
+  return !tokens.some(isUnsafeShellToken);
+}
+
+function extractCommandValue(params = {}) {
+  if (Array.isArray(params.command) || typeof params.command === 'string') {
+    return params.command;
+  }
+  if (Array.isArray(params.cmd) || typeof params.cmd === 'string') {
+    return params.cmd;
+  }
+  if (Array.isArray(params.argv)) {
+    return params.argv;
+  }
+  if (typeof params.shellCommand === 'string') {
+    return params.shellCommand;
+  }
+  return '';
+}
+
+function extractShellInlineCommand(tokens = []) {
+  const index = tokens.findIndex(token => token === '-c' || token === '-lc' || token === '-ilc');
+  if (index < 0 || index + 1 >= tokens.length) {
+    return '';
+  }
+  return tokens[index + 1];
+}
+
+function isUnsafeShellToken(token) {
+  return ['&&', '||', ';', '|', '>', '>>', '<', '<<', '`'].includes(token)
+    || /\$\(/.test(token);
+}
+
+function pathBasename(value) {
+  return String(value || '').split(/[\\/]/).pop();
+}
+
+function tokenizeShellCommand(command) {
+  const tokens = [];
+  let current = '';
+  let quote = '';
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    if (quote) {
+      if (char === quote) {
+        quote = '';
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+    if (char === '&' && command[index + 1] === '&') {
+      if (current) tokens.push(current);
+      tokens.push('&&');
+      current = '';
+      index += 1;
+      continue;
+    }
+    if (char === '|' && command[index + 1] === '|') {
+      if (current) tokens.push(current);
+      tokens.push('||');
+      current = '';
+      index += 1;
+      continue;
+    }
+    if (';|<>`'.includes(char)) {
+      if (current) tokens.push(current);
+      tokens.push(char);
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  if (current) {
+    tokens.push(current);
+  }
+  return tokens;
 }
 
 function createOptionalTimeout(value, onTimeout) {
@@ -505,6 +633,7 @@ module.exports = {
   buildCodexSettings,
   buildThreadStartParams,
   createOptionalTimeout,
+  decideCommandApproval,
   runCodexAppServerSession,
   runCodexSession
 };
