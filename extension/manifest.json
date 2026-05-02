@@ -36,6 +36,7 @@
         "src/shared/sessionState.js",
         "src/shared/storageKeys.js",
         "src/shared/staleGuard.js",
+        "src/shared/storageDb.js",
         "src/contentScript.js"
       ],
       "css": [
