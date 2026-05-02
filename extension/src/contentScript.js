@@ -2442,6 +2442,7 @@
     await injectScriptOnce('src/shared/reviewing.js', 'codex-overleaf-reviewing-script');
     await injectScriptOnce('src/shared/projectFiles.js', 'codex-overleaf-project-files-script');
     await injectScriptOnce('src/shared/staleGuard.js', 'codex-overleaf-stale-guard-script');
+    await injectScriptOnce('src/shared/compileAdapter.js', 'codex-overleaf-compile-adapter-script');
     await injectScriptOnce('src/pageBridge.js', 'codex-overleaf-page-bridge-script');
   }
 

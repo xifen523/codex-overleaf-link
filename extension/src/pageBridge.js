@@ -5,6 +5,46 @@
     return;
   }
   window.__codexOverleafPageBridgeInstalled = true;
+
+  // Intercept compile requests to capture the template
+  (function interceptCompileRequests() {
+    const originalFetch = window.fetch;
+    window.fetch = async function (...args) {
+      const [resource, init] = args;
+      const url = typeof resource === 'string' ? resource : (resource?.url || '');
+      const method = (init?.method || 'GET').toUpperCase();
+
+      if (/\/project\/[^/]+\/compile\b/.test(url) && method === 'POST') {
+        compileState.capturedRequestTemplate = {
+          url,
+          method: 'POST',
+          headers: init?.headers ? (
+            init.headers instanceof Headers
+              ? Object.fromEntries(init.headers.entries())
+              : { ...init.headers }
+          ) : {},
+          body: init?.body || null
+        };
+      }
+
+      const response = await originalFetch.apply(this, args);
+
+      if (/\/project\/[^/]+\/compile\b/.test(url) && response.ok) {
+        try {
+          const clone = response.clone();
+          const json = await clone.json();
+          const CompileAdapter = window.CodexOverleafCompileAdapter;
+          if (CompileAdapter) {
+            compileState.lastCompileResponse = CompileAdapter.parseCompileResponse(json);
+            compileState.lastCompileAt = Date.now();
+          }
+        } catch (_e) { /* ignore parse errors */ }
+      }
+
+      return response;
+    };
+  })();
+
   const SNAPSHOT_DEFAULT_MAX_AGE_MS = 2500;
   const SNAPSHOT_MAX_CACHE_MS = 15000;
   const FILE_LIST_DEFAULT_MAX_AGE_MS = 300000;
@@ -22,6 +62,12 @@
     capturedAt: 0,
     value: null,
     pending: null
+  };
+  const compileState = {
+    capturedRequestTemplate: null,
+    lastCompileResponse: null,
+    lastCompileAt: 0,
+    lastKnownSourceEditTimestamp: 0
   };
 
   window.addEventListener('message', async event => {
@@ -71,6 +117,18 @@
       return applyOperations(params.operations || [], {
         baseFiles: params.baseFiles || null
       });
+    }
+    if (method === 'triggerCompile') {
+      return triggerCompile(params);
+    }
+    if (method === 'getCompileLog') {
+      return getCompileLog(params);
+    }
+    if (method === 'getCompileState') {
+      return getCompileState();
+    }
+    if (method === 'waitForSaveState') {
+      return waitForSaveState(params);
     }
     return {
       ok: false,
@@ -234,6 +292,138 @@
 
   function delay(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function triggerCompile(params = {}) {
+    const template = compileState.capturedRequestTemplate;
+    if (!template) {
+      return { ok: false, reason: 'No compile request template captured yet. Compile once manually in Overleaf first.' };
+    }
+
+    const saveResult = await waitForSaveState({ deadlineMs: params.waitForSaveMs || 5000 });
+
+    try {
+      const response = await window.fetch(template.url, {
+        method: template.method,
+        headers: template.headers,
+        body: template.body,
+        credentials: 'same-origin'
+      });
+      if (!response.ok) {
+        return { ok: false, reason: `Compile request failed with status ${response.status}` };
+      }
+      const json = await response.json();
+      const CompileAdapter = window.CodexOverleafCompileAdapter;
+      const parsed = CompileAdapter
+        ? CompileAdapter.parseCompileResponse(json)
+        : { ok: false, reason: 'CompileAdapter not available' };
+      compileState.lastCompileResponse = parsed;
+      compileState.lastCompileAt = Date.now();
+      return {
+        ok: true,
+        compile: parsed,
+        saveStateVerified: saveResult.ok
+      };
+    } catch (error) {
+      return { ok: false, reason: `Compile request error: ${error.message}` };
+    }
+  }
+
+  async function getCompileLog(params = {}) {
+    const CompileAdapter = window.CodexOverleafCompileAdapter;
+    if (!CompileAdapter) {
+      return { ok: false, reason: 'CompileAdapter not loaded' };
+    }
+
+    const maxAgeMs = params.maxAgeMs || 30000;
+    const needsFreshCompile = !compileState.lastCompileResponse?.ok
+      || (Date.now() - compileState.lastCompileAt > maxAgeMs);
+
+    if (needsFreshCompile && params.triggerIfStale !== false) {
+      const compileResult = await triggerCompile({ waitForSaveMs: params.waitForSaveMs || 5000 });
+      if (!compileResult.ok) {
+        return { ok: false, reason: `Could not get fresh compile: ${compileResult.reason}` };
+      }
+    }
+
+    const compiled = compileState.lastCompileResponse;
+    if (!compiled?.ok || !compiled.logUrl) {
+      return { ok: false, reason: 'No compile log URL available' };
+    }
+
+    try {
+      const logUrl = compiled.logUrl.startsWith('/')
+        ? `${window.location.origin}${compiled.logUrl}`
+        : compiled.logUrl;
+      const response = await window.fetch(logUrl, { credentials: 'same-origin' });
+      if (!response.ok) {
+        return { ok: false, reason: `Failed to fetch compile log: ${response.status}` };
+      }
+      const logContent = await response.text();
+      const truncated = CompileAdapter.truncateLogForContext(logContent);
+      const parsed = CompileAdapter.parseLogErrors(logContent);
+      return {
+        ok: true,
+        log: truncated,
+        errors: parsed.errors,
+        warnings: parsed.warnings,
+        compiledAt: compileState.lastCompileAt,
+        fresh: CompileAdapter.isCompileLogFresh(
+          { sourceChangeTimestamp: compileState.lastCompileAt },
+          compileState.lastKnownSourceEditTimestamp
+        )
+      };
+    } catch (error) {
+      return { ok: false, reason: `Log fetch error: ${error.message}` };
+    }
+  }
+
+  async function waitForSaveState(params = {}) {
+    const deadlineMs = params.deadlineMs || 5000;
+    const deadline = Date.now() + deadlineMs;
+    const pollInterval = 100;
+
+    while (Date.now() < deadline) {
+      if (isOverleafSaved()) {
+        return { ok: true };
+      }
+      await delay(pollInterval);
+    }
+    return { ok: false, reason: 'Timed out waiting for Overleaf save state' };
+  }
+
+  function isOverleafSaved() {
+    const selectors = [
+      '.toolbar-header [class*="save" i]',
+      '[class*="saving-status" i]',
+      '[class*="save-status" i]',
+      '[data-testid*="save" i]',
+      '[aria-label*="save" i]'
+    ];
+    for (const selector of selectors) {
+      const elements = document.querySelectorAll(selector);
+      for (const el of elements) {
+        const text = (el.textContent || el.innerText || '').trim().toLowerCase();
+        if (/saving|compiling|syncing|未保存/i.test(text)) {
+          return false;
+        }
+        if (/all changes saved|saved|已保存/i.test(text)) {
+          return true;
+        }
+      }
+    }
+    // If no save indicator found at all, assume saved (Overleaf hides it when saved)
+    return true;
+  }
+
+  function getCompileState() {
+    return {
+      ok: true,
+      hasCapturedTemplate: Boolean(compileState.capturedRequestTemplate),
+      lastCompileAt: compileState.lastCompileAt,
+      lastCompileOk: compileState.lastCompileResponse?.ok || false,
+      lastKnownSourceEditTimestamp: compileState.lastKnownSourceEditTimestamp
+    };
   }
 
   async function getProjectSnapshot(params = {}) {
@@ -782,6 +972,10 @@
           }
         });
       }
+    }
+
+    if (applied.length > 0) {
+      compileState.lastKnownSourceEditTimestamp = Date.now();
     }
 
     return {
