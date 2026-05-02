@@ -121,7 +121,8 @@
         ? session.reasoningEffort
         : fallbackState.reasoningEffort,
       requireReviewing: session.requireReviewing !== false,
-      focusFiles: normalizeFocusFiles(session.focusFiles)
+      focusFiles: normalizeFocusFiles(session.focusFiles),
+      codexThreadId: typeof session.codexThreadId === 'string' ? session.codexThreadId : ''
     };
   }
 
@@ -149,7 +150,8 @@
     state.session = {
       id: active.id,
       history: Array.isArray(active.history) ? active.history.slice(-10) : [],
-      focusFiles: normalizeFocusFiles(active.focusFiles)
+      focusFiles: normalizeFocusFiles(active.focusFiles),
+      codexThreadId: active.codexThreadId || ''
     };
     state.runs = Array.isArray(active.runs) ? active.runs : [];
     state.task = typeof active.task === 'string' ? active.task : '';
@@ -179,7 +181,8 @@
         ? overrides.reasoningEffort
         : DEFAULT_PANEL_STATE.reasoningEffort,
       requireReviewing: overrides.requireReviewing !== false,
-      focusFiles: normalizeFocusFiles(overrides.focusFiles)
+      focusFiles: normalizeFocusFiles(overrides.focusFiles),
+      codexThreadId: typeof overrides.codexThreadId === 'string' ? overrides.codexThreadId : ''
     };
   }
 

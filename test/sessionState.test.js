@@ -368,3 +368,27 @@ test('aggressive storage preparation preserves the active session essentials und
   assert.ok(activeStoredSession.runs.length <= 3);
   assert.ok(activeStoredSession.runs.every(run => run.events.length <= 20));
 });
+
+test('normalizeSession preserves codexThreadId', () => {
+  const state = normalizePanelState({
+    sessions: [{ id: 'sess1', codexThreadId: 'thread_abc', title: 'test' }],
+    activeSessionId: 'sess1'
+  });
+  const session = state.sessions[0];
+  assert.strictEqual(session.codexThreadId, 'thread_abc');
+});
+
+test('updateActiveSession can set codexThreadId', () => {
+  let state = normalizePanelState({
+    sessions: [{ id: 'sess1', title: 'test' }],
+    activeSessionId: 'sess1'
+  });
+  state = updateActiveSession(state, { codexThreadId: 'thread_xyz' });
+  assert.strictEqual(state.sessions[0].codexThreadId, 'thread_xyz');
+  assert.strictEqual(state.session.codexThreadId, 'thread_xyz');
+});
+
+test('createSession defaults codexThreadId to empty string', () => {
+  const session = createSession({});
+  assert.strictEqual(session.codexThreadId, '');
+});

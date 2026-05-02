@@ -815,6 +815,9 @@
         }
       }
 
+      const activeSession = getActiveSession(state);
+      const codexThreadId = activeSession?.codexThreadId || '';
+
       appendRunEvent({ title: '本地 Codex session 开始运行。', status: 'running' });
       let response = await sendNative({
         method: 'codex.run',
@@ -829,7 +832,8 @@
           focusFiles,
           model: state.model,
           reasoningEffort: state.reasoningEffort,
-          session: state.session
+          session: state.session,
+          threadId: codexThreadId || undefined
         }
       });
 
@@ -847,9 +851,47 @@
             focusFiles,
             model: state.model,
             reasoningEffort: state.reasoningEffort,
-            session: state.session
+            session: state.session,
+            threadId: codexThreadId || undefined
           }
         });
+      }
+
+      if (!response.ok && response.error?.code === 'thread_resume_failed') {
+        const userChoice = await showThreadResumeFailedPrompt();
+        if (userChoice === 'new') {
+          state = updateActiveSession(state, { codexThreadId: '' });
+          const StorageDb = window.CodexOverleafStorageDb;
+          if (StorageDb) {
+            const record = await StorageDb.getRecord('sessions', state.activeSessionId);
+            if (record) {
+              record.codexThreadId = '';
+              await StorageDb.putRecord('sessions', record);
+            }
+          }
+          appendRunEvent({ title: '正在新建 Codex 会话线程。', status: 'running' });
+          response = await sendNative({
+            method: 'codex.run',
+            params: {
+              projectId: getCurrentProjectId(),
+              mode: state.mode,
+              task,
+              project: useExistingMirror ? undefined : project,
+              useExistingMirror: useExistingMirror || undefined,
+              fileOverlays: useExistingMirror ? fileOverlays : undefined,
+              expectedMirrorFreshness: useExistingMirror ? 15000 : undefined,
+              focusFiles,
+              model: state.model,
+              reasoningEffort: state.reasoningEffort,
+              session: state.session,
+              threadId: undefined
+            }
+          });
+        } else {
+          appendRunEvent({ title: '已取消：用户选择不新建线程。', status: 'rejected' });
+          finishRunView('已取消', 'rejected');
+          return;
+        }
       }
 
       if (!response.ok) {
@@ -891,8 +933,8 @@
       });
       finishRunView(syncOutcome.hasSkippedOperations ? '同步完成但有跳过项' : '同步完成', syncOutcome.hasSkippedOperations ? 'failed' : 'completed');
       try {
-        const activeSession = getActiveSession(state);
-        const updatedSession = recordSessionResult(activeSession, {
+        const activeSessionForHistory = getActiveSession(state);
+        const updatedSession = recordSessionResult(activeSessionForHistory, {
           task,
           result: buildSessionHistoryResult({
             assistantMessage,
@@ -903,6 +945,21 @@
         state = updateActiveSession(state, {
           history: updatedSession.history
         });
+
+        const returnedThreadId = response.result?.threadId || '';
+        if (returnedThreadId && returnedThreadId !== codexThreadId) {
+          state = updateActiveSession(state, { codexThreadId: returnedThreadId });
+          const StorageDb = window.CodexOverleafStorageDb;
+          if (StorageDb) {
+            const record = await StorageDb.getRecord('sessions', state.activeSessionId);
+            if (record) {
+              record.codexThreadId = returnedThreadId;
+              record.updatedAt = new Date().toISOString();
+              await StorageDb.putRecord('sessions', record);
+            }
+          }
+        }
+
         await saveState();
         applyStateToPanel();
       } catch (persistenceError) {
@@ -1043,6 +1100,17 @@
 
   function isRunCancellationError(error = {}) {
     return error.code === 'codex_cancelled' || /cancelled by the user|was cancelled/i.test(error.message || '');
+  }
+
+  function showThreadResumeFailedPrompt() {
+    return new Promise(resolve => {
+      const confirmed = window.confirm(
+        '无法恢复上一轮 Codex 会话。是否新建？\n\n' +
+        '点击"确定"新建一个 Codex 线程继续任务。\n' +
+        '点击"取消"放弃本次运行。'
+      );
+      resolve(confirmed ? 'new' : 'cancel');
+    });
   }
 
   function appendRunCancelledReport() {
