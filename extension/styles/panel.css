@@ -679,7 +679,7 @@
 
 #codex-overleaf-panel .codex-composer-toolbar {
   display: grid;
-  grid-template-columns: 26px 42px minmax(0, 1fr) minmax(54px, 66px) 28px;
+  grid-template-columns: 26px 42px auto minmax(0, 1fr) minmax(54px, 66px) 28px;
   align-items: center;
   gap: 4px;
   padding: 4px 6px 6px;
@@ -732,6 +732,24 @@
   outline-offset: 2px;
 }
 
+#codex-overleaf-panel .codex-recompile-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #a0a0a0;
+}
+
+#codex-overleaf-panel .codex-recompile-toggle input[type="checkbox"] {
+  margin: 0;
+  cursor: pointer;
+}
+
+#codex-overleaf-panel .codex-recompile-label {
+  white-space: nowrap;
+}
+
 #codex-overleaf-panel .codex-composer-toolbar select {
   width: 100%;
   min-width: 0;
@@ -749,7 +767,7 @@
 
 #codex-overleaf-panel .codex-composer-toolbar [data-run] {
   position: relative;
-  grid-column: 5;
+  grid-column: 6;
   width: 28px;
   min-width: 28px;
   padding: 0;

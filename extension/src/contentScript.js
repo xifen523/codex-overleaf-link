@@ -134,6 +134,10 @@
               <input type="checkbox" data-require-reviewing>
               <span class="codex-review-label">留痕</span>
             </label>
+            <label class="codex-recompile-toggle" title="写入 .tex/.bib/.sty/.cls 后自动触发编译验证">
+              <input type="checkbox" data-auto-recompile>
+              <span class="codex-recompile-label">自动编译</span>
+            </label>
             <select data-model aria-label="Model">
               <option value="gpt-5.5">GPT-5.5</option>
               <option value="gpt-5.4">GPT-5.4</option>
@@ -203,7 +207,7 @@
         });
       }
 
-      for (const selector of ['[data-model]', '[data-reasoning]', '[data-mode]', '[data-task]', '[data-require-reviewing]']) {
+      for (const selector of ['[data-model]', '[data-reasoning]', '[data-mode]', '[data-task]', '[data-require-reviewing]', '[data-auto-recompile]']) {
         panel.querySelector(selector).addEventListener('change', persistPanelInputs);
         panel.querySelector(selector).addEventListener('input', persistPanelInputs);
       }
@@ -818,6 +822,18 @@
       const activeSession = getActiveSession(state);
       const codexThreadId = activeSession?.codexThreadId || '';
 
+      // Resolve @compile-log if mentioned in task
+      let compileLogContext = null;
+      if (/\b@compile-log\b/i.test(task)) {
+        appendRunEvent({ title: '正在获取编译日志 (@compile-log)。', status: 'running' });
+        compileLogContext = await resolveCompileLogContext();
+        if (compileLogContext.available) {
+          appendRunEvent({ title: `编译日志已获取（${(compileLogContext.errors || []).length} 个错误，${(compileLogContext.warnings || []).length} 个警告）。`, status: 'completed' });
+        } else {
+          appendRunEvent({ title: `编译日志不可用：${compileLogContext.reason}`, status: 'failed' });
+        }
+      }
+
       appendRunEvent({ title: '本地 Codex session 开始运行。', status: 'running' });
       let response = await sendNative({
         method: 'codex.run',
@@ -833,7 +849,9 @@
           model: state.model,
           reasoningEffort: state.reasoningEffort,
           session: state.session,
-          threadId: codexThreadId || undefined
+          threadId: codexThreadId || undefined,
+          compileLog: compileLogContext?.available ? compileLogContext.log : undefined,
+          compileErrors: compileLogContext?.available ? compileLogContext.errors : undefined
         }
       });
 
@@ -931,6 +949,17 @@
         assistantMessage,
         unsupportedChanges: response.result.unsupportedChanges || []
       });
+
+      // Auto-recompile if compilable files were written
+      const writtenPaths = (response.result.syncChanges || [])
+        .filter(change => change.type === 'write')
+        .map(change => change.path);
+      if (writtenPaths.length) {
+        await autoRecompileAfterWriteback(writtenPaths).catch(error => {
+          appendRunEvent({ title: `自动编译出错：${error.message}`, status: 'failed' });
+        });
+      }
+
       finishRunView(syncOutcome.hasSkippedOperations ? '同步完成但有跳过项' : '同步完成', syncOutcome.hasSkippedOperations ? 'failed' : 'completed');
       try {
         const activeSessionForHistory = getActiveSession(state);
@@ -1525,6 +1554,61 @@
       .join('、');
     const suffix = changes.length > 5 ? ` 等 ${changes.length} 个文件` : `${changes.length} 个文件`;
     return `Codex 在本地生成了不会同步回 Overleaf 的资源或编译产物：${files || suffix}。`;
+  }
+
+  async function autoRecompileAfterWriteback(writtenPaths = []) {
+    if (state.autoRecompile === false) return;
+    if (state.mode === 'ask') return;
+
+    const CompileAdapter = window.CodexOverleafCompileAdapter;
+    if (!CompileAdapter) return;
+
+    const hasCompilableFile = writtenPaths.some(filePath => CompileAdapter.isCompilableFile(filePath));
+    if (!hasCompilableFile) return;
+
+    appendRunEvent({ title: '正在自动编译（写入了 .tex/.bib/.sty/.cls 文件）。', status: 'running' });
+
+    try {
+      const result = await callPageBridge('triggerCompile', { waitForSaveMs: 5000 });
+      if (result?.ok) {
+        const compile = result.compile;
+        if (compile?.status === 'success') {
+          appendRunEvent({ title: '编译成功。', status: 'completed' });
+        } else {
+          appendRunEvent({ title: `编译完成，状态：${compile?.status || '未知'}`, status: 'completed' });
+        }
+      } else {
+        appendRunEvent({ title: `自动编译未成功：${result?.reason || '未知原因'}`, status: 'failed' });
+      }
+    } catch (error) {
+      appendRunEvent({ title: `自动编译出错：${error.message}`, status: 'failed' });
+    }
+  }
+
+  async function resolveCompileLogContext() {
+    try {
+      const result = await callPageBridge('getCompileLog', {
+        triggerIfStale: true,
+        maxAgeMs: 30000,
+        waitForSaveMs: 5000
+      });
+
+      if (!result?.ok) {
+        return { type: 'compile-log', available: false, reason: result?.reason || 'Could not get compile log' };
+      }
+
+      return {
+        type: 'compile-log',
+        available: true,
+        log: result.log,
+        errors: result.errors || [],
+        warnings: result.warnings || [],
+        compiledAt: result.compiledAt,
+        fresh: result.fresh
+      };
+    } catch (error) {
+      return { type: 'compile-log', available: false, reason: error.message };
+    }
   }
 
   function buildSyncApplyOperations(syncChanges = [], project = {}) {
@@ -2637,6 +2721,7 @@
       task: panel.querySelector('[data-task]').value,
       requireReviewing: panel.querySelector('[data-require-reviewing]').checked
     });
+    state.autoRecompile = panel.querySelector('[data-auto-recompile]')?.checked !== false;
   }
 
   function clearTaskComposer() {
@@ -2654,6 +2739,10 @@
     panel.querySelector('[data-mode]').value = state.mode;
     panel.querySelector('[data-task]').value = state.task;
     panel.querySelector('[data-require-reviewing]').checked = state.requireReviewing;
+    const recompileCheckbox = panel?.querySelector('[data-auto-recompile]');
+    if (recompileCheckbox) {
+      recompileCheckbox.checked = state.autoRecompile !== false;
+    }
     syncModeControls();
     applySessionLabel();
     renderSessionList();

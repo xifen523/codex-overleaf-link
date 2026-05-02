@@ -16,7 +16,7 @@ test('composer keeps the send button in a fixed visible toolbar column', () => {
   assert.match(contentScript, /data-run title="发送" aria-label="发送"/);
   assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*display: grid/);
   assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*grid-template-columns:/);
-  assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*grid-column: 5/);
+  assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*grid-column: 6/);
   assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*width: 28px/);
   assert.match(css, /\.codex-composer-toolbar select\s*\{[\s\S]*min-width: 0/);
 });
