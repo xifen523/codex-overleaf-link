@@ -29,12 +29,11 @@ else
   git -C "$INSTALL_DIR" checkout --detach FETCH_HEAD >/dev/null
 fi
 
-installer_args=()
 if [ -n "${CODEX_OVERLEAF_EXTENSION_ID:-}" ]; then
-  installer_args+=(--extension-id "$CODEX_OVERLEAF_EXTENSION_ID")
+  node "$INSTALL_DIR/scripts/install-native-host.mjs" --extension-id "$CODEX_OVERLEAF_EXTENSION_ID" "$@"
+else
+  node "$INSTALL_DIR/scripts/install-native-host.mjs" "$@"
 fi
-
-node "$INSTALL_DIR/scripts/install-native-host.mjs" "${installer_args[@]}" "$@"
 
 echo
 echo "Codex Overleaf Link native host is installed."
