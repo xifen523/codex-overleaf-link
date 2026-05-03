@@ -1,74 +1,42 @@
 <div align="center">
-  <img src="extension/assets/icons/codex-overleaf-icon.png" width="128" alt="Codex Overleaf Link logo">
+  <img src="extension/assets/icons/codex-overleaf-icon.png" width="96" alt="Codex Overleaf Link">
   <h1>Codex Overleaf Link</h1>
-  <p><strong>Use local Codex from inside an Overleaf project.</strong></p>
+  <p><strong>Empower Overleaf with Codex.</strong></p>
   <p>
-    Chrome extension + macOS Native Messaging host that mirrors an Overleaf project to a local Codex workspace,
-    streams Codex progress back into Overleaf, and syncs accepted edits back to the browser editor.
+    <img src="https://img.shields.io/badge/version-0.1.0-blue" alt="version">
+    <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="platform">
+    <img src="https://img.shields.io/badge/chrome-MV3-green" alt="chrome manifest v3">
+    <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="node version">
+    <img src="https://img.shields.io/badge/tests-passing-success" alt="tests">
+    <img src="https://img.shields.io/badge/dependencies-0-orange" alt="zero dependencies">
+    <img src="https://img.shields.io/badge/license-MIT-blue" alt="license">
   </p>
 </div>
 
-## Overview
+---
 
-Codex Overleaf Link is a local bridge for using Codex on Overleaf projects without moving the writing workflow out of Overleaf. It adds a Codex panel to Overleaf, starts Codex locally through a native host, mirrors the current Overleaf project into `~/.codex-overleaf`, and writes accepted local changes back through the Overleaf page.
+## Why
 
-The project is designed as a glue layer. Codex still runs locally with the user's own Codex account and configuration; the extension only handles Overleaf project capture, local workspace sync, progress streaming, diff review, and browser writeback.
+Overleaf is great for collaborative LaTeX writing. Codex is great for AI-assisted editing. But switching between them breaks flow — you lose Overleaf's real-time collaboration, or you lose Codex's local intelligence.
 
-## Features
+Codex Overleaf Link bridges the two: it adds a Codex panel directly inside Overleaf, mirrors the project locally for Codex to work on, and writes accepted changes back through the browser — with stale-write guards, diff review, and undo checkpoints to reduce the risk of accidental overwrites.
 
-- Embedded Codex panel on Overleaf project pages.
-- Ask-only, suggest-edit, and auto-write task modes.
-- Model and reasoning-effort controls in the Overleaf panel.
-- Stable per-project local mirror under `~/.codex-overleaf/projects`.
-- Local Codex sessions isolated under `~/.codex-overleaf/codex-home` so plugin runs do not pollute global `~/.codex/sessions`.
-- Live Codex progress streamed into the panel.
-- Per-file diff review before or after writeback, depending on mode.
-- Overleaf Reviewing/Track Changes safety check before browser writes.
-- Stale-write guard to avoid overwriting user or collaborator changes.
-- Undo checkpoint for reversible browser writes.
-- Binary assets mirrored locally for LaTeX context while text writeback remains guarded.
-
-## Project Status
-
-Codex Overleaf Link is currently a `0.1.0` community preview for researchers and small teams who are comfortable installing an unpacked Chrome extension and a local native host. The core workflow is usable, but the project is not yet a Chrome Web Store package and should be treated as an unofficial local integration.
-
-## Requirements
-
-- macOS.
-- Google Chrome or Chromium with extension Developer Mode enabled.
-- Node.js 20 or newer.
-- Codex CLI installed and logged in on the same machine.
-- An Overleaf account and access to the target project.
-- Optional: a TeX distribution such as MacTeX if you want Codex to run `latexmk` or local compile checks.
-
-The current native host installer targets the user-level Chrome Native Messaging directory on macOS:
-
-```text
-~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.overleaf.json
-```
-
-## Quick Start
-
-Run the installer:
+## Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash
 ```
 
-The installer downloads the repository to `~/.codex-overleaf/source`, installs the macOS Native Messaging host, and opens `chrome://extensions`.
+Then load the extension in Chrome:
 
-Load the Chrome extension:
+1. Open `chrome://extensions` (the installer opens it automatically on macOS).
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and select `~/.codex-overleaf/source/extension`.
 
-1. Enable **Developer mode**.
-2. Click **Load unpacked**.
-3. Select `~/.codex-overleaf/source/extension`.
-4. Confirm that the extension id is `illdpneeeopfffmiepaejglgmhpmdhdc`.
+Open any Overleaf project — the Codex panel appears on the right.
 
-Open an Overleaf project. The Codex panel should appear on the right side of the page.
-
-### Manual Install
-
-If you prefer to keep the checkout somewhere else, clone the repository and install the native host manually:
+<details>
+<summary><strong>Manual install</strong> (if you prefer a custom location)</summary>
 
 ```bash
 git clone https://github.com/Ghqqqq/codex-overleaf-link.git
@@ -76,178 +44,206 @@ cd codex-overleaf-link
 npm run install:native
 ```
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked**.
-4. Select the repository's `extension/` directory.
-5. Confirm that the extension id is `illdpneeeopfffmiepaejglgmhpmdhdc`.
+Then load `extension/` as an unpacked extension in Chrome.
 
-## Extension ID
+</details>
 
-This repository commits a Chrome extension `key` in `extension/manifest.json`, so unpacked installs should use the stable id:
+<details>
+<summary><strong>Update</strong></summary>
 
-```text
-illdpneeeopfffmiepaejglgmhpmdhdc
-```
-
-The native host installer uses that id by default. If Chrome shows a different id, reinstall the native host with the id shown in `chrome://extensions`:
-
-```bash
-npm run install:native -- --extension-id <chrome-extension-id>
-```
-
-Then reload the extension and refresh the Overleaf project page.
-
-## How It Works
-
-```text
-Overleaf page
-  -> Chrome content script and page bridge
-  -> Chrome extension service worker
-  -> macOS Native Messaging host: com.codex.overleaf
-  -> local mirror workspace in ~/.codex-overleaf/projects/<project>/workspace
-  -> local Codex app-server
-  -> sync changes back through the Overleaf page
-```
-
-Each task follows this flow:
-
-1. The extension reads a fresh Overleaf project snapshot.
-2. The native host syncs that snapshot to a stable local mirror workspace.
-3. Codex runs locally against that workspace.
-4. The native host collects local text-file changes and attaches diffs.
-5. The browser applies accepted changes back to Overleaf with stale-write checks.
-6. The extension refreshes the local mirror baseline after successful writeback.
-
-## Local Data
-
-The extension stores local bridge data under `~/.codex-overleaf`:
-
-```text
-~/.codex-overleaf/
-  codex-home/                 # isolated Codex home for plugin runs
-  projects/                   # per-Overleaf-project local mirrors
-  native-host-runtime/         # generated native host runtime
-  codex-overleaf-bridge        # generated native host launcher
-  native-host-debug.log        # bridge debug log
-```
-
-`~/.codex-overleaf/codex-home` copies the user's Codex auth/config files and links local skills/plugins/rules, but it keeps plugin-generated Codex sessions separate from global `~/.codex/sessions`.
-
-## Privacy and Security
-
-- Codex runs locally through the user's existing Codex CLI login and account.
-- Overleaf project snapshots are mirrored to the local machine under `~/.codex-overleaf/projects`.
-- Plugin Codex history is kept under `~/.codex-overleaf/codex-home` instead of the user's global Codex session directory.
-- The extension does not send project data to a separate service operated by this repository.
-- Browser writeback is guarded by stale-content checks, Reviewing/Track Changes verification when enabled, and local undo checkpoints.
-
-Use the extension only on machines where you are comfortable storing local copies of the relevant Overleaf projects.
-
-## Updating
-
-If you used the quick installer, rerun it to update `~/.codex-overleaf/source` and reinstall the native host runtime:
+Rerun the same install command — it pulls the latest and reinstalls the native host:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash
 ```
 
-Then reload **Codex Overleaf Link** in `chrome://extensions` and refresh the Overleaf page.
+Then reload the extension in `chrome://extensions` and refresh the Overleaf page.
 
-If you installed from a manual checkout, pull the latest repository changes, reinstall the native host runtime, and reload the Chrome extension:
+</details>
 
-```bash
-git pull
-npm run install:native
-```
-
-## Uninstall
-
-Remove the generated native host registration and runtime:
+<details>
+<summary><strong>Uninstall</strong></summary>
 
 ```bash
-npm run uninstall:native
+node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs
 ```
 
-Then remove the extension from `chrome://extensions`.
+If you installed from a manual checkout, you can also run `npm run uninstall:native` inside the repo.
 
-The uninstall command does not delete project mirrors or plugin Codex history under `~/.codex-overleaf`. Remove that directory manually only if you no longer need local mirrors, undo context, or plugin history.
+Remove the extension from `chrome://extensions`. Optionally delete `~/.codex-overleaf` to remove local mirrors and plugin history.
+
+</details>
+
+## Requirements
+
+| Requirement | Notes |
+|-------------|-------|
+| macOS | Native Messaging host targets `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/` |
+| Chrome / Chromium | Developer mode enabled for unpacked extension |
+| Node.js >= 20 | Powers the native host bridge |
+| Codex CLI | Installed and logged in (`codex --version` to verify) |
+| Overleaf account | Access to the target project |
+| MacTeX *(optional)* | For `latexmk` / local compile checks |
+
+## Features
+
+- **Three task modes** — ask-only, suggest-edit (review before write), auto-write (with delete confirmation).
+- **Live progress** — Codex events stream into the panel in real time.
+- **Stale-write guard** — blocks writes if the file changed since Codex started.
+- **Diff review** — per-file diff view before accepting changes.
+- **Undo checkpoint** — one-click revert of browser writes.
+- **Track Changes integration** — optionally enables Overleaf Reviewing before writing.
+- **Auto-recompile** — triggers Overleaf recompile after writeback; logs compile errors as context.
+- **@ context** — attach specific files, `@compile-log`, or `@current-section` to the prompt.
+- **Model picker** — switch models and reasoning effort from the panel.
+- **Session history** — multi-session management with rename, resume, and delete.
+- **Isolated Codex home** — plugin sessions stay under `~/.codex-overleaf/codex-home`, not global `~/.codex/sessions`.
+
+## How It Works
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Overleaf page                                              │
+│    ↕ page bridge (injected script)                          │
+├─────────────────────────────────────────────────────────────┤
+│  Chrome content script                                      │
+│    ↕ chrome.runtime messaging                               │
+├─────────────────────────────────────────────────────────────┤
+│  Extension service worker                                   │
+│    ↕ Native Messaging (stdio)                               │
+├─────────────────────────────────────────────────────────────┤
+│  Native host (Node.js)                                      │
+│    → mirror sync: ~/.codex-overleaf/projects/<id>/workspace │
+│    → Codex CLI session                                      │
+│    ← collect diffs + patches                                │
+├─────────────────────────────────────────────────────────────┤
+│  Browser writeback (with stale-write guard + undo)          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Task lifecycle:**
+
+1. Extension captures a project snapshot from Overleaf.
+2. Native host syncs the snapshot to a local mirror workspace.
+3. Codex runs against the workspace.
+4. Native host collects text changes and computes diffs/patches.
+5. Extension applies changes back to Overleaf with freshness verification.
+6. Mirror baseline is updated after successful writeback.
+
+## Privacy and Security
+
+- The bridge runs locally and uses your existing Codex CLI account. Project content sent to Codex is handled by Codex/OpenAI under your account; this extension does not operate a separate backend or phone home to this repository.
+- Project snapshots are stored under `~/.codex-overleaf/projects` on your machine.
+- Writes are guarded by stale-content checks, optional Track Changes verification, and undo checkpoints.
+
+## Extension ID
+
+This repo ships a stable Chrome extension `key`, producing the deterministic id:
+
+```
+illdpneeeopfffmiepaejglgmhpmdhdc
+```
+
+If Chrome assigns a different id, reinstall the native host with the actual id:
+
+```bash
+cd ~/.codex-overleaf/source && npm run install:native -- --extension-id <your-chrome-extension-id>
+```
 
 ## Development
 
-Run the test suite:
-
 ```bash
-npm test
+npm test              # Node.js built-in test runner, zero dependencies
+npm run bridge        # run the native host directly for protocol work
+npm run install:native  # reinstall native host after changing native-host/src or extension/src/shared
 ```
 
-Reinstall the local native host after changing files under `native-host/src`, `extension/src/shared`, or `scripts`:
+### Project Structure
 
-```bash
-npm run install:native
 ```
-
-Run the native host directly for protocol development:
-
-```bash
-npm run bridge
+extension/
+  src/contentScript.js      # main panel UI and orchestration
+  src/background.js         # service worker (native messaging relay)
+  src/page/                 # injected page-level scripts (Overleaf editor access)
+  src/content/              # content-script-level controllers
+  src/shared/               # modules shared between content script and native host
+  styles/panel.css          # panel styles
+native-host/
+  src/index.js              # native messaging entry point
+  src/taskRunner.js         # request router
+  src/codexSessionRunner.js # Codex CLI orchestration
+  src/mirrorWorkspace.js    # project mirror + baseline management
+scripts/
+  install-native-host.mjs   # native host installer
+  codex-json-agent.mjs      # external agent adapter
+test/                       # unit + integration tests
+install.sh                  # one-command installer
 ```
-
-Continuous integration runs the same `npm test` command on GitHub Actions for pushes and pull requests.
 
 ## Known Limitations
 
-- The project currently supports macOS and Chrome/Chromium only.
-- The extension is loaded unpacked through Chrome Developer Mode.
-- It is not distributed through the Chrome Web Store.
-- It is not affiliated with or endorsed by Overleaf.
-- It does not use an official Overleaf API.
-- Project capture and browser writeback depend on Overleaf page internals, so Overleaf frontend changes can temporarily break parts of the integration.
-- The local native host is required; a Chrome extension alone cannot launch the local Codex process.
-- Windows, Linux, Firefox, and hosted/native-less modes are not supported in `0.1.0`.
-
-If Overleaf changes its editor or project tree implementation, run diagnostics from the panel and open an issue with the failing operation, browser version, and project structure.
+- macOS + Chrome only (no Windows/Linux/Firefox in 0.1.0).
+- Unpacked extension — not on the Chrome Web Store.
+- Depends on Overleaf page internals; Overleaf frontend updates may temporarily break functionality.
+- Not affiliated with or endorsed by Overleaf.
+- The native host is required — the extension alone cannot spawn Codex.
 
 ## Troubleshooting
 
-### Chrome says the native host is missing
+<details>
+<summary><strong>Native host not found</strong></summary>
 
-Run:
-
-```bash
-npm run install:native
-```
-
-If your unpacked extension id differs from the stable id in this README, pass it explicitly:
+Rerun the installer:
 
 ```bash
-npm run install:native -- --extension-id <chrome-extension-id>
+curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash
 ```
 
-### Codex is not found
-
-Confirm the Codex CLI works in a normal terminal:
+If your extension id differs from the default, pass it explicitly:
 
 ```bash
-codex --version
+cd ~/.codex-overleaf/source && npm run install:native -- --extension-id <id>
 ```
 
-The native launcher adds common macOS paths and reads the user's login-shell environment. If Codex is installed somewhere unusual, make sure the `codex` command is available from the login shell.
+</details>
 
-### `latexmk` or TeX tools are not found
+<details>
+<summary><strong>Codex CLI not found</strong></summary>
 
-Install MacTeX or another TeX distribution and confirm:
+Confirm `codex --version` works in a normal terminal. The native launcher reads the user's login-shell environment and adds common macOS paths. Make sure `codex` is on your login shell's `PATH`.
 
-```bash
-latexmk --version
-```
+</details>
 
-The native launcher includes `/Library/TeX/texbin` in `PATH`.
+<details>
+<summary><strong>latexmk / TeX tools not found</strong></summary>
 
-### Writes are blocked
+Install MacTeX and verify `latexmk --version`. The launcher includes `/Library/TeX/texbin` in `PATH`.
 
-The extension defaults to guarded write behavior. Enable Reviewing/Track Changes in Overleaf, keep the target file open long enough for Overleaf to load, and rerun the task. If the file changed after Codex started, the stale-write guard will block the write so user or collaborator edits are not overwritten.
+</details>
 
-### Old plugin sessions appear in VS Code or Codex Desktop
+<details>
+<summary><strong>Writes are blocked</strong></summary>
 
-Current versions isolate plugin sessions under `~/.codex-overleaf/codex-home`. Old development builds may have written to global `~/.codex/sessions`; those can be removed by scanning for sessions whose metadata has `originator: "codex-overleaf-link"` or whose `cwd` points into `~/.codex-overleaf/projects`.
+The stale-write guard blocks writes when the file has changed since Codex started. Enable Track Changes in Overleaf, ensure the file is loaded in the editor, and rerun the task.
+
+</details>
+
+<details>
+<summary><strong>Old sessions in global Codex history</strong></summary>
+
+Current versions isolate plugin sessions under `~/.codex-overleaf/codex-home`. Old builds may have written to `~/.codex/sessions` — remove any with `originator: "codex-overleaf-link"` or `cwd` pointing into `~/.codex-overleaf/projects`.
+
+</details>
+
+## Contributing
+
+Contributions are welcome. Please open an issue before submitting large changes so we can discuss the approach.
+
+1. Fork the repository.
+2. Create a feature branch.
+3. Run `npm test` and ensure all tests pass.
+4. Submit a pull request with a clear description.
+
+## License
+
+[MIT](LICENSE)
