@@ -377,6 +377,46 @@ test('page bridge applies undo operations with Reviewing disabled and leaves Edi
   assert.equal(result.reviewingPolicy.leftEditing, true);
 });
 
+test('page bridge applies all no-trace undo patches for one file in a single call', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingClickBehavior: 'toggle',
+    reviewingOk: true,
+    files: {
+      'main.tex': 'alpha delta theta'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha delta theta' }
+    ],
+    reviewingPolicy: 'no-trace-undo',
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 12, to: 17, expected: 'theta', insert: 'gamma' }
+        ]
+      },
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 11, expected: 'delta', insert: 'beta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, true, result.error || JSON.stringify(result));
+  assert.equal(result.applied.length, 2);
+  assert.equal(result.skipped.length, 0);
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getDispatchCount(), 2);
+});
+
 test('page bridge records and rejects Overleaf tracked changes for Reviewing writes', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -476,6 +516,400 @@ test('page bridge records tracked changes for each edited file in a Reviewing wr
   assert.equal(undo.applied.length, 2);
   assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
   assert.equal(bridge.getFile('refs.bib'), 'title = {Old}');
+  assert.equal(bridge.getTrackedChangeCount(), 0);
+  assert.equal(bridge.getRejectClickCount(), 2);
+});
+
+test('page bridge rejects multiple tracked changes in one file newest first', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      },
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 12, to: 17, expected: 'gamma', insert: 'theta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta theta');
+  assert.equal(write.trackedChanges.length, 2);
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: write.trackedChanges,
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ]
+  });
+
+  assert.equal(undo.ok, true, undo.error || JSON.stringify(undo));
+  assert.equal(undo.applied.length, 2);
+  assert.equal(undo.skipped.length, 0);
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getRejectClickCount(), 2);
+  assert.deepEqual(bridge.getRejectedChangeIds(), ['change-2', 'change-1']);
+});
+
+test('page bridge uses Overleaf editor undo to revert a tracked-change batch in one call', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    editorUndoTargets: {
+      'main.tex': 'alpha beta gamma'
+    },
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' },
+          { from: 11, to: 16, expected: 'gamma', insert: 'theta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta theta');
+  assert.equal(write.trackedChanges.length, 1);
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: write.trackedChanges,
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    postFiles: [
+      { path: 'main.tex', content: 'alpha delta theta' }
+    ]
+  });
+
+  assert.equal(undo.ok, true, undo.error || JSON.stringify(undo));
+  assert.equal(undo.applied.length, 1);
+  assert.equal(undo.skipped.length, 0);
+  assert.equal(undo.applied[0].result.method, 'overleaf-editor-undo');
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getEditorUndoClickCount(), 1);
+  assert.equal(bridge.getRejectClickCount(), 0);
+});
+
+test('page bridge does not use editor undo after user edits change the post-run content', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    editorUndoTargets: {
+      'main.tex': 'alpha beta gamma'
+    },
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  bridge.setFile('main.tex', 'alpha delta theta user edit');
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: write.trackedChanges,
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    postFiles: [
+      { path: 'main.tex', content: 'alpha delta gamma' }
+    ]
+  });
+
+  assert.equal(undo.ok, true, undo.error || JSON.stringify(undo));
+  assert.equal(bridge.getEditorUndoClickCount(), 0);
+  assert.equal(bridge.getRejectClickCount(), 1);
+});
+
+test('page bridge can undo a reviewing write with no captured tracked-change refs', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    editorUndoTargets: {
+      'main.tex': 'alpha beta gamma'
+    },
+    files: {
+      'main.tex': 'alpha delta gamma'
+    }
+  });
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: [],
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    postFiles: [
+      { path: 'main.tex', content: 'alpha delta gamma' }
+    ]
+  });
+
+  assert.equal(undo.ok, true, undo.error || JSON.stringify(undo));
+  assert.equal(undo.applied.length, 1);
+  assert.equal(undo.skipped.length, 0);
+  assert.equal(undo.applied[0].result.method, 'overleaf-editor-undo');
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getEditorUndoClickCount(), 1);
+  assert.equal(bridge.getRejectClickCount(), 0);
+});
+
+test('page bridge continues tracked-change undo after Overleaf rerenders review ids', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    rerenderTrackedChangeIdsOnReject: true,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      },
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 12, to: 17, expected: 'gamma', insert: 'theta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.equal(write.trackedChanges.length, 2);
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta theta');
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: write.trackedChanges,
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ]
+  });
+
+  assert.equal(undo.ok, true, undo.error || JSON.stringify(undo));
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getTrackedChangeCount(), 0);
+  assert.equal(bridge.getRejectClickCount(), 2);
+});
+
+test('page bridge rejects remaining tracked changes when stored refs are incomplete', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      },
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 12, to: 17, expected: 'gamma', insert: 'theta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.equal(write.trackedChanges.length, 2);
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta theta');
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: [
+      write.trackedChanges[1]
+    ],
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ]
+  });
+
+  assert.equal(undo.ok, true, undo.error || JSON.stringify(undo));
+  assert.equal(undo.applied.length, 2);
+  assert.equal(undo.skipped.length, 0);
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getTrackedChangeCount(), 0);
+  assert.equal(bridge.getRejectClickCount(), 2);
+});
+
+test('page bridge sweeps remaining tracked changes for old undo records without expected files', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      },
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 12, to: 17, expected: 'gamma', insert: 'theta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.equal(write.trackedChanges.length, 2);
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta theta');
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: [
+      write.trackedChanges[1]
+    ],
+    expectedFiles: []
+  });
+
+  assert.equal(undo.ok, true, undo.error || JSON.stringify(undo));
+  assert.equal(undo.applied.length, 2);
+  assert.equal(undo.skipped.length, 0);
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getTrackedChangeCount(), 0);
+  assert.equal(bridge.getRejectClickCount(), 2);
+});
+
+test('page bridge sweeps active file tracked changes when old undo refs have no path', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      },
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 12, to: 17, expected: 'gamma', insert: 'theta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.equal(write.trackedChanges.length, 2);
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: [
+      {
+        ...write.trackedChanges[1],
+        path: ''
+      }
+    ],
+    expectedFiles: []
+  });
+
+  assert.equal(undo.ok, true, undo.error || JSON.stringify(undo));
+  assert.equal(undo.applied.length, 2);
+  assert.equal(undo.skipped.length, 0);
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
   assert.equal(bridge.getTrackedChangeCount(), 0);
   assert.equal(bridge.getRejectClickCount(), 2);
 });
@@ -676,7 +1110,9 @@ function createPageBridgeHarness({
   modeOptionClassName = 'mode-option',
   internalReviewingState = undefined,
   dispatchApplies = true,
-  trackChangesOnDispatch = false
+  trackChangesOnDispatch = false,
+  rerenderTrackedChangeIdsOnReject = false,
+  editorUndoTargets = {}
 }) {
   const fileMap = new Map(Object.entries(files));
   const trackedChanges = [];
@@ -688,6 +1124,8 @@ function createPageBridgeHarness({
   let reviewingActive = reviewingOk;
   let reviewingClickCount = 0;
   let rejectClickCount = 0;
+  let editorUndoClickCount = 0;
+  const rejectedChangeIds = [];
   let modeMenuOpen = false;
   let modeOptionClickCount = 0;
 
@@ -712,6 +1150,7 @@ function createPageBridgeHarness({
       }
       if (/aria-label|title|review|track|button|\*/i.test(selector)) {
         return [
+          makeEditorUndoButton(),
           makeReviewingButton(),
           ...trackedChanges.filter(change => change.path === selectedPath).map(makeTrackedChangeNode),
           ...(includeLooseEditingButton ? [makeLooseEditingButton()] : []),
@@ -792,6 +1231,9 @@ function createPageBridgeHarness({
     getFile(filePath) {
       return fileMap.get(filePath);
     },
+    setFile(filePath, content) {
+      fileMap.set(filePath, content);
+    },
     getLastDispatchChanges() {
       return JSON.parse(JSON.stringify(lastDispatchChanges));
     },
@@ -806,6 +1248,12 @@ function createPageBridgeHarness({
     },
     getRejectClickCount() {
       return rejectClickCount;
+    },
+    getEditorUndoClickCount() {
+      return editorUndoClickCount;
+    },
+    getRejectedChangeIds() {
+      return rejectedChangeIds.slice();
     },
     getTrackedChangeCount() {
       return trackedChanges.length;
@@ -916,6 +1364,38 @@ function createPageBridgeHarness({
           modeMenuOpen = true;
         } else if (reviewingClickActivates) {
           reviewingActive = true;
+        }
+      },
+      dispatchEvent() {
+        this.click();
+        return true;
+      }
+    };
+  }
+
+  function makeEditorUndoButton() {
+    return {
+      tagName: 'BUTTON',
+      textContent: 'Undo',
+      innerText: 'Undo',
+      id: 'editor-undo',
+      className: 'toolbar-undo-button',
+      disabled: false,
+      parentElement: null,
+      getAttribute(attribute) {
+        if (attribute === 'aria-label' || attribute === 'title') {
+          return 'Undo';
+        }
+        if (attribute === 'aria-disabled') {
+          return 'false';
+        }
+        return '';
+      },
+      click() {
+        editorUndoClickCount += 1;
+        if (Object.prototype.hasOwnProperty.call(editorUndoTargets, selectedPath)) {
+          fileMap.set(selectedPath, editorUndoTargets[selectedPath]);
+          trackedChanges.splice(0, trackedChanges.length);
         }
       },
       dispatchEvent() {
@@ -1047,10 +1527,16 @@ function createPageBridgeHarness({
       },
       click() {
         rejectClickCount += 1;
+        rejectedChangeIds.push(change.id);
         fileMap.set(change.path, change.before);
         const index = trackedChanges.indexOf(change);
         if (index >= 0) {
           trackedChanges.splice(index, 1);
+        }
+        if (rerenderTrackedChangeIdsOnReject) {
+          trackedChanges.forEach((trackedChange, index) => {
+            trackedChange.id = `rerendered-${rejectClickCount}-${index + 1}`;
+          });
         }
       },
       dispatchEvent() {

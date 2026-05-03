@@ -130,6 +130,74 @@
     };
   }
 
+  function buildSnapshotRestoreUndo(run = {}) {
+    const undoOperations = Array.isArray(run.undoOperations) ? run.undoOperations : [];
+    const originalByPath = buildOriginalFilesForSnapshotUndo(run, undoOperations);
+    if (!originalByPath.size) {
+      return {
+        operations: undoOperations,
+        snapshotRestore: false
+      };
+    }
+
+    const restoredEditPaths = new Set();
+    const operations = [];
+    let snapshotRestore = false;
+    for (const operation of undoOperations) {
+      if (operation?.type === 'edit' && operation.path && originalByPath.has(operation.path)) {
+        if (restoredEditPaths.has(operation.path)) {
+          continue;
+        }
+        restoredEditPaths.add(operation.path);
+        snapshotRestore = true;
+        operations.push(normalizeUndoOperation({
+          type: 'edit',
+          path: operation.path,
+          replaceAll: originalByPath.get(operation.path),
+          reason: 'Undo edit'
+        }));
+        continue;
+      }
+      operations.push(operation);
+    }
+
+    return {
+      operations,
+      snapshotRestore
+    };
+  }
+
+  function buildOriginalFilesForSnapshotUndo(run, undoOperations) {
+    const expectedFiles = filesListToMap(run.undoExpectedFiles);
+    if (expectedFiles.size) {
+      return expectedFiles;
+    }
+
+    const editPaths = new Set((undoOperations || [])
+      .filter(operation => operation?.type === 'edit' && operation.path)
+      .map(operation => operation.path));
+    if (!editPaths.size) {
+      return new Map();
+    }
+
+    const workingFiles = filesListToMap(run.undoBaseFiles);
+    if (!workingFiles.size) {
+      return new Map();
+    }
+    for (const operation of undoOperations || []) {
+      applyOperationToFiles(workingFiles, operation);
+    }
+
+    const originalByPath = new Map();
+    for (const path of editPaths) {
+      const content = workingFiles.get(path);
+      if (typeof content === 'string') {
+        originalByPath.set(path, content);
+      }
+    }
+    return originalByPath;
+  }
+
   function buildExpectedFilesAfterOperations(project, appliedOperations) {
     const filesByPath = new Map();
     for (const file of project?.files || []) {
@@ -184,6 +252,16 @@
       path,
       content
     }));
+  }
+
+  function filesListToMap(files) {
+    const filesByPath = new Map();
+    for (const file of files || []) {
+      if (typeof file?.path === 'string' && typeof file.content === 'string') {
+        filesByPath.set(file.path, file.content);
+      }
+    }
+    return filesByPath;
   }
 
   function selectUndoBaseFiles(expectedFilesByPath, undoOperations) {
@@ -285,6 +363,7 @@
   return {
     buildUndoCheckpoint,
     buildExpectedFilesAfterOperations,
-    buildUndoOperations
+    buildUndoOperations,
+    buildSnapshotRestoreUndo
   };
 });

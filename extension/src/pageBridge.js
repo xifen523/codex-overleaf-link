@@ -1200,8 +1200,36 @@
   async function rejectTrackedChanges(params = {}) {
     const trackedChanges = normalizeTrackedChangeRefs(params.trackedChanges || []);
     const expectedFiles = Array.isArray(params.expectedFiles) ? params.expectedFiles : [];
+    const postFiles = Array.isArray(params.postFiles) ? params.postFiles : [];
     const applied = [];
     const skipped = [];
+    const appliedPaths = new Set();
+
+    const editorUndo = await rejectTrackedChangesViaEditorUndo(expectedFiles, postFiles, applied);
+    if (editorUndo.ok) {
+      if (applied.length > 0) {
+        compileBridge.markSourceEdited();
+      }
+      return {
+        ok: true,
+        applied,
+        skipped
+      };
+    }
+    if (editorUndo.attempted) {
+      skipped.push({
+        trackedChange: null,
+        result: editorUndo
+      });
+      if (applied.length > 0) {
+        compileBridge.markSourceEdited();
+      }
+      return {
+        ok: false,
+        applied,
+        skipped
+      };
+    }
 
     if (!trackedChanges.length) {
       return {
@@ -1218,10 +1246,13 @@
       };
     }
 
-    for (const trackedChange of trackedChanges) {
+    for (const trackedChange of orderTrackedChangesForReject(trackedChanges)) {
       if (trackedChange.path && getActiveFilePath() !== trackedChange.path) {
         const opened = await openFileByPath(trackedChange.path);
         if (!opened.ok) {
+          if (expectedFiles.length || trackedChange.path) {
+            continue;
+          }
           skipped.push({
             trackedChange,
             result: {
@@ -1234,8 +1265,18 @@
         }
       }
 
-      const node = findTrackedChangeNode(trackedChange);
+      let node = findTrackedChangeNode(trackedChange);
+      let actualTrackedChange = trackedChange;
+      if (!node && trackedChange.path && appliedPaths.has(trackedChange.path)) {
+        node = findNextTrackedChangeNodeForPath(trackedChange.path);
+        if (node) {
+          actualTrackedChange = trackedChangeRefFromNode(node, trackedChange.path);
+        }
+      }
       if (!node) {
+        if (expectedFiles.length || trackedChange.path) {
+          continue;
+        }
         skipped.push({
           trackedChange,
           result: {
@@ -1249,6 +1290,9 @@
 
       const rejectControl = findRejectControlForTrackedChangeNode(node);
       if (!rejectControl) {
+        if (expectedFiles.length || trackedChange.path) {
+          continue;
+        }
         skipped.push({
           trackedChange,
           result: {
@@ -1264,6 +1308,9 @@
       await delay(180);
 
       if (findTrackedChangeNode(trackedChange)) {
+        if (expectedFiles.length || trackedChange.path) {
+          continue;
+        }
         skipped.push({
           trackedChange,
           result: {
@@ -1276,20 +1323,31 @@
       }
 
       applied.push({
-        trackedChange,
+        trackedChange: actualTrackedChange,
         result: {
           ok: true,
           method: 'overleaf-review-reject'
         }
       });
+      if (actualTrackedChange.path) {
+        appliedPaths.add(actualTrackedChange.path);
+      }
     }
 
-    if (applied.length > 0) {
-      const verification = await verifyExpectedFilesAfterTrackedReject(expectedFiles);
-      if (!verification.ok) {
+    if (expectedFiles.length) {
+      const completion = await rejectRemainingTrackedChangesForExpectedFiles(expectedFiles, applied);
+      if (!completion.ok) {
         skipped.push({
           trackedChange: null,
-          result: verification
+          result: completion
+        });
+      }
+    } else {
+      const completion = await rejectRemainingTrackedChangesForTrackedPaths(trackedChanges, applied);
+      if (!completion.ok) {
+        skipped.push({
+          trackedChange: null,
+          result: completion
         });
       }
     }
@@ -1305,29 +1363,282 @@
     };
   }
 
-  async function verifyExpectedFilesAfterTrackedReject(expectedFiles) {
+  async function rejectTrackedChangesViaEditorUndo(expectedFiles, postFiles, applied) {
+    const expectedByPath = new Map((expectedFiles || [])
+      .filter(file => file?.path && typeof file.content === 'string')
+      .map(file => [window.CodexOverleafProjectFiles.normalizePath(file.path), file.content]));
+    const postByPath = new Map((postFiles || [])
+      .filter(file => file?.path && typeof file.content === 'string')
+      .map(file => [window.CodexOverleafProjectFiles.normalizePath(file.path), file.content]));
+    const paths = Array.from(expectedByPath.keys()).filter(path => postByPath.has(path));
+    if (!paths.length) {
+      return { ok: false, attempted: false };
+    }
+
+    for (const path of paths) {
+      if (path && getActiveFilePath() !== path) {
+        const opened = await openFileByPath(path);
+        if (!opened.ok) {
+          return {
+            ok: false,
+            attempted: false,
+            code: 'tracked_change_editor_undo_open_failed',
+            reason: `无法打开 ${path} 来执行 Overleaf 原生撤销。`
+          };
+        }
+      }
+
+      const current = readActiveEditorText();
+      const postContent = postByPath.get(path);
+      if (current !== postContent) {
+        return {
+          ok: false,
+          attempted: false,
+          code: 'tracked_change_editor_undo_current_mismatch',
+          reason: `${path} 当前内容已经不是本轮写入后的内容；为避免撤掉你的后续修改，Codex 不使用 Overleaf 原生撤销。`
+        };
+      }
+
+      const result = await undoEditorHistoryUntilContent(expectedByPath.get(path), path);
+      if (!result.ok) {
+        return result;
+      }
+      applied.push({
+        trackedChange: {
+          path,
+          key: `editor-undo:${path}`,
+          id: '',
+          label: `Overleaf editor undo (${result.clicks} step${result.clicks === 1 ? '' : 's'})`
+        },
+        result: {
+          ok: true,
+          method: 'overleaf-editor-undo',
+          undoClicks: result.clicks
+        }
+      });
+    }
+
+    return { ok: true, attempted: true };
+  }
+
+  async function undoEditorHistoryUntilContent(expectedContent, path) {
+    const maxClicks = 200;
+    for (let clicks = 0; clicks <= maxClicks; clicks += 1) {
+      if (readActiveEditorText() === expectedContent) {
+        return {
+          ok: true,
+          attempted: clicks > 0,
+          clicks
+        };
+      }
+      if (clicks === maxClicks) {
+        break;
+      }
+
+      const undoControl = findEditorUndoControl();
+      if (!undoControl) {
+        return {
+          ok: false,
+          attempted: clicks > 0,
+          code: 'editor_undo_control_not_found',
+          reason: `没有找到 Overleaf 编辑器自己的 Undo/撤销按钮，无法一次性撤销 ${path} 的本轮留痕。`
+        };
+      }
+
+      const beforeText = readActiveEditorText();
+      clickNode(undoControl);
+      await waitForEditorTextProgress(beforeText, expectedContent, 1000);
+      if (readActiveEditorText() === beforeText) {
+        return {
+          ok: false,
+          attempted: clicks > 0,
+          code: 'editor_undo_no_progress',
+          reason: `Codex 点击了 Overleaf Undo/撤销，但 ${path} 内容没有变化。`
+        };
+      }
+    }
+
+    return {
+      ok: false,
+      attempted: true,
+      code: 'editor_undo_max_iterations',
+      reason: `${path} 经过多次 Overleaf 原生撤销后仍未回到本轮写入前内容，已停止以避免撤销其它修改。`
+    };
+  }
+
+  async function waitForEditorTextProgress(beforeText, expectedContent, timeoutMs) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const current = readActiveEditorText();
+      if (current !== beforeText || current === expectedContent) {
+        return true;
+      }
+      await delay(60);
+    }
+    return false;
+  }
+
+  async function rejectRemainingTrackedChangesForExpectedFiles(expectedFiles, applied) {
     for (const file of expectedFiles || []) {
       if (!file?.path || typeof file.content !== 'string') {
         continue;
       }
-      const opened = await openFileByPath(file.path);
-      if (!opened.ok) {
-        return {
-          ok: false,
-          code: 'tracked_change_undo_verify_open_failed',
-          reason: `撤销后无法打开 ${file.path} 验证内容；请刷新 Overleaf 后检查。`
-        };
-      }
-      const verified = await verifyActiveEditorText(file.content, file.path, 800);
-      if (!verified.ok) {
-        return {
-          ...verified,
-          code: 'tracked_change_undo_verify_failed',
-          reason: `${file.path} 拒绝留痕后内容没有回到写入前状态；请在 Overleaf 审阅面板检查这轮修改。`
-        };
+      const result = await rejectRemainingTrackedChangesForExpectedFile(file, applied);
+      if (!result.ok) {
+        return result;
       }
     }
     return { ok: true };
+  }
+
+  async function rejectRemainingTrackedChangesForTrackedPaths(trackedChanges, applied) {
+    const paths = Array.from(new Set((trackedChanges || [])
+      .map(change => window.CodexOverleafProjectFiles.normalizePath(change?.path || ''))
+      .filter(Boolean)));
+    if (!paths.length) {
+      const activePath = window.CodexOverleafProjectFiles.normalizePath(getActiveFilePath());
+      if (!activePath || !applied.length) {
+        return { ok: true };
+      }
+      paths.push(activePath);
+    }
+
+    for (const path of paths) {
+      const result = await rejectRemainingTrackedChangesForPath(path, applied);
+      if (!result.ok) {
+        return result;
+      }
+    }
+    return { ok: true };
+  }
+
+  async function rejectRemainingTrackedChangesForPath(path, applied) {
+    if (path && getActiveFilePath() !== path) {
+      const opened = await openFileByPath(path);
+      if (!opened.ok) {
+        return {
+          ok: false,
+          code: 'tracked_change_file_open_failed',
+          reason: `无法打开 ${path} 来继续拒绝这轮留痕记录；请在 Overleaf 审阅面板手动处理。`
+        };
+      }
+    }
+
+    const appliedCountBefore = applied.length;
+    const maxAttempts = 200;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const node = findLastTrackedChangeNodeForPath(path);
+      if (!node) {
+        if (applied.length > appliedCountBefore) {
+          return { ok: true };
+        }
+        return {
+          ok: false,
+          code: 'tracked_change_not_found',
+          reason: '没有在 Overleaf 页面里找到这轮写入对应的留痕记录；Codex 没有用文本补丁伪撤销。'
+        };
+      }
+
+      const rejectControl = findRejectControlForTrackedChangeNode(node);
+      if (!rejectControl) {
+        return {
+          ok: false,
+          code: 'tracked_change_reject_control_not_found',
+          reason: `还有 ${path || '当前文件'} 的留痕记录未处理，但没有找到对应的 Reject/拒绝按钮；请在 Overleaf 审阅面板手动拒绝。`
+        };
+      }
+
+      const trackedChange = trackedChangeRefFromNode(node, path);
+      const beforeText = readActiveEditorText();
+      clickNode(rejectControl);
+      await waitForTrackedChangeRejectProgress(trackedChange, path, beforeText, 1200);
+      applied.push({
+        trackedChange,
+        result: {
+          ok: true,
+          method: 'overleaf-review-reject-sweep'
+        }
+      });
+    }
+
+    return {
+      ok: false,
+      code: 'tracked_change_undo_max_iterations',
+      reason: `${path || '当前文件'} 仍有未完成的留痕记录；Codex 已停止以避免误拒绝其它改动。`
+    };
+  }
+
+  async function rejectRemainingTrackedChangesForExpectedFile(file, applied) {
+    const opened = await openFileByPath(file.path);
+    if (!opened.ok) {
+      return {
+        ok: false,
+        code: 'tracked_change_undo_verify_open_failed',
+        reason: `撤销后无法打开 ${file.path} 验证内容；请刷新 Overleaf 后检查。`
+      };
+    }
+
+    const appliedCountBefore = applied.length;
+    const maxAttempts = 200;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const node = findLastTrackedChangeNodeForPath(file.path);
+      if (!node) {
+        const verified = await verifyActiveEditorText(file.content, file.path, 800);
+        if (verified.ok) {
+          return { ok: true };
+        }
+        const rejectedAnyForFile = applied.length > appliedCountBefore;
+        return {
+          ...verified,
+          code: rejectedAnyForFile ? 'tracked_change_undo_verify_failed' : 'tracked_change_not_found',
+          reason: rejectedAnyForFile
+            ? `${file.path} 拒绝留痕后内容没有回到写入前状态；请在 Overleaf 审阅面板检查这轮修改。`
+            : '没有在 Overleaf 页面里找到这轮写入对应的留痕记录；Codex 没有用文本补丁伪撤销。'
+        };
+      }
+
+      const rejectControl = findRejectControlForTrackedChangeNode(node);
+      if (!rejectControl) {
+        return {
+          ok: false,
+          code: 'tracked_change_reject_control_not_found',
+          reason: `还有 ${file.path} 的留痕记录未处理，但没有找到对应的 Reject/拒绝按钮；请在 Overleaf 审阅面板手动拒绝。`
+        };
+      }
+
+      const trackedChange = trackedChangeRefFromNode(node, file.path);
+      const beforeText = readActiveEditorText();
+      clickNode(rejectControl);
+      await waitForTrackedChangeRejectProgress(trackedChange, file.path, beforeText, 1200);
+      applied.push({
+        trackedChange,
+        result: {
+          ok: true,
+          method: 'overleaf-review-reject-sweep'
+        }
+      });
+    }
+
+    return {
+      ok: false,
+      code: 'tracked_change_undo_max_iterations',
+      reason: `${file.path} 仍有未完成的留痕记录；Codex 已停止以避免误拒绝其它改动。`
+    };
+  }
+
+  async function waitForTrackedChangeRejectProgress(trackedChange, path, beforeText, timeoutMs) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const currentText = readActiveEditorText();
+      if (currentText !== beforeText) {
+        return true;
+      }
+      if (trackedChange?.key && !findTrackedChangeNode({ ...trackedChange, path })) {
+        return true;
+      }
+      await delay(80);
+    }
+    return false;
   }
 
   function buildNoTraceUndoBlockedResult(operations, disabled) {
@@ -1866,6 +2177,10 @@
     return normalized;
   }
 
+  function orderTrackedChangesForReject(refs = []) {
+    return (refs || []).slice().reverse();
+  }
+
   function diffTrackedChangeRefs(before = [], after = []) {
     const beforeKeys = new Set((before || []).map(ref => ref.key).filter(Boolean));
     const seen = new Set();
@@ -1894,6 +2209,25 @@
       || null;
   }
 
+  function findNextTrackedChangeNodeForPath(path) {
+    const nodes = findTrackedChangeNodesForPath(path);
+    return nodes[0] || null;
+  }
+
+  function findLastTrackedChangeNodeForPath(path) {
+    const nodes = findTrackedChangeNodesForPath(path);
+    return nodes[nodes.length - 1] || null;
+  }
+
+  function findTrackedChangeNodesForPath(path) {
+    const targetPath = window.CodexOverleafProjectFiles.normalizePath(path || getActiveFilePath());
+    return collectTrackedChangeNodes()
+      .filter(node => {
+        const ref = trackedChangeRefFromNode(node, targetPath);
+        return !targetPath || !ref.path || ref.path === targetPath;
+      })
+  }
+
   function findRejectControlForTrackedChangeNode(node) {
     const scopes = [];
     let current = node;
@@ -1912,6 +2246,26 @@
       }
     }
     return isRejectTrackedChangeControl(node) ? node : null;
+  }
+
+  function findEditorUndoControl() {
+    return collectElements('button,[role="button"],[aria-label],[title]', 1200)
+      .find(isEditorUndoControl)
+      || null;
+  }
+
+  function isEditorUndoControl(node) {
+    if (!node || isInsideCodexPanel(node) || node.disabled) {
+      return false;
+    }
+    if (/^(true|disabled)$/i.test(node.getAttribute?.('aria-disabled') || '')) {
+      return false;
+    }
+    const signal = normalizeReviewingSignalText(readNodeSignalText(node));
+    if (/\b(?:redo|重做)\b/i.test(signal)) {
+      return false;
+    }
+    return /\bundo\b|撤销/i.test(signal);
   }
 
   function isRejectTrackedChangeControl(node) {

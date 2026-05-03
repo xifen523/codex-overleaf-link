@@ -235,12 +235,13 @@ test('storage notice is not appended repeatedly during autosave', () => {
   const saveStateBody = contentScript.match(/async function saveState\(\) \{[\s\S]*?\n  function saveStateSoon/)?.[0] || '';
   const appendStorageNoticeBody = contentScript.match(/function appendStorageNoticeOnce\(key, text\) \{[\s\S]*?\n  function saveStateSoon/)?.[0] || '';
   const appendPlainLogBody = contentScript.match(/function appendPlainLog\(text\) \{[\s\S]*?\n  function updateProbeNotice/)?.[0] || '';
+  const showPluginToastBody = contentScript.match(/function showPluginToast\(text, options = \{\}\) \{[\s\S]*?\n  function updateProbeNotice/)?.[0] || '';
 
   assert.match(contentScript, /storageNoticeKeys = new Set\(\)/);
   assert.match(contentScript, /function appendStorageNoticeOnce\(/);
   assert.match(saveStateBody, /appendStorageNoticeOnce\('save-failed'/);
-  assert.match(appendStorageNoticeBody, /if \(currentRunView\)/);
-  assert.match(appendStorageNoticeBody, /appendRunEvent\(\{[\s\S]*kind:\s*'checkpoint'/);
-  assert.match(appendPlainLogBody, /lastElementChild/);
-  assert.match(appendPlainLogBody, /dataset\.repeatCount/);
+  assert.doesNotMatch(appendStorageNoticeBody, /appendRunEvent\(\{/);
+  assert.match(appendStorageNoticeBody, /showPluginToast/);
+  assert.match(appendPlainLogBody, /showPluginToast/);
+  assert.match(showPluginToastBody, /dataset\.repeatCount/);
 });

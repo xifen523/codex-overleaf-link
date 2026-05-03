@@ -32,7 +32,11 @@
   } = window.CodexOverleafSessionState;
   const { getProjectStorageKey } = window.CodexOverleafStorageKeys;
   const { HIGH_RISK_TYPES, buildChangeSummaryLine, hasSkippedApplyOperations } = window.CodexOverleafSummary;
-  const { buildUndoCheckpoint } = window.CodexOverleafUndoOperations;
+  const {
+    buildExpectedFilesAfterOperations,
+    buildSnapshotRestoreUndo,
+    buildUndoCheckpoint
+  } = window.CodexOverleafUndoOperations;
   const {
     buildHumanCompletionReport,
     mapAgentEventToActivity,
@@ -138,6 +142,7 @@
             <button type="button" data-new-session title="New Session" aria-label="New Session">✎</button>
           </div>
         </div>
+        <div class="codex-toast-region" data-toast-region aria-live="polite" aria-atomic="false"></div>
 
         <div class="codex-vscode-main" data-main>
           <section class="codex-task-section">
@@ -3157,6 +3162,9 @@
     if (method === 'triggerCompile' || method === 'getCompileLog') {
       return 60000;
     }
+    if (method === 'rejectTrackedChanges') {
+      return 120000;
+    }
     return 8000;
   }
 
@@ -3305,15 +3313,7 @@
       return;
     }
     storageNoticeKeys.add(key);
-    if (currentRunView) {
-      appendRunEvent({
-        kind: 'checkpoint',
-        title: text,
-        status: 'completed'
-      });
-      return;
-    }
-    appendPlainLog(text);
+    showPluginToast(text, { status: 'warning', sticky: true });
   }
 
   function saveStateSoon(delayMs = 120) {
@@ -3466,7 +3466,7 @@
       return;
     }
     if (isSessionRunning(target)) {
-      appendPlainLog('这个会话正在运行。请先中断任务，再删除。');
+      showPluginToast('这个会话正在运行。请先中断任务，再删除。', { status: 'warning' });
       return;
     }
 
@@ -3498,12 +3498,14 @@
         }
       });
       if (!response?.ok) {
-        appendPlainLog(`已删除这个插件会话，但对应的插件本地 Codex 线程历史没有清理完成：${response?.error?.message || 'native host 没有返回成功状态'}`);
+        showPluginToast(`已删除这个插件会话，但对应的插件本地 Codex 线程历史没有清理完成：${response?.error?.message || 'native host 没有返回成功状态'}`, { status: 'warning', sticky: true });
       } else if (response.result?.skipped) {
-        appendPlainLog('已删除这个插件会话；这个旧会话没有可识别的本地 Codex 线程历史，未清理本地历史。');
+        showPluginToast('已删除这个插件会话；这个旧会话没有可识别的本地 Codex 线程历史，未清理本地历史。', { status: 'info' });
+      } else {
+        showPluginToast('已删除这个插件会话。', { status: 'completed' });
       }
     } catch (error) {
-      appendPlainLog(`已删除这个插件会话，但对应的插件本地 Codex 线程历史没有清理完成：${error.message}`);
+      showPluginToast(`已删除这个插件会话，但对应的插件本地 Codex 线程历史没有清理完成：${error.message}`, { status: 'warning', sticky: true });
     }
   }
 
@@ -4540,12 +4542,16 @@
       return;
     }
 
-    if (Array.isArray(run.undoTrackedChanges) && run.undoTrackedChanges.length) {
+    if ((Array.isArray(run.undoTrackedChanges) && run.undoTrackedChanges.length) || hasTrackedEditorUndo(run)) {
       await undoRunTrackedChanges(runId, run);
       return;
     }
 
-    const unsafeFullFileUndo = findUnsafeFullFileUndoOperation(run.undoOperations);
+    const undoRestore = buildNoTraceUndoRestore(run);
+    const undoOperations = undoRestore.operations;
+    const unsafeFullFileUndo = findUnsafeFullFileUndoOperation(undoOperations, {
+      allowSnapshotRestore: undoRestore.snapshotRestore
+    });
     if (unsafeFullFileUndo) {
       appendRunRecordEvent(runId, {
         title: '已阻止旧格式全文撤销',
@@ -4563,7 +4569,7 @@
       message: [
         truncateRunTitle(run.task),
         '',
-        `将撤销本轮对 ${formatOperationFiles(run.undoOperations)} 的写入。`,
+        `将撤销本轮对 ${formatOperationFiles(undoOperations)} 的写入。`,
         '',
         '如果 Overleaf 正在使用 Reviewing/Track Changes，Codex 会先切到 Editing；撤销后会保持 Editing，下一轮写入会按需要重新切到 Reviewing。'
       ].join('\n'),
@@ -4579,11 +4585,11 @@
     appendRunRecordEvent(runId, {
       title: '开始无留痕撤销本轮写入',
       status: 'running',
-      detail: { '将撤销': formatOperationFiles(run.undoOperations) }
+      detail: { '将撤销': formatOperationFiles(undoOperations) }
     });
 
     const result = await callPageBridge('applyOperations', {
-      operations: run.undoOperations,
+      operations: undoOperations,
       baseFiles: run.undoBaseFiles || [],
       reviewingPolicy: 'no-trace-undo'
     });
@@ -4607,16 +4613,21 @@
   }
 
   async function undoRunTrackedChanges(runId, run) {
+    const trackedUndo = Array.isArray(run.undoTrackedChanges) && run.undoTrackedChanges.length > 0;
     const approved = await showPluginConfirm({
-      title: '拒绝本轮 Overleaf 留痕改动？',
+      title: trackedUndo ? '拒绝本轮 Overleaf 留痕改动？' : '撤销本轮 Overleaf 写入？',
       message: [
         truncateRunTitle(run.task),
         '',
-        `将通过 Overleaf 自己的 Reject/拒绝功能撤销 ${formatTrackedChangeFiles(run.undoTrackedChanges)}。`,
+        trackedUndo
+          ? `将通过 Overleaf 自己的 Reject/拒绝功能撤销 ${formatTrackedChangeFiles(run.undoTrackedChanges)}。`
+          : `将通过 Overleaf 自己的 Undo/撤销功能回退 ${formatTrackedUndoFiles(run)}。`,
         '',
-        '这不会用文本补丁重写文件；如果插件不能确认对应留痕记录，会停止并让你在 Overleaf 审阅面板手动处理。'
+        trackedUndo
+          ? '这不会用文本补丁重写文件；如果插件不能确认对应留痕记录，会停止并让你在 Overleaf 审阅面板手动处理。'
+          : '执行前会确认当前内容仍是本轮写入后的内容；如果你已经手动改过，Codex 会停止，避免撤掉你的新修改。'
       ].join('\n'),
-      confirmLabel: '拒绝本轮改动',
+      confirmLabel: trackedUndo ? '拒绝本轮改动' : '撤销写入',
       cancelLabel: '取消',
       destructive: true
     });
@@ -4626,20 +4637,23 @@
 
     setRunUndoStatus(runId, 'running');
     appendRunRecordEvent(runId, {
-      title: '开始拒绝本轮 Overleaf 留痕改动',
+      title: trackedUndo ? '开始拒绝本轮 Overleaf 留痕改动' : '开始用 Overleaf 原生撤销回退本轮写入',
       status: 'running',
-      detail: { '将撤销': formatTrackedChangeFiles(run.undoTrackedChanges) }
+      detail: { '将撤销': trackedUndo ? formatTrackedChangeFiles(run.undoTrackedChanges) : formatTrackedUndoFiles(run) }
     });
 
     const result = await callPageBridge('rejectTrackedChanges', {
       trackedChanges: run.undoTrackedChanges || [],
-      expectedFiles: run.undoExpectedFiles || []
+      expectedFiles: run.undoExpectedFiles || [],
+      postFiles: buildTrackedUndoPostFiles(run)
     });
     appendRunRecordEvent(runId, {
-      title: `撤销结果：已拒绝 ${result.applied?.length || 0} 条留痕，跳过 ${result.skipped?.length || 0} 条`,
+      title: trackedUndo
+        ? `撤销结果：已拒绝 ${result.applied?.length || 0} 条留痕，跳过 ${result.skipped?.length || 0} 条`
+        : `撤销结果：已撤销 ${result.applied?.length || 0} 个文件，跳过 ${result.skipped?.length || 0} 项`,
       status: result.skipped?.length ? 'failed' : 'completed',
       detail: {
-        '已拒绝': (result.applied || []).map(item => ({
+        [trackedUndo ? '已拒绝' : '已撤销']: (result.applied || []).map(item => ({
           '文件': item.trackedChange?.path || '未知文件',
           '记录': item.trackedChange?.label || item.trackedChange?.id || item.trackedChange?.key
         })),
@@ -4657,7 +4671,9 @@
     if (!run) {
       return 0;
     }
-    return (run.undoOperations?.length || 0) + (run.undoTrackedChanges?.length || 0);
+    return (run.undoOperations?.length || 0)
+      + (run.undoTrackedChanges?.length || 0)
+      + (hasTrackedEditorUndo(run) ? 1 : 0);
   }
 
   function appendUndoReviewingPolicyEvent(runId, reviewingPolicy) {
@@ -4682,7 +4698,26 @@
     }
   }
 
-  function findUnsafeFullFileUndoOperation(operations = []) {
+  function buildNoTraceUndoRestoreOperations(run) {
+    return buildNoTraceUndoRestore(run).operations;
+  }
+
+  function buildNoTraceUndoRestore(run) {
+    return buildSnapshotRestoreUndo({
+      undoOperations: Array.isArray(run?.undoOperations) ? run.undoOperations : [],
+      undoBaseFiles: Array.isArray(run?.undoBaseFiles) ? run.undoBaseFiles : [],
+      undoExpectedFiles: Array.isArray(run?.undoExpectedFiles) ? run.undoExpectedFiles : []
+    });
+  }
+
+  function hasNoTraceSnapshotUndo(run) {
+    return buildNoTraceUndoRestore(run).snapshotRestore;
+  }
+
+  function findUnsafeFullFileUndoOperation(operations = [], options = {}) {
+    if (options.allowSnapshotRestore === true) {
+      return null;
+    }
     return (operations || []).find(operation => {
       if (!operation || operation.type !== 'edit') {
         return false;
@@ -4735,6 +4770,14 @@
             '记录': change.label || change.id || change.key
           }))
         });
+      } else if (hasTrackedEditorUndo(record)) {
+        appendRunEvent({
+          title: `已创建撤销点：可通过 Overleaf 原生 Undo 回退本轮 ${formatTrackedUndoFiles(record)}`,
+          status: 'completed',
+          detail: {
+            '方式': '没有识别到具体留痕节点，但已保存写入前和写入后的文件内容。撤销时会优先使用 Overleaf 自己的 Undo/撤销功能，并在执行前确认当前内容仍是本轮写入后的内容。'
+          }
+        });
       } else {
         appendRunEvent({
           title: '没有创建自动撤销点：未识别到本轮 Overleaf 留痕记录',
@@ -4756,7 +4799,7 @@
     record.undoOperations = checkpoint.undoOperations;
     record.undoBaseFiles = checkpoint.undoBaseFiles;
     record.undoTrackedChanges = [];
-    record.undoExpectedFiles = [];
+    record.undoExpectedFiles = selectExpectedFilesForTrackedUndo(project, combinedAppliedOperations, []);
     record.undoStatus = '';
     record.partialWriteback = Boolean(applyResult.skipped?.length);
     refreshRunCardControls(record.id);
@@ -4816,6 +4859,35 @@
         path: file.path,
         content: file.content
       }));
+  }
+
+  function buildTrackedUndoPostFiles(run) {
+    const expectedFiles = Array.isArray(run?.undoExpectedFiles) ? run.undoExpectedFiles : [];
+    const appliedOperations = Array.isArray(run?.appliedOperations) ? run.appliedOperations : [];
+    if (!expectedFiles.length || !appliedOperations.length) {
+      return [];
+    }
+
+    const postFilesByPath = buildExpectedFilesAfterOperations(
+      { files: expectedFiles },
+      appliedOperations
+    );
+    const expectedPaths = new Set(expectedFiles.map(file => file?.path).filter(Boolean));
+    return Array.from(postFilesByPath.entries())
+      .filter(([path, content]) => expectedPaths.has(path) && typeof content === 'string')
+      .map(([path, content]) => ({
+        path,
+        content
+      }));
+  }
+
+  function hasTrackedEditorUndo(run) {
+    return buildTrackedUndoPostFiles(run).length > 0;
+  }
+
+  function formatTrackedUndoFiles(run) {
+    const files = buildTrackedUndoPostFiles(run).map(file => file.path).filter(Boolean);
+    return files.join(', ') || formatTrackedChangeFiles(run?.undoTrackedChanges || []);
   }
 
   function formatTrackedChangeFiles(changes = []) {
@@ -5237,26 +5309,60 @@
   }
 
   function appendPlainLog(text) {
-    const log = panel?.querySelector('[data-log]');
-    if (!log) {
+    showPluginToast(text, { status: 'info' });
+  }
+
+  function showPluginToast(text, options = {}) {
+    const region = panel?.querySelector('[data-toast-region]');
+    if (!region) {
       return;
     }
-    const value = String(text || '');
-    const last = log.lastElementChild;
-    if (last?.classList?.contains('log-line') && last.dataset.baseText === value) {
+    const value = String(text || '').trim();
+    if (!value) {
+      return;
+    }
+
+    const last = region.lastElementChild;
+    if (last?.classList?.contains('codex-toast') && last.dataset.baseText === value) {
       const repeatCount = Number(last.dataset.repeatCount || '1') + 1;
       last.dataset.repeatCount = String(repeatCount);
-      last.textContent = `${value}（${repeatCount} 次）`;
-      scrollLogToBottom();
+      const textNode = last.querySelector('[data-toast-text]');
+      if (textNode) {
+        textNode.textContent = `${value}（${repeatCount} 次）`;
+      }
       return;
     }
+
     const item = document.createElement('div');
-    item.className = 'log-line';
+    item.className = 'codex-toast';
     item.dataset.baseText = value;
     item.dataset.repeatCount = '1';
-    item.textContent = value;
-    log.append(item);
-    scrollLogToBottom();
+    item.dataset.status = options.status || 'info';
+
+    const body = document.createElement('div');
+    body.className = 'codex-toast-body';
+    body.dataset.toastText = 'true';
+    body.textContent = value;
+    item.append(body);
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'codex-toast-close';
+    close.setAttribute('aria-label', 'Dismiss notification');
+    close.textContent = '×';
+    close.addEventListener('click', () => item.remove());
+    item.append(close);
+
+    region.append(item);
+    while (region.children.length > 3) {
+      region.firstElementChild?.remove();
+    }
+
+    if (!options.sticky) {
+      setTimeout(() => {
+        item.remove();
+      }, 5200);
+    }
   }
 
   function updateProbeNotice(text) {

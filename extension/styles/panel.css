@@ -129,6 +129,57 @@
   color: #d4d4d4;
 }
 
+#codex-overleaf-panel .codex-toast-region {
+  position: fixed;
+  z-index: 2147483647;
+  top: 44px;
+  right: 12px;
+  display: grid;
+  width: min(320px, calc(var(--codex-overleaf-panel-width) - 24px));
+  gap: 8px;
+  pointer-events: none;
+}
+
+#codex-overleaf-panel .codex-toast {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  align-items: start;
+  gap: 8px;
+  border: 1px solid #3a3d41;
+  border-radius: 7px;
+  background: #252526;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.42);
+  color: #d4d4d4;
+  padding: 9px 8px 9px 10px;
+  pointer-events: auto;
+}
+
+#codex-overleaf-panel .codex-toast[data-status="completed"] {
+  border-color: #2f6f43;
+}
+
+#codex-overleaf-panel .codex-toast[data-status="warning"] {
+  border-color: #8a6a2a;
+}
+
+#codex-overleaf-panel .codex-toast[data-status="failed"] {
+  border-color: #8a3a32;
+}
+
+#codex-overleaf-panel .codex-toast-body {
+  color: #cccccc;
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+#codex-overleaf-panel .codex-toast-close {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  color: #a7a7a7;
+}
+
 @keyframes codex-refresh-spin {
   to {
     transform: rotate(360deg);

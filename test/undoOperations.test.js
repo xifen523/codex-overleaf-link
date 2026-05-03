@@ -4,7 +4,8 @@ const test = require('node:test');
 const {
   buildUndoCheckpoint,
   buildExpectedFilesAfterOperations,
-  buildUndoOperations
+  buildUndoOperations,
+  buildSnapshotRestoreUndo
 } = require('../extension/src/shared/undoOperations');
 
 test('builds undo operations from the pre-run project snapshot', () => {
@@ -169,5 +170,44 @@ test('builds post-apply undo base files from local edit patches', () => {
 
   assert.deepEqual(Array.from(expected.entries()), [
     ['main.tex', 'alpha delta gamma']
+  ]);
+});
+
+test('builds full snapshot undo restores from legacy base files when original files are missing', () => {
+  const restore = buildSnapshotRestoreUndo({
+    undoExpectedFiles: [],
+    undoBaseFiles: [
+      { path: 'main.tex', content: 'alpha delta omega' }
+    ],
+    undoOperations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 11, expected: 'delta', insert: 'beta' }
+        ]
+      },
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 11, to: 16, expected: 'omega', insert: 'gamma' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(restore.snapshotRestore, true);
+  assert.deepEqual(restore.operations, [
+    {
+      type: 'edit',
+      path: 'main.tex',
+      to: null,
+      find: null,
+      replace: null,
+      replaceAll: 'alpha beta gamma',
+      content: null,
+      reason: 'Undo edit'
+    }
   ]);
 });

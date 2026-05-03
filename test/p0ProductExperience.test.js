@@ -245,6 +245,21 @@ test('deleting a UI session also clears plugin-isolated Codex history', () => {
   assert.doesNotMatch(deleteBody, /This deletes local session history/);
 });
 
+test('session deletion status uses plugin toast instead of task transcript space', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
+  const plainLogBody = contentScript.match(/function appendPlainLog\(text\) \{[\s\S]*?\n  function updateProbeNotice/)?.[0] || '';
+
+  assert.match(contentScript, /data-toast-region/);
+  assert.match(contentScript, /function showPluginToast\(/);
+  assert.match(deleteBody, /showPluginToast/);
+  assert.doesNotMatch(deleteBody, /appendPlainLog/);
+  assert.doesNotMatch(plainLogBody, /log\.append\(item\)/);
+});
+
 test('run history renders as a compact single-column transcript without persistent speaker rails', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -809,6 +824,17 @@ test('compile page bridge calls use long-running timeouts', () => {
   assert.match(contentScript, /const timeoutMs = getPageBridgeTimeoutMs\(method\)/);
 });
 
+test('tracked-change undo page bridge calls have enough time to reject many changes', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const timeoutBody = contentScript.match(/function getPageBridgeTimeoutMs\(method\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(timeoutBody, /method === 'rejectTrackedChanges'/);
+  assert.match(timeoutBody, /return 120000/);
+});
+
 test('partial writeback report tells the user what already changed and how to recover', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -842,7 +868,8 @@ test('undo flow blocks legacy full-file replaceAll restores that would mark whol
 
   assert.match(contentScript, /const MAX_SAFE_UNDO_REPLACEALL_CHARS/);
   assert.match(contentScript, /function findUnsafeFullFileUndoOperation\(/);
-  assert.match(undoRunBody, /findUnsafeFullFileUndoOperation\(run\.undoOperations\)/);
+  assert.match(undoRunBody, /findUnsafeFullFileUndoOperation\(undoOperations,\s*\{/);
+  assert.match(undoRunBody, /allowSnapshotRestore:\s*undoRestore\.snapshotRestore/);
   assert.match(contentScript, /已阻止旧格式全文撤销/);
 });
 
@@ -858,6 +885,25 @@ test('undo flow uses no-trace restoring instead of requiring Reviewing write mod
   assert.match(contentScript, /无留痕撤销/);
 });
 
+test('no-trace undo restores original file snapshots in one operation per file', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const undoRunBody = contentScript.match(/async function undoRun\(runId\) \{[\s\S]*?\n  async function undoRunTrackedChanges/)?.[0] || '';
+  const recordUndoBody = contentScript.match(/function recordUndoFromApply\(project, applyResult\) \{[\s\S]*?\n  function normalizeApplyTrackedChanges/)?.[0] || '';
+
+  assert.match(contentScript, /function buildNoTraceUndoRestoreOperations\(run\)/);
+  assert.match(contentScript, /function hasNoTraceSnapshotUndo\(run\)/);
+  assert.match(contentScript, /buildSnapshotRestoreUndo/);
+  assert.match(undoRunBody, /const undoRestore = buildNoTraceUndoRestore\(run\)/);
+  assert.match(undoRunBody, /const undoOperations = undoRestore\.operations/);
+  assert.match(undoRunBody, /operations:\s*undoOperations/);
+  assert.match(undoRunBody, /baseFiles:\s*run\.undoBaseFiles \|\| \[\]/);
+  assert.match(recordUndoBody, /record\.undoExpectedFiles = selectExpectedFilesForTrackedUndo\(project, combinedAppliedOperations, \[\]\)/);
+  assert.doesNotMatch(recordUndoBody, /record\.undoExpectedFiles = \[\]/);
+});
+
 test('reviewing write undo rejects Overleaf tracked changes instead of text patching', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -871,6 +917,33 @@ test('reviewing write undo rejects Overleaf tracked changes instead of text patc
   assert.match(recordUndoBody, /applyResult\?\.trackedChanges/);
   assert.match(recordUndoBody, /undoTrackedChanges/);
   assert.match(recordUndoBody, /没有创建自动撤销点/);
+});
+
+test('reviewing write undo passes post-run content so Overleaf native undo can revert the whole transaction', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const pageBridge = fs.readFileSync(
+    path.join(__dirname, '../extension/src/pageBridge.js'),
+    'utf8'
+  );
+  const undoRunBody = contentScript.match(/async function undoRunTrackedChanges\(runId, run\) \{[\s\S]*?\n  function getRunUndoCount/)?.[0] || '';
+  const undoCountBody = contentScript.match(/function getRunUndoCount\(run\) \{[\s\S]*?\n  function appendUndoReviewingPolicyEvent/)?.[0] || '';
+  const recordUndoBody = contentScript.match(/function recordUndoFromApply\(project, applyResult\) \{[\s\S]*?\n  function normalizeApplyTrackedChanges/)?.[0] || '';
+
+  assert.match(contentScript, /buildExpectedFilesAfterOperations/);
+  assert.match(contentScript, /function buildTrackedUndoPostFiles\(run\)/);
+  assert.match(contentScript, /function hasTrackedEditorUndo\(run\)/);
+  assert.match(undoRunBody, /postFiles:\s*buildTrackedUndoPostFiles\(run\)/);
+  assert.match(contentScript, /hasTrackedEditorUndo\(run\)/);
+  assert.match(undoCountBody, /hasTrackedEditorUndo\(run\)\s*\?\s*1\s*:\s*0/);
+  assert.match(recordUndoBody, /hasTrackedEditorUndo\(record\)/);
+  assert.match(recordUndoBody, /可通过 Overleaf 原生 Undo 回退/);
+  assert.match(pageBridge, /function rejectTrackedChangesViaEditorUndo/);
+  assert.match(pageBridge, /rejectTrackedChangesViaEditorUndo\(expectedFiles,\s*postFiles,\s*applied\)[\s\S]*?if \(!trackedChanges\.length\)/);
+  assert.match(pageBridge, /function findEditorUndoControl/);
+  assert.match(pageBridge, /method:\s*'overleaf-editor-undo'/);
 });
 
 test('change preview is grouped by file with edit evidence instead of raw operation counts', () => {
