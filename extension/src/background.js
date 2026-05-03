@@ -78,6 +78,9 @@
     port.onMessage.addListener(message => {
       const id = message?.id;
       if (!pending.has(id)) {
+        if (message?.ok === false) {
+          resolveUnmatchedNativeError(message);
+        }
         return;
       }
       const pendingRequest = pending.get(id);
@@ -98,6 +101,26 @@
     });
 
     return port;
+  }
+
+  function resolveUnmatchedNativeError(message) {
+    if (pending.size === 1) {
+      const [pendingId, pendingRequest] = pending.entries().next().value;
+      pendingRequest.resolve({
+        ...message,
+        id: pendingId
+      });
+      pending.delete(pendingId);
+      return;
+    }
+
+    for (const [pendingId, pendingRequest] of pending.entries()) {
+      pendingRequest.resolve({
+        ...message,
+        id: pendingId
+      });
+    }
+    pending.clear();
   }
 
   function forwardNativeEvent(tabId, id, event) {

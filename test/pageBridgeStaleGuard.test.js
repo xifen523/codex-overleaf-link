@@ -12,6 +12,22 @@ const pageBridgeSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/pageBridge.js'),
   'utf8'
 );
+const overleafCapabilitiesSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/overleafCapabilities.js'),
+  'utf8'
+);
+const compileBridgeSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/compileBridge.js'),
+  'utf8'
+);
+const overleafEditorSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/overleafEditor.js'),
+  'utf8'
+);
+const overleafProjectSnapshotSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/overleafProjectSnapshot.js'),
+  'utf8'
+);
 
 test('page bridge allows multiple successful edits to the same fresh file', async () => {
   const bridge = createPageBridgeHarness({
@@ -31,7 +47,7 @@ test('page bridge allows multiple successful edits to the same fresh file', asyn
     ]
   });
 
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, result.error || JSON.stringify(result));
   assert.equal(result.applied.length, 2);
   assert.equal(result.skipped.length, 0);
   assert.equal(bridge.getFile('main.tex'), 'one beta three');
@@ -216,6 +232,98 @@ test('page bridge can activate Reviewing before write operations', async () => {
   assert.equal(bridge.getReviewingClickCount(), 1);
 });
 
+test('page bridge can activate Reviewing through the current Editing mode dropdown', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: false,
+    reviewingClickBehavior: 'menu',
+    reviewingButtonShowsCurrentMode: true,
+    files: {
+      'main.tex': 'alpha'
+    }
+  });
+
+  const result = await bridge.call('ensureReviewing', {});
+
+  assert.equal(result.ok, true, result.reason || JSON.stringify(result));
+  assert.equal(result.activated, true);
+  assert.equal(bridge.getReviewingClickCount(), 1);
+  assert.equal(bridge.getModeOptionClickCount(), 1);
+  assert.equal(bridge.isReviewingActive(), true);
+});
+
+test('page bridge can activate Reviewing from a roleless dropdown item', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: false,
+    reviewingClickBehavior: 'menu',
+    reviewingButtonShowsCurrentMode: true,
+    modeOptionRole: '',
+    modeOptionClassName: 'dropdown-item',
+    files: {
+      'main.tex': 'alpha'
+    }
+  });
+
+  const result = await bridge.call('ensureReviewing', {});
+
+  assert.equal(result.ok, true, result.reason || JSON.stringify(result));
+  assert.equal(bridge.getReviewingClickCount(), 1);
+  assert.equal(bridge.getModeOptionClickCount(), 1);
+  assert.equal(bridge.isReviewingActive(), true);
+});
+
+test('page bridge does not treat internal Reviewing permission flags as active write-safe mode', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: false,
+    reviewingClickActivates: false,
+    reviewingClickBehavior: 'noop',
+    reviewingButtonShowsCurrentMode: true,
+    internalReviewingState: true,
+    files: {
+      'main.tex': 'alpha'
+    }
+  });
+
+  const result = await bridge.call('ensureReviewing', { waitMs: 0 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'reviewing_not_enabled');
+  assert.equal(result.activated, undefined);
+  assert.equal(bridge.getReviewingClickCount(), 1);
+  assert.equal(bridge.isReviewingActive(), false);
+});
+
+test('page bridge blocks required Reviewing writes at the final apply boundary', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: false,
+    reviewingClickBehavior: 'noop',
+    reviewingButtonShowsCurrentMode: true,
+    internalReviewingState: true,
+    files: {
+      'main.tex': 'alpha beta'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta' }
+    ],
+    operations: [
+      { type: 'edit', path: 'main.tex', find: 'alpha', replace: 'omega' }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.code, 'reviewing_not_enabled');
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta');
+});
+
 test('page bridge rejects write-safety confirmation when Reviewing click does not activate', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -233,8 +341,212 @@ test('page bridge rejects write-safety confirmation when Reviewing click does no
   assert.equal(bridge.getReviewingClickCount(), 1);
 });
 
+test('page bridge applies undo operations with Reviewing temporarily disabled and restored', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingClickBehavior: 'toggle',
+    reviewingOk: true,
+    files: {
+      'main.tex': 'alpha delta gamma'
+    }
+  });
 
-function createPageBridgeHarness({ activePath, files, reviewingOk = true, reviewingClickActivates = true, dispatchApplies = true }) {
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha delta gamma' }
+    ],
+    reviewingPolicy: 'no-trace-undo',
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 11, expected: 'delta', insert: 'beta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, true, result.error || JSON.stringify(result));
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getReviewingClickCount(), 2);
+  assert.equal(bridge.isReviewingActive(), true);
+  assert.equal(result.reviewingPolicy.policy, 'no-trace-undo');
+  assert.equal(result.reviewingPolicy.disabled, true);
+  assert.equal(result.reviewingPolicy.restored, true);
+});
+
+test('page bridge disables Reviewing through an Overleaf mode dropdown before undo', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingClickBehavior: 'menu',
+    reviewingOk: true,
+    files: {
+      'main.tex': 'alpha delta gamma'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha delta gamma' }
+    ],
+    reviewingPolicy: 'no-trace-undo',
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 11, expected: 'delta', insert: 'beta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, true, result.error || JSON.stringify(result));
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getReviewingClickCount(), 2);
+  assert.equal(bridge.getModeOptionClickCount(), 2);
+  assert.equal(bridge.isReviewingActive(), true);
+  assert.equal(result.reviewingPolicy.disabled, true);
+  assert.equal(result.reviewingPolicy.restored, true);
+});
+
+test('page bridge blocks no-trace undo when Reviewing cannot be disabled', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingClickBehavior: 'noop',
+    reviewingOk: true,
+    files: {
+      'main.tex': 'alpha delta gamma'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha delta gamma' }
+    ],
+    reviewingPolicy: 'no-trace-undo',
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 11, expected: 'delta', insert: 'beta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.code, 'reviewing_disable_failed');
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+  assert.equal(bridge.isReviewingActive(), true);
+});
+
+test('page bridge blocks no-trace undo when Editing mode is not positively confirmed', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: false,
+    reviewingClickBehavior: 'noop',
+    exposeReviewingActiveState: false,
+    files: {
+      'main.tex': 'alpha delta gamma'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha delta gamma' }
+    ],
+    reviewingPolicy: 'no-trace-undo',
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 11, expected: 'delta', insert: 'beta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.code, 'editing_not_confirmed');
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+});
+
+test('page bridge does not treat a loose Editing button as confirmed no-trace undo mode', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    reviewingClickBehavior: 'noop',
+    exposeReviewingActiveState: false,
+    includeLooseEditingButton: true,
+    files: {
+      'main.tex': 'alpha delta gamma'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha delta gamma' }
+    ],
+    reviewingPolicy: 'no-trace-undo',
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 11, expected: 'delta', insert: 'beta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.code, 'editing_not_confirmed');
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+});
+
+test('page bridge probe reports capabilities for explicit degradation messages', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'alpha'
+    }
+  });
+
+  const result = await bridge.call('probe', {});
+
+  assert.equal(result.ok, true, result.error || JSON.stringify(result));
+  assert.equal(result.capabilities.editor.read, true);
+  assert.equal(result.capabilities.editor.write, true);
+  assert.equal(result.capabilities.fileTree.write, true);
+  assert.equal(result.capabilities.compile.capture, false);
+  assert.ok(Array.isArray(result.capabilities.warnings));
+});
+
+
+function createPageBridgeHarness({
+  activePath,
+  files,
+  reviewingOk = true,
+  reviewingClickActivates = true,
+  reviewingClickBehavior = 'activate',
+  reviewingButtonShowsCurrentMode = false,
+  exposeReviewingActiveState = true,
+  includeLooseEditingButton = false,
+  modeOptionRole = 'menuitem',
+  modeOptionClassName = 'mode-option',
+  internalReviewingState = undefined,
+  dispatchApplies = true
+}) {
   const fileMap = new Map(Object.entries(files));
   let selectedPath = activePath;
   let listener = null;
@@ -242,6 +554,8 @@ function createPageBridgeHarness({ activePath, files, reviewingOk = true, review
   let lastDispatchChanges = null;
   let reviewingActive = reviewingOk;
   let reviewingClickCount = 0;
+  let modeMenuOpen = false;
+  let modeOptionClickCount = 0;
 
   const document = {
     body: {
@@ -264,7 +578,9 @@ function createPageBridgeHarness({ activePath, files, reviewingOk = true, review
       }
       if (/aria-label|title|review|track|button|\*/i.test(selector)) {
         return [
-          makeReviewingButton()
+          makeReviewingButton(),
+          ...(includeLooseEditingButton ? [makeLooseEditingButton()] : []),
+          ...(modeMenuOpen ? [makeModeOption('Editing'), makeModeOption('Reviewing')] : [])
         ];
       }
       return [];
@@ -285,7 +601,8 @@ function createPageBridgeHarness({ activePath, files, reviewingOk = true, review
     CodexOverleafStaleGuard: staleGuard,
     _ide: {
       editorView: createEditorView(),
-      fileTreeManager: createFileTreeManager()
+      fileTreeManager: createFileTreeManager(),
+      ...(internalReviewingState === undefined ? {} : { reviewing: internalReviewingState })
     },
     addEventListener(event, callback) {
       if (event === 'message') {
@@ -314,6 +631,10 @@ function createPageBridgeHarness({ activePath, files, reviewingOk = true, review
     console
   });
 
+  vm.runInContext(overleafCapabilitiesSource, context, { filename: 'overleafCapabilities.js' });
+  vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
+  vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
+  vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });
   vm.runInContext(pageBridgeSource, context, { filename: 'pageBridge.js' });
 
   return {
@@ -341,6 +662,12 @@ function createPageBridgeHarness({ activePath, files, reviewingOk = true, review
     },
     getReviewingClickCount() {
       return reviewingClickCount;
+    },
+    getModeOptionClickCount() {
+      return modeOptionClickCount;
+    },
+    isReviewingActive() {
+      return reviewingActive;
     }
   };
 
@@ -399,31 +726,109 @@ function createPageBridgeHarness({ activePath, files, reviewingOk = true, review
   }
 
   function makeReviewingButton() {
+    const label = reviewingButtonShowsCurrentMode
+      ? (reviewingActive ? 'Reviewing' : 'Editing')
+      : 'Reviewing';
     return {
       tagName: 'BUTTON',
-      textContent: 'Reviewing',
-      innerText: 'Reviewing',
-      id: 'reviewing-mode',
-      className: 'toolbar-reviewing-button',
+      textContent: label,
+      innerText: label,
+      id: reviewingButtonShowsCurrentMode ? 'editor-mode-dropdown' : 'reviewing-mode',
+      className: reviewingButtonShowsCurrentMode ? 'editor-mode-dropdown' : 'toolbar-reviewing-button',
       disabled: false,
       parentElement: null,
       getAttribute(attribute) {
         if (attribute === 'aria-label' || attribute === 'title') {
-          return 'Reviewing';
+          return label;
         }
         if (attribute === 'aria-disabled') {
           return 'false';
         }
         if (attribute === 'aria-pressed' || attribute === 'aria-selected' || attribute === 'aria-current') {
+          if (!exposeReviewingActiveState) {
+            return '';
+          }
           return reviewingActive ? 'true' : 'false';
         }
         return '';
       },
       click() {
         reviewingClickCount += 1;
-        if (reviewingClickActivates) {
+        if (reviewingClickBehavior === 'toggle') {
+          reviewingActive = !reviewingActive;
+        } else if (reviewingClickBehavior === 'noop') {
+          return;
+        } else if (reviewingClickBehavior === 'menu') {
+          modeMenuOpen = true;
+        } else if (reviewingClickActivates) {
           reviewingActive = true;
         }
+      },
+      dispatchEvent() {
+        this.click();
+        return true;
+      }
+    };
+  }
+
+  function makeModeOption(label) {
+    return {
+      tagName: 'BUTTON',
+      textContent: label,
+      innerText: label,
+      id: `${label.toLowerCase()}-mode-option`,
+      className: modeOptionClassName,
+      disabled: false,
+      parentElement: null,
+      getAttribute(attribute) {
+        if (attribute === 'aria-label' || attribute === 'title') {
+          return label;
+        }
+        if (attribute === 'role') {
+          return modeOptionRole;
+        }
+        if (attribute === 'aria-disabled') {
+          return 'false';
+        }
+        if (attribute === 'aria-pressed' || attribute === 'aria-selected' || attribute === 'aria-current') {
+          return (label === 'Reviewing' && reviewingActive) || (label === 'Editing' && !reviewingActive)
+            ? 'true'
+            : 'false';
+        }
+        return '';
+      },
+      click() {
+        modeOptionClickCount += 1;
+        reviewingActive = label === 'Reviewing';
+        modeMenuOpen = false;
+      },
+      dispatchEvent() {
+        this.click();
+        return true;
+      }
+    };
+  }
+
+  function makeLooseEditingButton() {
+    return {
+      tagName: 'BUTTON',
+      textContent: 'Editing',
+      innerText: 'Editing',
+      id: 'format-editing-control',
+      className: 'toolbar-button',
+      disabled: false,
+      parentElement: null,
+      getAttribute(attribute) {
+        if (attribute === 'aria-label' || attribute === 'title') {
+          return 'Editing';
+        }
+        if (attribute === 'aria-disabled') {
+          return 'false';
+        }
+        return '';
+      },
+      click() {
+        return undefined;
       },
       dispatchEvent() {
         this.click();

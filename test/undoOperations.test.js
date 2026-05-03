@@ -44,6 +44,75 @@ test('coalesces multiple edits to the same file into one full-file restore', () 
   ]);
 });
 
+test('builds local inverse patches for patch-based edits instead of full-file undo replacement', () => {
+  const undo = buildUndoOperations({
+    files: [{ path: 'main.tex', content: 'alpha beta gamma' }]
+  }, [
+    {
+      type: 'edit',
+      path: 'main.tex',
+      patches: [
+        { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+      ]
+    }
+  ]);
+
+  assert.deepEqual(undo, [
+    {
+      type: 'edit',
+      path: 'main.tex',
+      to: null,
+      find: null,
+      replace: null,
+      replaceAll: null,
+      patches: [
+        { from: 6, to: 11, expected: 'delta', insert: 'beta' }
+      ],
+      content: null,
+      reason: 'Undo edit'
+    }
+  ]);
+});
+
+test('builds inverse patch ranges against the post-edit content after earlier patch shifts', () => {
+  const undo = buildUndoOperations({
+    files: [{ path: 'main.tex', content: 'one two three four' }]
+  }, [
+    {
+      type: 'edit',
+      path: 'main.tex',
+      patches: [
+        { from: 4, to: 7, expected: 'two', insert: 'twenty' },
+        { from: 14, to: 18, expected: 'four', insert: '4' }
+      ]
+    }
+  ]);
+
+  assert.deepEqual(undo[0].patches, [
+    { from: 4, to: 10, expected: 'twenty', insert: 'two' },
+    { from: 17, to: 18, expected: '4', insert: 'four' }
+  ]);
+});
+
+test('does not add fragile inverse patches after a full-file undo restore already covers the file', () => {
+  const undo = buildUndoOperations({
+    files: [{ path: 'main.tex', content: 'original alpha' }]
+  }, [
+    { type: 'edit', path: 'main.tex', replaceAll: 'rewritten beta' },
+    {
+      type: 'edit',
+      path: 'main.tex',
+      patches: [
+        { from: 10, to: 14, expected: 'beta', insert: 'gamma' }
+      ]
+    }
+  ]);
+
+  assert.deepEqual(undo, [
+    { type: 'edit', path: 'main.tex', to: null, find: null, replace: null, replaceAll: 'original alpha', content: null, reason: 'Undo edit' }
+  ]);
+});
+
 test('skips undo operations that need unavailable original content', () => {
   const undo = buildUndoOperations({
     files: []

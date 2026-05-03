@@ -59,6 +59,45 @@ test('syncs Overleaf text files to the mirror and removes files missing from the
   }
 });
 
+test('partial Overleaf snapshots update provided files without deleting the full mirror', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const first = await syncOverleafToMirror({
+      projectId: 'project-partial-overlay',
+      rootDir,
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [
+          { path: 'main.tex', content: 'before' },
+          { path: 'refs.bib', content: '@article{a}' }
+        ]
+      }
+    });
+    const firstBaseline = JSON.parse(fs.readFileSync(path.join(first.metadataPath, 'baseline.json'), 'utf8'));
+
+    const second = await syncOverleafToMirror({
+      projectId: 'project-partial-overlay',
+      rootDir,
+      project: {
+        capabilities: { fullProjectSnapshot: false },
+        files: [
+          { path: 'main.tex', content: 'live unsaved editor text' }
+        ]
+      }
+    });
+
+    assert.equal(fs.readFileSync(path.join(second.workspacePath, 'main.tex'), 'utf8'), 'live unsaved editor text');
+    assert.equal(fs.readFileSync(path.join(second.workspacePath, 'refs.bib'), 'utf8'), '@article{a}');
+
+    const secondBaseline = JSON.parse(fs.readFileSync(path.join(second.metadataPath, 'baseline.json'), 'utf8'));
+    assert.equal(secondBaseline.lastFullSyncAt, firstBaseline.lastFullSyncAt);
+    assert.equal(typeof secondBaseline.lastPartialSyncAt, 'string');
+    assert.deepEqual(secondBaseline.files.map(file => file.path).sort(), ['main.tex', 'refs.bib']);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('syncs binary Overleaf assets to the mirror without treating them as editable text changes', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
   try {

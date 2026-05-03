@@ -96,6 +96,36 @@ test('buildSessionRecord preserves provided values', () => {
   assert.equal(record.updatedAt, '2025-01-02T00:00:00.000Z');
 });
 
+test('buildSessionRecord preserves reloadable session state', () => {
+  const input = {
+    id: 'ses_stateful',
+    projectId: 'proj_stateful',
+    title: 'Check grammar',
+    task: '帮我检查语法错误',
+    mode: 'auto',
+    model: 'gpt-5.3-codex-spark',
+    reasoningEffort: 'xhigh',
+    requireReviewing: false,
+    history: [{ task: '上一轮', result: '改了摘要', at: '2026-05-02T01:00:00.000Z' }],
+    runs: [{
+      id: 'run_1',
+      task: '帮我检查语法错误',
+      status: 'completed',
+      events: [{ title: 'Codex 完成处理。', status: 'completed' }]
+    }]
+  };
+
+  const record = buildSessionRecord(input);
+
+  assert.equal(record.task, '帮我检查语法错误');
+  assert.equal(record.mode, 'auto');
+  assert.equal(record.model, 'gpt-5.3-codex-spark');
+  assert.equal(record.reasoningEffort, 'xhigh');
+  assert.equal(record.requireReviewing, false);
+  assert.deepEqual(record.history, input.history);
+  assert.deepEqual(record.runs, input.runs);
+});
+
 test('buildSessionRecord generates id when not provided', () => {
   const record = buildSessionRecord({ projectId: 'proj_3' });
   assert.ok(record.id.startsWith('ses_'));

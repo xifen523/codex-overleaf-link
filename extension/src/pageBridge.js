@@ -6,69 +6,36 @@
   }
   window.__codexOverleafPageBridgeInstalled = true;
 
-  // Intercept compile requests to capture the template
-  (function interceptCompileRequests() {
-    const originalFetch = window.fetch;
-    window.fetch = async function (...args) {
-      const [resource, init] = args;
-      const url = typeof resource === 'string' ? resource : (resource?.url || '');
-      const method = (init?.method || 'GET').toUpperCase();
-
-      if (/\/project\/[^/]+\/compile\b/.test(url) && method === 'POST') {
-        compileState.capturedRequestTemplate = {
-          url,
-          method: 'POST',
-          headers: init?.headers ? (
-            init.headers instanceof Headers
-              ? Object.fromEntries(init.headers.entries())
-              : { ...init.headers }
-          ) : {},
-          body: init?.body || null
-        };
-      }
-
-      const response = await originalFetch.apply(this, args);
-
-      if (/\/project\/[^/]+\/compile\b/.test(url) && response.ok) {
-        try {
-          const clone = response.clone();
-          const json = await clone.json();
-          const CompileAdapter = window.CodexOverleafCompileAdapter;
-          if (CompileAdapter) {
-            compileState.lastCompileResponse = CompileAdapter.parseCompileResponse(json);
-            compileState.lastCompileAt = Date.now();
-          }
-        } catch (_e) { /* ignore parse errors */ }
-      }
-
-      return response;
-    };
-  })();
-
-  const SNAPSHOT_DEFAULT_MAX_AGE_MS = 2500;
-  const SNAPSHOT_MAX_CACHE_MS = 15000;
-  const FILE_LIST_DEFAULT_MAX_AGE_MS = 300000;
-  const ZIP_FETCH_TIMEOUT_MS = 10000;
+  const ZIP_FETCH_TIMEOUT_MS = 30000;
   const MAX_BINARY_FILE_BYTES = 10 * 1024 * 1024;
   const MAX_BINARY_TOTAL_BYTES = 80 * 1024 * 1024;
-  const snapshotCache = {
-    key: '',
-    capturedAt: 0,
-    value: null,
-    pending: null
-  };
-  const fileListCache = {
-    key: '',
-    capturedAt: 0,
-    value: null,
-    pending: null
-  };
-  const compileState = {
-    capturedRequestTemplate: null,
-    lastCompileResponse: null,
-    lastCompileAt: 0,
-    lastKnownSourceEditTimestamp: 0
-  };
+  const compileBridge = window.CodexOverleafCompileBridge.create({
+    document,
+    getActiveFilePath,
+    waitForSaveState,
+    window
+  });
+  compileBridge.install();
+  const editorAdapter = window.CodexOverleafEditorAdapter.create({
+    document,
+    Event,
+    findEditorContentNode,
+    findEditorTextArea,
+    getCodeMirrorDocLength,
+    getCodeMirrorDocText,
+    getCodeMirrorEditorView,
+    getDeepActiveElement,
+    InputEvent,
+    isInsideCodexPanel,
+    normalizeTextPatches
+  });
+  const projectSnapshotBridge = window.CodexOverleafProjectSnapshot.create({
+    buildProjectFileList,
+    buildProjectSnapshot,
+    getProjectId,
+    normalizePath: window.CodexOverleafProjectFiles.normalizePath,
+    window
+  });
 
   window.addEventListener('message', async event => {
     if (event.source !== window || event.data?.source !== 'codex-overleaf/content') {
@@ -98,13 +65,13 @@
       return probe(params);
     }
     if (method === 'getProjectSnapshot') {
-      return getProjectSnapshot(params);
+      return projectSnapshotBridge.getProjectSnapshot(params);
     }
     if (method === 'getProjectFileList') {
-      return getProjectFileList(params);
+      return projectSnapshotBridge.getProjectFileList(params);
     }
     if (method === 'invalidateProjectSnapshot') {
-      invalidateProjectSnapshot();
+      projectSnapshotBridge.invalidateProjectSnapshot();
       return { ok: true };
     }
     if (method === 'createCheckpoint') {
@@ -115,17 +82,19 @@
     }
     if (method === 'applyOperations') {
       return applyOperations(params.operations || [], {
-        baseFiles: params.baseFiles || null
+        baseFiles: params.baseFiles || null,
+        reviewingPolicy: params.reviewingPolicy || '',
+        requireReviewing: params.requireReviewing === true
       });
     }
     if (method === 'triggerCompile') {
-      return triggerCompile(params);
+      return compileBridge.triggerCompile(params);
     }
     if (method === 'getCompileLog') {
-      return getCompileLog(params);
+      return compileBridge.getCompileLog(params);
     }
     if (method === 'getCompileState') {
-      return getCompileState();
+      return compileBridge.getCompileState();
     }
     if (method === 'waitForSaveState') {
       return waitForSaveState(params);
@@ -146,6 +115,7 @@
       reviewing: window.CodexOverleafReviewing.detectReviewingFromSignals(reviewingSignals),
       reviewingDiagnostics: reviewingSignals.diagnostics,
       editor,
+      capabilities: collectPageCapabilities(editor),
       editorDiagnostics: buildEditorDiagnostics(editor),
       projectDiagnostics: {
         internalRootKeys: collectInternalRootKeys(),
@@ -153,6 +123,24 @@
         docRecords: docRecords.slice(0, 8)
       }
     };
+  }
+
+  function collectPageCapabilities(editor = detectEditor()) {
+    return window.CodexOverleafPageCapabilities.collectPageCapabilities({
+      editor,
+      compileState: compileBridge.state,
+      detectEditor,
+      fileTreeMethodNames,
+      findEditorContentNode,
+      findEditorTextArea,
+      findFileTreeManager,
+      findHistoryObject,
+      findReviewingActivationControl,
+      getCodeMirrorEditorView,
+      getDeepActiveElement,
+      isInsideCodexPanel,
+      window
+    });
   }
 
   async function ensureReviewing(params = {}) {
@@ -165,31 +153,22 @@
       };
     }
 
-    const control = findReviewingActivationControl();
-    if (!control) {
-      return {
-        ok: false,
-        code: 'reviewing_not_enabled',
-        reason: 'Overleaf Reviewing/Track Changes is not enabled, and Codex could not find a Reviewing control to activate.',
-        reviewing: initial.reviewing
-      };
-    }
-
-    clickNode(control);
-    const after = await waitForReviewingState(params);
-    if (isReviewingConfirmedForWrite(after)) {
+    const switched = await toggleReviewingMode(true, params);
+    if (switched.ok) {
       return {
         ok: true,
         activated: true,
-        reviewing: after.reviewing
+        reviewing: switched.reviewing
       };
     }
 
     return {
       ok: false,
       code: 'reviewing_not_enabled',
-      reason: 'Codex clicked the Reviewing control, but Overleaf still did not report Reviewing/Track Changes as enabled.',
-      reviewing: after.reviewing
+      reason: switched.attempted
+        ? 'Codex clicked the Overleaf mode control, but Overleaf still did not report Reviewing/Track Changes as enabled.'
+        : 'Overleaf Reviewing/Track Changes is not enabled, and Codex could not find a Reviewing control to activate.',
+      reviewing: switched.reviewing || initial.reviewing
     };
   }
 
@@ -210,6 +189,128 @@
       current = getReviewingState(params);
     }
     return current;
+  }
+
+  async function setReviewingEnabled(enabled, params = {}) {
+    const initial = getReviewingState(params);
+    const initiallyReviewing = isReviewingConfirmedForWrite(initial);
+    if (isReviewingTargetStateConfirmed(enabled, initial)) {
+      return {
+        ok: true,
+        changed: false,
+        enabled,
+        reviewing: initial.reviewing
+      };
+    }
+
+    const switched = await toggleReviewingMode(enabled, params);
+    if (switched.ok) {
+      return {
+        ok: true,
+        changed: true,
+        enabled,
+        reviewing: switched.reviewing
+      };
+    }
+
+    return {
+      ok: false,
+      code: enabled
+        ? 'reviewing_enable_failed'
+        : initiallyReviewing
+          ? 'reviewing_disable_failed'
+          : 'editing_not_confirmed',
+      reason: enabled
+        ? (switched.attempted
+          ? 'Codex clicked the Reviewing control after undo, but Overleaf still did not report Reviewing/Track Changes as enabled.'
+          : 'Codex could not find an Overleaf Reviewing/Track Changes control to restore after undo.')
+        : initiallyReviewing
+          ? (switched.attempted
+            ? 'Codex clicked the Reviewing control before undo, but Overleaf still did not report Reviewing/Track Changes as disabled.'
+            : 'Codex could not find an Overleaf Reviewing/Track Changes control to disable before undo.')
+          : (switched.attempted
+            ? 'Codex clicked the Overleaf mode control before undo, but Overleaf still did not clearly report Editing mode. To avoid tracked undo changes, Codex did not undo.'
+            : 'Codex could not clearly confirm Overleaf Editing mode before undo. To avoid tracked undo changes, Codex did not undo.'),
+      reviewing: switched.reviewing || initial.reviewing
+    };
+  }
+
+  async function toggleReviewingMode(enabled, params = {}) {
+    const attemptedNodes = uniqueNodes([
+      findReviewingActivationControl(),
+      findReviewingModeMenuControl()
+    ].filter(Boolean));
+
+    for (const control of attemptedNodes) {
+      clickNode(control);
+      let after = await waitForReviewingEnabled(enabled, {
+        ...params,
+        waitMs: Math.min(resolveWaitMs(params), 180)
+      });
+      if (isReviewingTargetStateConfirmed(enabled, after)) {
+        return {
+          ok: true,
+          attempted: true,
+          reviewing: after.reviewing
+        };
+      }
+
+      const modeOption = findReviewingModeOption(enabled, { requireMenuOption: true });
+      if (modeOption) {
+        clickNode(modeOption);
+        after = await waitForReviewingEnabled(enabled, params);
+        if (isReviewingTargetStateConfirmed(enabled, after)) {
+          return {
+            ok: true,
+            attempted: true,
+            reviewing: after.reviewing
+          };
+        }
+      }
+    }
+
+    const visibleModeOption = findReviewingModeOption(enabled, { requireMenuOption: true });
+    if (visibleModeOption) {
+      clickNode(visibleModeOption);
+      const after = await waitForReviewingEnabled(enabled, params);
+      return {
+        ok: isReviewingTargetStateConfirmed(enabled, after),
+        attempted: true,
+        reviewing: after.reviewing
+      };
+    }
+
+    const after = getReviewingState(params);
+    return {
+      ok: false,
+      attempted: attemptedNodes.length > 0,
+      reviewing: after.reviewing
+    };
+  }
+
+  async function waitForReviewingEnabled(enabled, params = {}) {
+    const waitMs = resolveWaitMs(params);
+    const deadline = Date.now() + Math.max(0, waitMs);
+    let current = getReviewingState(params);
+    while (!isReviewingTargetStateConfirmed(enabled, current) && Date.now() < deadline) {
+      await delay(120);
+      current = getReviewingState(params);
+    }
+    return current;
+  }
+
+  function resolveWaitMs(params = {}) {
+    return Number.isFinite(Number(params.waitMs)) ? Number(params.waitMs) : 1600;
+  }
+
+  function summarizeReviewingToggleResult(result = {}) {
+    return {
+      ok: result.ok === true,
+      changed: result.changed === true,
+      enabled: result.enabled === true,
+      code: result.code || '',
+      reason: result.reason || ''
+    };
   }
 
   function isReviewingConfirmedForWrite(state = {}) {
@@ -233,6 +334,223 @@
         .some(key => /^(true|page|step|location)$/i.test(control[key] || ''));
       return active && /\breviewing\b|\btrack(?:ed)? changes?\b|\bsuggest(?:ing|ions?)\b/i.test(text);
     });
+  }
+
+  function isReviewingTargetStateConfirmed(enabled, state = {}) {
+    return enabled
+      ? isReviewingConfirmedForWrite(state)
+      : isEditingConfirmedForNoTraceUndo(state);
+  }
+
+  function isEditingConfirmedForNoTraceUndo(state = {}) {
+    if (isReviewingConfirmedForWrite(state)) {
+      return false;
+    }
+    if (isEditingConfirmedFromControls(state.signals?.controls || [])) {
+      return true;
+    }
+    return (state.signals?.internalStates || []).some(value => {
+      const text = normalizeReviewingSignalText(value);
+      return /\b(?:mode|editingMode|reviewMode)\s*:\s*(?:editing|source editing|source mode)\b/i.test(text);
+    });
+  }
+
+  function isEditingConfirmedFromControls(controls = []) {
+    return controls.some(control => {
+      const text = normalizeReviewingSignalText([
+        control.text,
+        control.innerText,
+        control.ariaLabel,
+        control.title,
+        control.value,
+        control.role,
+        control.id,
+        control.className,
+        control.dataTestId,
+        control.dataQa,
+        control.dataOlName,
+        control.ariaSelected,
+        control.ariaCurrent,
+        control.htmlSnippet
+      ].filter(Boolean).join(' '));
+      const active = ['ariaPressed', 'ariaSelected', 'ariaCurrent']
+        .some(key => /^(true|page|step|location)$/i.test(control[key] || ''));
+      const inactive = ['ariaPressed', 'ariaSelected', 'ariaCurrent']
+        .some(key => /^false$/i.test(control[key] || ''));
+      const menuOption = /\b(menuitem|option|dropdown-item|menu-item)\b/i.test(text);
+
+      if (isEditingModeText(text)) {
+        return active || isCurrentEditingModeControl(control, text, { menuOption });
+      }
+      if ((/\breviewing\b|\btrack(?:ed)? changes?\b|\bsuggest(?:ing|ions?)\b/i.test(text)) && inactive) {
+        return true;
+      }
+      return false;
+    });
+  }
+
+  function isCurrentEditingModeControl(control = {}, text = '', options = {}) {
+    if (options.menuOption) {
+      return false;
+    }
+    const visibleLabel = normalizeReviewingSignalText([
+      control.innerText,
+      control.text,
+      control.ariaLabel,
+      control.title,
+      control.value
+    ].filter(Boolean).join(' '));
+    const controlIdentity = normalizeReviewingSignalText([
+      control.role,
+      control.id,
+      control.className,
+      control.dataTestId,
+      control.dataQa,
+      control.dataOlName
+    ].filter(Boolean).join(' '));
+
+    return /^(editing|source editing|source mode)$/i.test(visibleLabel)
+      && /\b(editor-mode|mode|source|dropdown|switcher|toggle)\b/i.test(controlIdentity)
+      && !/\breviewing\b|\btrack(?:ed)? changes?\b|\bsuggest(?:ing|ions?)\b/i.test(text);
+  }
+
+  function normalizeReviewingSignalText(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function findReviewingModeOption(enabled, options = {}) {
+    const candidates = collectReviewingModeOptionNodes()
+      .filter(node => isReviewingModeOptionCandidate(node, enabled, options))
+      .sort((left, right) => scoreReviewingModeOption(right, enabled) - scoreReviewingModeOption(left, enabled));
+    return candidates[0] || null;
+  }
+
+  function findReviewingModeMenuControl() {
+    const candidates = collectReviewingModeMenuControlNodes()
+      .filter(node => isReviewingModeMenuControlCandidate(node))
+      .sort((left, right) => scoreReviewingModeMenuControl(right) - scoreReviewingModeMenuControl(left));
+    return candidates[0] || null;
+  }
+
+  function collectReviewingModeMenuControlNodes() {
+    const selector = [
+      'button',
+      '[role="button"]',
+      '[aria-haspopup]',
+      '[aria-expanded]',
+      '[aria-label]',
+      '[title]',
+      '[id*="mode" i]',
+      '[class*="mode" i]',
+      '[id*="edit" i]',
+      '[class*="edit" i]',
+      '[id*="source" i]',
+      '[class*="source" i]'
+    ].join(',');
+    return uniqueNodes([
+      ...collectElements(selector, 1500),
+      ...collectElements('*', 3500).filter(node => /editing|source mode|source editing/i.test(readNodeSignalText(node)))
+    ]).slice(0, 1500);
+  }
+
+  function isReviewingModeMenuControlCandidate(node) {
+    if (!node || node.disabled || node.getAttribute?.('aria-disabled') === 'true') {
+      return false;
+    }
+    const text = readNodeSignalText(node);
+    if (/\breview panel\b|\bsyntax highlighting\b/i.test(text)) {
+      return false;
+    }
+    if (isReviewingModeText(text) && !isEditingModeText(text) && !node.getAttribute?.('aria-haspopup') && !node.getAttribute?.('aria-expanded')) {
+      return false;
+    }
+    return isEditingModeText(text)
+      || /\bmode\b/i.test(text)
+      || /\bsource\b/i.test(text)
+      || node.getAttribute?.('aria-haspopup')
+      || node.getAttribute?.('aria-expanded');
+  }
+
+  function scoreReviewingModeMenuControl(node) {
+    const text = readNodeSignalText(node);
+    let score = 0;
+    if (node.tagName === 'BUTTON') score += 4;
+    if (isEditingModeText(text)) score += 8;
+    if (/\bmode\b/i.test(text)) score += 4;
+    if (/\bsource\b/i.test(text)) score += 3;
+    if (node.getAttribute?.('aria-haspopup')) score += 3;
+    if (node.getAttribute?.('aria-expanded')) score += 2;
+    return score;
+  }
+
+  function collectReviewingModeOptionNodes() {
+    const selector = [
+      'button',
+      '[role="button"]',
+      '[role="menuitem"]',
+      '[role="option"]',
+      '[aria-label]',
+      '[title]',
+      '[id*="mode" i]',
+      '[class*="mode" i]',
+      '[id*="edit" i]',
+      '[class*="edit" i]',
+      '[id*="review" i]',
+      '[class*="review" i]',
+      '[id*="track" i]',
+      '[class*="track" i]'
+    ].join(',');
+    return uniqueNodes([
+      ...collectElements(selector, 1500),
+      ...collectElements('*', 3500).filter(node => /editing|reviewing|track changes|suggesting/i.test(readNodeSignalText(node)))
+    ]).slice(0, 1500);
+  }
+
+  function isReviewingModeOptionCandidate(node, enabled, options = {}) {
+    if (!node || node.disabled || node.getAttribute?.('aria-disabled') === 'true') {
+      return false;
+    }
+    if (options.requireMenuOption && !isMenuLikeModeOption(node)) {
+      return false;
+    }
+    const text = readNodeSignalText(node);
+    return enabled ? isReviewingModeText(text) : isEditingModeText(text);
+  }
+
+  function isMenuLikeModeOption(node) {
+    const role = node.getAttribute?.('role') || '';
+    const text = readNodeSignalText(node);
+    return /menuitem|option/i.test(role)
+      || /\bdropdown-item\b|\bmenu-item\b|\bmenuitem\b|\boption\b/i.test(text);
+  }
+
+  function scoreReviewingModeOption(node, enabled) {
+    const text = readNodeSignalText(node);
+    let score = 0;
+    const role = node.getAttribute?.('role') || '';
+    if (/menuitem|option/i.test(role)) score += 8;
+    if (node.tagName === 'BUTTON') score += 2;
+    if (enabled) {
+      if (/^\s*reviewing\s*$/i.test(node.innerText || node.textContent || '')) score += 8;
+      if (/\breviewing\b/i.test(text)) score += 6;
+      if (/\btrack(?:ed)? changes?\b/i.test(text)) score += 4;
+      if (/\bsuggest(?:ing|ions?)\b/i.test(text)) score += 3;
+    } else {
+      if (/^\s*editing\s*$/i.test(node.innerText || node.textContent || '')) score += 8;
+      if (/\bediting\b/i.test(text)) score += 6;
+      if (/\bsource\b/i.test(text)) score += 3;
+    }
+    return score;
+  }
+
+  function isReviewingModeText(text) {
+    return /\breviewing\b|\btrack(?:ed)? changes?\b|\bsuggest(?:ing|ions?)\b/i.test(text)
+      && !/\breview panel\b/i.test(text);
+  }
+
+  function isEditingModeText(text) {
+    return /\bediting\b|\bsource editing\b|\bsource mode\b/i.test(text)
+      && !/\bsyntax highlighting\b/i.test(text);
   }
 
   function findReviewingActivationControl() {
@@ -294,90 +612,6 @@
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
-  async function triggerCompile(params = {}) {
-    const template = compileState.capturedRequestTemplate;
-    if (!template) {
-      return { ok: false, reason: 'No compile request template captured yet. Compile once manually in Overleaf first.' };
-    }
-
-    const saveResult = await waitForSaveState({ deadlineMs: params.waitForSaveMs || 5000 });
-
-    try {
-      const response = await window.fetch(template.url, {
-        method: template.method,
-        headers: template.headers,
-        body: template.body,
-        credentials: 'same-origin'
-      });
-      if (!response.ok) {
-        return { ok: false, reason: `Compile request failed with status ${response.status}` };
-      }
-      const json = await response.json();
-      const CompileAdapter = window.CodexOverleafCompileAdapter;
-      const parsed = CompileAdapter
-        ? CompileAdapter.parseCompileResponse(json)
-        : { ok: false, reason: 'CompileAdapter not available' };
-      compileState.lastCompileResponse = parsed;
-      compileState.lastCompileAt = Date.now();
-      return {
-        ok: true,
-        compile: parsed,
-        saveStateVerified: saveResult.ok
-      };
-    } catch (error) {
-      return { ok: false, reason: `Compile request error: ${error.message}` };
-    }
-  }
-
-  async function getCompileLog(params = {}) {
-    const CompileAdapter = window.CodexOverleafCompileAdapter;
-    if (!CompileAdapter) {
-      return { ok: false, reason: 'CompileAdapter not loaded' };
-    }
-
-    const maxAgeMs = params.maxAgeMs || 30000;
-    const needsFreshCompile = !compileState.lastCompileResponse?.ok
-      || (Date.now() - compileState.lastCompileAt > maxAgeMs);
-
-    if (needsFreshCompile && params.triggerIfStale !== false) {
-      const compileResult = await triggerCompile({ waitForSaveMs: params.waitForSaveMs || 5000 });
-      if (!compileResult.ok) {
-        return { ok: false, reason: `Could not get fresh compile: ${compileResult.reason}` };
-      }
-    }
-
-    const compiled = compileState.lastCompileResponse;
-    if (!compiled?.ok || !compiled.logUrl) {
-      return { ok: false, reason: 'No compile log URL available' };
-    }
-
-    try {
-      const logUrl = compiled.logUrl.startsWith('/')
-        ? `${window.location.origin}${compiled.logUrl}`
-        : compiled.logUrl;
-      const response = await window.fetch(logUrl, { credentials: 'same-origin' });
-      if (!response.ok) {
-        return { ok: false, reason: `Failed to fetch compile log: ${response.status}` };
-      }
-      const logContent = await response.text();
-      const truncated = CompileAdapter.truncateLogForContext(logContent);
-      const parsed = CompileAdapter.parseLogErrors(logContent);
-      return {
-        ok: true,
-        log: truncated,
-        errors: parsed.errors,
-        warnings: parsed.warnings,
-        compiledAt: compileState.lastCompileAt,
-        fresh: CompileAdapter.isCompileLogFresh(
-          { sourceChangeTimestamp: compileState.lastCompileAt },
-          compileState.lastKnownSourceEditTimestamp
-        )
-      };
-    } catch (error) {
-      return { ok: false, reason: `Log fetch error: ${error.message}` };
-    }
-  }
-
   async function waitForSaveState(params = {}) {
     const deadlineMs = params.deadlineMs || 5000;
     const deadline = Date.now() + deadlineMs;
@@ -414,80 +648,6 @@
     }
     // If no save indicator found at all, assume saved (Overleaf hides it when saved)
     return true;
-  }
-
-  function getCompileState() {
-    return {
-      ok: true,
-      hasCapturedTemplate: Boolean(compileState.capturedRequestTemplate),
-      lastCompileAt: compileState.lastCompileAt,
-      lastCompileOk: compileState.lastCompileResponse?.ok || false,
-      lastKnownSourceEditTimestamp: compileState.lastKnownSourceEditTimestamp
-    };
-  }
-
-  async function getProjectSnapshot(params = {}) {
-    const cacheKey = getSnapshotCacheKey(params);
-    const maxAgeMs = normalizeSnapshotMaxAge(params.maxAgeMs);
-    const now = Date.now();
-
-    if (snapshotCache.key === cacheKey && snapshotCache.pending) {
-      return snapshotCache.pending;
-    }
-
-    if (!params.force && snapshotCache.key === cacheKey && snapshotCache.value && now - snapshotCache.capturedAt <= maxAgeMs) {
-      return withSnapshotCacheMetadata(snapshotCache.value, 'memory', snapshotCache.capturedAt);
-    }
-
-    const pending = buildProjectSnapshot(params)
-      .then(snapshot => {
-        const capturedAt = Date.now();
-        snapshotCache.key = cacheKey;
-        snapshotCache.value = snapshot;
-        snapshotCache.capturedAt = capturedAt;
-        return withSnapshotCacheMetadata(snapshot, 'fresh', capturedAt);
-      })
-      .finally(() => {
-        if (snapshotCache.pending === pending) {
-          snapshotCache.pending = null;
-        }
-      });
-
-    snapshotCache.key = cacheKey;
-    snapshotCache.pending = pending;
-    return pending;
-  }
-
-  async function getProjectFileList(params = {}) {
-    const cacheKey = getProjectFileListCacheKey(params);
-    const maxAgeMs = normalizeFileListMaxAge(params.maxAgeMs);
-    const now = Date.now();
-
-    if (fileListCache.key === cacheKey && fileListCache.pending) {
-      return fileListCache.pending;
-    }
-
-    if (!params.force && fileListCache.key === cacheKey && fileListCache.value && now - fileListCache.capturedAt <= maxAgeMs) {
-      return withFileListCacheMetadata(fileListCache.value, 'memory', fileListCache.capturedAt);
-    }
-
-    const pending = buildProjectFileList(params)
-      .then(fileList => {
-        const capturedAt = Date.now();
-        fileListCache.key = cacheKey;
-        fileListCache.value = fileList;
-        fileListCache.capturedAt = capturedAt;
-        return withFileListCacheMetadata(fileList, 'fresh', capturedAt);
-      })
-      .finally(() => {
-        if (fileListCache.pending === pending) {
-          fileListCache.pending = null;
-        }
-      });
-
-    fileListCache.key = cacheKey;
-    fileListCache.pending = pending;
-    return pending;
   }
 
   async function buildProjectFileList(params = {}) {
@@ -592,6 +752,10 @@
   }
 
   async function buildProjectSnapshot(params = {}) {
+    if (params.zipOnly) {
+      return buildZipOnlyProjectSnapshot(params);
+    }
+
     const activePath = getActiveFilePath();
     const internalDocRecords = collectDocRecords();
     const docRecordByPath = new Map(internalDocRecords.map(record => [record.path, record]));
@@ -665,10 +829,13 @@
     zipSnapshot,
     lightweightOnly
   }) {
+    const snapshotActivePath = params.allowEditorNavigation === false
+      ? getActiveFilePath()
+      : activePath;
     const projectPaths = window.CodexOverleafProjectFiles.collectUniqueTextPaths([
-      activePath,
+      snapshotActivePath,
       ...(Array.isArray(params.focusFiles) ? params.focusFiles : []),
-      ...collectProjectTextPaths(activePath)
+      ...collectProjectTextPaths(snapshotActivePath)
     ], 80);
     const files = [];
     const skipped = [];
@@ -681,7 +848,7 @@
     let previousSignature = '';
 
     for (const filePath of projectPaths) {
-      if (filePath === activePath) {
+      if (filePath === snapshotActivePath) {
         const ready = await waitForActiveEditorText(filePath, 5000);
         if (!ready.ok) {
           skipped.push({
@@ -753,7 +920,7 @@
       previousSignature = contentSignature(ready.text);
     }
 
-    if (activePath && getActiveFilePath() !== activePath) {
+    if (params.allowEditorNavigation !== false && activePath && getActiveFilePath() !== activePath) {
       await openFileByPath(activePath);
       await waitForActiveFile(activePath, 5000);
       await waitForActiveEditorText(activePath, 5000);
@@ -761,7 +928,7 @@
 
     if (!files.length && (!lightweightOnly || params.allowZipFallback === false)) {
       files.push({
-        path: activePath,
+        path: snapshotActivePath,
         content: readActiveEditorText(),
         source: 'active-editor'
       });
@@ -770,7 +937,7 @@
     return {
       id: getProjectId(),
       url: window.location.href,
-      activePath,
+      activePath: snapshotActivePath,
       files,
       capabilities: {
         fullProjectSnapshot: isCompleteProjectSnapshot(files, projectPaths),
@@ -785,6 +952,60 @@
           : (files.length > 1
             ? 'Captured text project files from Overleaf document data, with editor fallback when needed.'
             : 'Only the active editor was captured; no additional visible text files were detected.')
+      }
+    };
+  }
+
+  async function buildZipOnlyProjectSnapshot(params = {}) {
+    const activePath = getActiveFilePath();
+    const activeText = readActiveEditorText();
+    const activeOverlay = activePath && window.CodexOverleafProjectFiles.isUsableProjectFileContent(activeText)
+      ? [{
+        path: activePath,
+        content: activeText,
+        source: 'active-editor',
+        kind: 'text'
+      }]
+      : [];
+
+    const zipSnapshot = await fetchProjectZipSnapshot(params);
+    if (zipSnapshot.ok && zipSnapshot.files.length) {
+      return {
+        id: getProjectId(),
+        url: window.location.href,
+        activePath,
+        files: mergeSnapshotFiles(zipSnapshot.files, activeOverlay),
+        capabilities: {
+          fullProjectSnapshot: true,
+          method: 'overleaf-zip',
+          skipped: zipSnapshot.skipped || [],
+          diagnostics: {
+            zipEndpoint: zipSnapshot.endpoint,
+            docRecordCount: 0,
+            docRecords: []
+          },
+          note: 'Captured project files from Overleaf source ZIP without inspecting or opening the file tree.'
+        }
+      };
+    }
+
+    return {
+      id: getProjectId(),
+      url: window.location.href,
+      activePath,
+      files: activeOverlay,
+      capabilities: {
+        fullProjectSnapshot: false,
+        method: activeOverlay.length ? 'active-editor-zip-only-fallback' : 'zip-only-fallback-empty',
+        skipped: [{
+          path: 'project.zip',
+          reason: zipSnapshot.reason
+        }],
+        diagnostics: {
+          docRecordCount: 0,
+          docRecords: []
+        },
+        note: 'Only the current editor was read because the Overleaf source ZIP was unavailable; no file tree navigation was attempted.'
       }
     };
   }
@@ -869,88 +1090,64 @@
     };
   }
 
-  function getSnapshotCacheKey(params = {}) {
-    const focusKey = Array.isArray(params.focusFiles)
-      ? params.focusFiles.map(path => window.CodexOverleafProjectFiles.normalizePath(path)).filter(Boolean).sort().join(',')
-      : '';
-    return [
-      window.location.origin,
-      getProjectId() || window.location.pathname || window.location.href,
-      params.preferLightweight ? 'lightweight' : 'full',
-      params.includeBinaryFiles ? 'binary' : 'text',
-      params.includeContent === false ? 'list' : 'content',
-      focusKey
-    ].join(':');
-  }
-
-  function invalidateProjectSnapshot() {
-    snapshotCache.key = '';
-    snapshotCache.capturedAt = 0;
-    snapshotCache.value = null;
-    snapshotCache.pending = null;
-  }
-
-  function getProjectFileListCacheKey(params = {}) {
-    return [
-      window.location.origin,
-      getProjectId() || window.location.pathname || window.location.href,
-      params.preferExact === false ? 'tree' : 'exact'
-    ].join(':');
-  }
-
-  function normalizeSnapshotMaxAge(value) {
-    if (value === 0) {
-      return 0;
-    }
-    const number = Number(value);
-    if (!Number.isFinite(number)) {
-      return SNAPSHOT_DEFAULT_MAX_AGE_MS;
-    }
-    return Math.max(0, Math.min(number, SNAPSHOT_MAX_CACHE_MS));
-  }
-
-  function normalizeFileListMaxAge(value) {
-    if (value === 0) {
-      return 0;
-    }
-    const number = Number(value);
-    if (!Number.isFinite(number)) {
-      return FILE_LIST_DEFAULT_MAX_AGE_MS;
-    }
-    return Math.max(0, Math.min(number, FILE_LIST_DEFAULT_MAX_AGE_MS));
-  }
-
-  function withSnapshotCacheMetadata(snapshot, cacheState, capturedAt) {
-    const capabilities = snapshot?.capabilities || {};
-    return {
-      ...snapshot,
-      capabilities: {
-        ...capabilities,
-        diagnostics: {
-          ...(capabilities.diagnostics || {}),
-          snapshotCache: cacheState,
-          snapshotCapturedAt: new Date(capturedAt).toISOString()
-        }
-      }
-    };
-  }
-
-  function withFileListCacheMetadata(fileList, cacheState, capturedAt) {
-    const capabilities = fileList?.capabilities || {};
-    return {
-      ...fileList,
-      capabilities: {
-        ...capabilities,
-        diagnostics: {
-          ...(capabilities.diagnostics || {}),
-          fileListCache: cacheState,
-          fileListCapturedAt: new Date(capturedAt).toISOString()
-        }
-      }
-    };
-  }
-
   async function applyOperations(operations, options = {}) {
+    if (options.reviewingPolicy === 'no-trace-undo') {
+      return applyOperationsWithNoTraceUndo(operations, options);
+    }
+    if (options.requireReviewing === true && (operations || []).length > 0) {
+      const reviewing = await ensureReviewing({ waitMs: 1800 });
+      if (!reviewing.ok) {
+        return buildReviewingRequiredBlockedResult(operations, reviewing);
+      }
+    }
+    return applyOperationsCore(operations, options);
+  }
+
+  async function applyOperationsWithNoTraceUndo(operations, options = {}) {
+    const initial = getReviewingState({});
+    if (isEditingConfirmedForNoTraceUndo(initial)) {
+      const result = await applyOperationsCore(operations, options);
+      return {
+        ...result,
+        reviewingPolicy: {
+          policy: 'no-trace-undo',
+          disabled: false,
+          restored: false,
+          reason: 'editing_already_confirmed'
+        }
+      };
+    }
+
+    const disabled = await setReviewingEnabled(false, { waitMs: 1800 });
+    if (!disabled.ok) {
+      return buildNoTraceUndoBlockedResult(operations, disabled);
+    }
+
+    let result;
+    let applyError = null;
+    try {
+      result = await applyOperationsCore(operations, options);
+    } catch (error) {
+      applyError = error;
+    }
+    const restored = await setReviewingEnabled(true, { waitMs: 1800 });
+    if (applyError) {
+      throw applyError;
+    }
+
+    return {
+      ...result,
+      reviewingPolicy: {
+        policy: 'no-trace-undo',
+        disabled: true,
+        restored: restored.ok === true,
+        disable: summarizeReviewingToggleResult(disabled),
+        restore: summarizeReviewingToggleResult(restored)
+      }
+    };
+  }
+
+  async function applyOperationsCore(operations, options = {}) {
     const applied = [];
     const skipped = [];
     const baseFileLookup = window.CodexOverleafStaleGuard?.buildBaseFileLookup(options.baseFiles);
@@ -975,13 +1172,51 @@
     }
 
     if (applied.length > 0) {
-      compileState.lastKnownSourceEditTimestamp = Date.now();
+      compileBridge.markSourceEdited();
     }
 
     return {
       ok: skipped.length === 0,
       applied,
       skipped
+    };
+  }
+
+  function buildNoTraceUndoBlockedResult(operations, disabled) {
+    return {
+      ok: false,
+      applied: [],
+      skipped: (operations || []).map(rawOperation => ({
+        operation: normalizeOperationPaths(rawOperation),
+        result: {
+          ok: false,
+          code: disabled?.code || 'reviewing_disable_failed',
+          reason: disabled?.reason || '无法确认 Overleaf Reviewing/Track Changes 已关闭；为避免撤销也留下新的留痕，Codex 没有执行撤销。'
+        }
+      })),
+      reviewingPolicy: {
+        policy: 'no-trace-undo',
+        disabled: false,
+        restored: false,
+        disable: summarizeReviewingToggleResult(disabled)
+      }
+    };
+  }
+
+  function buildReviewingRequiredBlockedResult(operations, reviewing) {
+    return {
+      ok: false,
+      applied: [],
+      skipped: (operations || []).map(rawOperation => ({
+        operation: normalizeOperationPaths(rawOperation),
+        result: {
+          ok: false,
+          code: reviewing?.code || 'reviewing_not_enabled',
+          reason: reviewing?.reason || 'Overleaf Reviewing/Track Changes was not confirmed before writing. Codex did not change this file.',
+          reviewing: reviewing?.reviewing || null
+        }
+      })),
+      reviewing
     };
   }
 
@@ -1568,34 +1803,7 @@
   }
 
   function detectEditor() {
-    if (getCodeMirrorEditorView()) {
-      return {
-        ok: true,
-        type: 'codemirror-view'
-      };
-    }
-    if (findEditorTextArea()) {
-      return {
-        ok: true,
-        type: 'textarea'
-      };
-    }
-    if (findEditorContentNode('.cm-content')) {
-      return {
-        ok: true,
-        type: 'codemirror'
-      };
-    }
-    if (findEditorContentNode('[contenteditable="true"]')) {
-      return {
-        ok: true,
-        type: 'contenteditable'
-      };
-    }
-    return {
-      ok: false,
-      type: 'unknown'
-    };
+    return editorAdapter.detectEditor();
   }
 
   function buildEditorDiagnostics(editor) {
@@ -1661,132 +1869,15 @@
   }
 
   function readActiveEditorText() {
-    const editorView = getCodeMirrorEditorView();
-    if (editorView) {
-      return getCodeMirrorDocText(editorView);
-    }
-
-    const active = getDeepActiveElement();
-    if (active && active.tagName === 'TEXTAREA' && !isInsideCodexPanel(active)) {
-      return active.value;
-    }
-
-    const textarea = findEditorTextArea();
-    if (textarea) {
-      return textarea.value;
-    }
-
-    const cm = findEditorContentNode('.cm-content');
-    if (cm) {
-      return cm.innerText || cm.textContent || '';
-    }
-
-    const editable = findEditorContentNode('[contenteditable="true"]');
-    if (editable) {
-      return editable.innerText || editable.textContent || '';
-    }
-
-    return '';
+    return editorAdapter.readActiveEditorText();
   }
 
   function replaceActiveEditorText(text) {
-    const editorView = getCodeMirrorEditorView();
-    if (editorView) {
-      const from = 0;
-      const to = getCodeMirrorDocLength(editorView);
-      editorView.dispatch({
-        changes: {
-          from,
-          to,
-          insert: text
-        }
-      });
-      return {
-        ok: true,
-        method: 'codemirror-view'
-      };
-    }
-
-    const active = getDeepActiveElement();
-    const textarea = active?.tagName === 'TEXTAREA' && !isInsideCodexPanel(active)
-      ? active
-      : findEditorTextArea();
-
-    if (textarea) {
-      textarea.focus();
-      textarea.value = text;
-      textarea.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertReplacementText', data: text }));
-      textarea.dispatchEvent(new Event('change', { bubbles: true }));
-      return {
-        ok: true,
-        method: 'textarea'
-      };
-    }
-
-    const editable = findEditorContentNode('.cm-content') || findEditorContentNode('[contenteditable="true"]');
-    if (editable) {
-      editable.focus();
-      document.execCommand('selectAll', false, null);
-      document.execCommand('insertText', false, text);
-      editable.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertReplacementText', data: text }));
-      return {
-        ok: true,
-        method: 'contenteditable'
-      };
-    }
-
-    return {
-      ok: false,
-      reason: 'No editable surface was detected'
-    };
+    return editorAdapter.replaceActiveEditorText(text);
   }
 
   function replaceActiveEditorPatches(patches, nextContent) {
-    const normalized = normalizeTextPatches(patches, readActiveEditorText().length);
-    if (!normalized.ok) {
-      return normalized;
-    }
-
-    const editorView = getCodeMirrorEditorView();
-    if (editorView) {
-      editorView.dispatch({
-        changes: normalized.patches.map(patch => ({
-          from: patch.from,
-          to: patch.to,
-          insert: patch.insert
-        }))
-      });
-      return {
-        ok: true,
-        method: 'codemirror-view-patch'
-      };
-    }
-
-    const active = getDeepActiveElement();
-    const textarea = active?.tagName === 'TEXTAREA' && !isInsideCodexPanel(active)
-      ? active
-      : findEditorTextArea();
-
-    if (textarea && typeof textarea.setRangeText === 'function') {
-      textarea.focus();
-      for (const patch of normalized.patches.slice().sort((left, right) => right.from - left.from)) {
-        textarea.setRangeText(patch.insert, patch.from, patch.to, 'end');
-      }
-      textarea.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertReplacementText', data: '' }));
-      textarea.dispatchEvent(new Event('change', { bubbles: true }));
-      return {
-        ok: true,
-        method: 'textarea-patch'
-      };
-    }
-
-    const result = replaceActiveEditorText(nextContent);
-    return result.ok
-      ? {
-        ...result,
-        method: `${result.method}-patch-fallback`
-      }
-      : result;
+    return editorAdapter.replaceActiveEditorPatches(patches, nextContent);
   }
 
   function getCodeMirrorEditorView() {

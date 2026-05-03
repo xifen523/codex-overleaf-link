@@ -39,6 +39,9 @@
         "src/shared/storageDb.js",
         "src/shared/storageMigration.js",
         "src/shared/compileAdapter.js",
+        "src/content/nativeChannel.js",
+        "src/content/writebackController.js",
+        "src/content/runController.js",
         "src/contentScript.js"
       ],
       "css": [
@@ -55,6 +58,10 @@
         "src/shared/projectFiles.js",
         "src/shared/staleGuard.js",
         "src/shared/compileAdapter.js",
+        "src/page/overleafCapabilities.js",
+        "src/page/compileBridge.js",
+        "src/page/overleafEditor.js",
+        "src/page/overleafProjectSnapshot.js",
         "src/pageBridge.js"
       ],
       "matches": [

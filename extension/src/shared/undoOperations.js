@@ -8,15 +8,15 @@
   'use strict';
 
   function buildUndoOperations(project, appliedOperations) {
-    const filesByPath = new Map();
+    const workingFilesByPath = new Map();
     for (const file of project?.files || []) {
       if (typeof file?.path === 'string' && typeof file.content === 'string') {
-        filesByPath.set(file.path, file.content);
+        workingFilesByPath.set(file.path, file.content);
       }
     }
 
     const undo = [];
-    const restoredEditPaths = new Set();
+    const fullRestoreEditPaths = new Set();
 
     for (const operation of appliedOperations || []) {
       if (!operation || typeof operation.type !== 'string') {
@@ -24,16 +24,29 @@
       }
 
       if (operation.type === 'edit') {
-        if (!operation.path || restoredEditPaths.has(operation.path) || !filesByPath.has(operation.path)) {
+        if (!operation.path || !workingFilesByPath.has(operation.path)) {
           continue;
         }
-        restoredEditPaths.add(operation.path);
-        undo.push(normalizeUndoOperation({
-          type: 'edit',
-          path: operation.path,
-          replaceAll: filesByPath.get(operation.path),
-          reason: 'Undo edit'
-        }));
+        const currentBeforeEdit = workingFilesByPath.get(operation.path);
+        if (!fullRestoreEditPaths.has(operation.path)) {
+          const inversePatches = buildInverseTextPatches(currentBeforeEdit, operation.patches);
+          if (inversePatches.length) {
+            undo.push(normalizeUndoOperation({
+              type: 'edit',
+              path: operation.path,
+              patches: inversePatches,
+              reason: 'Undo edit'
+            }));
+          } else {
+            fullRestoreEditPaths.add(operation.path);
+            undo.push(normalizeUndoOperation({
+              type: 'edit',
+              path: operation.path,
+              replaceAll: currentBeforeEdit,
+              reason: 'Undo edit'
+            }));
+          }
+        }
       } else if (operation.type === 'create') {
         if (!operation.path) {
           continue;
@@ -64,19 +77,48 @@
           reason: 'Undo move'
         }));
       } else if (operation.type === 'delete') {
-        if (!operation.path || !filesByPath.has(operation.path)) {
+        if (!operation.path || !workingFilesByPath.has(operation.path)) {
           continue;
         }
         undo.push(normalizeUndoOperation({
           type: 'create',
           path: operation.path,
-          content: filesByPath.get(operation.path),
+          content: workingFilesByPath.get(operation.path),
           reason: 'Undo delete'
         }));
       }
+
+      applyOperationToFiles(workingFilesByPath, operation);
     }
 
     return undo.reverse();
+  }
+
+  function buildInverseTextPatches(textBeforeEdit, patches) {
+    if (!Array.isArray(patches) || !patches.length) {
+      return [];
+    }
+    const normalized = normalizeTextPatches(patches, String(textBeforeEdit || '').length);
+    if (!normalized.ok) {
+      return [];
+    }
+    const applied = applyTextPatches(textBeforeEdit, normalized.patches);
+    if (!applied.ok) {
+      return [];
+    }
+
+    let offset = 0;
+    return normalized.patches.map(patch => {
+      const from = patch.from + offset;
+      const to = from + patch.insert.length;
+      offset += patch.insert.length - (patch.to - patch.from);
+      return {
+        from,
+        to,
+        expected: patch.insert,
+        insert: patch.expected
+      };
+    });
   }
 
   function buildUndoCheckpoint(project, appliedOperations) {
@@ -165,7 +207,7 @@
   }
 
   function normalizeUndoOperation(operation) {
-    return {
+    const normalized = {
       type: operation.type,
       path: operation.path,
       to: operation.to ?? null,
@@ -175,6 +217,15 @@
       content: operation.content ?? null,
       reason: operation.reason || null
     };
+    if (Array.isArray(operation.patches) && operation.patches.length) {
+      normalized.patches = operation.patches.map(patch => ({
+        from: patch.from,
+        to: patch.to,
+        expected: String(patch.expected ?? ''),
+        insert: String(patch.insert ?? '')
+      }));
+    }
+    return normalized;
   }
 
   function applyTextPatches(text, patches) {

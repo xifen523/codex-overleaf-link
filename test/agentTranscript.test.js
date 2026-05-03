@@ -31,6 +31,14 @@ test('unknown ask-mode errors explain local Codex failure without implying the a
   assert.match(translated.nextStep, /技术详情/);
 });
 
+test('unsupported reasoning summary errors explain model parameter compatibility', () => {
+  const translated = translateRawError('Unsupported parameter: reasoning.summary is not supported with the gpt-5.3-codex-spark model.');
+
+  assert.equal(translated.conclusion, '这轮没有继续：当前 Codex 模型不支持插件请求的推理摘要参数。');
+  assert.match(translated.nextStep, /刷新扩展|重新运行/);
+  assert.doesNotMatch(JSON.stringify(translated), /没有返回可用结果/);
+});
+
 test('keeps schema-only lifecycle events out of the visible transcript', () => {
   for (const event of [
     { type: 'codex.prompt.ready', title: 'Codex prompt prepared' },
@@ -321,6 +329,38 @@ test('builds fallback final reports without raw operation JSON', () => {
   assert.match(report.text, /写入结果：已写入 1 项，跳过 0 项/);
   assert.match(report.text, /可撤销：可撤销本轮 1 项写入/);
   assert.doesNotMatch(report.text, /"type"|"find"|"replace"|old|new/);
+});
+
+test('fallback final reports include skipped write reasons directly', () => {
+  const report = buildHumanCompletionReport({
+    status: 'failed',
+    notes: '本地 Codex 改动已尝试写回 Overleaf。',
+    operations: [
+      { type: 'edit', path: 'draft.tex', reason: '同步本地 Codex workspace 中的局部文件改动（2 处）。' }
+    ],
+    applyResults: [
+      {
+        applied: [],
+        skipped: [
+          {
+            operation: { type: 'edit', path: 'draft.tex' },
+            result: {
+              code: 'reviewing_not_enabled',
+              reason: 'Overleaf Reviewing/Track Changes was not confirmed before writing.'
+            }
+          }
+        ]
+      }
+    ],
+    undoCount: 0,
+    includeWriteResult: true
+  });
+
+  assert.match(report.text, /计划修改：\n- draft\.tex：编辑/);
+  assert.match(report.text, /写入结果：已写入 0 项，跳过 1 项/);
+  assert.match(report.text, /跳过原因：\n- draft\.tex：编辑没有写入（Overleaf Reviewing\/Track Changes was not confirmed before writing\.）/);
+  assert.match(report.text, /可撤销：本轮没有可撤销的写入/);
+  assert.doesNotMatch(report.text, /"type"|"code"|"result"/);
 });
 
 test('storage quota errors are not presented as missing ask-mode analysis', () => {

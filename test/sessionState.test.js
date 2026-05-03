@@ -11,6 +11,7 @@ const {
   prepareStateForStorage,
   estimateJsonBytes,
   recordSessionResult,
+  selectVisibleSessionsForList,
   setActiveSession,
   updateActiveSession
 } = require('../extension/src/shared/sessionState');
@@ -72,6 +73,35 @@ test('does not display a blank default session as a task', () => {
   }), true);
 });
 
+test('session list keeps an older active session visible alongside recent sessions', () => {
+  const sessions = Array.from({ length: 5 }, (_, index) => ({
+    id: `session_${index}`,
+    title: `Task ${index}`,
+    runs: [{ id: `run_${index}`, task: `task ${index}`, status: 'completed' }],
+    history: []
+  }));
+
+  const visible = selectVisibleSessionsForList(sessions, 'session_0', { maxVisible: 3 });
+
+  assert.deepEqual(visible.map(session => session.id), ['session_0', 'session_4', 'session_3']);
+});
+
+test('session list keeps a running pinned session visible alongside the active session', () => {
+  const sessions = Array.from({ length: 5 }, (_, index) => ({
+    id: `session_${index}`,
+    title: `Task ${index}`,
+    runs: [{ id: `run_${index}`, task: `task ${index}`, status: 'completed' }],
+    history: []
+  }));
+
+  const visible = selectVisibleSessionsForList(sessions, 'session_0', {
+    maxVisible: 3,
+    pinnedSessionIds: ['session_1']
+  });
+
+  assert.deepEqual(visible.map(session => session.id), ['session_0', 'session_1', 'session_4']);
+});
+
 test('records bounded session history', () => {
   let session = createSession();
   for (let index = 0; index < 12; index += 1) {
@@ -84,6 +114,67 @@ test('records bounded session history', () => {
   assert.equal(session.history.length, 10);
   assert.equal(session.history[0].task, 'task 2');
   assert.equal(session.history[9].task, 'task 11');
+});
+
+test('recordSessionResult preserves existing session runs and settings', () => {
+  const session = createSession({
+    title: 'Grammar pass',
+    task: '帮我检查语法',
+    mode: 'auto',
+    model: 'gpt-5.4-mini',
+    reasoningEffort: 'xhigh',
+    requireReviewing: false,
+    focusFiles: ['paper.tex'],
+    codexThreadId: 'thread_123',
+    runs: [{
+      id: 'run_1',
+      task: '帮我检查语法',
+      status: 'completed',
+      events: [{ title: '本轮完成报告', status: 'completed' }]
+    }]
+  });
+
+  const updated = recordSessionResult(session, {
+    task: '帮我检查语法',
+    result: '已检查并总结'
+  });
+
+  assert.equal(updated.id, session.id);
+  assert.equal(updated.title, 'Grammar pass');
+  assert.equal(updated.task, '帮我检查语法');
+  assert.equal(updated.mode, 'auto');
+  assert.equal(updated.model, 'gpt-5.4-mini');
+  assert.equal(updated.reasoningEffort, 'xhigh');
+  assert.equal(updated.requireReviewing, false);
+  assert.deepEqual(updated.focusFiles, ['paper.tex']);
+  assert.equal(updated.codexThreadId, 'thread_123');
+  assert.equal(updated.runs[0].id, 'run_1');
+  assert.equal(updated.history.at(-1).result, '已检查并总结');
+});
+
+test('normalizes previously corrupted history-only sessions into clickable runs', () => {
+  const state = normalizePanelState({
+    sessions: [{
+      id: 'session_corrupted',
+      title: 'Grammar pass',
+      task: '',
+      history: [{
+        task: '帮我检查语法',
+        result: '结论：发现 3 处语法问题。',
+        at: '2026-05-02T17:51:00.134Z'
+      }]
+    }],
+    activeSessionId: 'session_corrupted'
+  });
+
+  assert.equal(state.runs.length, 1);
+  assert.equal(state.runs[0].id, 'recovered_session_corrupted_0');
+  assert.equal(state.runs[0].task, '帮我检查语法');
+  assert.equal(state.runs[0].status, 'completed');
+  assert.equal(state.runs[0].events[0].kind, 'report');
+  assert.deepEqual(state.runs[0].events[0].detail, {
+    '结论': '结论：发现 3 处语法问题。'
+  });
 });
 
 test('migrates legacy single-session state into a switchable session list', () => {
@@ -159,7 +250,7 @@ test('updates active session without mutating inactive sessions', () => {
   assert.equal(updated.runs[0].id, 'run_new');
 });
 
-test('sets active session without re-normalizing running runs', () => {
+test('keeps in-memory running runs active while switching sessions', () => {
   const state = normalizePanelState({
     activeSessionId: 'session_a',
     sessions: [
@@ -171,8 +262,8 @@ test('sets active session without re-normalizing running runs', () => {
   const switched = setActiveSession(state, 'session_b');
 
   assert.equal(switched.session.id, 'session_b');
-  assert.equal(switched.runs[0].status, 'failed');
-  assert.equal(switched.runs[0].events.length, 1);
+  assert.equal(switched.runs[0].status, 'running');
+  assert.equal(switched.runs[0].events.length, 0);
 });
 
 test('deletes inactive sessions without changing the active session', () => {
@@ -283,7 +374,7 @@ test('preserves stream metadata and enough processing history for completed runs
   assert.equal(final.streamRole, 'assistant');
 });
 
-test('marks restored running runs as interrupted', () => {
+test('marks restored persisted running runs as no longer tracked after reload', () => {
   const state = normalizePanelState({
     runs: [{
       id: 'run_active',
@@ -292,11 +383,13 @@ test('marks restored running runs as interrupted', () => {
       statusText: 'Running',
       events: [{ title: 'Codex exec started', status: 'running' }]
     }]
+  }, {
+    restoreRunningRuns: true
   });
 
   assert.equal(state.runs[0].status, 'failed');
-  assert.equal(state.runs[0].statusText, 'Interrupted by page reload');
-  assert.equal(state.runs[0].events[1].title, 'Run interrupted by page reload');
+  assert.equal(state.runs[0].statusText, '页面刷新后已停止跟踪');
+  assert.equal(state.runs[0].events[1].title, '页面刷新后已停止跟踪这轮任务');
 });
 
 test('prepares a compact persisted state without storing huge historical payloads', () => {
@@ -337,6 +430,51 @@ test('prepares a compact persisted state without storing huge historical payload
   assert.ok(activeStoredSession.runs[0].events[0].title.length < 6100);
   assert.equal(activeStoredSession.runs[0].undoOperations.length, 0);
   assert.equal(activeStoredSession.runs.at(-1).undoOperations.length, 1);
+});
+
+test('storage compaction preserves long final reports better than transient activity details', () => {
+  const reportBody = [
+    '结论：我检查了全文。',
+    '',
+    '### 1) 数学和引用',
+    '- [paper.tex:486](/Users/example/.codex-overleaf/projects/p/workspace/paper.tex:486)：`\\eqref{eq:cmdp_obj}` 当前标签不存在。',
+    'x'.repeat(8000),
+    'END_REPORT_MARKER'
+  ].join('\n');
+  const activityDetail = `${'y'.repeat(8000)}END_ACTIVITY_MARKER`;
+  const state = normalizePanelState({
+    sessions: [createSession({
+      title: 'Long summary',
+      runs: [{
+        id: 'run_long_report',
+        task: '检查证明',
+        status: 'completed',
+        events: [
+          {
+            title: '本地检查已完成',
+            status: 'completed',
+            kind: 'activity',
+            detail: activityDetail
+          },
+          {
+            title: '本轮完成报告',
+            status: 'completed',
+            kind: 'report',
+            detail: reportBody
+          }
+        ]
+      }]
+    })]
+  });
+
+  const compact = prepareStateForStorage(state);
+  const run = compact.sessions[0].runs[0];
+  const activity = run.events.find(event => event.kind === 'activity');
+  const report = run.events.find(event => event.kind === 'report');
+
+  assert.match(report.detail, /END_REPORT_MARKER/);
+  assert.match(report.detail, /\[paper\.tex:486\]\(/);
+  assert.doesNotMatch(activity.detail, /END_ACTIVITY_MARKER/);
 });
 
 test('aggressive storage preparation preserves the active session essentials under a smaller cap', () => {

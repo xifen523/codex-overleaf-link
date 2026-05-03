@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  buildCodexTurnPrompt,
   buildFinalAssistantMessage,
   buildThreadStartParams,
   decideCommandApproval,
@@ -128,6 +129,93 @@ test('passes recent UI session history into the Codex turn prompt', async () => 
     assert.match(received.task, /发现 main\.tex 有两个缺失引用/);
     assert.match(received.task, /Current user request:\n继续刚才的检查/);
     assert.match(received.task, /Focus files:\n- main\.tex/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('auto and confirm prompts require direct edits for explicit fix requests', () => {
+  const prompt = buildCodexTurnPrompt({
+    projectId: 'project-edit-intent',
+    task: '帮我检查语法问题并修正',
+    mode: 'auto',
+    project: { files: [{ path: 'paper.tex', content: 'Before' }] }
+  }, {
+    projectKey: 'project-edit-intent',
+    workspacePath: '/tmp/project-edit-intent'
+  });
+
+  assert.match(prompt, /Write expectation for this turn:/);
+  assert.match(prompt, /The request asks for file changes/);
+  assert.match(prompt, /must edit the local workspace/);
+  assert.match(prompt, /Do not stop at a suggestion list/);
+});
+
+test('passes @compile-log context into the Codex turn prompt', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  let received = null;
+  try {
+    await runCodexSession({
+      params: {
+        projectId: 'project-compile-log',
+        task: '根据 @compile-log 修复编译错误',
+        mode: 'ask',
+        project: { files: [{ path: 'main.tex', content: '\\badcommand' }] },
+        compileLog: '! Undefined control sequence.\nl.1 \\badcommand',
+        compileErrors: ['! Undefined control sequence. l.1 \\badcommand'],
+        compileWarnings: ['LaTeX Warning: Reference `fig:a` undefined.'],
+        compileLogFresh: true,
+        compileLogCompiledAt: 1777651200000
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async input => {
+        received = input;
+      }
+    });
+
+    assert.match(received.task, /Compilation context \(@compile-log\):/);
+    assert.match(received.task, /errors: 1/);
+    assert.match(received.task, /warnings: 1/);
+    assert.match(received.task, /Undefined control sequence/);
+    assert.match(received.task, /Current user request:\n根据 @compile-log 修复编译错误/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('focused partial runs only return sync changes for focused files', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  try {
+    const result = await runCodexSession({
+      params: {
+        projectId: 'project-focused-partial',
+        task: '只改 main.tex',
+        mode: 'auto',
+        focusFiles: ['main.tex'],
+        restrictToFocusFiles: true,
+        project: {
+          capabilities: { fullProjectSnapshot: false },
+          files: [{ path: 'main.tex', content: 'Before' }]
+        }
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async ({ workspacePath }) => {
+        fs.writeFileSync(path.join(workspacePath, 'main.tex'), 'After', 'utf8');
+        fs.writeFileSync(path.join(workspacePath, 'notes.tex'), 'Out of focus', 'utf8');
+      }
+    });
+
+    assert.deepEqual(result.syncChanges.map(change => [change.type, change.path]), [
+      ['write', 'main.tex']
+    ]);
+    assert.equal(
+      result.unsupportedChanges.some(change =>
+        change.path === 'notes.tex' && change.reason === 'out_of_focus_partial_snapshot'
+      ),
+      true
+    );
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
@@ -276,4 +364,41 @@ test('allowed commands with pipe operators are rejected (safety check)', () => {
     decideCommandApproval({ mode: 'auto', params: { command: 'wc -l main.tex && rm main.tex' } }).decision,
     'decline'
   );
+});
+
+test('allowed command executables still reject risky write-like arguments', () => {
+  const riskyCommands = [
+    'find . -exec rm {} ;',
+    'find . -delete',
+    'sed -i s/old/new/g main.tex',
+    'awk {print} main.tex -i inplace',
+    'shasum -c checksums.txt',
+    'md5sum --check checksums.txt'
+  ];
+
+  for (const command of riskyCommands) {
+    assert.equal(
+      decideCommandApproval({ mode: 'auto', params: { command } }).decision,
+      'decline',
+      `expected "${command}" to be declined`
+    );
+  }
+});
+
+test('shell command approval rejects ambiguous escapes and extra shell arguments', () => {
+  const riskyCommands = [
+    'bash -lc "rg citation main.tex" --init-file ~/.zshrc',
+    'sh -c "rg citation main.tex" extra-arg',
+    'rg citation\\;rm main.tex',
+    'bash -lc "rg \\"citation\\" main.tex"',
+    'bash -lc "rg citation main.tex'
+  ];
+
+  for (const command of riskyCommands) {
+    assert.equal(
+      decideCommandApproval({ mode: 'auto', params: { command } }).decision,
+      'decline',
+      `expected "${command}" to be declined`
+    );
+  }
 });

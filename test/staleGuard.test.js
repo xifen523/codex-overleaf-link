@@ -37,6 +37,51 @@ test('blocks edits when the Overleaf file changed after the snapshot', () => {
   assert.match(result.reason, /Codex 没有覆盖它/);
 });
 
+test('allows patch edits when collaborator changes are outside the patch range', () => {
+  const baseFiles = buildBaseFileLookup([
+    { path: 'main.tex', content: 'title\nbody old\nfooter\n' }
+  ]);
+
+  const result = checkOperationFreshness(
+    {
+      type: 'edit',
+      path: 'main.tex',
+      patches: [
+        { from: 11, to: 14, expected: 'old', insert: 'new' }
+      ]
+    },
+    'title\nbody old\nfooter updated by user\n',
+    baseFiles
+  );
+
+  assert.deepEqual(result, {
+    ok: true,
+    reconciled: true,
+    strategy: 'patch-range'
+  });
+});
+
+test('blocks patch edits when collaborator changes overlap the patch range', () => {
+  const baseFiles = buildBaseFileLookup([
+    { path: 'main.tex', content: 'title\nbody old\nfooter\n' }
+  ]);
+
+  const result = checkOperationFreshness(
+    {
+      type: 'edit',
+      path: 'main.tex',
+      patches: [
+        { from: 11, to: 14, expected: 'old', insert: 'new' }
+      ]
+    },
+    'title\nbody user-edited\nfooter\n',
+    baseFiles
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'stale_patch_range');
+});
+
 test('blocks edits when the base snapshot lacks the target file', () => {
   const baseFiles = buildBaseFileLookup([
     { path: 'main.tex', content: 'alpha' }

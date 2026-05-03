@@ -178,3 +178,73 @@ test('COMPILABLE_EXTENSIONS is a Set with 7 entries', () => {
   assert.ok(COMPILABLE_EXTENSIONS instanceof Set);
   assert.equal(COMPILABLE_EXTENSIONS.size, 7);
 });
+
+test('compile bridge invalidates cached compile logs after source edits', () => {
+  const compileBridge = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '../extension/src/page/compileBridge.js'),
+    'utf8'
+  );
+
+  assert.match(compileBridge, /lastCompileSourceChangeTimestamp/);
+  assert.match(compileBridge, /const compileLogFresh = CompileAdapter\.isCompileLogFresh/);
+  assert.match(compileBridge, /\|\| !compileLogFresh/);
+  assert.match(compileBridge, /typeof pageDocument\.addEventListener === 'function'/);
+  assert.match(compileBridge, /pageDocument\.addEventListener\('input', markSourceEditFromInput, true\)/);
+});
+
+test('compile bridge stamps manual compile logs with request-start source timestamp', () => {
+  const compileBridge = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '../extension/src/page/compileBridge.js'),
+    'utf8'
+  );
+
+  assert.match(compileBridge, /const isCompileRequest = \/\\\/project\\\/\[\^\/\]\+\\\/compile\\b\/\.test\(url\) && method === 'POST'/);
+  assert.match(compileBridge, /const compileSourceChangeTimestamp = isCompileRequest \? state\.lastKnownSourceEditTimestamp : 0/);
+  assert.match(compileBridge, /lastCompileSourceChangeTimestamp = compileSourceChangeTimestamp/);
+});
+
+test('compile bridge install is idempotent for fetch interception and source listeners', async () => {
+  const CompileBridge = require('../extension/src/page/compileBridge');
+  let cloneCount = 0;
+  let inputListenerCount = 0;
+  const pageWindow = {
+    location: { origin: 'https://www.overleaf.com' },
+    CodexOverleafCompileAdapter: {
+      parseCompileResponse(json) {
+        return { ok: true, logUrl: json.outputFiles[0].url };
+      }
+    },
+    fetch: async () => ({
+      ok: true,
+      clone() {
+        cloneCount += 1;
+        return {
+          async json() {
+            return { outputFiles: [{ path: 'output.log', url: '/output.log' }] };
+          }
+        };
+      }
+    })
+  };
+  const pageDocument = {
+    addEventListener(type) {
+      if (type === 'input') {
+        inputListenerCount += 1;
+      }
+    }
+  };
+
+  const bridge = CompileBridge.create({
+    document: pageDocument,
+    getActiveFilePath: () => 'main.tex',
+    waitForSaveState: async () => ({ ok: true }),
+    window: pageWindow
+  });
+  bridge.install();
+  bridge.install();
+
+  await pageWindow.fetch('/project/abc/compile', { method: 'POST' });
+
+  assert.equal(cloneCount, 1);
+  assert.equal(inputListenerCount, 1);
+});

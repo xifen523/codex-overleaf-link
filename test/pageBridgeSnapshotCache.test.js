@@ -11,6 +11,22 @@ const pageBridgeSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/pageBridge.js'),
   'utf8'
 );
+const overleafCapabilitiesSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/overleafCapabilities.js'),
+  'utf8'
+);
+const compileBridgeSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/compileBridge.js'),
+  'utf8'
+);
+const overleafEditorSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/overleafEditor.js'),
+  'utf8'
+);
+const overleafProjectSnapshotSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/overleafProjectSnapshot.js'),
+  'utf8'
+);
 
 test('context file list uses the exact Overleaf ZIP file tree and caches it', async () => {
   const bridge = createSnapshotHarness({
@@ -430,6 +446,63 @@ test('run snapshots never open inactive Overleaf files when ZIP fallback is unav
   assert.match(result.capabilities.skipped[0].reason, /timed out/i);
 });
 
+test('non-invasive snapshots do not restore an old active file after the user switches files during ZIP fallback', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'sections/intro.tex': 'Intro'
+    },
+    fetchMode: 'hang',
+    onFetch({ setActivePath }) {
+      setActivePath('sections/intro.tex');
+    }
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    preferLightweight: true,
+    allowZipFallback: true,
+    allowEditorNavigation: false,
+    requireFullProject: true,
+    zipTimeoutMs: 5,
+    maxAgeMs: 0
+  });
+
+  assert.equal(bridge.getOpenClickCount(), 0);
+  assert.equal(bridge.getActivePath(), 'sections/intro.tex');
+  assert.equal(result.capabilities.fullProjectSnapshot, false);
+});
+
+test('zip-only run snapshots never inspect or open the Overleaf project tree', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'sections/intro.tex': 'Intro'
+    },
+    treePaths: [
+      ['main.tex'],
+      ['sections', 'intro.tex']
+    ],
+    fetchMode: 'hang'
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    zipOnly: true,
+    allowZipFallback: true,
+    allowEditorNavigation: false,
+    requireFullProject: true,
+    zipTimeoutMs: 5,
+    maxAgeMs: 0
+  });
+
+  assert.equal(bridge.getOpenClickCount(), 0);
+  assert.equal(bridge.getTreeQueryCount(), 0);
+  assert.equal(result.files.length, 1);
+  assert.equal(result.files[0].path, 'main.tex');
+  assert.equal(result.capabilities.method, 'active-editor-zip-only-fallback');
+  assert.equal(result.capabilities.fullProjectSnapshot, false);
+}
+);
+
 test('lightweight snapshots do not poison the full-project ZIP cache', async () => {
   const bridge = createSnapshotHarness({
     files: {
@@ -472,12 +545,13 @@ test('project snapshot falls back when the Overleaf ZIP download hangs', async (
   assert.match(result.capabilities.skipped[0].reason, /timed out/i);
 });
 
-function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, fetchMode = 'zip', treePaths = null, internalState = {}, windowExtra = {} }) {
+function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, fetchMode = 'zip', treePaths = null, internalState = {}, windowExtra = {}, onFetch = null }) {
   const fileMap = new Map(Object.entries(files));
   const zipBuffer = createStoredZip(zipFiles || files);
   let listener = null;
   let fetchCount = 0;
   let openClickCount = 0;
+  let treeQueryCount = 0;
   let selectedPath = Array.from(fileMap.keys())[0];
   const treeNodes = treePaths
     ? treePaths.flatMap(parts => makeNestedTreeNodes(parts))
@@ -519,6 +593,7 @@ function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, f
         return [editorTextarea];
       }
       if (/treeitem|role="row"|file-tree|project-tree|data-entity-id|data-doc-id|data-id|data-file-id/.test(selector)) {
+        treeQueryCount += 1;
         if (treeNodes) {
           return treeNodes;
         }
@@ -555,6 +630,15 @@ function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, f
     fetch: async (_endpoint, options = {}) => {
       fetchCount += 1;
       const endpoint = String(_endpoint || '');
+      if (typeof onFetch === 'function') {
+        onFetch({
+          endpoint,
+          options,
+          setActivePath(path) {
+            selectedPath = path;
+          }
+        });
+      }
       const docMatch = endpoint.match(/\/doc\/([^/?#]+)/);
       if (docMatch && docFetchFiles) {
         const content = docFetchFiles[decodeURIComponent(docMatch[1])] || '';
@@ -623,6 +707,10 @@ function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, f
     console
   });
 
+  vm.runInContext(overleafCapabilitiesSource, context, { filename: 'overleafCapabilities.js' });
+  vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
+  vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
+  vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });
   vm.runInContext(pageBridgeSource, context, { filename: 'pageBridge.js' });
 
   return {
@@ -648,6 +736,9 @@ function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, f
     },
     getOpenClickCount() {
       return openClickCount;
+    },
+    getTreeQueryCount() {
+      return treeQueryCount;
     },
     getActivePath() {
       return selectedPath;

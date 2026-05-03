@@ -83,6 +83,7 @@ test('task run snapshots request binary assets so local LaTeX can see Figures di
   const getRunProjectSnapshotBody = contentScript.match(/async function getRunProjectSnapshot\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
   assert.match(getRunProjectSnapshotBody, /includeBinaryFiles:\s*true/);
+  assert.match(getRunProjectSnapshotBody, /zipOnly:\s*true/);
   assert.match(contentScript, /资源文件/);
 });
 
@@ -97,7 +98,21 @@ test('task run snapshots bypass cache so Codex sees the latest Overleaf state', 
   assert.match(getRunProjectSnapshotBody, /maxAgeMs:\s*0/);
 });
 
-test('task run blocks partial project snapshots before they can rewrite the local mirror', () => {
+test('whole-project ZIP sync waits long enough before falling back to focused files', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const getRunProjectSnapshotBody = contentScript.match(/async function getRunProjectSnapshot\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const timeoutBody = contentScript.match(/function getPageBridgeTimeoutMs\(method\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(contentScript, /const RUN_SNAPSHOT_ZIP_TIMEOUT_MS\s*=\s*30000/);
+  assert.match(contentScript, /const SNAPSHOT_PAGE_BRIDGE_TIMEOUT_MS\s*=\s*70000/);
+  assert.match(getRunProjectSnapshotBody, /zipTimeoutMs:\s*RUN_SNAPSHOT_ZIP_TIMEOUT_MS/);
+  assert.match(timeoutBody, /return SNAPSHOT_PAGE_BRIDGE_TIMEOUT_MS/);
+});
+
+test('task run blocks unfocused partial project snapshots before they can rewrite the local mirror', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -106,6 +121,22 @@ test('task run blocks partial project snapshots before they can rewrite the loca
 
   assert.match(warningsBody, /fullProjectSnapshot/);
   assert.match(contentScript, /没有读到完整的 Overleaf 项目/);
+  assert.match(contentScript, /snapshotWarnings\.blocking\.length && !warmMirrorReuse\.useExistingMirror && !focusedPartialSnapshot/);
+  assert.match(contentScript, /只读到你选择的上下文文件/);
+});
+
+test('fresh warm mirror can carry a run when Overleaf only returns a partial snapshot', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /async function resolveWarmMirrorReuse/);
+  assert.match(contentScript, /Full project snapshot was not captured/);
+  assert.match(contentScript, /const WARM_MIRROR_MAX_AGE_MS\s*=\s*5 \* 60 \* 1000/);
+  assert.match(contentScript, /mirrorStatus\.ageMs >= WARM_MIRROR_MAX_AGE_MS/);
+  assert.match(contentScript, /没有读到完整 Overleaf 项目，但本地 workspace 刚同步过/);
+  assert.match(contentScript, /mergeProjectWithSyncChangeBaseFiles\(project,\s*syncChanges\)/);
 });
 
 test('successful Overleaf writeback refreshes page snapshot cache and native mirror baseline', () => {
@@ -139,9 +170,27 @@ test('idle background sync does not poll or touch the Overleaf editor', () => {
   );
   const initBody = contentScript.match(/async function init\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
+  assert.doesNotMatch(initBody, /initWarmMirror/);
   assert.doesNotMatch(initBody, /scheduleProjectSync/);
   assert.doesNotMatch(initBody, /mirror\.sync/);
+  assert.doesNotMatch(contentScript, /setInterval\(\(\) => \{[\s\S]*syncMirrorBackground/);
   assert.doesNotMatch(contentScript, /function scheduleProjectSync/);
+  assert.doesNotMatch(contentScript, /addEventListener\('input', scheduleMirrorPrefetch\)/);
+  assert.doesNotMatch(initBody, /scheduleProbeRefresh/);
+  assert.doesNotMatch(initBody, /installInteractionRefresh/);
+});
+
+test('status probing and mirror prefetch have no automatic refresh helpers left behind', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.doesNotMatch(contentScript, /function installInteractionRefresh/);
+  assert.doesNotMatch(contentScript, /function scheduleProbeRefresh/);
+  assert.doesNotMatch(contentScript, /function scheduleDebouncedProbeRefresh/);
+  assert.doesNotMatch(contentScript, /function scheduleMirrorPrefetch/);
+  assert.doesNotMatch(contentScript, /function syncMirrorBackground/);
 });
 
 test('ask mode is not blocked by write-safety preconditions', () => {
@@ -245,7 +294,8 @@ test('completed runs collapse processing history behind a processed summary', ()
   );
 
   assert.match(contentScript, /function finishRunView\(/);
-  assert.match(contentScript, /collapseRunProcess\(currentRunView/);
+  assert.match(contentScript, /const visibleView = getCurrentRunViewForRender\(\)/);
+  assert.match(contentScript, /collapseRunProcess\(visibleView/);
   assert.match(contentScript, /formatProcessedSummary/);
   assert.match(contentScript, /已处理/);
   assert.match(contentScript, /runProcess\.open = false/);
@@ -269,7 +319,7 @@ test('context compaction appears as a lightweight checkpoint inside processed hi
   assert.match(agentTranscript, /上下文已压缩，Codex 继续处理/);
   assert.match(agentTranscript, /kind:\s*'checkpoint'/);
   assert.match(contentScript, /row\.dataset\.kind = event\.kind \|\| 'activity'/);
-  assert.match(contentScript, /collapseRunProcess\(currentRunView/);
+  assert.match(contentScript, /collapseRunProcess\(visibleView/);
   assert.match(css, /\.run-activity\[data-kind="checkpoint"\]/);
   assert.match(css, /\.run-activity\[data-kind="checkpoint"\]\s+\.run-activity-title::before/);
   assert.doesNotMatch(agentTranscript, /技术详情[^']*上下文已压缩/);
@@ -313,6 +363,101 @@ test('task session navigation stays pinned while the transcript scrolls', () => 
   assert.match(css, /\.col-log\s*\{[\s\S]*overflow-y:\s*auto/);
 });
 
+test('running Codex tasks do not block switching to another session for reading history', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const switchBody = contentScript.match(/async function switchSession\(sessionId\) \{[\s\S]*?\n  async function deleteSessionWithConfirm/)?.[0] || '';
+
+  assert.doesNotMatch(switchBody, /Finish the current Codex task before switching sessions/);
+  assert.doesNotMatch(switchBody, /if \(currentRunView\)/);
+  assert.match(contentScript, /sessionId:\s*state\.activeSessionId/);
+  assert.match(contentScript, /findRunRecord\(currentRunView\.recordId,\s*currentRunView\.sessionId\)/);
+});
+
+test('running Codex tasks only lock the running session, not the whole session list', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const startNewBody = contentScript.match(/async function startNewSession\(\) \{[\s\S]*?\n  async function switchSession/)?.[0] || '';
+  const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
+  const setRunningBody = contentScript.match(/function setRunning\(running\) \{[\s\S]*?\n  function startRunView/)?.[0] || '';
+  const sessionListBody = contentScript.match(/function renderSessionList\(\{ showAll = false \} = \{\}\) \{[\s\S]*?\n  function renderRunHistory/)?.[0] || '';
+
+  assert.doesNotMatch(startNewBody, /Finish the current Codex task before starting a new session/);
+  assert.doesNotMatch(setRunningBody, /\[data-new-session\]'\)\.disabled = running/);
+  assert.match(deleteBody, /isSessionRunning\(target\)/);
+  assert.doesNotMatch(deleteBody, /currentRunView\?\.sessionId === sessionId/);
+  assert.doesNotMatch(deleteBody, /Finish the current Codex task before deleting a session/);
+  assert.match(sessionListBody, /pinnedSessionIds:\s*getRunningSessionIds\(\)/);
+  assert.doesNotMatch(sessionListBody, /pinnedSessionIds:\s*\[currentRunView\?\.sessionId\]\.filter\(Boolean\)/);
+  assert.match(sessionListBody, /const isRunningSession = isSessionRunning\(session\)/);
+  assert.doesNotMatch(sessionListBody, /const isRunningSession = currentRunView\?\.sessionId === session\.id/);
+  assert.match(sessionListBody, /row\.dataset\.running = isRunningSession \? 'true' : 'false'/);
+  assert.match(sessionListBody, /deleteButton\.disabled = isRunningSession/);
+  assert.match(contentScript, /function isSessionRunning\(session\) \{/);
+  assert.match(contentScript, /run\.status === 'running'/);
+  assert.match(css, /\.codex-session-row\[data-running="true"\]/);
+  assert.match(css, /codex-session-spin/);
+});
+
+test('running tasks are only marked interrupted when restoring persisted state after reload', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const sessionState = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/sessionState.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /normalizePanelState\(await loadStoredState\(\),\s*\{\s*restoreRunningRuns:\s*true\s*\}\)/);
+  assert.match(sessionState, /restoreRunningRuns/);
+  assert.doesNotMatch(sessionState, /Run interrupted by page reload/);
+  assert.doesNotMatch(sessionState, /Interrupted by page reload/);
+  assert.match(sessionState, /页面刷新后已停止跟踪这轮任务/);
+});
+
+test('session list keeps the selected historical session reachable', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const sessionState = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/sessionState.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /selectVisibleSessionsForList/);
+  assert.match(contentScript, /state\.activeSessionId/);
+  assert.match(sessionState, /function selectVisibleSessionsForList/);
+  assert.match(sessionState, /activeSessionId/);
+});
+
+test('high-volume Codex stream output is throttled before panel rendering and storage writes', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const appendRunEventBody = contentScript.match(/function appendRunEvent\(input = \{\}\) \{[\s\S]*?\n  function getCurrentRunViewForRender/)?.[0] || '';
+
+  assert.match(contentScript, /STREAM_RENDER_FLUSH_MS/);
+  assert.match(contentScript, /STREAM_SAVE_DELAY_MS/);
+  assert.match(contentScript, /pendingStreamRenderEvents = new Map\(\)/);
+  assert.match(contentScript, /function scheduleStreamEventRender/);
+  assert.match(contentScript, /function flushPendingStreamRenders/);
+  assert.match(contentScript, /function scheduleRunStateSave/);
+  assert.match(appendRunEventBody, /scheduleRunStateSave\(event\.kind\)/);
+  assert.match(appendRunEventBody, /scheduleStreamEventRender\(renderedEvent\)/);
+  assert.match(appendRunEventBody, /if \(event\.kind === 'stream'\) \{[\s\S]*scheduleStreamEventRender\(renderedEvent\)/);
+});
+
 test('reviewing safety toggle is labeled instead of a mysterious check icon', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -342,9 +487,50 @@ test('write paths enforce Overleaf Reviewing before applying changes when reques
 
   assert.match(contentScript, /async function ensureReviewingBeforeWrite/);
   assert.match(applySyncBody, /await ensureReviewingBeforeWrite\(operations\)/);
+  assert.match(applySyncBody, /requireReviewing:\s*state\.requireReviewing === true/);
   assert.match(applyTaskBody, /await ensureReviewingBeforeWrite\(partitioned\.safe\)/);
+  assert.match(applyTaskBody, /requireReviewing:\s*state\.requireReviewing === true/);
   assert.match(pageBridge, /method === 'ensureReviewing'/);
   assert.match(pageBridge, /function ensureReviewing\(/);
+  assert.match(pageBridge, /requireReviewing:\s*params\.requireReviewing === true/);
+  assert.match(pageBridge, /buildReviewingRequiredBlockedResult/);
+});
+
+test('write tasks preflight Reviewing before syncing or starting local Codex', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
+  const preflightIndex = runTaskBody.indexOf('preflightWriteSafety()');
+  const snapshotIndex = runTaskBody.indexOf('getRunProjectSnapshot()');
+  const codexRunIndex = runTaskBody.indexOf("method: 'codex.run'");
+  const preflightBody = contentScript.match(/async function preflightWriteSafety\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
+
+  assert.match(contentScript, /async function preflightWriteSafety\(/);
+  assert.ok(preflightIndex > -1);
+  assert.ok(snapshotIndex > -1);
+  assert.ok(codexRunIndex > -1);
+  assert.ok(preflightIndex < snapshotIndex);
+  assert.ok(preflightIndex < codexRunIndex);
+  assert.match(preflightBody, /state\.mode === 'ask'/);
+  assert.match(preflightBody, /state\?\.requireReviewing/);
+  assert.match(preflightBody, /callPageBridge\('ensureReviewing'/);
+  assert.match(preflightBody, /任务未开始：无法开启 Overleaf 留痕/);
+  assert.match(preflightBody, /finishRunView\('未开始：无法开启留痕', 'failed'\)/);
+});
+
+test('write preflight gives natural feedback for automatic Reviewing activation', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const preflightBody = contentScript.match(/async function preflightWriteSafety\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
+
+  assert.match(preflightBody, /正在确认 Overleaf 留痕状态/);
+  assert.match(preflightBody, /已开启 Overleaf 留痕，开始处理任务/);
+  assert.match(preflightBody, /Overleaf 留痕已经开启，开始处理任务/);
+  assert.match(preflightBody, /你可能没有权限，或 Overleaf 当前页面没有暴露切换入口/);
 });
 
 test('native and raw agent events go through the human transcript mapper', () => {
@@ -427,7 +613,8 @@ test('same UI session records final assistant summary for the next Codex turn', 
   assert.match(contentScript, /function buildSessionHistoryResult/);
   assert.match(contentScript, /const assistantMessage = response\.result\.assistantMessage \|\| getAssistantAnswerForCurrentRun\(\)/);
   assert.match(contentScript, /result:\s*buildSessionHistoryResult\(\{[\s\S]*assistantMessage,/);
-  assert.match(contentScript, /syncChanges:\s*response\.result\.syncChanges/);
+  assert.match(contentScript, /const syncChanges = response\.result\.syncChanges \|\| \[\]/);
+  assert.match(contentScript, /syncChanges\s*\n\s*\}\)/);
 });
 
 test('post-run session persistence failures do not turn ask results into failed analysis', () => {
@@ -523,6 +710,116 @@ test('auto mode shows a readonly diff after applying Codex changes', () => {
   assert.match(contentScript, /dataset\.readonly = 'true'/);
   assert.match(css, /\.codex-diff-review\[data-readonly="true"\]/);
   assert.doesNotMatch(applySyncBody, /本地 Codex 改动预览：\$\{syncChanges\.filter/);
+});
+
+test('confirm diff review uses immediate per-file decisions and batch accept reject actions', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const createDiffBody = contentScript.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderDiffReview/)?.[0] || '';
+  const renderDiffBody = contentScript.match(/function renderDiffReview\(syncChanges\) \{[\s\S]*?\n  function renderReadOnlyDiffReview/)?.[0] || '';
+
+  assert.match(createDiffBody, /card\.dataset\.decision = readonly \? 'accepted' : 'pending'/);
+  assert.match(createDiffBody, /function decideFileChange\(path, accepted\)/);
+  assert.match(createDiffBody, /status\.textContent = accepted \? '已接受' : '已拒绝'/);
+  assert.match(renderDiffBody, /acceptAllBtn\.textContent = '接受全部'/);
+  assert.match(renderDiffBody, /rejectAllBtn\.textContent = '拒绝全部'/);
+  assert.doesNotMatch(renderDiffBody, /应用选中/);
+  assert.match(renderDiffBody, /finishIfAllDecided/);
+  assert.match(css, /\.codex-diff-file\[data-decision="accepted"\]/);
+  assert.match(css, /\.codex-diff-toolbar-summary/);
+});
+
+test('auto recompile is based on successfully applied Overleaf writes', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
+  const applySyncBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  async function refreshProjectMirrorAfterWriteback/)?.[0] || '';
+
+  assert.doesNotMatch(runTaskBody, /response\.result\.syncChanges[\s\S]*autoRecompileAfterWriteback/);
+  assert.match(applySyncBody, /const appliedPaths = getAppliedOperationPaths\(applied\)/);
+  assert.match(applySyncBody, /autoRecompileAfterWriteback\(appliedPaths\)/);
+});
+
+test('@compile-log context is preserved across Codex run retries', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
+
+  assert.match(contentScript, /function buildCodexRunParams\(/);
+  assert.match(runTaskBody, /compileLogContext = await resolveCompileLogContext\(\)/);
+  assert.match(runTaskBody, /mirror_stale[\s\S]*buildCodexRunParams\([\s\S]*compileLogContext/);
+  assert.match(runTaskBody, /thread_resume_failed[\s\S]*buildCodexRunParams\([\s\S]*compileLogContext/);
+});
+
+test('compile page bridge calls use long-running timeouts', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /function getPageBridgeTimeoutMs\(method\)/);
+  assert.match(contentScript, /method === 'triggerCompile' \|\| method === 'getCompileLog'/);
+  assert.match(contentScript, /return 60000/);
+  assert.match(contentScript, /const timeoutMs = getPageBridgeTimeoutMs\(method\)/);
+});
+
+test('partial writeback report tells the user what already changed and how to recover', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const appendApplyResultBody = contentScript.match(/function appendApplyResult\(result\) \{[\s\S]*?\n  function formatOperationType/)?.[0] || '';
+  const partialWarningIndex = contentScript.indexOf('function appendPartialWritebackWarning');
+  const appendApplyIndex = contentScript.indexOf('function appendApplyResult');
+
+  assert.match(contentScript, /function appendPartialWritebackWarning\(/);
+  assert.ok(partialWarningIndex > -1);
+  assert.ok(appendApplyIndex > -1);
+  assert.ok(partialWarningIndex < appendApplyIndex);
+  assert.doesNotMatch(appendApplyResultBody, /function appendPartialWritebackWarning/);
+  assert.match(contentScript, /部分写入已完成/);
+  assert.match(contentScript, /写入被跳过/);
+  assert.match(contentScript, /function formatWritebackSkippedNextStep/);
+  assert.match(contentScript, /这轮没有任何内容写入。请查看跳过原因，处理后重试。/);
+  assert.match(contentScript, /撤销改动/);
+  assert.match(contentScript, /撤销已写入部分/);
+  assert.match(contentScript, /recordUndoFromApply\(project, applied\)[\s\S]*appendPartialWritebackWarning\(applied\)/);
+  assert.match(contentScript, /appendPartialWritebackWarning\(applied\)/);
+});
+
+test('undo flow blocks legacy full-file replaceAll restores that would mark whole documents changed', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const undoRunBody = contentScript.match(/async function undoRun\(runId\) \{[\s\S]*?\n  function recordUndoFromApply/)?.[0] || '';
+
+  assert.match(contentScript, /const MAX_SAFE_UNDO_REPLACEALL_CHARS/);
+  assert.match(contentScript, /function findUnsafeFullFileUndoOperation\(/);
+  assert.match(undoRunBody, /findUnsafeFullFileUndoOperation\(run\.undoOperations\)/);
+  assert.match(contentScript, /已阻止旧格式全文撤销/);
+});
+
+test('undo flow uses no-trace restoring instead of requiring Reviewing write mode', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const undoRunBody = contentScript.match(/async function undoRun\(runId\) \{[\s\S]*?\n  function findUnsafeFullFileUndoOperation/)?.[0] || '';
+
+  assert.doesNotMatch(undoRunBody, /ensureReviewingBeforeWrite\(run\.undoOperations\)/);
+  assert.match(undoRunBody, /reviewingPolicy:\s*'no-trace-undo'/);
+  assert.match(contentScript, /无留痕撤销/);
 });
 
 test('change preview is grouped by file with edit evidence instead of raw operation counts', () => {

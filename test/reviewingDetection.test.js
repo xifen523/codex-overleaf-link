@@ -80,6 +80,33 @@ test('does not treat false internal reviewing flags as active Reviewing mode', (
   assert.equal(result.status, 'not-detected');
 });
 
+test('does not treat internal reviewing permission flags as active Reviewing mode', () => {
+  const result = detectReviewingFromSignals({
+    bodyText: '',
+    controls: [],
+    internalStates: [
+      'reviewing:true',
+      'trackChanges:true'
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 'not-detected');
+});
+
+test('detects explicit internal editing mode Reviewing state', () => {
+  const result = detectReviewingFromSignals({
+    bodyText: '',
+    controls: [],
+    internalStates: [
+      'editingMode:reviewing'
+    ]
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.source, 'internal-state');
+});
+
 test('manual override is explicit and auditable', () => {
   const result = detectReviewingFromSignals({
     manualOverride: true,

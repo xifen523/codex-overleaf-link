@@ -192,6 +192,13 @@
       codexThreadId: typeof input.codexThreadId === 'string' ? input.codexThreadId : '',
       status: typeof input.status === 'string' && input.status ? input.status : 'active',
       focusFiles: Array.isArray(input.focusFiles) ? input.focusFiles.slice() : [],
+      history: Array.isArray(input.history) ? cloneJsonValue(input.history) : [],
+      runs: Array.isArray(input.runs) ? cloneJsonValue(input.runs) : [],
+      task: typeof input.task === 'string' ? input.task : '',
+      mode: typeof input.mode === 'string' ? input.mode : '',
+      model: typeof input.model === 'string' ? input.model : '',
+      reasoningEffort: typeof input.reasoningEffort === 'string' ? input.reasoningEffort : '',
+      requireReviewing: input.requireReviewing !== false,
       createdAt: typeof input.createdAt === 'string' ? input.createdAt : now,
       updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : now
     };
@@ -309,6 +316,14 @@
 
   function generateId(prefix) {
     return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function cloneJsonValue(value) {
+    try {
+      return JSON.parse(JSON.stringify(value));
+    } catch (_error) {
+      return Array.isArray(value) ? value.slice() : value;
+    }
   }
 
   return {

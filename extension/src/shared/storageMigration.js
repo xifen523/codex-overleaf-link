@@ -41,6 +41,13 @@
           codexThreadId: '',
           status: 'active',
           focusFiles: Array.isArray(legacy.focusFiles) ? legacy.focusFiles : [],
+          history: Array.isArray(legacy.history) ? legacy.history : [],
+          runs: Array.isArray(legacy.runs) ? legacy.runs : [],
+          task: typeof legacy.task === 'string' ? legacy.task : '',
+          mode: typeof legacy.mode === 'string' ? legacy.mode : legacyBlob.mode || '',
+          model: typeof legacy.model === 'string' ? legacy.model : legacyBlob.model || '',
+          reasoningEffort: typeof legacy.reasoningEffort === 'string' ? legacy.reasoningEffort : legacyBlob.reasoningEffort || '',
+          requireReviewing: legacy.requireReviewing !== false && legacyBlob.requireReviewing !== false,
           createdAt: legacy.createdAt,
           updatedAt: legacy.updatedAt
         });

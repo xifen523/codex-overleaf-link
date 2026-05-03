@@ -14,7 +14,6 @@
   ];
 
   const INTERNAL_ACTIVE_REVIEW_PATTERNS = [
-    /\b(?:reviewing|track(?:ed)?Changes?|suggest(?:ing|ions?))\s*:\s*true\b/i,
     /\b(?:mode|editingMode|reviewMode)\s*:\s*(?:reviewing|suggesting|track(?:ed)? changes?)\b/i
   ];
 

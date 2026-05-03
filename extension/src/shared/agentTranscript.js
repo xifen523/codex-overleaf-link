@@ -496,6 +496,12 @@
         nextStep: '请确认终端里可以运行 `codex`，然后重新安装 native host 或刷新扩展后重试。'
       };
     }
+    if (/unsupported[_ ]parameter/i.test(text) && /reasoning\.summary|summary/i.test(text)) {
+      return {
+        conclusion: '这轮没有继续：当前 Codex 模型不支持插件请求的推理摘要参数。',
+        nextStep: '请刷新扩展并重新运行；插件会按模型能力自动去掉不兼容参数。'
+      };
+    }
     if (/quota|kQuotaBytes|QUOTA_BYTES/i.test(text)) {
       return {
         conclusion: 'Codex 结果已经生成，但本地会话记录超出 Chrome 存储配额。',
@@ -570,6 +576,7 @@
     if (writeResult) {
       sections.push(`写入结果：${writeResult}`);
     }
+    addListSection(sections, '跳过原因', report.skippedChanges);
     const undo = cleanVisibleText(report.undo || '');
     if (undo) {
       sections.push(`可撤销：${undo}`);
@@ -597,6 +604,7 @@
       findings: normalizeStringList(input.findings),
       plannedChanges: counts.appliedCount ? [] : operations.map(formatOperationLine),
       appliedChanges: appliedOperations.map(formatOperationLine),
+      skippedChanges: collectSkippedOperations(input.applyResults).map(formatSkippedOperationLine),
       unchangedReason: input.unchangedReason || (noWrites ? inferUnchangedReason(input) : ''),
       writeResult: input.writeResult || (counts.appliedCount || counts.skippedCount
         ? `已写入 ${counts.appliedCount} 项，跳过 ${counts.skippedCount} 项`
@@ -639,6 +647,7 @@
       findings: normalizeStringList(report.findings),
       plannedChanges: normalizeStringList(report.plannedChanges),
       appliedChanges: normalizeStringList(report.appliedChanges),
+      skippedChanges: normalizeStringList(report.skippedChanges),
       unchangedReason: cleanVisibleText(report.unchangedReason || ''),
       nextStep: cleanVisibleText(report.nextStep || '')
     };
@@ -894,6 +903,21 @@
     return operations;
   }
 
+  function collectSkippedOperations(applyResults) {
+    const operations = [];
+    for (const result of normalizeApplyResults(applyResults)) {
+      for (const item of result.skipped || []) {
+        if (item?.operation) {
+          operations.push({
+            operation: item.operation,
+            result: item.result || {}
+          });
+        }
+      }
+    }
+    return operations;
+  }
+
   function collectAffectedFiles(operations = [], summary, applyResults = []) {
     const files = [];
     const seen = new Set();
@@ -923,6 +947,15 @@
     const filePath = operation?.path || operation?.from || operation?.to || '未知文件';
     const reason = cleanVisibleText(operation?.reason || '');
     return reason ? `${filePath}：${label}（${reason}）` : `${filePath}：${label}`;
+  }
+
+  function formatSkippedOperationLine(item) {
+    const operation = item?.operation || {};
+    const label = OPERATION_LABELS[operation.type] || operation.type || '处理';
+    const filePath = operation.path || operation.from || operation.to || '未知文件';
+    const result = item?.result || {};
+    const reason = cleanVisibleText(result.reason || result.error || result.code || '未知原因');
+    return `${filePath}：${label}没有写入（${reason}）`;
   }
 
   return {

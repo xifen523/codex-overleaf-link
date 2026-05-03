@@ -1,6 +1,11 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { buildThreadStartParams, buildThreadResumeParams, buildCodexSettings } = require('../native-host/src/codexSessionRunner');
+const {
+  buildThreadStartParams,
+  buildThreadResumeParams,
+  buildTurnStartParams,
+  buildCodexSettings
+} = require('../native-host/src/codexSessionRunner');
 
 test('buildThreadStartParams does not include threadId', () => {
   const params = buildThreadStartParams({
@@ -46,4 +51,35 @@ test('buildThreadResumeParams defaults model to null', () => {
     workspacePath: '/tmp/ws'
   });
   assert.strictEqual(params.model, null);
+});
+
+test('buildTurnStartParams requests detailed reasoning summaries for supported models', () => {
+  const params = buildTurnStartParams({
+    threadId: 'thread_abc123',
+    workspacePath: '/tmp/ws',
+    task: 'check grammar',
+    model: 'gpt-5.5',
+    reasoningEffort: 'xhigh'
+  });
+
+  assert.strictEqual(params.threadId, 'thread_abc123');
+  assert.strictEqual(params.cwd, '/tmp/ws');
+  assert.strictEqual(params.model, 'gpt-5.5');
+  assert.strictEqual(params.effort, 'xhigh');
+  assert.strictEqual(params.summary, 'detailed');
+});
+
+test('buildTurnStartParams omits reasoning summary for gpt-5.3-codex-spark', () => {
+  const params = buildTurnStartParams({
+    threadId: 'thread_spark',
+    workspacePath: '/tmp/ws',
+    task: 'check grammar',
+    model: 'gpt-5.3-codex-spark',
+    reasoningEffort: 'xhigh'
+  });
+
+  assert.strictEqual(params.threadId, 'thread_spark');
+  assert.strictEqual(params.model, 'gpt-5.3-codex-spark');
+  assert.strictEqual(params.effort, 'xhigh');
+  assert.strictEqual(Object.hasOwn(params, 'summary'), false);
 });

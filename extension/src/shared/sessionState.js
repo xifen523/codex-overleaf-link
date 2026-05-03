@@ -33,6 +33,7 @@
     targetBytes: 4 * 1024 * 1024,
     titleChars: 6000,
     detailChars: 3000,
+    reportDetailChars: 64000,
     historyChars: 1800,
     taskChars: 12000,
     sessionTitleChars: 80,
@@ -47,13 +48,14 @@
     targetBytes: 768 * 1024,
     titleChars: 1000,
     detailChars: 300,
+    reportDetailChars: 16000,
     historyChars: 400,
     taskChars: 2000,
     sessionTitleChars: 80,
     statusTextChars: 400
   };
 
-  function normalizePanelState(input = {}) {
+  function normalizePanelState(input = {}, options = {}) {
     const state = {
       ...DEFAULT_PANEL_STATE,
       ...input
@@ -69,18 +71,18 @@
     state.autoOpen = state.autoOpen !== false;
     state.task = typeof state.task === 'string' ? state.task : '';
     state.model = typeof state.model === 'string' && state.model ? state.model : DEFAULT_PANEL_STATE.model;
-    state.runs = normalizeRuns(state.runs);
-    state.sessions = normalizeSessions(state, input);
+    state.runs = normalizeRuns(state.runs, options);
+    state.sessions = normalizeSessions(state, input, options);
     state.activeSessionId = resolveActiveSessionId(state.sessions, input.activeSessionId);
 
     return mirrorActiveSession(state);
   }
 
-  function normalizeSessions(state, input) {
+  function normalizeSessions(state, input, options = {}) {
     const explicitSessions = Array.isArray(input.sessions) ? input.sessions : [];
     const sessions = explicitSessions
       .filter(session => session && typeof session.id === 'string')
-      .map(session => normalizeSession(session, state));
+      .map(session => normalizeSession(session, state, options));
 
     if (sessions.length) {
       return sessions.slice(-20);
@@ -98,22 +100,24 @@
       runs: state.runs,
       title: legacySession.title || deriveSessionTitle(state.runs, state.task),
       updatedAt: legacySession.updatedAt
-    }, state)];
+    }, state, options)];
   }
 
-  function normalizeSession(session, fallbackState = DEFAULT_PANEL_STATE) {
-    const normalizedRuns = normalizeRuns(session.runs);
+  function normalizeSession(session, fallbackState = DEFAULT_PANEL_STATE, options = {}) {
+    const history = Array.isArray(session.history) ? session.history.slice(-10) : [];
+    const normalizedRuns = normalizeRuns(session.runs, options);
+    const runs = normalizedRuns.length ? normalizedRuns : recoverRunsFromHistory(session, history);
     const title = typeof session.title === 'string' && session.title.trim()
       ? session.title.trim()
-      : deriveSessionTitle(normalizedRuns, session.task);
+      : deriveSessionTitle(runs, session.task);
 
     return {
       id: session.id,
       title,
       createdAt: typeof session.createdAt === 'string' ? session.createdAt : new Date().toISOString(),
       updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : new Date().toISOString(),
-      history: Array.isArray(session.history) ? session.history.slice(-10) : [],
-      runs: normalizedRuns,
+      history,
+      runs,
       task: typeof session.task === 'string' ? session.task : '',
       mode: VALID_MODES.has(session.mode) ? session.mode : fallbackState.mode,
       model: typeof session.model === 'string' && session.model ? session.model : fallbackState.model,
@@ -124,6 +128,41 @@
       focusFiles: normalizeFocusFiles(session.focusFiles),
       codexThreadId: typeof session.codexThreadId === 'string' ? session.codexThreadId : ''
     };
+  }
+
+  function recoverRunsFromHistory(session, history) {
+    if (!Array.isArray(history) || !history.length) {
+      return [];
+    }
+    return normalizeRuns(history.map((entry, index) => {
+      const task = typeof entry?.task === 'string' && entry.task.trim()
+        ? entry.task.trim()
+        : (typeof session.task === 'string' && session.task.trim() ? session.task.trim() : 'untitled task');
+      const timestamp = typeof entry?.at === 'string' ? entry.at : session.updatedAt;
+      const result = typeof entry?.result === 'string' && entry.result.trim()
+        ? entry.result.trim()
+        : '这轮任务有历史记录，但没有保存详细结果。';
+      return {
+        id: `recovered_${session.id}_${index}`,
+        task,
+        mode: session.mode,
+        model: session.model,
+        reasoningEffort: session.reasoningEffort,
+        status: 'completed',
+        statusText: '已处理',
+        startedAt: timestamp,
+        finishedAt: timestamp,
+        events: [{
+          title: '本轮完成报告',
+          status: 'completed',
+          kind: 'report',
+          timestamp,
+          detail: {
+            '结论': result
+          }
+        }]
+      };
+    }));
   }
 
   function resolveActiveSessionId(sessions, activeSessionId) {
@@ -189,6 +228,7 @@
   function recordSessionResult(session, entry) {
     const base = session?.id ? session : createSession();
     return {
+      ...base,
       id: base.id,
       history: [
         ...(Array.isArray(base.history) ? base.history : []),
@@ -197,7 +237,8 @@
           result: entry.result || entry.status || 'completed',
           at: entry.at || new Date().toISOString()
         }
-      ].slice(-10)
+      ].slice(-10),
+      updatedAt: entry.at || new Date().toISOString()
     };
   }
 
@@ -299,21 +340,62 @@
     return hasTask || hasRuns || hasHistory || hasRealTitle;
   }
 
-  function normalizeRuns(runs) {
+  function selectVisibleSessionsForList(sessions, activeSessionId, options = {}) {
+    const maxVisible = Number.isFinite(options.maxVisible) && options.maxVisible > 0
+      ? Math.floor(options.maxVisible)
+      : 3;
+    const displayable = (Array.isArray(sessions) ? sessions : []).filter(isDisplayableSession);
+    if (options.showAll || displayable.length <= maxVisible) {
+      return displayable.slice().reverse();
+    }
+
+    const pinnedSessionIds = Array.isArray(options.pinnedSessionIds)
+      ? options.pinnedSessionIds.filter(Boolean)
+      : [];
+    const recent = displayable.slice(-maxVisible).reverse();
+    if (pinnedSessionIds.length) {
+      const selected = [];
+      const pushSession = session => {
+        if (session && !selected.some(item => item.id === session.id)) {
+          selected.push(session);
+        }
+      };
+      pushSession(displayable.find(session => session.id === activeSessionId));
+      for (const pinnedId of pinnedSessionIds) {
+        pushSession(displayable.find(session => session.id === pinnedId));
+      }
+      for (const session of recent) {
+        pushSession(session);
+      }
+      return selected.slice(0, maxVisible);
+    }
+
+    if (!activeSessionId || recent.some(session => session.id === activeSessionId)) {
+      return recent;
+    }
+
+    const active = displayable.find(session => session.id === activeSessionId);
+    if (!active) {
+      return recent;
+    }
+    return [active, ...recent.filter(session => session.id !== activeSessionId).slice(0, maxVisible - 1)];
+  }
+
+  function normalizeRuns(runs, options = {}) {
     return (Array.isArray(runs) ? runs : [])
       .filter(run => run && typeof run.id === 'string')
-      .map(normalizeRun)
+      .map(run => normalizeRun(run, options))
       .slice(-20);
   }
 
-  function normalizeRun(run) {
-    const wasRunning = run.status === 'running';
+  function normalizeRun(run, options = {}) {
+    const shouldStopRestoredRun = options.restoreRunningRuns === true && run.status === 'running';
     const events = normalizeRunEvents(run.events);
-    if (wasRunning) {
+    if (shouldStopRestoredRun) {
       events.push({
-        title: 'Run interrupted by page reload',
+        title: '页面刷新后已停止跟踪这轮任务',
         status: 'failed',
-        detail: 'The Overleaf page was reloaded while this run was active. Start a new run to continue.',
+        detail: '插件重新加载时发现这轮任务还标记为处理中。为了避免继续显示过期状态，已把它标记为中断；可以重新运行任务。',
         timestamp: new Date().toISOString()
       });
     }
@@ -324,10 +406,10 @@
       mode: typeof run.mode === 'string' ? run.mode : '',
       model: typeof run.model === 'string' ? run.model : '',
       reasoningEffort: typeof run.reasoningEffort === 'string' ? run.reasoningEffort : '',
-      status: wasRunning ? 'failed' : normalizeRunStatus(run.status),
-      statusText: wasRunning ? 'Interrupted by page reload' : typeof run.statusText === 'string' ? run.statusText : '',
+      status: shouldStopRestoredRun ? 'failed' : normalizeRunStatus(run.status),
+      statusText: shouldStopRestoredRun ? '页面刷新后已停止跟踪' : typeof run.statusText === 'string' ? run.statusText : '',
       startedAt: typeof run.startedAt === 'string' ? run.startedAt : '',
-      finishedAt: wasRunning ? new Date().toISOString() : typeof run.finishedAt === 'string' ? run.finishedAt : '',
+      finishedAt: shouldStopRestoredRun ? new Date().toISOString() : typeof run.finishedAt === 'string' ? run.finishedAt : '',
       events: events.slice(-MAX_RUN_EVENTS),
       appliedOperations: Array.isArray(run.appliedOperations) ? run.appliedOperations : [],
       undoOperations: Array.isArray(run.undoOperations) ? run.undoOperations : [],
@@ -547,12 +629,18 @@
           streamKey: typeof event.streamKey === 'string' ? event.streamKey : '',
           streamRole: typeof event.streamRole === 'string' ? event.streamRole : ''
         };
-        const detail = compactDetailForStorage(event.detail, limits.detailChars);
+        const detail = compactDetailForStorage(event.detail, getEventDetailLimit(event, limits));
         if (detail !== undefined) {
           compact.detail = detail;
         }
         return compact;
       });
+  }
+
+  function getEventDetailLimit(event, limits) {
+    return event.kind === 'report'
+      ? (limits.reportDetailChars || limits.detailChars)
+      : limits.detailChars;
   }
 
   function compactDetailForStorage(detail, maxChars) {
@@ -642,6 +730,7 @@
     isDisplayableSession,
     normalizePanelState,
     recordSessionResult,
+    selectVisibleSessionsForList,
     setActiveSession,
     updateActiveSession,
     normalizeRuns,

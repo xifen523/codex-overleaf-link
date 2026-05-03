@@ -1,0 +1,218 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const projectFiles = require('../extension/src/shared/projectFiles');
+const reviewing = require('../extension/src/shared/reviewing');
+const staleGuard = require('../extension/src/shared/staleGuard');
+const { runCodexSession } = require('../native-host/src/codexSessionRunner');
+
+const pageBridgeSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/pageBridge.js'),
+  'utf8'
+);
+const overleafCapabilitiesSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/overleafCapabilities.js'),
+  'utf8'
+);
+const compileBridgeSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/compileBridge.js'),
+  'utf8'
+);
+const overleafEditorSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/overleafEditor.js'),
+  'utf8'
+);
+const overleafProjectSnapshotSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/overleafProjectSnapshot.js'),
+  'utf8'
+);
+
+test('mock Codex changes flow from native mirror into the Overleaf page bridge', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-e2e-'));
+  const project = {
+    files: [
+      { path: 'main.tex', content: 'alpha beta gamma\n' }
+    ]
+  };
+
+  try {
+    const nativeResult = await runCodexSession({
+      params: {
+        projectId: 'project-e2e',
+        task: '把 beta 改成 delta',
+        mode: 'auto',
+        project
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async ({ workspacePath }) => {
+        fs.writeFileSync(path.join(workspacePath, 'main.tex'), 'alpha delta gamma\n', 'utf8');
+      }
+    });
+
+    assert.equal(nativeResult.status, 'completed');
+    assert.equal(nativeResult.syncChanges.length, 1);
+    assert.equal(nativeResult.syncChanges[0].path, 'main.tex');
+    assert.equal(nativeResult.syncChanges[0].patches.length, 1);
+
+    const bridge = createMinimalPageBridgeHarness({
+      activePath: 'main.tex',
+      files: {
+        'main.tex': 'alpha beta gamma\n'
+      }
+    });
+    const applyResult = await bridge.call('applyOperations', {
+      baseFiles: project.files,
+      operations: nativeResult.syncChanges.map(change => ({
+        type: 'edit',
+        path: change.path,
+        patches: change.patches
+      }))
+    });
+
+    assert.equal(applyResult.ok, true);
+    assert.equal(applyResult.applied.length, 1);
+    assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma\n');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+function createMinimalPageBridgeHarness({ activePath, files }) {
+  const fileMap = new Map(Object.entries(files));
+  let selectedPath = activePath;
+  let listener = null;
+  let pendingResult = null;
+
+  const document = {
+    body: {
+      innerText: 'Reviewing',
+      textContent: 'Reviewing'
+    },
+    querySelector(selector) {
+      if (/\[aria-selected="true"\]|\.selected/.test(selector)) {
+        return makeTreeNode(selectedPath);
+      }
+      return null;
+    },
+    querySelectorAll(selector) {
+      if (/treeitem|role="row"|file-tree|project-tree|data-entity-id|data-doc-id|data-id|data-file-id/.test(selector)) {
+        return Array.from(fileMap.keys(), makeTreeNode);
+      }
+      return [];
+    },
+    execCommand() {
+      return false;
+    }
+  };
+
+  const window = {
+    location: {
+      href: 'https://www.overleaf.com/project/project-e2e',
+      origin: 'https://www.overleaf.com',
+      pathname: '/project/project-e2e'
+    },
+    CodexOverleafProjectFiles: projectFiles,
+    CodexOverleafReviewing: reviewing,
+    CodexOverleafStaleGuard: staleGuard,
+    _ide: {
+      editorView: createEditorView()
+    },
+    addEventListener(event, callback) {
+      if (event === 'message') {
+        listener = callback;
+      }
+    },
+    postMessage(message) {
+      if (message.source === 'codex-overleaf/page' && pendingResult) {
+        pendingResult(message.result);
+      }
+    },
+    setTimeout,
+    clearTimeout
+  };
+
+  const context = vm.createContext({
+    window,
+    document,
+    Node: class Node {},
+    EventTarget: class EventTarget {},
+    MouseEvent: class MouseEvent {},
+    InputEvent: class InputEvent {},
+    Event: class Event {},
+    setTimeout,
+    clearTimeout,
+    console
+  });
+  vm.runInContext(overleafCapabilitiesSource, context, { filename: 'overleafCapabilities.js' });
+  vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
+  vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
+  vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });
+  vm.runInContext(pageBridgeSource, context, { filename: 'pageBridge.js' });
+
+  return {
+    async call(method, params) {
+      assert.equal(typeof listener, 'function');
+      const resultPromise = new Promise(resolve => {
+        pendingResult = resolve;
+      });
+      await listener({
+        source: window,
+        data: {
+          source: 'codex-overleaf/content',
+          id: 'test-call',
+          method,
+          params
+        }
+      });
+      return resultPromise;
+    },
+    getFile(filePath) {
+      return fileMap.get(filePath);
+    }
+  };
+
+  function createEditorView() {
+    const doc = {
+      toString() {
+        return fileMap.get(selectedPath) || '';
+      },
+      get length() {
+        return (fileMap.get(selectedPath) || '').length;
+      }
+    };
+    return {
+      state: { doc },
+      dispatch(transaction) {
+        const changes = Array.isArray(transaction.changes)
+          ? transaction.changes
+          : [transaction.changes];
+        for (const change of changes.slice().sort((left, right) => right.from - left.from)) {
+          const text = fileMap.get(selectedPath) || '';
+          fileMap.set(selectedPath, text.slice(0, change.from) + change.insert + text.slice(change.to));
+        }
+      }
+    };
+  }
+
+  function makeTreeNode(filePath) {
+    return {
+      textContent: filePath,
+      parentElement: null,
+      getAttribute(attribute) {
+        if (attribute === 'data-path' || attribute === 'aria-label' || attribute === 'title') {
+          return filePath;
+        }
+        return '';
+      },
+      dispatchEvent() {
+        selectedPath = filePath;
+        return true;
+      }
+    };
+  }
+}

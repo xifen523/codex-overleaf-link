@@ -18,12 +18,68 @@ test('project snapshot action lives in the diagnostics menu instead of the heade
   assert.match(contentScript, /data-diagnostics-native-env/);
   assert.match(contentScript, /data-diagnostics-page-state/);
   assert.match(contentScript, /data-diagnostics-snapshot/);
+  assert.match(contentScript, /data-diagnostics-result/);
+  assert.match(contentScript, /遇到无法运行、无法写入、读不到文件时使用/);
+  assert.match(contentScript, /检查本机连接/);
+  assert.match(contentScript, /检查 Overleaf 写入/);
+  assert.match(contentScript, /检查项目读取/);
   assert.match(contentScript, /function inspectNativeEnvironment\(/);
-  assert.match(contentScript, /function formatNativeEnvironmentLog\(/);
-  assert.match(contentScript, /本机环境诊断/);
+  assert.match(contentScript, /function formatNativeEnvironmentResult\(/);
   assert.match(contentScript, /function toggleDiagnosticsMenu\(/);
   assert.match(contentScript, /function closeDiagnosticsMenu\(/);
+  assert.match(contentScript, /function showDiagnosticsResult\(/);
   assert.match(contentScript, /function inspectProjectSnapshot\(/);
   assert.match(contentScript, /allowEditorNavigation:\s*false/);
   assert.match(css, /\.codex-diagnostics-menu/);
+  assert.match(css, /\.codex-diagnostics-result/);
+  assert.match(css, /\.codex-diagnostics-technical/);
+});
+
+test('diagnostics render in a floating result panel instead of the task transcript', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const nativeBody = contentScript.match(/async function inspectNativeEnvironment\(\) \{[\s\S]*?\n  function formatNativeEnvironmentResult/)?.[0] || '';
+  const pageBody = contentScript.match(/async function inspectPageStateDiagnostics\(\) \{[\s\S]*?\n  async function runTask/)?.[0] || '';
+  const snapshotBody = contentScript.match(/async function inspectProjectSnapshot\(\) \{[\s\S]*?\n  async function inspectNativeEnvironment/)?.[0] || '';
+
+  assert.doesNotMatch(nativeBody, /appendLog\(/);
+  assert.doesNotMatch(pageBody, /appendLog\(/);
+  assert.doesNotMatch(snapshotBody, /appendLog\(/);
+  assert.match(nativeBody, /showDiagnosticsLoading\('检查本机连接'/);
+  assert.match(pageBody, /showDiagnosticsLoading\('检查 Overleaf 写入'/);
+  assert.match(snapshotBody, /showDiagnosticsLoading\('检查项目读取'/);
+  assert.match(nativeBody, /showDiagnosticsResult\(formatNativeEnvironmentResult/);
+  assert.match(pageBody, /showDiagnosticsResult\(formatPageStateDiagnosticsResult/);
+  assert.match(snapshotBody, /showDiagnosticsResult\(formatProjectSnapshotDiagnosticsResult/);
+});
+
+test('diagnostic summaries use natural language while raw details stay collapsed', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /Codex 已连接，本机 LaTeX 工具可用/);
+  assert.match(contentScript, /插件没有连上本机服务/);
+  assert.match(contentScript, /当前 Overleaf 文件可以读取和写入/);
+  assert.match(contentScript, /插件没有确认当前编辑器可以写入/);
+  assert.match(contentScript, /插件已读到完整 Overleaf 项目/);
+  assert.match(contentScript, /没有读到完整的 Overleaf 项目/);
+  assert.match(contentScript, /<summary>技术细节<\/summary>/);
+});
+
+test('diagnostic result floats inside the Codex panel with visible side margins', () => {
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const resultBlock = css.match(/#codex-overleaf-panel \.codex-diagnostics-result\s*\{[\s\S]*?\n\}/)?.[0] || '';
+
+  assert.match(resultBlock, /position:\s*fixed/);
+  assert.match(resultBlock, /top:\s*44px/);
+  assert.match(resultBlock, /right:\s*12px/);
+  assert.match(resultBlock, /width:\s*min\(316px,\s*calc\(var\(--codex-overleaf-panel-width\) - 24px\)\)/);
+  assert.doesNotMatch(resultBlock, /position:\s*absolute/);
 });

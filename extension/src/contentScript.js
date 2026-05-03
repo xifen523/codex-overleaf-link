@@ -4,7 +4,21 @@
   const PANEL_ID = 'codex-overleaf-panel';
   const LEGACY_STORAGE_KEY = 'codexOverleafPanelState';
   const RUN_PROJECT_SYNC_MAX_AGE_MS = 30000;
+  const RUN_SNAPSHOT_ZIP_TIMEOUT_MS = 30000;
+  const SNAPSHOT_PAGE_BRIDGE_TIMEOUT_MS = 70000;
+  const WARM_MIRROR_MAX_AGE_MS = 5 * 60 * 1000;
+  const STREAM_RENDER_FLUSH_MS = 80;
+  const STREAM_SAVE_DELAY_MS = 1000;
   const MAX_RUN_EVENTS = 300;
+  const MAX_SAFE_UNDO_REPLACEALL_CHARS = 2000;
+  const MODEL_DISPLAY_LABELS = Object.freeze({
+    'gpt-5.5': '5.5',
+    'gpt-5.4': '5.4',
+    'gpt-5.4-mini': '5.4m',
+    'gpt-5.3-codex': '5.3C',
+    'gpt-5.3-codex-spark': '5.3S',
+    'gpt-5.2': '5.2'
+  });
   const pageBridgeReady = injectPageBridge();
   const {
     createSession,
@@ -14,6 +28,7 @@
     normalizePanelState,
     prepareStateForStorage,
     recordSessionResult,
+    selectVisibleSessionsForList,
     setActiveSession,
     updateActiveSession
   } = window.CodexOverleafSessionState;
@@ -25,15 +40,20 @@
     mapAgentEventToActivity,
     translateRawError
   } = window.CodexOverleafAgentTranscript;
+  const nativeChannel = window.CodexOverleafNativeChannel.create({
+    chrome,
+    crypto
+  });
+  const writebackController = window.CodexOverleafWritebackController;
+  const runController = window.CodexOverleafRunController;
 
   let panel = null;
   let state = null;
   let storageKey = LEGACY_STORAGE_KEY;
-  let interactionRefreshTimer = null;
-  let interactionRefreshAttached = false;
-  let activeNativeRequestId = null;
   let currentRunView = null;
   let saveStateTimer = null;
+  let streamRenderTimer = null;
+  let pendingStreamRenderEvents = new Map();
   let storageNoticeKeys = new Set();
   let contextProject = null;
   let contextLoadId = 0;
@@ -41,20 +61,12 @@
   let logAutoFollow = true;
   let userScrollIntentUntil = 0;
   let runCancellationRequested = false;
-  let warmMirrorState = {
-    warmInterval: null,
-    warmBackoffMs: 120000,
-    warmFailures: 0,
-    prefetchTimer: null,
-    lastPrefetchAt: 0,
-    coldStartDone: false
-  };
 
   chrome.runtime.onMessage.addListener(message => {
     if (message?.type === 'codex-overleaf/open-panel') {
       ensurePanelOpen();
     }
-    if (message?.type === 'codex-overleaf/native-event' && message.id === activeNativeRequestId) {
+    if (nativeChannel.shouldHandleNativeEvent(message)) {
       appendNativeEvent(message.event);
     }
   });
@@ -63,14 +75,10 @@
 
   async function init() {
     storageKey = getProjectStorageKey(LEGACY_STORAGE_KEY, window.location.href);
-    state = normalizePanelState(await loadStoredState());
+    state = normalizePanelState(await loadStoredState(), { restoreRunningRuns: true });
     ensurePanelOpen();
     applyStateToPanel();
-    initWarmMirror();
-    await refreshProbe();
-    scheduleProbeRefresh(1200);
-    scheduleProbeRefresh(4000);
-    scheduleProbeRefresh(9000);
+    await refreshProbe({ quiet: true });
   }
 
   function ensurePanelOpen() {
@@ -81,14 +89,38 @@
         <div class="codex-vscode-head">
           <div class="codex-vscode-title">CODEX</div>
           <div class="codex-vscode-head-actions" aria-label="Codex actions">
-            <button type="button" data-refresh title="刷新状态" aria-label="刷新状态">↻</button>
+            <button type="button" data-refresh title="重新检测当前文件状态；不会同步或修改文件" aria-label="重新检测当前文件状态">↻</button>
             <div class="codex-diagnostics-wrap">
-              <button type="button" data-diagnostics-menu title="诊断" aria-label="诊断" aria-expanded="false">⋯</button>
+              <button type="button" data-diagnostics-menu title="排查问题" aria-label="排查问题" aria-expanded="false">⋯</button>
               <div class="codex-diagnostics-menu" data-diagnostics-popover hidden>
-                <button type="button" data-diagnostics-native-env>本机环境诊断</button>
-                <button type="button" data-diagnostics-page-state>页面状态诊断</button>
-                <button type="button" data-diagnostics-snapshot>项目快照诊断</button>
+                <div class="codex-diagnostics-hint">遇到无法运行、无法写入、读不到文件时使用</div>
+                <button type="button" data-diagnostics-native-env>
+                  <span>检查本机连接</span>
+                  <small>Codex、Native Host、LaTeX 工具</small>
+                </button>
+                <button type="button" data-diagnostics-page-state>
+                  <span>检查 Overleaf 写入</span>
+                  <small>当前文件、写入能力、留痕状态</small>
+                </button>
+                <button type="button" data-diagnostics-snapshot>
+                  <span>检查项目读取</span>
+                  <small>完整项目、资源文件、读取来源</small>
+                </button>
               </div>
+              <section class="codex-diagnostics-result" data-diagnostics-result hidden>
+                <div class="codex-diagnostics-result-head">
+                  <div>
+                    <div class="codex-diagnostics-result-title" data-diagnostics-result-title></div>
+                    <div class="codex-diagnostics-result-subtitle" data-diagnostics-result-subtitle></div>
+                  </div>
+                  <button type="button" data-diagnostics-result-close title="关闭" aria-label="关闭诊断结果">×</button>
+                </div>
+                <div class="codex-diagnostics-result-body" data-diagnostics-result-body></div>
+                <details class="codex-diagnostics-technical" data-diagnostics-result-details>
+                  <summary>技术细节</summary>
+                  <pre data-diagnostics-result-technical></pre>
+                </details>
+              </section>
             </div>
             <button type="button" data-new-session title="新建会话" aria-label="新建会话">✎</button>
           </div>
@@ -138,14 +170,17 @@
               <input type="checkbox" data-auto-recompile>
               <span class="codex-recompile-label">自动编译</span>
             </label>
-            <select data-model aria-label="Model">
-              <option value="gpt-5.5">GPT-5.5</option>
-              <option value="gpt-5.4">GPT-5.4</option>
-              <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
-              <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
-              <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
-              <option value="gpt-5.2">GPT-5.2</option>
-            </select>
+            <div class="codex-select-shell codex-model-picker" data-model-picker>
+              <span data-model-display>5.4</span>
+              <select data-model aria-label="Model">
+                <option value="gpt-5.5">GPT-5.5</option>
+                <option value="gpt-5.4">GPT-5.4</option>
+                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+                <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
+                <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
+                <option value="gpt-5.2">GPT-5.2</option>
+              </select>
+            </div>
             <select data-reasoning aria-label="Reasoning">
               <option value="low">Low</option>
               <option value="medium">Medium</option>
@@ -184,7 +219,7 @@
       panel.querySelector('[data-task]').addEventListener('keydown', handleTaskInputKeydown);
       panel.addEventListener('click', event => event.stopPropagation());
       panel.addEventListener('mousedown', event => event.stopPropagation());
-      panel.querySelector('[data-refresh]').addEventListener('click', () => refreshProbe());
+      panel.querySelector('[data-refresh]').addEventListener('click', () => refreshProbe({ userInitiated: true }));
       panel.querySelector('[data-diagnostics-menu]').addEventListener('click', () => toggleDiagnosticsMenu());
       panel.querySelector('[data-diagnostics-native-env]').addEventListener('click', () => {
         closeDiagnosticsMenu();
@@ -198,6 +233,7 @@
         closeDiagnosticsMenu();
         inspectProjectSnapshot();
       });
+      panel.querySelector('[data-diagnostics-result-close]').addEventListener('click', () => closeDiagnosticsResult());
       panel.querySelector('[data-view-all]').addEventListener('click', () => renderSessionList({ showAll: true }));
       panel.querySelector('[data-add-context]').addEventListener('click', () => toggleContextTray());
       panel.querySelector('[data-context-refresh]').addEventListener('click', () => loadContextFiles({ force: true }));
@@ -211,9 +247,6 @@
         panel.querySelector(selector).addEventListener('change', persistPanelInputs);
         panel.querySelector(selector).addEventListener('input', persistPanelInputs);
       }
-      panel.querySelector('[data-task]').addEventListener('input', scheduleMirrorPrefetch);
-
-      installInteractionRefresh();
       installDiagnosticsDismiss();
       installContextDismiss();
       bindLogAutoFollow();
@@ -257,6 +290,66 @@
       }
       closeDiagnosticsMenu();
     }, true);
+  }
+
+  function closeDiagnosticsResult() {
+    const result = panel?.querySelector('[data-diagnostics-result]');
+    if (result) {
+      result.hidden = true;
+    }
+  }
+
+  function showDiagnosticsLoading(title, subtitle = '正在检查当前状态。') {
+    showDiagnosticsResult({
+      title,
+      subtitle,
+      status: 'running',
+      summary: '正在读取信息，不会修改 Overleaf 文件。'
+    });
+  }
+
+  function showDiagnosticsResult(result = {}) {
+    const root = panel?.querySelector('[data-diagnostics-result]');
+    if (!root) {
+      return;
+    }
+
+    root.hidden = false;
+    root.dataset.status = result.status || 'info';
+    root.querySelector('[data-diagnostics-result-title]').textContent = result.title || '诊断结果';
+    root.querySelector('[data-diagnostics-result-subtitle]').textContent = result.subtitle || '';
+
+    const body = root.querySelector('[data-diagnostics-result-body]');
+    body.textContent = '';
+    appendDiagnosticsParagraph(body, result.summary || '没有返回可展示的诊断结果。');
+    if (Array.isArray(result.bullets) && result.bullets.length) {
+      const list = document.createElement('ul');
+      for (const item of result.bullets) {
+        const li = document.createElement('li');
+        li.textContent = item;
+        list.append(li);
+      }
+      body.append(list);
+    }
+    if (result.nextStep) {
+      const next = document.createElement('p');
+      next.className = 'codex-diagnostics-next-step';
+      next.textContent = `下一步：${result.nextStep}`;
+      body.append(next);
+    }
+
+    const details = root.querySelector('[data-diagnostics-result-details]');
+    const technical = root.querySelector('[data-diagnostics-result-technical]');
+    const technicalText = String(result.technical || '').trim();
+    details.open = false;
+    details.hidden = !technicalText;
+    technical.textContent = technicalText;
+  }
+
+  function appendDiagnosticsParagraph(container, text) {
+    const paragraph = document.createElement('p');
+    paragraph.textContent = text;
+    container.append(paragraph);
   }
 
   function installContextDismiss() {
@@ -693,52 +786,227 @@
   }
 
   async function inspectProjectSnapshot() {
-    appendLog('Inspecting project snapshot.');
-    const project = await callPageBridge('getProjectSnapshot', {
-      force: true,
-      preferLightweight: true,
-      allowZipFallback: true,
-      allowEditorNavigation: false,
-      requireFullProject: true
-    });
-    appendLog(formatProjectSnapshotLog(project));
-    appendProjectWarnings(project);
+    showDiagnosticsLoading('检查项目读取', '确认插件能否读取完整 Overleaf 项目。');
+    try {
+      const project = await callPageBridge('getProjectSnapshot', {
+        force: true,
+        preferLightweight: true,
+        allowZipFallback: true,
+        allowEditorNavigation: false,
+        requireFullProject: true,
+        zipOnly: true,
+        zipTimeoutMs: RUN_SNAPSHOT_ZIP_TIMEOUT_MS
+      });
+      showDiagnosticsResult(formatProjectSnapshotDiagnosticsResult(project));
+    } catch (error) {
+      showDiagnosticsResult({
+        title: '项目读取失败',
+        subtitle: '插件没有拿到 Overleaf 项目内容。',
+        status: 'failed',
+        summary: '这通常是 Overleaf 页面还没加载完成，或者当前页面接口暂时没有返回项目文件。',
+        nextStep: '刷新 Overleaf 页面，等左侧文件树加载完成后重试。',
+        technical: error?.stack || error?.message || String(error)
+      });
+    }
   }
 
   async function inspectNativeEnvironment() {
-    appendLog('本机环境诊断：正在检查 Codex 和 LaTeX 工具。');
+    showDiagnosticsLoading('检查本机连接', '确认本机 Codex、Native Host 和 LaTeX 工具是否可用。');
     const response = await sendBackgroundNative({ method: 'bridge.ping', params: {} });
-    if (!response?.ok) {
-      appendLog(`本机环境诊断失败：${response?.error?.message || 'native host 没有响应'}`);
-      return;
-    }
-
-    appendLog(formatNativeEnvironmentLog(response.result?.environment));
+    showDiagnosticsResult(formatNativeEnvironmentResult(response));
   }
 
-  function formatNativeEnvironmentLog(environment) {
-    if (!environment) {
-      return '本机环境：native host 已连接，但没有返回环境详情。';
+  function formatNativeEnvironmentResult(response) {
+    if (!response?.ok) {
+      return {
+        title: '本机连接异常',
+        subtitle: '插件没有连上本机服务。',
+        status: 'failed',
+        summary: '插件没有连上本机服务，所以暂时不能调用本地 Codex 或同步本地 workspace。',
+        nextStep: '确认 native host 已安装，并重新加载 Chrome 扩展后再试。',
+        technical: response?.error?.message || 'native host 没有响应'
+      };
     }
 
-    const codex = environment.codex?.ok
-      ? `Codex 已连接：${environment.codex.path}`
-      : 'Codex 未找到：请确认终端里可以运行 codex。';
+    const environment = response.result?.environment;
+    if (!environment) {
+      return {
+        title: '本机连接可用',
+        subtitle: 'Native Host 已响应。',
+        status: 'completed',
+        summary: '本机服务已经连接，但没有返回 Codex 或 LaTeX 的工具详情。',
+        nextStep: '如果运行任务失败，请重新安装 native host 或检查终端里的 codex 命令。',
+        technical: JSON.stringify(response.result || {}, null, 2)
+      };
+    }
+
+    const codexOk = environment.codex?.ok === true;
     const latexTools = environment.latex?.available || [];
-    const latex = latexTools.length
-      ? `LaTeX 可用：${latexTools.join(', ')}`
-      : 'LaTeX 未找到：当前可以编辑文本，但不能本地编译。';
-    return `${codex} ${latex}`;
+    const latexOk = latexTools.length > 0;
+    const bullets = [
+      codexOk
+        ? `Codex 可用：${environment.codex.path || '已在 PATH 中找到'}`
+        : 'Codex 没有找到：插件不能启动本地 Codex。',
+      latexOk
+        ? `LaTeX 工具可用：${latexTools.join(', ')}`
+        : 'LaTeX 工具没有找到：可以编辑文本，但不能在本地编译验证。'
+    ];
+
+    if (codexOk && latexOk) {
+      return {
+        title: '本机连接正常',
+        subtitle: 'Codex 和 LaTeX 都可以使用。',
+        status: 'completed',
+        summary: 'Codex 已连接，本机 LaTeX 工具可用。你可以让 Codex 读取、修改并本地检查 Overleaf 项目。',
+        bullets,
+        technical: JSON.stringify(environment, null, 2)
+      };
+    }
+
+    return {
+      title: codexOk ? '本机连接部分可用' : 'Codex 不可用',
+      subtitle: codexOk ? 'Codex 可用，但编译工具不完整。' : '没有找到本机 Codex。',
+      status: codexOk ? 'warning' : 'failed',
+      summary: codexOk
+        ? '本机 Codex 可以运行，但没有找到 LaTeX 编译工具；修改文件不受影响，编译验证会受限。'
+        : '插件已经连上 native host，但没有找到本机 Codex，所以不能启动任务。',
+      bullets,
+      nextStep: codexOk ? '如需编译验证，请确认 latexmk 或 pdflatex 在终端 PATH 中可用。' : '请确认终端里可以运行 codex，然后重新加载扩展。',
+      technical: JSON.stringify(environment, null, 2)
+    };
   }
 
   async function inspectPageStateDiagnostics() {
-    appendLog('页面状态诊断：正在读取 Overleaf 连接细节。');
-    const probe = await callPageBridge('probe', {
-      manualOverride: state?.requireReviewing === false
-    });
-    appendLog(`诊断摘要：${formatProbeStatusBar(probe)}。`);
-    appendReviewingDiagnostics(probe.reviewingDiagnostics);
-    appendEditorDiagnostics(probe.editorDiagnostics, probe.projectDiagnostics);
+    showDiagnosticsLoading('检查 Overleaf 写入', '确认当前文件、写入能力和留痕状态。');
+    try {
+      const probe = await callPageBridge('probe', {
+        manualOverride: state?.requireReviewing === false
+      });
+      showDiagnosticsResult(formatPageStateDiagnosticsResult(probe));
+    } catch (error) {
+      showDiagnosticsResult({
+        title: 'Overleaf 页面检查失败',
+        subtitle: '插件没有读到当前页面状态。',
+        status: 'failed',
+        summary: '这通常表示 Overleaf 页面还在加载，或者页面脚本暂时不可用。',
+        nextStep: '刷新 Overleaf 页面，点开要处理的 .tex 文件后再试。',
+        technical: error?.stack || error?.message || String(error)
+      });
+    }
+  }
+
+  function formatPageStateDiagnosticsResult(probe) {
+    const readiness = getProbeRunReadiness(probe || {});
+    const reviewingOk = probe?.reviewing?.ok === true;
+    const writable = probe?.capabilities?.editor?.write !== false;
+    const readable = probe?.editor?.ok === true;
+    const bullets = [
+      readable ? '当前文件已经读到。' : '还没有确认当前文件内容。',
+      writable ? '当前编辑器写入能力会在写入时再次验证。' : '当前编辑器暂时不可写。',
+      reviewingOk ? '留痕/Reviewing 状态已确认。' : '留痕/Reviewing 状态还没有确认。'
+    ];
+
+    if (readable && writable) {
+      return {
+        title: 'Overleaf 页面可用',
+        subtitle: formatProbeStatusBar(probe),
+        status: reviewingOk || state?.mode === 'ask' ? 'completed' : 'warning',
+        summary: '当前 Overleaf 文件可以读取和写入。写入前插件仍会再次验证，避免覆盖用户或协作者的新改动。',
+        bullets,
+        nextStep: reviewingOk || state?.mode === 'ask' ? '' : '如果需要留痕写入，请先在 Overleaf 开启 Reviewing/Track Changes。',
+        technical: formatPageDiagnosticsTechnicalDetails(probe)
+      };
+    }
+
+    return {
+      title: readable ? '当前文件已读取，但写入状态不完整' : '还没有确认当前文件',
+      subtitle: formatProbeStatusBar(probe),
+      status: 'warning',
+      summary: readable
+        ? '插件已读到当前 Overleaf 文件，但还没有确认当前编辑器可以写入。'
+        : '插件没有确认当前编辑器可以写入。通常是还没点开 .tex 文件，或者 Overleaf 页面仍在加载。',
+      bullets,
+      nextStep: '在 Overleaf 左侧文件树点开要处理的 .tex 文件，等编辑器加载完成后重新检测。',
+      technical: formatPageDiagnosticsTechnicalDetails(probe)
+    };
+  }
+
+  function formatProjectSnapshotDiagnosticsResult(project) {
+    const files = project?.files || [];
+    const textCount = files.filter(isTextSnapshotFile).length;
+    const binaryCount = files.length - textCount;
+    const fullProject = project?.capabilities?.fullProjectSnapshot === true;
+    const warnings = getProjectSnapshotWarnings(project);
+    const warningText = [...warnings.blocking, ...warnings.nonBlocking].map(formatProjectSnapshotWarning);
+    const source = project?.capabilities?.method || 'unknown';
+    const bullets = [
+      `文本文件：${textCount} 个`,
+      `资源文件：${binaryCount} 个`,
+      project?.activePath ? `当前文件：${project.activePath}` : '当前文件：未识别'
+    ];
+
+    if (fullProject && files.length) {
+      return {
+        title: '项目读取正常',
+        subtitle: `读取来源：${source}`,
+        status: 'completed',
+        summary: `插件已读到完整 Overleaf 项目：${textCount} 个文本文件${binaryCount ? `，${binaryCount} 个资源文件` : ''}。`,
+        bullets: warningText.length ? [...bullets, ...warningText] : bullets,
+        technical: formatProjectSnapshotLog(project)
+      };
+    }
+
+    return {
+      title: files.length ? '没有读到完整项目' : '没有读到项目文件',
+      subtitle: `读取来源：${source}`,
+      status: 'warning',
+      summary: files.length
+        ? `没有读到完整的 Overleaf 项目。当前只读到 ${textCount} 个文本文件${binaryCount ? `，${binaryCount} 个资源文件` : ''}。`
+        : '没有读到完整的 Overleaf 项目，也没有拿到可用文件内容。',
+      bullets: warningText.length ? [...bullets, ...warningText] : bullets,
+      nextStep: '刷新 Overleaf 页面，等左侧文件树加载完成后重试；如果只想处理一个文件，可以用 + 添加 @file 上下文。',
+      technical: formatProjectSnapshotLog(project)
+    };
+  }
+
+  function formatPageDiagnosticsTechnicalDetails(probe) {
+    const lines = [];
+    lines.push(`状态：${formatProbeStatusBar(probe || {})}`);
+    const diagnostics = probe?.reviewingDiagnostics;
+    if (diagnostics) {
+      lines.push(`Reviewing controls: ${diagnostics.controlCount || 0}; body=${Boolean(diagnostics.bodyTextHasReviewing)}; text=${Boolean(diagnostics.textContentHasReviewing)}`);
+      for (const control of (diagnostics.reviewLikeControls || []).slice(0, 4)) {
+        const label = [
+          control.text,
+          control.ariaLabel && `aria:${control.ariaLabel}`,
+          control.title && `title:${control.title}`,
+          control.dataTestId && `test:${control.dataTestId}`,
+          control.id && `id:${control.id}`
+        ].filter(Boolean).join(' | ');
+        lines.push(`Review-like ${control.tag || 'node'}: ${label || control.htmlSnippet || '(no label)'}`);
+      }
+    }
+    const editorDiagnostics = probe?.editorDiagnostics;
+    if (editorDiagnostics) {
+      const active = editorDiagnostics.active;
+      lines.push(`Editor: active ${active?.tag || 'none'} ${active?.ariaLabel || active?.className || ''} len=${active?.valueLength || 0}; textareas=${editorDiagnostics.textareaCount || 0}; editables=${editorDiagnostics.editableCount || 0}; iframes=${editorDiagnostics.iframeCount || 0}`);
+      if (editorDiagnostics.documentStats) {
+        const stats = editorDiagnostics.documentStats;
+        lines.push(`DOM: elements=${stats.elementCount || 0}; textareas=${stats.textareaCount || 0}; cm=${stats.cmCount || 0}; role textbox=${stats.roleTextboxCount || 0}`);
+      }
+      if (editorDiagnostics.codeMirrorView) {
+        const view = editorDiagnostics.codeMirrorView;
+        lines.push(`CodeMirror: docLength=${view.docLength || 0}; dispatch=${Boolean(view.hasDispatch)}; source=${view.source || 'unknown'}`);
+      }
+    }
+    const projectDiagnostics = probe?.projectDiagnostics;
+    if (projectDiagnostics) {
+      lines.push(`Project records: ${projectDiagnostics.docRecordCount || 0}; roots=${(projectDiagnostics.internalRootKeys || []).slice(0, 6).join(', ') || 'none'}`);
+      for (const record of (projectDiagnostics.docRecords || []).slice(0, 4)) {
+        lines.push(`Doc record: ${record.path} id=${record.id} source=${record.source || 'internal'}`);
+      }
+    }
+    return lines.join('\n');
   }
 
   async function runTask() {
@@ -758,6 +1026,7 @@
       model: state.model,
       reasoningEffort: state.reasoningEffort
     });
+    const runSessionId = currentRunView.sessionId;
     clearTaskComposer();
     appendRunEvent({
       title: '我会先理解你的请求，再检查相关 Overleaf 文件。',
@@ -776,6 +1045,11 @@
     });
 
     try {
+      const writeSafety = await preflightWriteSafety();
+      if (!writeSafety.ok) {
+        return;
+      }
+
       appendRunEvent({
         title: '正在同步 Overleaf 项目到本地 Codex workspace。',
         status: 'running'
@@ -784,7 +1058,21 @@
       throwIfRunCancellationRequested();
       appendLog(formatProjectSnapshotUserLog(project));
       const snapshotWarnings = getProjectSnapshotWarnings(project);
-      if (snapshotWarnings.blocking.length) {
+      const focusFiles = getActiveFocusFiles();
+      let useExistingMirror = false;
+      let fileOverlays = null;
+      const warmMirrorReuse = await resolveWarmMirrorReuse(project, {
+        snapshotWarnings,
+        focusFiles
+      });
+      const focusedPartialSnapshot = runController.canUseFocusedPartialSnapshot({
+        project,
+        snapshotWarnings,
+        focusFiles,
+        isUsableProjectFileContent: window.CodexOverleafProjectFiles.isUsableProjectFileContent
+      });
+      const restrictToFocusFiles = runController.shouldRestrictWritebackToFocus({ focusFiles });
+      if (snapshotWarnings.blocking.length && !warmMirrorReuse.useExistingMirror && !focusedPartialSnapshot) {
         for (const warning of snapshotWarnings.blocking) {
           appendLog(`无法继续：${formatProjectSnapshotWarning(warning)}`);
         }
@@ -798,28 +1086,28 @@
         finishRunView('已阻止：没有读到完整项目', 'failed');
         return;
       }
-      for (const warning of snapshotWarnings.nonBlocking) {
-        appendLog(`提示：${formatProjectSnapshotWarning(warning)}`);
-      }
 
-      // Warm mirror path decision
-      let useExistingMirror = false;
-      let fileOverlays = null;
-      const focusFiles = getActiveFocusFiles();
-
-      if (focusFiles.length > 0 && state.mode !== 'ask') {
-        const mirrorStatus = await getMirrorFreshness();
-        if (mirrorStatus && mirrorStatus.exists && mirrorStatus.ageMs < 15000) {
-          const focusFileContents = (project.files || []).filter(f => focusFiles.includes(f.path));
-          if (focusFileContents.length === focusFiles.length) {
-            fileOverlays = focusFileContents.map(f => ({ path: f.path, content: f.content }));
-            useExistingMirror = true;
-            appendRunEvent({ title: '使用已预热的本地 workspace（仅同步焦点文件差异）。', status: 'completed' });
-          }
+      if (warmMirrorReuse.useExistingMirror) {
+        useExistingMirror = true;
+        fileOverlays = warmMirrorReuse.fileOverlays;
+        appendRunEvent({
+          title: warmMirrorReuse.partialSnapshot
+            ? '没有读到完整 Overleaf 项目，但本地 workspace 刚同步过；继续使用最近的完整 workspace，并叠加当前文件内容。'
+            : '使用已预热的本地 workspace（仅同步焦点文件差异）。',
+          status: 'completed'
+        });
+      } else if (focusedPartialSnapshot) {
+        appendRunEvent({
+          title: `只读到你选择的上下文文件：${focusFiles.join(', ')}；本轮将只基于这些文件运行和写回。`,
+          status: 'completed'
+        });
+      } else {
+        for (const warning of snapshotWarnings.nonBlocking) {
+          appendLog(`提示：${formatProjectSnapshotWarning(warning)}`);
         }
       }
 
-      const activeSession = getActiveSession(state);
+      const activeSession = findSessionById(runSessionId) || getActiveSession(state);
       const codexThreadId = activeSession?.codexThreadId || '';
 
       // Resolve @compile-log if mentioned in task
@@ -837,51 +1125,59 @@
       appendRunEvent({ title: '本地 Codex session 开始运行。', status: 'running' });
       let response = await sendNative({
         method: 'codex.run',
-        params: {
-          projectId: getCurrentProjectId(),
-          mode: state.mode,
+        params: buildCodexRunParams({
           task,
-          project: useExistingMirror ? undefined : project,
-          useExistingMirror: useExistingMirror || undefined,
-          fileOverlays: useExistingMirror ? fileOverlays : undefined,
-          expectedMirrorFreshness: useExistingMirror ? 15000 : undefined,
+          project,
+          useExistingMirror,
+          fileOverlays,
           focusFiles,
-          model: state.model,
-          reasoningEffort: state.reasoningEffort,
-          session: state.session,
-          threadId: codexThreadId || undefined,
-          compileLog: compileLogContext?.available ? compileLogContext.log : undefined,
-          compileErrors: compileLogContext?.available ? compileLogContext.errors : undefined
-        }
+          restrictToFocusFiles,
+          codexThreadId,
+          compileLogContext
+        })
       });
 
       // Handle mirror_stale error by retrying with full sync
       if (!response.ok && response.error?.code === 'mirror_stale' && useExistingMirror) {
+        if (project?.capabilities?.fullProjectSnapshot === false) {
+          appendRunEvent({
+            title: '最近的本地 workspace 已过期，而且这次没有读到完整 Overleaf 项目；Codex 没有继续。',
+            status: 'failed'
+          });
+          appendCompletionReport({
+            conclusion: '这轮没有继续：Overleaf 没有提供完整项目内容，本地 workspace 也不够新。',
+            status: 'blocked',
+            operations: [],
+            applyResults: [],
+            nextStep: '请刷新 Overleaf 项目，等文件列表加载完成后重试；也可以先选中一个具体 .tex 文件作为 @context。'
+          });
+          finishRunView('已阻止：本地 workspace 过期', 'failed');
+          return;
+        }
         appendRunEvent({ title: '预热 workspace 已过期，正在重新完整同步。', status: 'running' });
         useExistingMirror = false;
         response = await sendNative({
           method: 'codex.run',
-          params: {
-            projectId: getCurrentProjectId(),
-            mode: state.mode,
+          params: buildCodexRunParams({
             task,
             project,
+            useExistingMirror: false,
+            fileOverlays: null,
             focusFiles,
-            model: state.model,
-            reasoningEffort: state.reasoningEffort,
-            session: state.session,
-            threadId: codexThreadId || undefined
-          }
+            restrictToFocusFiles: false,
+            codexThreadId,
+            compileLogContext
+          })
         });
       }
 
       if (!response.ok && response.error?.code === 'thread_resume_failed') {
         const userChoice = await showThreadResumeFailedPrompt();
         if (userChoice === 'new') {
-          state = updateActiveSession(state, { codexThreadId: '' });
+          updateSessionById(runSessionId, { codexThreadId: '' });
           const StorageDb = window.CodexOverleafStorageDb;
           if (StorageDb) {
-            const record = await StorageDb.getRecord('sessions', state.activeSessionId);
+            const record = await StorageDb.getRecord('sessions', runSessionId);
             if (record) {
               record.codexThreadId = '';
               await StorageDb.putRecord('sessions', record);
@@ -890,20 +1186,16 @@
           appendRunEvent({ title: '正在新建 Codex 会话线程。', status: 'running' });
           response = await sendNative({
             method: 'codex.run',
-            params: {
-              projectId: getCurrentProjectId(),
-              mode: state.mode,
+            params: buildCodexRunParams({
               task,
-              project: useExistingMirror ? undefined : project,
-              useExistingMirror: useExistingMirror || undefined,
-              fileOverlays: useExistingMirror ? fileOverlays : undefined,
-              expectedMirrorFreshness: useExistingMirror ? 15000 : undefined,
+              project,
+              useExistingMirror,
+              fileOverlays,
               focusFiles,
-              model: state.model,
-              reasoningEffort: state.reasoningEffort,
-              session: state.session,
-              threadId: undefined
-            }
+              restrictToFocusFiles,
+              codexThreadId: '',
+              compileLogContext
+            })
           });
         } else {
           appendRunEvent({ title: '已取消：用户选择不新建线程。', status: 'rejected' });
@@ -945,42 +1237,34 @@
 
       throwIfRunCancellationRequested();
       const assistantMessage = response.result.assistantMessage || getAssistantAnswerForCurrentRun();
-      const syncOutcome = await applySyncChangesToOverleaf(response.result.syncChanges || [], project, {
+      const syncChanges = response.result.syncChanges || [];
+      const writebackProject = useExistingMirror
+        ? mergeProjectWithSyncChangeBaseFiles(project, syncChanges)
+        : project;
+      const syncOutcome = await applySyncChangesToOverleaf(syncChanges, writebackProject, {
         assistantMessage,
         unsupportedChanges: response.result.unsupportedChanges || []
       });
 
-      // Auto-recompile if compilable files were written
-      const writtenPaths = (response.result.syncChanges || [])
-        .filter(change => change.type === 'write')
-        .map(change => change.path);
-      if (writtenPaths.length) {
-        await autoRecompileAfterWriteback(writtenPaths).catch(error => {
-          appendRunEvent({ title: `自动编译出错：${error.message}`, status: 'failed' });
-        });
-      }
-
       finishRunView(syncOutcome.hasSkippedOperations ? '同步完成但有跳过项' : '同步完成', syncOutcome.hasSkippedOperations ? 'failed' : 'completed');
       try {
-        const activeSessionForHistory = getActiveSession(state);
-        const updatedSession = recordSessionResult(activeSessionForHistory, {
+        const runSessionForHistory = findSessionById(runSessionId) || getActiveSession(state);
+        const updatedSession = recordSessionResult(runSessionForHistory, {
           task,
           result: buildSessionHistoryResult({
             assistantMessage,
             syncOutcome,
-            syncChanges: response.result.syncChanges || []
+            syncChanges
           })
         });
-        state = updateActiveSession(state, {
-          history: updatedSession.history
-        });
+        replaceSessionInState(updatedSession);
 
         const returnedThreadId = response.result?.threadId || '';
         if (returnedThreadId && returnedThreadId !== codexThreadId) {
-          state = updateActiveSession(state, { codexThreadId: returnedThreadId });
+          updateSessionById(runSessionId, { codexThreadId: returnedThreadId });
           const StorageDb = window.CodexOverleafStorageDb;
           if (StorageDb) {
-            const record = await StorageDb.getRecord('sessions', state.activeSessionId);
+            const record = await StorageDb.getRecord('sessions', runSessionId);
             if (record) {
               record.codexThreadId = returnedThreadId;
               record.updatedAt = new Date().toISOString();
@@ -1040,39 +1324,78 @@
       finishRunView('任务失败', 'failed');
     } finally {
       setRunning(false);
-      activeNativeRequestId = null;
+      nativeChannel.clearActiveRequest();
       currentRunView = null;
       runCancellationRequested = false;
       saveStateSoon();
     }
   }
 
+  async function preflightWriteSafety() {
+    if (state.mode === 'ask' || !state?.requireReviewing) {
+      return { ok: true, skipped: true };
+    }
+
+    appendRunEvent({
+      title: '正在确认 Overleaf 留痕状态。',
+      status: 'running'
+    });
+
+    let result = null;
+    try {
+      result = await callPageBridge('ensureReviewing', { waitMs: 1800 });
+    } catch (error) {
+      result = {
+        ok: false,
+        reason: error?.message || 'Overleaf 没有返回留痕状态',
+        reviewing: null
+      };
+    }
+
+    if (result?.ok) {
+      appendRunEvent({
+        title: result.activated
+          ? '已开启 Overleaf 留痕，开始处理任务。'
+          : 'Overleaf 留痕已经开启，开始处理任务。',
+        status: 'completed'
+      });
+      return result;
+    }
+
+    const reason = result?.reason || 'Overleaf 没有返回留痕状态';
+    appendRunEvent({
+      title: '任务未开始：无法开启 Overleaf 留痕。',
+      status: 'failed',
+      detail: {
+        '原因': reason,
+        '下一步': '你可能没有权限，或 Overleaf 当前页面没有暴露切换入口。可以手动切到 Reviewing 后重试，或关闭“留痕”再运行。'
+      },
+      technicalDetail: {
+        reason,
+        reviewing: result?.reviewing || null
+      }
+    });
+    appendCompletionReport({
+      conclusion: '这轮任务没有开始：Codex 没有运行，也没有写入文件。',
+      status: 'blocked',
+      operations: [],
+      applyResults: [],
+      nextStep: '你可能没有权限，或 Overleaf 当前页面没有暴露切换入口。可以手动切到 Reviewing 后重试，或关闭“留痕”再运行。'
+    });
+    finishRunView('未开始：无法开启留痕', 'failed');
+    return {
+      ok: false,
+      reason,
+      reviewing: result?.reviewing || null
+    };
+  }
+
   function buildSessionHistoryResult({ assistantMessage = '', syncOutcome = {}, syncChanges = [] } = {}) {
-    const parts = [];
-    const finalAnswer = truncateSessionHistoryText(assistantMessage, 1600);
-    if (finalAnswer) {
-      parts.push(finalAnswer);
-    }
-
-    const changedFiles = Array.from(new Set((syncChanges || [])
-      .map(change => change?.path)
-      .filter(Boolean)));
-    if (changedFiles.length) {
-      parts.push(`涉及文件：${changedFiles.slice(0, 8).join(', ')}${changedFiles.length > 8 ? ' 等' : ''}`);
-    }
-
-    if (!parts.length) {
-      return truncateSessionHistoryText(syncOutcome.summaryLine || 'completed', 1600);
-    }
-    return truncateSessionHistoryText(parts.join('\n'), 2000);
+    return runController.buildSessionHistoryResult({ assistantMessage, syncOutcome, syncChanges });
   }
 
   function truncateSessionHistoryText(value, maxLength) {
-    const text = String(value || '').replace(/\s+/g, ' ').trim();
-    if (!text || text.length <= maxLength) {
-      return text;
-    }
-    return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
+    return runController.truncateSessionHistoryText(value, maxLength);
   }
 
   function safeRunTask() {
@@ -1081,7 +1404,7 @@
     }
     runTask().catch(error => {
       setRunning(false);
-      activeNativeRequestId = null;
+      nativeChannel.clearActiveRequest();
       currentRunView = null;
       console.error('[codex-overleaf] failed to start task', error);
       appendPlainLog(`无法启动 Codex 任务：${error.message}`);
@@ -1100,14 +1423,15 @@
       status: 'running'
     });
 
-    if (!activeNativeRequestId) {
+    const activeRequestId = nativeChannel.getActiveRequestId();
+    if (!activeRequestId) {
       return;
     }
 
     const response = await sendBackgroundNative({
       method: 'codex.cancel',
       params: {
-        requestId: activeNativeRequestId
+        requestId: activeRequestId
       }
     });
     if (!response?.ok) {
@@ -1142,6 +1466,30 @@
     });
   }
 
+  function buildCodexRunParams({
+    task,
+    project,
+    useExistingMirror,
+    fileOverlays,
+    focusFiles,
+    restrictToFocusFiles,
+    codexThreadId,
+    compileLogContext
+  } = {}) {
+    return runController.buildCodexRunParams({
+      currentProjectId: getCurrentProjectId(),
+      state,
+      task,
+      project,
+      useExistingMirror,
+      fileOverlays,
+      focusFiles,
+      restrictToFocusFiles,
+      codexThreadId,
+      compileLogContext
+    });
+  }
+
   function appendRunCancelledReport() {
     appendRunEvent({
       title: '已中断当前 Codex 任务。',
@@ -1172,13 +1520,60 @@
       container.dataset.readonly = 'true';
     }
     const fileStates = new Map();
+    const fileViews = new Map();
+    const decisionListeners = new Set();
+
+    function notifyDecisionChanged() {
+      for (const listener of decisionListeners) {
+        listener();
+      }
+    }
+
+    function setDecisionStatus(actions, accepted) {
+      const status = document.createElement('span');
+      status.className = 'codex-diff-decision-label';
+      status.textContent = accepted ? '已接受' : '已拒绝';
+      actions.replaceChildren(status);
+    }
+
+    function decideFileChange(path, accepted) {
+      if (readonly || fileStates.get(path) !== null) {
+        return;
+      }
+      const view = fileViews.get(path);
+      if (!view) {
+        return;
+      }
+      fileStates.set(path, accepted);
+      view.card.dataset.accepted = accepted ? 'true' : 'false';
+      view.card.dataset.decision = accepted ? 'accepted' : 'rejected';
+      setDecisionStatus(view.actions, accepted);
+      notifyDecisionChanged();
+    }
+
+    function getPendingCount() {
+      let count = 0;
+      for (const value of fileStates.values()) {
+        if (value === null) {
+          count += 1;
+        }
+      }
+      return count;
+    }
+
+    function getAcceptedChanges() {
+      return syncChanges.filter(change => fileStates.get(change.path) === true);
+    }
 
     for (const change of syncChanges) {
-      fileStates.set(change.path, true);
+      fileStates.set(change.path, readonly ? true : null);
       const card = document.createElement('div');
       card.className = 'codex-diff-file';
       card.dataset.path = change.path;
-      card.dataset.accepted = 'true';
+      card.dataset.decision = readonly ? 'accepted' : 'pending';
+      if (readonly) {
+        card.dataset.accepted = 'true';
+      }
 
       const header = document.createElement('div');
       header.className = 'codex-diff-file-header';
@@ -1205,14 +1600,8 @@
         rejectBtn.textContent = '✗';
         rejectBtn.title = '拒绝';
 
-        acceptBtn.addEventListener('click', () => {
-          card.dataset.accepted = 'true';
-          fileStates.set(change.path, true);
-        });
-        rejectBtn.addEventListener('click', () => {
-          card.dataset.accepted = 'false';
-          fileStates.set(change.path, false);
-        });
+        acceptBtn.addEventListener('click', () => decideFileChange(change.path, true));
+        rejectBtn.addEventListener('click', () => decideFileChange(change.path, false));
 
         actions.append(acceptBtn, rejectBtn);
       }
@@ -1239,39 +1628,71 @@
       }
 
       container.append(card);
+      fileViews.set(change.path, { card, actions });
     }
 
     return {
       container,
-      fileStates
+      fileStates,
+      decideFileChange,
+      getPendingCount,
+      getAcceptedChanges,
+      onDecision(callback) {
+        decisionListeners.add(callback);
+        return () => decisionListeners.delete(callback);
+      }
     };
   }
 
   function renderDiffReview(syncChanges) {
     return new Promise(resolve => {
-      const { container, fileStates } = createDiffReviewElement(syncChanges);
+      const review = createDiffReviewElement(syncChanges);
+      const { container } = review;
+      let finished = false;
 
       const toolbar = document.createElement('div');
       toolbar.className = 'codex-diff-toolbar';
-      const applyBtn = document.createElement('button');
-      applyBtn.type = 'button';
-      applyBtn.dataset.diffApplyAll = '';
-      applyBtn.textContent = '应用选中';
+      const summary = document.createElement('span');
+      summary.className = 'codex-diff-toolbar-summary';
       const rejectAllBtn = document.createElement('button');
       rejectAllBtn.type = 'button';
-      rejectAllBtn.textContent = '全部拒绝';
+      rejectAllBtn.textContent = '拒绝全部';
+      const acceptAllBtn = document.createElement('button');
+      acceptAllBtn.type = 'button';
+      acceptAllBtn.dataset.diffAcceptAll = '';
+      acceptAllBtn.textContent = '接受全部';
 
-      applyBtn.addEventListener('click', () => {
+      function finish(accepted) {
+        if (finished) {
+          return;
+        }
+        finished = true;
         container.remove();
-        const accepted = syncChanges.filter(c => fileStates.get(c.path) === true);
         resolve(accepted);
+      }
+
+      function updateSummary() {
+        const pending = review.getPendingCount();
+        summary.textContent = pending ? `待处理 ${pending} 个` : '已完成选择';
+      }
+
+      function finishIfAllDecided() {
+        updateSummary();
+        if (review.getPendingCount() === 0) {
+          finish(review.getAcceptedChanges());
+        }
+      }
+
+      acceptAllBtn.addEventListener('click', () => {
+        finish(syncChanges);
       });
       rejectAllBtn.addEventListener('click', () => {
-        container.remove();
-        resolve([]);
+        finish([]);
       });
+      review.onDecision(finishIfAllDecided);
 
-      toolbar.append(rejectAllBtn, applyBtn);
+      updateSummary();
+      toolbar.append(summary, rejectAllBtn, acceptAllBtn);
       container.append(toolbar);
 
       if (currentRunView?.events) {
@@ -1383,7 +1804,8 @@
     const applied = operations.length
       ? await callPageBridge('applyOperations', {
         operations,
-        baseFiles: project?.files || []
+        baseFiles: project?.files || [],
+        requireReviewing: state.requireReviewing === true
       })
       : { ok: true, applied: [], skipped: [] };
     await refreshProjectMirrorAfterWriteback(project, applied);
@@ -1392,6 +1814,15 @@
     }
     appendApplyResult(applied);
     recordUndoFromApply(project, applied);
+    if (applied.skipped?.length) {
+      appendPartialWritebackWarning(applied);
+    }
+    const appliedPaths = getAppliedOperationPaths(applied);
+    if (appliedPaths.length) {
+      await autoRecompileAfterWriteback(appliedPaths).catch(error => {
+        appendRunEvent({ title: `自动编译出错：${error.message}`, status: 'failed' });
+      });
+    }
     const summaryLine = appendChangeSummary({
       notes: '本地 Codex 改动已同步回 Overleaf。',
       operations,
@@ -1408,10 +1839,12 @@
         : syncedConclusion,
       status: applied.skipped?.length ? 'failed' : 'completed',
       operations,
-      applyResults: [applied],
-      mode: state.mode,
-      nextStep: applied.skipped?.length ? '请查看跳过原因，处理冲突后重试同步。' : '请在 Overleaf 中查看同步后的文件。'
-    });
+	      applyResults: [applied],
+	      mode: state.mode,
+	      nextStep: applied.skipped?.length
+	        ? formatWritebackSkippedNextStep(applied)
+	        : '请在 Overleaf 中查看同步后的文件。'
+	    });
 
     return {
       summaryLine,
@@ -1438,6 +1871,8 @@
       allowEditorNavigation: false,
       requireFullProject: true,
       includeBinaryFiles: true,
+      zipOnly: true,
+      zipTimeoutMs: RUN_SNAPSHOT_ZIP_TIMEOUT_MS,
       focusFiles: getAppliedOperationPaths(applied)
     });
     if (!freshProject?.files?.length || freshProject?.capabilities?.fullProjectSnapshot === false) {
@@ -1472,65 +1907,11 @@
   }
 
   function getAppliedOperationPaths(applied = {}) {
-    return Array.from(new Set((applied.applied || [])
-      .map(item => item?.operation?.path)
-      .filter(Boolean)));
+    return writebackController.getAppliedOperationPaths(applied);
   }
 
   function mergeVerifiedAppliedFiles(freshProject = {}, originalProject = {}, applied = {}) {
-    const filesByPath = new Map((freshProject.files || []).map(file => [file.path, { ...file }]));
-    const originalByPath = new Map((originalProject.files || []).map(file => [file.path, file]));
-
-    for (const item of applied.applied || []) {
-      const operation = item?.operation || {};
-      const result = item?.result || {};
-      if (!operation.path) {
-        continue;
-      }
-
-      if (operation.type === 'delete') {
-        filesByPath.delete(operation.path);
-        continue;
-      }
-
-      if ((operation.type === 'rename' || operation.type === 'move') && operation.to) {
-        const previous = filesByPath.get(operation.path) || originalByPath.get(operation.path);
-        filesByPath.delete(operation.path);
-        filesByPath.set(operation.to, {
-          ...(previous || {}),
-          path: operation.to,
-          kind: 'text',
-          content: result.verifiedContent || previous?.content || '',
-          source: 'verified-writeback'
-        });
-        continue;
-      }
-
-      if (operation.type === 'create') {
-        filesByPath.set(operation.path, {
-          path: operation.path,
-          kind: 'text',
-          content: result.verifiedContent || operation.content || '',
-          source: 'verified-writeback'
-        });
-        continue;
-      }
-
-      if (operation.type === 'edit' && typeof result.verifiedContent === 'string') {
-        filesByPath.set(operation.path, {
-          ...(filesByPath.get(operation.path) || originalByPath.get(operation.path) || {}),
-          path: operation.path,
-          kind: 'text',
-          content: result.verifiedContent,
-          source: 'verified-writeback'
-        });
-      }
-    }
-
-    return {
-      ...freshProject,
-      files: Array.from(filesByPath.values())
-    };
+    return writebackController.mergeVerifiedAppliedFiles(freshProject, originalProject, applied);
   }
 
   function appendUnsupportedLocalChanges(changes = []) {
@@ -1544,16 +1925,7 @@
   }
 
   function formatUnsupportedLocalChangeSummary(changes = []) {
-    if (!changes.length) {
-      return '';
-    }
-    const files = changes
-      .slice(0, 5)
-      .map(change => change.path)
-      .filter(Boolean)
-      .join('、');
-    const suffix = changes.length > 5 ? ` 等 ${changes.length} 个文件` : `${changes.length} 个文件`;
-    return `Codex 在本地生成了不会同步回 Overleaf 的资源或编译产物：${files || suffix}。`;
+    return writebackController.formatUnsupportedLocalChangeSummary(changes);
   }
 
   async function autoRecompileAfterWriteback(writtenPaths = []) {
@@ -1612,102 +1984,23 @@
   }
 
   function buildSyncApplyOperations(syncChanges = [], project = {}) {
-    const existingPaths = new Set((project.files || []).map(file => file.path));
-    return (syncChanges || []).map(change => {
-      if (change.type === 'delete') {
-        return {
-          type: 'delete',
-          path: change.path,
-          reason: '本地 Codex workspace 删除了这个文件。'
-        };
-      }
-      if (change.type === 'write' && existingPaths.has(change.path)) {
-        const patches = getSyncChangePatches(change);
-        if (patches.length) {
-          return {
-            type: 'edit',
-            path: change.path,
-            patches,
-            reason: `同步本地 Codex workspace 中的局部文件改动（${patches.length} 处）。`
-          };
-        }
-        return {
-          type: 'edit',
-          path: change.path,
-          replaceAll: String(change.content ?? ''),
-          reason: '同步本地 Codex workspace 中的文件内容。'
-        };
-      }
-      return {
-        type: 'create',
-        path: change.path,
-        content: change.content || '',
-        reason: '同步本地 Codex workspace 中的新文件。'
-      };
-    }).filter(operation => operation.path);
+    return writebackController.buildSyncApplyOperations(syncChanges, project);
   }
 
   function getSyncChangePatches(change = {}) {
-    const normalized = normalizeTextPatches(change.patches);
-    if (normalized.length) {
-      return normalized;
-    }
-    if (typeof change.previousContent === 'string' && typeof change.content === 'string') {
-      return computeSingleTextPatch(change.previousContent, change.content);
-    }
-    return [];
+    return writebackController.getSyncChangePatches(change);
   }
 
   function normalizeTextPatches(patches) {
-    const normalized = [];
-    for (const patch of patches || []) {
-      const from = Number(patch?.from);
-      const to = Number(patch?.to);
-      if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from) {
-        continue;
-      }
-      normalized.push({
-        from,
-        to,
-        expected: String(patch.expected ?? ''),
-        insert: String(patch.insert ?? '')
-      });
-    }
-    return normalized.sort((left, right) => left.from - right.from);
+    return writebackController.normalizeTextPatches(patches);
   }
 
   function computeSingleTextPatch(oldText, newText) {
-    if (oldText === newText) {
-      return [];
-    }
-    let prefix = 0;
-    const sharedLength = Math.min(oldText.length, newText.length);
-    while (prefix < sharedLength && oldText[prefix] === newText[prefix]) {
-      prefix += 1;
-    }
-
-    let oldEnd = oldText.length;
-    let newEnd = newText.length;
-    while (oldEnd > prefix && newEnd > prefix && oldText[oldEnd - 1] === newText[newEnd - 1]) {
-      oldEnd -= 1;
-      newEnd -= 1;
-    }
-
-    return [
-      {
-        from: prefix,
-        to: oldEnd,
-        expected: oldText.slice(prefix, oldEnd),
-        insert: newText.slice(prefix, newEnd)
-      }
-    ];
+    return writebackController.computeSingleTextPatch(oldText, newText);
   }
 
   function getAppliedSyncChanges(syncChanges = [], applied = {}) {
-    const appliedPaths = new Set((applied.applied || [])
-      .map(item => item.operation?.path || item.operation?.to || item.operation?.from)
-      .filter(Boolean));
-    return (syncChanges || []).filter(change => appliedPaths.has(change.path));
+    return writebackController.getAppliedSyncChanges(syncChanges, applied);
   }
 
   function getCurrentProjectId() {
@@ -1927,7 +2220,8 @@
     const applied = partitioned.safe.length
       ? await callPageBridge('applyOperations', {
         operations: partitioned.safe,
-        baseFiles: project?.files || []
+        baseFiles: project?.files || [],
+        requireReviewing: state.requireReviewing === true
       })
       : { ok: true, applied: [], skipped: [] };
 
@@ -2023,36 +2317,107 @@
   }
 
   async function refreshProbe(options = {}) {
-    const probe = await callPageBridge('probe', {
-      manualOverride: state?.requireReviewing === false
-    });
-    const status = panel?.querySelector('[data-probe-status]');
-    if (status) {
-      status.textContent = formatProbeStatusBar(probe);
-      status.dataset.ok = probe.reviewing?.ok && probe.editor?.ok ? 'true' : 'false';
+    const userInitiated = options.userInitiated === true;
+    if (userInitiated) {
+      setRefreshProbeLoading(true);
+      const status = panel?.querySelector('[data-probe-status]');
+      if (status) {
+        status.textContent = '正在重新检测当前文件、写入权限和留痕状态...';
+        status.dataset.ok = 'false';
+        status.dataset.refreshing = 'true';
+      }
     }
-    if (!options.quiet) {
-      appendProbeUserStatus(probe);
-    } else {
-      updateExistingProbeNotice(probe);
+
+    try {
+      const probe = await callPageBridge('probe', {
+        manualOverride: state?.requireReviewing === false
+      });
+      const status = panel?.querySelector('[data-probe-status]');
+      if (status) {
+        status.textContent = userInitiated
+          ? `已重新检测：${formatProbeStatusBar(probe)}`
+          : formatProbeStatusBar(probe);
+        status.dataset.ok = isProbeReadyForCurrentMode(probe) ? 'true' : 'false';
+        status.dataset.refreshing = 'false';
+      }
+      if (!options.quiet && !userInitiated) {
+        appendProbeUserStatus(probe);
+      } else {
+        updateExistingProbeNotice(probe);
+      }
+      return probe;
+    } catch (error) {
+      if (!userInitiated) {
+        throw error;
+      }
+      const status = panel?.querySelector('[data-probe-status]');
+      if (status) {
+        status.textContent = '检测失败：请刷新 Overleaf 页面后重试';
+        status.dataset.ok = 'false';
+        status.dataset.refreshing = 'false';
+      }
+      console.warn('[codex-overleaf] refresh probe failed', error);
+      return null;
+    } finally {
+      if (userInitiated) {
+        setRefreshProbeLoading(false);
+      }
     }
-    return probe;
+  }
+
+  function setRefreshProbeLoading(loading) {
+    const button = panel?.querySelector('[data-refresh]');
+    if (!button) {
+      return;
+    }
+    button.dataset.loading = loading ? 'true' : 'false';
+    button.disabled = Boolean(loading);
+    button.setAttribute('aria-busy', loading ? 'true' : 'false');
   }
 
   function formatProbeStatusBar(probe) {
-    const reviewingOk = probe.reviewing?.ok === true;
-    const editorOk = probe.editor?.ok === true;
+    const readiness = getProbeRunReadiness(probe);
+    const reviewingOk = readiness.reviewingOk;
+    const editorWritable = readiness.editorWritable;
 
-    if (reviewingOk && editorOk) {
-      return '可以运行 · 已读到当前文件';
+    if (state?.mode === 'ask') {
+      return `只问不改 · ${readiness.contextLabel}`;
     }
-    if (reviewingOk && !editorOk) {
-      return '需要打开一个 .tex 文件';
+    if (reviewingOk) {
+      return editorWritable
+        ? `可以运行 · ${readiness.contextLabel}`
+        : `${formatModeLabel(state?.mode)} · 写入时验证编辑器`;
     }
-    if (!reviewingOk && editorOk) {
+    if (readiness.contextReady) {
       return '需要开启 Reviewing';
     }
     return '需要开启 Reviewing 并打开文件';
+  }
+
+  function isProbeReadyForCurrentMode(probe) {
+    const readiness = getProbeRunReadiness(probe);
+    return state?.mode === 'ask' || readiness.reviewingOk;
+  }
+
+  function getProbeRunReadiness(probe) {
+    const editorOk = probe.editor?.ok === true;
+    const focusFiles = getActiveFocusFiles();
+    const hasFocus = focusFiles.length > 0;
+    const hasTexFocus = focusFiles.some(file => /\.tex$/i.test(file));
+    const contextLabel = editorOk
+      ? '已读到当前文件'
+      : hasTexFocus
+        ? '已选择 @file 上下文'
+        : hasFocus
+          ? '已选择 @context'
+          : '将读取整个项目';
+    return {
+      reviewingOk: probe.reviewing?.ok === true,
+      editorOk,
+      editorWritable: probe.capabilities?.editor?.write !== false,
+      contextReady: true,
+      contextLabel
+    };
   }
 
   function formatModeLabel(mode) {
@@ -2107,60 +2472,46 @@
   }
 
   function formatProbeUserNotice(probe) {
-    const reviewingOk = probe.reviewing?.ok === true;
-    const editorOk = probe.editor?.ok === true;
+    const readiness = getProbeRunReadiness(probe);
+    const reviewingOk = readiness.reviewingOk;
+    const editorOk = readiness.editorOk;
     const manualOverride = probe.reviewing?.status === 'manual-override';
+    const editorWriteBlocked = probe.capabilities?.editor?.write === false;
 
-    if (reviewingOk && editorOk) {
+    if (state?.mode === 'ask') {
+      return {
+        ready: true,
+        message: `可以运行：当前是“只问不改”，Codex ${readiness.contextLabel}，不会写入 Overleaf。`
+      };
+    }
+
+    if (reviewingOk && editorOk && editorWriteBlocked) {
+      return {
+        ready: true,
+        message: `可以运行：已选择“${formatModeLabel(state?.mode)}”。当前页面暂时没有暴露可写编辑器，写入时会重新打开目标文件并验证；如果写回失败，再刷新 Overleaf 页面后重试。`
+      };
+    }
+
+    if (reviewingOk) {
       return {
         ready: true,
         message: manualOverride
-          ? '可以运行：你已确认 Overleaf 已开启留痕，Codex 已读到当前文件。'
-          : '可以运行：Codex 已确认 Overleaf Reviewing/Track Changes 已开启，并读到当前文件。'
+          ? `可以运行：你已确认 Overleaf 已开启留痕，Codex ${readiness.contextLabel}。`
+          : `可以运行：Codex 已确认 Overleaf Reviewing/Track Changes 已开启，并且${readiness.contextLabel}。`
       };
     }
 
-    if (reviewingOk && !editorOk) {
+    if (readiness.contextReady) {
       return {
         ready: false,
-        message: '还差一步：Codex 没读到当前文件。请在 Overleaf 左侧文件列表点开要处理的 .tex 文件（例如 main.tex），再点刷新或直接运行。'
-      };
-    }
-
-    if (!reviewingOk && editorOk) {
-      return {
-        ready: false,
-        message: '还不能安全写入：Codex 已读到当前文件，但没有确认 Overleaf 已开启 Reviewing/Track Changes。请先打开 Reviewing，或关闭下方的安全检查。'
+        message: `还不能安全写入：Codex ${readiness.contextLabel}，但没有确认 Overleaf 已开启 Reviewing/Track Changes。请先打开 Reviewing，或关闭下方的安全检查。`
       };
     }
 
     return {
       ready: false,
-      message: '还不能安全写入：请先在 Overleaf 打开 Reviewing/Track Changes，并在左侧文件列表点开要处理的 .tex 文件（例如 main.tex）。'
+      message: '还不能安全写入：请先在 Overleaf 打开 Reviewing/Track Changes；Codex 会在运行时读取整个项目，也可以用 @file 指定重点文件。'
     };
-  }
-
-  function installInteractionRefresh() {
-    if (interactionRefreshAttached) {
-      return;
-    }
-    interactionRefreshAttached = true;
-
-    const refreshAfterPageInteraction = event => {
-      if (panel?.contains(event.target)) {
-        return;
-      }
-      scheduleDebouncedProbeRefresh(250);
-    };
-
-    document.addEventListener('click', refreshAfterPageInteraction, true);
-    document.addEventListener('focusin', refreshAfterPageInteraction, true);
-  }
-
-  function scheduleProbeRefresh(delayMs) {
-    window.setTimeout(() => {
-      refreshProbe({ quiet: true }).catch(error => appendLog(`State refresh failed: ${error.message}`));
-    }, delayMs);
   }
 
   async function getRunProjectSnapshot() {
@@ -2170,82 +2521,32 @@
       preferLightweight: true,
       allowZipFallback: true,
       allowEditorNavigation: false,
-      requireFullProject: true,
-      includeBinaryFiles: true,
+        requireFullProject: true,
+        includeBinaryFiles: true,
+        zipOnly: true,
+      zipTimeoutMs: RUN_SNAPSHOT_ZIP_TIMEOUT_MS,
       focusFiles: getActiveFocusFiles()
     });
+    if (project?.capabilities?.fullProjectSnapshot) {
+      return project;
+    }
+    const pageStateProject = await callPageBridge('getProjectSnapshot', {
+      force: true,
+      maxAgeMs: 0,
+      preferLightweight: true,
+      allowZipFallback: false,
+      allowEditorNavigation: false,
+      requireFullProject: true,
+      includeBinaryFiles: false,
+      focusFiles: getActiveFocusFiles()
+    });
+    if (pageStateProject?.capabilities?.fullProjectSnapshot) {
+      return pageStateProject;
+    }
     return project;
   }
 
   // --- Warm Mirror Controller ---
-
-  function initWarmMirror() {
-    const delay = 2000 + Math.random() * 3000;
-    setTimeout(async () => {
-      if (warmMirrorState.coldStartDone) return;
-      warmMirrorState.coldStartDone = true;
-      await syncMirrorBackground();
-      startWarmInterval();
-    }, delay);
-  }
-
-  async function syncMirrorBackground() {
-    if (currentRunView) return;
-    try {
-      const project = await callPageBridge('getProjectSnapshot', {
-        force: false,
-        preferLightweight: false,
-        allowZipFallback: true,
-        allowEditorNavigation: false,
-        requireFullProject: true,
-        maxAgeMs: 30000
-      });
-      if (!project?.capabilities?.fullProjectSnapshot) return;
-      if (!project?.files?.length) return;
-
-      await sendBackgroundNative({
-        method: 'mirror.sync',
-        params: {
-          projectId: getCurrentProjectId(),
-          project
-        }
-      });
-      warmMirrorState.warmFailures = 0;
-      warmMirrorState.warmBackoffMs = 120000;
-    } catch (error) {
-      warmMirrorState.warmFailures++;
-      warmMirrorState.warmBackoffMs = Math.min(warmMirrorState.warmBackoffMs * 2, 600000);
-    }
-  }
-
-  function startWarmInterval() {
-    stopWarmInterval();
-    warmMirrorState.warmInterval = setInterval(() => {
-      if (document.hidden) return;
-      if (currentRunView) return;
-      syncMirrorBackground();
-    }, warmMirrorState.warmBackoffMs);
-  }
-
-  function stopWarmInterval() {
-    if (warmMirrorState.warmInterval) {
-      clearInterval(warmMirrorState.warmInterval);
-      warmMirrorState.warmInterval = null;
-    }
-  }
-
-  function scheduleMirrorPrefetch() {
-    if (warmMirrorState.prefetchTimer) {
-      clearTimeout(warmMirrorState.prefetchTimer);
-    }
-    warmMirrorState.prefetchTimer = setTimeout(async () => {
-      warmMirrorState.prefetchTimer = null;
-      const now = Date.now();
-      if (now - warmMirrorState.lastPrefetchAt < 30000) return;
-      warmMirrorState.lastPrefetchAt = now;
-      await syncMirrorBackground();
-    }, 1200);
-  }
 
   async function getMirrorFreshness() {
     try {
@@ -2260,14 +2561,92 @@
     return null;
   }
 
-  // --- End Warm Mirror Controller ---
+  async function resolveWarmMirrorReuse(project = {}, options = {}) {
+    const snapshotWarnings = options.snapshotWarnings || { blocking: [] };
+    const focusFiles = options.focusFiles || [];
+    const partialSnapshot = Boolean(
+      snapshotWarnings.blocking?.some(warning => /Full project snapshot was not captured/i.test(warning))
+    );
 
-  function scheduleDebouncedProbeRefresh(delayMs) {
-    window.clearTimeout(interactionRefreshTimer);
-    interactionRefreshTimer = window.setTimeout(() => {
-      refreshProbe({ quiet: true }).catch(error => appendLog(`State refresh failed: ${error.message}`));
-    }, delayMs);
+    if (!partialSnapshot && (state.mode === 'ask' || !focusFiles.length)) {
+      return { useExistingMirror: false };
+    }
+
+    const fileOverlays = buildSnapshotFileOverlays(project, focusFiles, { partialSnapshot });
+    if (partialSnapshot && !fileOverlays.length) {
+      return { useExistingMirror: false, reason: 'missing_overlay' };
+    }
+    if (focusFiles.length && !focusFiles.every(path => {
+      const normalized = normalizeSnapshotPath(path);
+      return fileOverlays.some(file => normalizeSnapshotPath(file.path) === normalized);
+    })) {
+      return { useExistingMirror: false, reason: 'missing_focus_overlay' };
+    }
+
+    const mirrorStatus = await getMirrorFreshness();
+    if (!mirrorStatus?.exists || mirrorStatus.ageMs >= WARM_MIRROR_MAX_AGE_MS) {
+      return { useExistingMirror: false, reason: 'mirror_not_fresh', mirrorStatus };
+    }
+
+    return {
+      useExistingMirror: true,
+      fileOverlays,
+      mirrorStatus,
+      partialSnapshot
+    };
   }
+
+  function buildSnapshotFileOverlays(project = {}, focusFiles = [], options = {}) {
+    const textFiles = (project.files || []).filter(isTextSnapshotFile);
+    const focusSet = new Set((focusFiles || []).map(normalizeSnapshotPath).filter(Boolean));
+    const activePath = project.activePath || '';
+    const candidates = focusFiles.length
+      ? textFiles.filter(file => focusSet.has(normalizeSnapshotPath(file.path)))
+      : textFiles.filter(file => file.path === activePath || file.active || options.partialSnapshot);
+    const seen = new Set();
+    return candidates
+      .filter(file =>
+        typeof file.content === 'string' &&
+        window.CodexOverleafProjectFiles.isUsableProjectFileContent(file.content) &&
+        file.path &&
+        !seen.has(file.path) &&
+        seen.add(file.path)
+      )
+      .map(file => ({
+        path: file.path,
+        content: file.content
+      }));
+  }
+
+  function normalizeSnapshotPath(path) {
+    return String(path || '')
+      .replace(/^@file:/i, '')
+      .replace(/\\/g, '/')
+      .trim()
+      .replace(/^\/+/, '');
+  }
+
+  function mergeProjectWithSyncChangeBaseFiles(project = {}, syncChanges = []) {
+    const filesByPath = new Map((project.files || []).map(file => [file.path, { ...file }]));
+    for (const change of syncChanges || []) {
+      if (!change?.path || filesByPath.has(change.path) || typeof change.previousContent !== 'string') {
+        continue;
+      }
+      filesByPath.set(change.path, {
+        path: change.path,
+        kind: 'text',
+        content: change.previousContent,
+        source: 'mirror-baseline'
+      });
+    }
+
+    return {
+      ...project,
+      files: Array.from(filesByPath.values())
+    };
+  }
+
+  // --- End Warm Mirror Controller ---
 
   function formatProjectSnapshotLog(project) {
     const files = project.files || [];
@@ -2463,26 +2842,11 @@
   }
 
   function sendNative(payload) {
-    const id = crypto.randomUUID();
-    activeNativeRequestId = id;
-    return chrome.runtime.sendMessage({
-      type: 'codex-overleaf/native-request',
-      payload: {
-        id,
-        ...payload
-      }
-    });
+    return nativeChannel.sendNative(payload);
   }
 
   function sendBackgroundNative(payload) {
-    const id = crypto.randomUUID();
-    return chrome.runtime.sendMessage({
-      type: 'codex-overleaf/native-request',
-      payload: {
-        id,
-        ...payload
-      }
-    });
+    return nativeChannel.sendBackgroundNative(payload);
   }
 
   async function callPageBridge(method, params) {
@@ -2503,7 +2867,7 @@
     }, window.location.origin);
 
     return new Promise(resolve => {
-      const timeoutMs = method === 'getProjectSnapshot' ? 60000 : 8000;
+      const timeoutMs = getPageBridgeTimeoutMs(method);
       const timeout = window.setTimeout(() => {
         window.removeEventListener('message', onMessage);
         resolve({ ok: false, error: 'Page bridge timed out' });
@@ -2522,11 +2886,25 @@
     });
   }
 
+  function getPageBridgeTimeoutMs(method) {
+    if (method === 'getProjectSnapshot') {
+      return SNAPSHOT_PAGE_BRIDGE_TIMEOUT_MS;
+    }
+    if (method === 'triggerCompile' || method === 'getCompileLog') {
+      return 60000;
+    }
+    return 8000;
+  }
+
   async function injectPageBridge() {
     await injectScriptOnce('src/shared/reviewing.js', 'codex-overleaf-reviewing-script');
     await injectScriptOnce('src/shared/projectFiles.js', 'codex-overleaf-project-files-script');
     await injectScriptOnce('src/shared/staleGuard.js', 'codex-overleaf-stale-guard-script');
     await injectScriptOnce('src/shared/compileAdapter.js', 'codex-overleaf-compile-adapter-script');
+    await injectScriptOnce('src/page/overleafCapabilities.js', 'codex-overleaf-capabilities-script');
+    await injectScriptOnce('src/page/compileBridge.js', 'codex-overleaf-compile-bridge-script');
+    await injectScriptOnce('src/page/overleafEditor.js', 'codex-overleaf-editor-script');
+    await injectScriptOnce('src/page/overleafProjectSnapshot.js', 'codex-overleaf-project-snapshot-script');
     await injectScriptOnce('src/pageBridge.js', 'codex-overleaf-page-bridge-script');
   }
 
@@ -2583,13 +2961,15 @@
           codexThreadId: session.codexThreadId || '',
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
-          runs: [],
-          history: [],
-          task: '',
-          mode: prefs.mode || 'confirm',
-          model: prefs.model || 'gpt-5.4',
-          reasoningEffort: prefs.reasoningEffort || 'high',
-          requireReviewing: prefs.requireReviewing !== false
+          runs: Array.isArray(session.runs) ? session.runs : [],
+          history: Array.isArray(session.history) ? session.history : [],
+          task: typeof session.task === 'string' ? session.task : '',
+          mode: session.mode || prefs.mode || 'confirm',
+          model: session.model || prefs.model || 'gpt-5.4',
+          reasoningEffort: session.reasoningEffort || prefs.reasoningEffort || 'high',
+          requireReviewing: typeof session.requireReviewing === 'boolean'
+            ? session.requireReviewing
+            : prefs.requireReviewing !== false
         })),
         activeSessionId: activeSessionId,
         runs: []
@@ -2609,31 +2989,39 @@
       const StorageDb = window.CodexOverleafStorageDb;
       const Migration = window.CodexOverleafStorageMigration;
       const projectId = getCurrentProjectId();
+      const compactState = prepareStateForStorage(state);
 
       // Save lightweight prefs to chrome.storage.local
-      const prefs = StorageDb.extractLightweightPrefs(state, projectId);
+      const prefs = StorageDb.extractLightweightPrefs(compactState, projectId);
       prefs.activeSessionByProject = StorageDb.buildActiveSessionByProject(
         prefs.activeSessionByProject || {},
         projectId,
-        state.activeSessionId || ''
+        compactState.activeSessionId || state.activeSessionId || ''
       );
       await Migration.savePrefs(prefs);
 
-      // Save active session to IndexedDB
-      const activeSession = getActiveSession(state);
-      if (activeSession) {
-        const record = StorageDb.buildSessionRecord({
-          id: activeSession.id,
+      // Save all displayable session state to IndexedDB. The panel history lives here;
+      // chrome.storage.local only keeps small pointers/preferences.
+      const sessionRecords = (compactState.sessions || []).map(session => (
+        StorageDb.buildSessionRecord({
+          ...session,
           projectId,
-          title: activeSession.title || 'New task',
-          codexThreadId: activeSession.codexThreadId || '',
+          title: session.title || 'New task',
+          codexThreadId: session.codexThreadId || '',
           status: 'active',
-          focusFiles: Array.isArray(activeSession.focusFiles) ? activeSession.focusFiles : [],
-          createdAt: activeSession.createdAt,
-          updatedAt: new Date().toISOString()
-        });
-        await StorageDb.putRecord('sessions', record);
+          focusFiles: Array.isArray(session.focusFiles) ? session.focusFiles : [],
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt
+        })
+      ));
+      if (sessionRecords.length) {
+        await StorageDb.putRecords('sessions', sessionRecords);
       }
+      const keepSessionIds = new Set(sessionRecords.map(record => record.id));
+      const existingSessions = await StorageDb.getAllByIndex('sessions', 'projectId', projectId);
+      await Promise.all(existingSessions
+        .filter(session => session?.id && !keepSessionIds.has(session.id))
+        .map(session => StorageDb.deleteRecord('sessions', session.id)));
     } catch (error) {
       // Fallback: try legacy save
       try {
@@ -2660,7 +3048,7 @@
     appendPlainLog(text);
   }
 
-  function saveStateSoon() {
+  function saveStateSoon(delayMs = 120) {
     if (saveStateTimer) {
       clearTimeout(saveStateTimer);
     }
@@ -2669,7 +3057,11 @@
       saveState().catch(error => {
         appendPlainLog(`保存会话状态失败：${formatStateSaveError(error)}`);
       });
-    }, 120);
+    }, delayMs);
+  }
+
+  function scheduleRunStateSave(kind) {
+    saveStateSoon(kind === 'stream' ? STREAM_SAVE_DELAY_MS : 120);
   }
 
   function isStorageQuotaError(error) {
@@ -2685,6 +3077,7 @@
 
   async function persistPanelInputs() {
     readPanelInputs();
+    updateModelDisplay();
     await saveState();
     syncModeControls();
     applySessionLabel();
@@ -2702,6 +3095,7 @@
     modeSelect.value = mode;
     syncModeControls();
     await persistPanelInputs();
+    await refreshProbe({ quiet: true });
   }
 
   function syncModeControls() {
@@ -2724,6 +3118,21 @@
     state.autoRecompile = panel.querySelector('[data-auto-recompile]')?.checked !== false;
   }
 
+  function formatModelDisplayLabel(model) {
+    return MODEL_DISPLAY_LABELS[model] || String(model || '').replace(/^gpt-/i, '');
+  }
+
+  function updateModelDisplay() {
+    const modelSelect = panel?.querySelector('[data-model]');
+    const modelDisplay = panel?.querySelector('[data-model-display]');
+    if (!modelSelect || !modelDisplay) {
+      return;
+    }
+    const fullLabel = modelSelect.options[modelSelect.selectedIndex]?.textContent || modelSelect.value;
+    modelDisplay.textContent = formatModelDisplayLabel(modelSelect.value);
+    modelDisplay.title = fullLabel;
+  }
+
   function clearTaskComposer() {
     const taskInput = panel?.querySelector('[data-task]');
     if (taskInput) {
@@ -2743,6 +3152,7 @@
     if (recompileCheckbox) {
       recompileCheckbox.checked = state.autoRecompile !== false;
     }
+    updateModelDisplay();
     syncModeControls();
     applySessionLabel();
     renderSessionList();
@@ -2761,10 +3171,6 @@
   }
 
   async function startNewSession() {
-    if (currentRunView) {
-      appendPlainLog('Finish the current Codex task before starting a new session.');
-      return;
-    }
     readPanelInputs();
     const session = createSession({
       mode: state.mode,
@@ -2782,10 +3188,6 @@
   }
 
   async function switchSession(sessionId) {
-    if (currentRunView) {
-      appendPlainLog('Finish the current Codex task before switching sessions.');
-      return;
-    }
     readPanelInputs();
     state = setActiveSession(state, sessionId);
     await saveState();
@@ -2793,12 +3195,12 @@
   }
 
   async function deleteSessionWithConfirm(sessionId) {
-    if (currentRunView) {
-      appendPlainLog('Finish the current Codex task before deleting a session.');
-      return;
-    }
     const target = (state.sessions || []).find(session => session.id === sessionId);
     if (!target) {
+      return;
+    }
+    if (isSessionRunning(target)) {
+      appendPlainLog('这个会话正在运行。请先中断任务，再删除。');
       return;
     }
 
@@ -2835,7 +3237,7 @@
     runButton.disabled = false;
     runButton.title = running ? '中断当前任务' : '发送';
     runButton.setAttribute('aria-label', running ? '中断当前任务' : '发送');
-    panel.querySelector('[data-new-session]').disabled = running;
+    panel.querySelector('[data-new-session]').disabled = false;
     panel.querySelector('[data-diagnostics-snapshot]').disabled = running;
     if (running) {
       closeDiagnosticsMenu();
@@ -2880,6 +3282,7 @@
     applySessionLabel();
 
     return {
+      sessionId: state.activeSessionId,
       recordId: record.id,
       root,
       runProcess: root.querySelector('[data-run-process]'),
@@ -2895,7 +3298,8 @@
     if (!currentRunView) {
       return;
     }
-    const record = findRunRecord(currentRunView.recordId);
+    const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
+    flushPendingStreamRenders();
     const statusText = formatProcessedSummary(status, Date.now() - currentRunView.startedAt);
     if (record) {
       record.status = status;
@@ -2904,14 +3308,17 @@
       saveStateSoon();
       renderSessionList();
     }
-    currentRunView.root.dataset.status = status;
-    currentRunView.root.title = [
-      text,
-      record?.mode ? `模式：${formatModeLabel(record.mode)}` : '',
-      record?.model,
-      record?.reasoningEffort
-    ].filter(Boolean).join(' · ');
-    collapseRunProcess(currentRunView, statusText);
+    const visibleView = getCurrentRunViewForRender();
+    if (visibleView) {
+      visibleView.root.dataset.status = status;
+      visibleView.root.title = [
+        text,
+        record?.mode ? `模式：${formatModeLabel(record.mode)}` : '',
+        record?.model,
+        record?.reasoningEffort
+      ].filter(Boolean).join(' · ');
+      collapseRunProcess(visibleView, statusText);
+    }
   }
 
   function collapseRunProcess(view, statusText) {
@@ -2992,7 +3399,7 @@
       appendText: input.appendText,
       replaceText: input.replaceText
     };
-    const record = findRunRecord(currentRunView.recordId);
+    const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
     let renderedEvent = event;
     if (record) {
       renderedEvent = event.kind === 'stream'
@@ -3001,11 +3408,68 @@
       if (event.kind !== 'stream') {
         record.events = [...(record.events || []), event].slice(-MAX_RUN_EVENTS);
       }
-      saveStateSoon();
+      scheduleRunStateSave(event.kind);
     }
 
-    appendRunEventToView(currentRunView, renderedEvent);
+    const visibleView = getCurrentRunViewForRender();
+    if (visibleView) {
+      if (event.kind === 'stream') {
+        scheduleStreamEventRender(renderedEvent);
+      } else {
+        flushPendingStreamRenders();
+        appendRunEventToView(visibleView, renderedEvent);
+        scrollLogToBottom();
+      }
+    }
+  }
+
+  function scheduleStreamEventRender(event) {
+    const streamKey = event.streamKey || event.streamRole || 'codex-stream';
+    pendingStreamRenderEvents.set(streamKey, { ...event });
+    if (streamRenderTimer) {
+      return;
+    }
+    streamRenderTimer = setTimeout(flushPendingStreamRenders, STREAM_RENDER_FLUSH_MS);
+  }
+
+  function flushPendingStreamRenders() {
+    if (streamRenderTimer) {
+      clearTimeout(streamRenderTimer);
+      streamRenderTimer = null;
+    }
+    if (!pendingStreamRenderEvents.size) {
+      return;
+    }
+    const events = Array.from(pendingStreamRenderEvents.values());
+    pendingStreamRenderEvents.clear();
+    const visibleView = getCurrentRunViewForRender();
+    if (!visibleView) {
+      return;
+    }
+    for (const event of events) {
+      appendRunEventToView(visibleView, event);
+    }
     scrollLogToBottom();
+  }
+
+  function getCurrentRunViewForRender() {
+    if (!currentRunView || currentRunView.sessionId !== state.activeSessionId) {
+      return null;
+    }
+    if (currentRunView.root?.isConnected) {
+      return currentRunView;
+    }
+    const root = panel?.querySelector(`[data-run-id="${cssEscape(currentRunView.recordId)}"]`);
+    if (!root) {
+      return null;
+    }
+    currentRunView.root = root;
+    currentRunView.runProcess = root.querySelector('[data-run-process]');
+    currentRunView.processLabel = root.querySelector('[data-run-process-summary]');
+    currentRunView.events = root.querySelector('[data-run-events]');
+    currentRunView.report = root.querySelector('[data-run-report]');
+    currentRunView.status = root.querySelector('[data-run-status]');
+    return currentRunView;
   }
 
   function appendRunEventToView(view, event) {
@@ -3063,7 +3527,7 @@
   }
 
   function getAssistantAnswerForCurrentRun() {
-    const record = currentRunView?.recordId ? findRunRecord(currentRunView.recordId) : null;
+    const record = currentRunView?.recordId ? findRunRecord(currentRunView.recordId, currentRunView.sessionId) : null;
     const events = Array.isArray(record?.events) ? record.events : [];
     const answers = events
       .filter(event =>
@@ -3091,7 +3555,11 @@
     }
 
     const sessions = (state.sessions || []).filter(isDisplayableSession);
-    const visibleSessions = showAll ? sessions : sessions.slice(-3).reverse();
+    const visibleSessions = selectVisibleSessionsForList(state.sessions, state.activeSessionId, {
+      showAll,
+      maxVisible: 3,
+      pinnedSessionIds: getRunningSessionIds()
+    });
     const count = panel.querySelector('[data-session-count]');
     if (count) {
       count.textContent = sessions.length ? `${sessions.length}` : '';
@@ -3100,8 +3568,10 @@
     list.replaceChildren();
     for (const session of visibleSessions) {
       const row = document.createElement('div');
+      const isRunningSession = isSessionRunning(session);
       row.className = 'codex-session-row';
       row.dataset.active = session.id === state.activeSessionId ? 'true' : 'false';
+      row.dataset.running = isRunningSession ? 'true' : 'false';
       row.innerHTML = `
         <button type="button" class="codex-session-switch">
           <span class="codex-session-row-title"></span>
@@ -3112,7 +3582,10 @@
       row.querySelector('.codex-session-row-title').textContent = session.title || 'New task';
       row.querySelector('time').textContent = formatSessionTime(session.updatedAt || session.createdAt);
       row.querySelector('.codex-session-switch').addEventListener('click', () => switchSession(session.id));
-      row.querySelector('.codex-session-delete').addEventListener('click', event => {
+      const deleteButton = row.querySelector('.codex-session-delete');
+      deleteButton.disabled = isRunningSession;
+      deleteButton.title = isRunningSession ? '任务运行中，先中断后再删除' : 'Delete session';
+      deleteButton.addEventListener('click', event => {
         event.stopPropagation();
         deleteSessionWithConfirm(session.id);
       });
@@ -3124,6 +3597,16 @@
       viewAll.hidden = showAll || sessions.length <= 3;
       viewAll.textContent = `查看全部（${sessions.length} 个）`;
     }
+  }
+
+  function getRunningSessionIds() {
+    return (state.sessions || [])
+      .filter(isSessionRunning)
+      .map(session => session.id);
+  }
+
+  function isSessionRunning(session) {
+    return Boolean((session?.runs || []).some(run => run.status === 'running'));
   }
 
   function renderRunHistory() {
@@ -3612,10 +4095,12 @@
 
     button.hidden = false;
     button.disabled = run.undoStatus === 'running' || run.undoStatus === 'applied';
-    button.textContent = run.undoStatus === 'applied' ? '已撤销' : '撤销改动';
+    button.textContent = run.undoStatus === 'applied'
+      ? '已撤销'
+      : (run.partialWriteback ? '撤销已写入部分' : '撤销改动');
     button.title = run.undoStatus === 'applied'
       ? '本轮写入已经撤销'
-      : '撤销本轮写入到 Overleaf 的改动';
+      : (run.partialWriteback ? '撤销本轮已经写入 Overleaf 的部分改动' : '撤销本轮写入到 Overleaf 的改动');
     button.addEventListener('click', event => {
       event.stopPropagation();
       undoRun(run.id);
@@ -3638,40 +4123,45 @@
       return;
     }
 
+    const unsafeFullFileUndo = findUnsafeFullFileUndoOperation(run.undoOperations);
+    if (unsafeFullFileUndo) {
+      appendRunRecordEvent(runId, {
+        title: '已阻止旧格式全文撤销',
+        status: 'failed',
+        detail: {
+          '文件': unsafeFullFileUndo.path,
+          '原因': '这个撤销点会用全文替换恢复文件，在 Overleaf 留痕模式下会把整篇文档标成改动。请重新运行任务生成局部撤销点，或手动处理这次历史改动。'
+        }
+      });
+      return;
+    }
+
     const approved = window.confirm([
-      '撤销本轮写入？',
+      '无留痕撤销本轮写入？',
       '',
       truncateRunTitle(run.task),
       '',
-      `将撤销本轮对 ${formatOperationFiles(run.undoOperations)} 的写入。`
+      `将撤销本轮对 ${formatOperationFiles(run.undoOperations)} 的写入。`,
+      '',
+      '如果 Overleaf 正在使用 Reviewing/Track Changes，Codex 会先临时关闭它，撤销后再恢复。'
     ].join('\n'));
     if (!approved) {
       return;
     }
 
-    if (state.requireReviewing) {
-      const reviewing = await ensureReviewingBeforeWrite(run.undoOperations);
-      if (!reviewing.ok) {
-        appendRunRecordEvent(runId, {
-          title: '无法撤销：没有确认 Overleaf 已开启 Reviewing/Track Changes',
-          status: 'failed',
-          detail: { '原因': reviewing.reason || 'Overleaf 没有返回留痕状态' }
-        });
-        return;
-      }
-    }
-
     setRunUndoStatus(runId, 'running');
     appendRunRecordEvent(runId, {
-      title: '开始撤销本轮写入',
+      title: '开始无留痕撤销本轮写入',
       status: 'running',
       detail: { '将撤销': formatOperationFiles(run.undoOperations) }
     });
 
     const result = await callPageBridge('applyOperations', {
       operations: run.undoOperations,
-      baseFiles: run.undoBaseFiles || []
+      baseFiles: run.undoBaseFiles || [],
+      reviewingPolicy: 'no-trace-undo'
     });
+    appendUndoReviewingPolicyEvent(runId, result.reviewingPolicy);
     appendRunRecordEvent(runId, {
       title: `撤销结果：已撤销 ${result.applied?.length || 0} 项，跳过 ${result.skipped?.length || 0} 项`,
       status: result.skipped?.length ? 'failed' : 'completed',
@@ -3690,6 +4180,41 @@
     setRunUndoStatus(runId, result.skipped?.length ? 'partial' : 'applied');
   }
 
+  function appendUndoReviewingPolicyEvent(runId, reviewingPolicy) {
+    if (!reviewingPolicy || reviewingPolicy.policy !== 'no-trace-undo') {
+      return;
+    }
+    if (reviewingPolicy.disabled && reviewingPolicy.restored) {
+      appendRunRecordEvent(runId, {
+        title: '撤销时已临时关闭并恢复 Overleaf 留痕模式。',
+        status: 'completed'
+      });
+      return;
+    }
+    if (reviewingPolicy.disabled && !reviewingPolicy.restored) {
+      appendRunRecordEvent(runId, {
+        title: '撤销已执行，但没有确认 Overleaf 留痕模式已恢复。',
+        status: 'failed',
+        detail: {
+          '下一步': '请在 Overleaf 手动确认 Reviewing/Track Changes 是否需要重新开启。'
+        }
+      });
+    }
+  }
+
+  function findUnsafeFullFileUndoOperation(operations = []) {
+    return (operations || []).find(operation => {
+      if (!operation || operation.type !== 'edit') {
+        return false;
+      }
+      if (Array.isArray(operation.patches) && operation.patches.length) {
+        return false;
+      }
+      return typeof operation.replaceAll === 'string'
+        && operation.replaceAll.length > MAX_SAFE_UNDO_REPLACEALL_CHARS;
+    }) || null;
+  }
+
   function recordUndoFromApply(project, applyResult) {
     if (!currentRunView?.recordId || !applyResult?.applied?.length) {
       return;
@@ -3697,7 +4222,7 @@
     const appliedOperations = applyResult.applied
       .map(item => item.operation)
       .filter(Boolean);
-    const record = findRunRecord(currentRunView.recordId);
+    const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
     if (!record) {
       return;
     }
@@ -3715,6 +4240,7 @@
     record.undoOperations = checkpoint.undoOperations;
     record.undoBaseFiles = checkpoint.undoBaseFiles;
     record.undoStatus = '';
+    record.partialWriteback = Boolean(applyResult.skipped?.length);
     refreshRunCardControls(record.id);
     appendRunEvent({
       title: `已创建撤销点：可撤销本轮 ${record.undoOperations.length} 项写入`,
@@ -3774,8 +4300,46 @@
     configureUndoButton(root, run);
   }
 
-  function findRunRecord(runId) {
-    return (state.runs || []).find(run => run.id === runId);
+  function findRunRecord(runId, sessionId = '') {
+    if (!runId) {
+      return null;
+    }
+    if (sessionId) {
+      const session = findSessionById(sessionId);
+      return (session?.runs || []).find(run => run.id === runId) || null;
+    }
+    return (state.runs || []).find(run => run.id === runId)
+      || (state.sessions || []).flatMap(session => session.runs || []).find(run => run.id === runId)
+      || null;
+  }
+
+  function findSessionById(sessionId) {
+    if (!sessionId) {
+      return null;
+    }
+    return (state.sessions || []).find(session => session.id === sessionId)
+      || (state.session?.id === sessionId ? state.session : null);
+  }
+
+  function replaceSessionInState(session) {
+    if (!session?.id) {
+      return;
+    }
+    state = normalizePanelState({
+      ...state,
+      sessions: (state.sessions || []).map(item => item.id === session.id ? session : item)
+    });
+  }
+
+  function updateSessionById(sessionId, patch = {}) {
+    const session = findSessionById(sessionId);
+    if (!session) {
+      return;
+    }
+    replaceSessionInState({
+      ...session,
+      ...patch
+    });
   }
 
   function createRunId() {
@@ -3878,7 +4442,7 @@
   function appendCompletionReport(input = {}) {
     const operations = input.operations || [];
     const applyResults = input.applyResults || [];
-    const record = currentRunView?.recordId ? findRunRecord(currentRunView.recordId) : null;
+    const record = currentRunView?.recordId ? findRunRecord(currentRunView.recordId, currentRunView.sessionId) : null;
     const undoCount = record?.undoOperations?.length || 0;
     const report = buildHumanCompletionReport({
       ...input,
@@ -3997,6 +4561,45 @@
       parts.push(`目标：${operation.to}`);
     }
     return parts.join('；');
+  }
+
+  function appendPartialWritebackWarning(result) {
+    const applied = result?.applied || [];
+    const skipped = result?.skipped || [];
+    if (!applied.length && !skipped.length) {
+      return;
+    }
+    const record = currentRunView?.recordId ? findRunRecord(currentRunView.recordId, currentRunView.sessionId) : null;
+    const undoAvailable = Boolean(record?.undoOperations?.length);
+    appendRunEvent({
+      title: applied.length
+        ? `部分写入已完成：${applied.length} 项已经进入 Overleaf，${skipped.length} 项没有写入。`
+        : `写入被跳过：${skipped.length} 项没有写入 Overleaf。`,
+      status: 'failed',
+      detail: {
+        '恢复操作': undoAvailable
+          ? '点击本轮的“撤销已写入部分”按钮，可以先回退已经进入 Overleaf 的改动。'
+          : '本轮没有可自动撤销的写入；请按下面的文件列表手动检查。'
+        ,
+        '已经写入，可点“撤销已写入部分”回退': applied.map(item => ({
+          '动作': formatOperationType(item.operation?.type),
+          '文件': item.operation?.path || item.operation?.to || '未知文件'
+        })),
+        '没有写入，需要处理后重试': skipped.map(item => ({
+          '动作': formatOperationType(item.operation?.type),
+          '文件': item.operation?.path || item.operation?.to || '未知文件',
+          '原因': item.result?.reason || item.result?.error || '未知原因'
+        }))
+      }
+    });
+  }
+
+  function formatWritebackSkippedNextStep(result = {}) {
+    const appliedCount = result.applied?.length || 0;
+    if (appliedCount > 0) {
+      return '请查看跳过原因。已写入的部分可以点击“撤销已写入部分”回退，处理冲突后再重试。';
+    }
+    return '这轮没有任何内容写入。请查看跳过原因，处理后重试。';
   }
 
   function appendApplyResult(result) {

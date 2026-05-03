@@ -28,18 +28,21 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
   const skippedFiles = normalized.skippedFiles;
   const nextPaths = new Set(files.map(file => file.path));
   const previous = readBaseline(mirror.baselinePath);
+  const fullProjectSnapshot = project?.capabilities?.fullProjectSnapshot !== false;
 
   fs.mkdirSync(mirror.workspacePath, { recursive: true });
   fs.mkdirSync(mirror.metadataPath, { recursive: true });
 
-  for (const filePath of listWorkspaceFiles(mirror.workspacePath)) {
-    if (nextPaths.has(filePath)) {
-      continue;
-    }
-    const target = resolveWorkspacePath(mirror.workspacePath, filePath);
-    if (fs.existsSync(target)) {
-      fs.rmSync(target, { force: true });
-      removeEmptyParents(path.dirname(target), mirror.workspacePath);
+  if (fullProjectSnapshot) {
+    for (const filePath of listWorkspaceFiles(mirror.workspacePath)) {
+      if (nextPaths.has(filePath)) {
+        continue;
+      }
+      const target = resolveWorkspacePath(mirror.workspacePath, filePath);
+      if (fs.existsSync(target)) {
+        fs.rmSync(target, { force: true });
+        removeEmptyParents(path.dirname(target), mirror.workspacePath);
+      }
     }
   }
 
@@ -57,18 +60,26 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
     writtenCount++;
   }
 
+  const now = new Date().toISOString();
+  const nextBaselineFiles = fullProjectSnapshot
+    ? files.map(file => buildBaselineFile(file))
+    : mergePartialBaselineFiles(previous.files || [], files);
+
   writeBaseline(mirror.baselinePath, {
+    ...previous,
     projectKey: mirror.projectKey,
-    capturedAt: new Date().toISOString(),
-    lastFullSyncAt: new Date().toISOString(),
-    files: files.map(file => buildBaselineFile(file))
+    capturedAt: fullProjectSnapshot ? now : (previous.capturedAt || ''),
+    lastFullSyncAt: fullProjectSnapshot ? now : previous.lastFullSyncAt,
+    lastPartialSyncAt: fullProjectSnapshot ? previous.lastPartialSyncAt : now,
+    files: nextBaselineFiles
   });
 
   return {
     ...mirror,
     fileCount: files.length,
     writtenCount,
-    skippedFiles
+    skippedFiles,
+    partialSnapshot: !fullProjectSnapshot
   };
 }
 
@@ -229,6 +240,14 @@ function buildBaselineFile(file) {
     baseline.content = file.content;
   }
   return baseline;
+}
+
+function mergePartialBaselineFiles(previousFiles, overlayFiles) {
+  const filesByPath = new Map((previousFiles || []).map(file => [file.path, file]));
+  for (const file of overlayFiles || []) {
+    filesByPath.set(file.path, buildBaselineFile(file));
+  }
+  return Array.from(filesByPath.values()).sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function hashProjectFile(file) {

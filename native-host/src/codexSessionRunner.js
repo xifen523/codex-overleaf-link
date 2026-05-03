@@ -58,8 +58,16 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     projectId,
     rootDir
   });
-  const rawSyncChanges = collected.changes || [];
-  const unsupportedChanges = collected.unsupportedChanges || [];
+  const filteredChanges = filterSyncChangesForFocus({
+    changes: collected.changes || [],
+    focusFiles: params.focusFiles || params.session?.focusFiles,
+    restrictToFocusFiles: params.restrictToFocusFiles
+  });
+  const rawSyncChanges = filteredChanges.changes;
+  const unsupportedChanges = [
+    ...(collected.unsupportedChanges || []),
+    ...filteredChanges.unsupportedChanges
+  ];
   throwIfAborted(signal);
 
   const syncChanges = rawSyncChanges.map(change => {
@@ -113,14 +121,41 @@ function buildCodexTurnPrompt(params = {}, mirror = {}) {
     'Focus files:',
     formatFocusFiles(focusFiles),
     '',
+    'Compilation context (@compile-log):',
+    formatCompileLogContext(params),
+    '',
     'Mode for this turn:',
     `- ${mode}`,
     '- ask: inspect and explain only; do not edit files.',
     '- confirm/auto: edit the local workspace directly when the request calls for changes. The browser bridge handles review, confirmation, deletion approval, and syncing back to Overleaf.',
     '',
+    'Write expectation for this turn:',
+    formatWriteExpectation({ mode, task: userTask }),
+    '',
     'Current user request:',
     userTask || '(empty request)'
   ].join('\n');
+}
+
+function formatWriteExpectation({ mode = 'auto', task = '' } = {}) {
+  if (mode === 'ask') {
+    return '- This is read-only. Inspect and explain; do not edit files.';
+  }
+  if (requestImpliesFileChanges(task)) {
+    return [
+      '- The request asks for file changes. You must edit the local workspace when you find concrete fixes.',
+      '- Do not stop at a suggestion list or say you will not modify files unless no safe concrete edit exists.',
+      '- If you intentionally leave files unchanged, explain the specific blocker in the final answer.'
+    ].join('\n');
+  }
+  return [
+    '- This mode can write. If the request asks for corrections, revisions, fixes, polishing, updates, or implementation, edit the local workspace directly.',
+    '- If the request is purely an inspection question, report findings without inventing unnecessary edits.'
+  ].join('\n');
+}
+
+function requestImpliesFileChanges(task = '') {
+  return /修正|修复|修改|改[一-龥]*|完善|补全|补充|润色|重写|改写|整理|调整|应用|写入|fix|correct|repair|revise|edit|update|rewrite|polish|improve|apply/i.test(String(task || ''));
 }
 
 function normalizeFocusFiles(value) {
@@ -140,11 +175,81 @@ function normalizeFocusFiles(value) {
   return files;
 }
 
+function filterSyncChangesForFocus({ changes = [], focusFiles = [], restrictToFocusFiles = false } = {}) {
+  if (!restrictToFocusFiles) {
+    return { changes, unsupportedChanges: [] };
+  }
+  const focusSet = new Set(normalizeFocusFiles(focusFiles));
+  if (!focusSet.size) {
+    return { changes, unsupportedChanges: [] };
+  }
+
+  const accepted = [];
+  const rejected = [];
+  for (const change of changes || []) {
+    if (focusSet.has(change?.path)) {
+      accepted.push(change);
+    } else if (change?.path) {
+      rejected.push({
+        type: 'ignored-local-change',
+        path: change.path,
+        reason: 'out_of_focus_partial_snapshot'
+      });
+    }
+  }
+  return {
+    changes: accepted,
+    unsupportedChanges: rejected
+  };
+}
+
 function formatFocusFiles(files) {
   if (!files.length) {
     return '- none; use the whole project when needed.';
   }
   return files.map(filePath => `- ${filePath}`).join('\n');
+}
+
+function formatCompileLogContext(params = {}) {
+  const log = String(params.compileLog || '').trim();
+  if (!log) {
+    return '- none provided.';
+  }
+
+  const errors = normalizeCompileMessages(params.compileErrors);
+  const warnings = normalizeCompileMessages(params.compileWarnings);
+  const fresh = params.compileLogFresh === false
+    ? 'possibly stale'
+    : 'fresh';
+  const compiledAt = params.compileLogCompiledAt
+    ? new Date(params.compileLogCompiledAt).toISOString()
+    : 'unknown';
+
+  return [
+    `- status: ${fresh}`,
+    `- compiledAt: ${compiledAt}`,
+    `- errors: ${errors.length}`,
+    `- warnings: ${warnings.length}`,
+    errors.length ? `- error summary:\n${errors.slice(0, 8).map(message => `  - ${message}`).join('\n')}` : '',
+    warnings.length ? `- warning summary:\n${warnings.slice(0, 8).map(message => `  - ${message}`).join('\n')}` : '',
+    '- log:',
+    fencedBlock(log)
+  ].filter(Boolean).join('\n');
+}
+
+function normalizeCompileMessages(value) {
+  const messages = Array.isArray(value) ? value : [];
+  return messages
+    .map(message => String(message || '').replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+}
+
+function fencedBlock(value) {
+  return [
+    '```text',
+    String(value || '').replace(/```/g, '` ` `'),
+    '```'
+  ].join('\n');
 }
 
 function formatSessionHistory(history) {
@@ -190,6 +295,30 @@ function buildThreadResumeParams(input = {}) {
     approvalPolicy: input.approvalPolicy,
     sandbox: input.sandboxMode
   };
+}
+
+function buildTurnStartParams(input = {}, threadId = input.threadId || '') {
+  const params = {
+    threadId,
+    input: [
+      {
+        type: 'text',
+        text: input.task,
+        text_elements: []
+      }
+    ],
+    cwd: input.workspacePath,
+    model: input.model || null,
+    effort: normalizeReasoningEffort(input.reasoningEffort)
+  };
+  if (supportsReasoningSummary(input.model)) {
+    params.summary = 'detailed';
+  }
+  return params;
+}
+
+function supportsReasoningSummary(model) {
+  return String(model || '').toLowerCase() !== 'gpt-5.3-codex-spark';
 }
 
 function runCodexAppServerSession(input) {
@@ -280,21 +409,29 @@ function runCodexAppServerSession(input) {
         }
       }
 
-      const turnResponse = await request('turn/start', {
-        threadId: activeThreadId,
-        input: [
-          {
-            type: 'text',
-            text: input.task,
-            text_elements: []
-          }
-        ],
-        cwd: input.workspacePath,
-        model: input.model || null,
-        effort: normalizeReasoningEffort(input.reasoningEffort),
-        summary: 'detailed'
-      });
+      const turnResponse = await startTurnWithSummaryFallback(activeThreadId);
       activeTurnId = turnResponse?.turn?.id || '';
+    }
+
+    async function startTurnWithSummaryFallback(threadId) {
+      const params = buildTurnStartParams(input, threadId);
+      try {
+        return await request('turn/start', params);
+      } catch (error) {
+        if (!params.summary || !isUnsupportedReasoningSummaryError(error)) {
+          throw error;
+        }
+        emitCodexEvent(input.emit, 'codex.session.event', 'reasoning summary unsupported; retrying without it', {
+          method: 'turn/start',
+          params: {
+            model: input.model || '',
+            retriedWithoutSummary: true
+          }
+        }, 'completed');
+        const retryParams = { ...params };
+        delete retryParams.summary;
+        return request('turn/start', retryParams);
+      }
     }
 
     function request(method, params) {
@@ -452,6 +589,9 @@ function decideCommandApproval({ mode = 'auto', params = {} } = {}) {
 
 function isAllowedLocalCommand(params = {}) {
   const command = extractCommandValue(params);
+  if (typeof command === 'string' && hasUnsupportedShellSyntax(command)) {
+    return false;
+  }
   const tokens = Array.isArray(command) ? command.map(String) : tokenizeShellCommand(String(command || ''));
   if (!tokens.length) {
     return false;
@@ -475,7 +615,8 @@ function isAllowedLocalCommand(params = {}) {
     return false;
   }
 
-  return !tokens.some(isUnsafeShellToken);
+  return !tokens.some(isUnsafeShellToken)
+    && !hasDisallowedCommandArguments(executable, tokens.slice(1));
 }
 
 function extractCommandValue(params = {}) {
@@ -496,15 +637,61 @@ function extractCommandValue(params = {}) {
 
 function extractShellInlineCommand(tokens = []) {
   const index = tokens.findIndex(token => token === '-c' || token === '-lc' || token === '-ilc');
-  if (index < 0 || index + 1 >= tokens.length) {
+  if (index < 0 || index + 1 >= tokens.length || tokens.length !== index + 2) {
     return '';
   }
   return tokens[index + 1];
 }
 
+function hasUnsupportedShellSyntax(command) {
+  return hasAmbiguousShellEscape(command) || hasUnbalancedShellQuote(command);
+}
+
+function hasAmbiguousShellEscape(command) {
+  return /\\["';&|<>`$(){}\n\r]/.test(command);
+}
+
+function hasUnbalancedShellQuote(command) {
+  let quote = '';
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    if (char === '\\' && quote !== "'") {
+      index += 1;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = '';
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+    }
+  }
+  return Boolean(quote);
+}
+
 function isUnsafeShellToken(token) {
   return ['&&', '||', ';', '|', '>', '>>', '<', '<<', '`'].includes(token)
     || /\$\(/.test(token);
+}
+
+function hasDisallowedCommandArguments(executable, args = []) {
+  const flags = args.map(String);
+  if (executable === 'find') {
+    return flags.some(flag => ['-exec', '-execdir', '-delete', '-ok', '-okdir'].includes(flag));
+  }
+  if (executable === 'sed') {
+    return flags.some(flag => flag === '-i' || /^-i[^a-zA-Z0-9]?/.test(flag));
+  }
+  if (executable === 'awk') {
+    return flags.some((flag, index) => flag === '-i' && flags[index + 1] === 'inplace');
+  }
+  if (executable === 'shasum' || executable === 'md5sum') {
+    return flags.some(flag => flag === '-c' || flag === '--check');
+  }
+  return false;
 }
 
 function pathBasename(value) {
@@ -659,6 +846,11 @@ function normalizeReasoningEffort(value) {
   return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value) ? value : null;
 }
 
+function isUnsupportedReasoningSummaryError(error) {
+  const message = String(error?.message || error || '');
+  return /unsupported_parameter/i.test(message) && /reasoning\.summary|summary/i.test(message);
+}
+
 function cleanAssistantMessage(value) {
   return String(value || '').trim();
 }
@@ -669,6 +861,7 @@ module.exports = {
   buildCodexSettings,
   buildThreadStartParams,
   buildThreadResumeParams,
+  buildTurnStartParams,
   createOptionalTimeout,
   decideCommandApproval,
   runCodexAppServerSession,

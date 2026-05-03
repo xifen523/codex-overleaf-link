@@ -21,6 +21,44 @@ test('composer keeps the send button in a fixed visible toolbar column', () => {
   assert.match(css, /\.codex-composer-toolbar select\s*\{[\s\S]*min-width: 0/);
 });
 
+test('composer selects reserve room for the dropdown chevron', () => {
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+
+  const selectBody = (css.match(/#codex-overleaf-panel \.codex-composer-toolbar select\s*\{[\s\S]*?\n\}/g) || [])
+    .find(block => /width:\s*100%/.test(block)) || '';
+
+  assert.match(selectBody, /appearance:\s*none/);
+  assert.match(selectBody, /padding:\s*0 18px 0 3px/);
+  assert.match(selectBody, /background-image:\s*url\("data:image\/svg\+xml/);
+  assert.match(selectBody, /background-position:\s*right 4px center/);
+  assert.match(selectBody, /text-overflow:\s*ellipsis/);
+});
+
+test('composer model picker uses a compact selected display while preserving model ids', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const modelSelect = contentScript.match(/<select data-model[\s\S]*?<\/select>/)?.[0] || '';
+
+  assert.match(contentScript, /data-model-display/);
+  assert.match(contentScript, /const MODEL_DISPLAY_LABELS/);
+  assert.match(contentScript, /'gpt-5\.5': '5\.5'/);
+  assert.match(contentScript, /'gpt-5\.3-codex-spark': '5\.3S'/);
+  assert.match(contentScript, /function updateModelDisplay/);
+  assert.match(modelSelect, /<option value="gpt-5\.5">GPT-5\.5<\/option>/);
+  assert.match(modelSelect, /<option value="gpt-5\.3-codex-spark">GPT-5\.3 Codex Spark<\/option>/);
+  assert.match(css, /\.codex-model-picker \[data-model-display\]\s*\{[\s\S]*padding:\s*0 16px 0 3px/);
+  assert.match(css, /\.codex-model-picker select\s*\{[\s\S]*opacity:\s*0/);
+});
+
 test('composer sends through a form submit path with a guarded run handler', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -129,8 +167,10 @@ test('panel persistence uses hybrid IndexedDB storage with legacy fallback', () 
   assert.match(contentScript, /saveState\(\)\.catch/);
   // Hybrid approach: prefs via Migration, sessions via StorageDb
   assert.match(contentScript, /Migration\.savePrefs\(prefs\)/);
-  assert.match(contentScript, /StorageDb\.putRecord\('sessions', record\)/);
-  assert.match(contentScript, /StorageDb\.extractLightweightPrefs\(state, projectId\)/);
+  assert.match(contentScript, /StorageDb\.putRecords\('sessions', sessionRecords\)/);
+  assert.match(contentScript, /StorageDb\.extractLightweightPrefs\(compactState, projectId\)/);
+  assert.match(contentScript, /runs:\s*Array\.isArray\(session\.runs\)/);
+  assert.match(contentScript, /history:\s*Array\.isArray\(session\.history\)/);
 });
 
 test('storage notice is not appended repeatedly during autosave', () => {

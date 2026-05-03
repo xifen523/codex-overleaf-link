@@ -41,6 +41,10 @@
     const baseContent = baseFileLookup.get(filePath);
     const current = normalizeText(currentContent);
     if (current !== baseContent) {
+      const patchRangeFreshness = checkPatchRangeFreshness(operation, current);
+      if (patchRangeFreshness) {
+        return patchRangeFreshness;
+      }
       return {
         ok: false,
         code: 'stale_snapshot',
@@ -49,6 +53,40 @@
     }
 
     return { ok: true };
+  }
+
+  function checkPatchRangeFreshness(operation, currentContent) {
+    const patches = Array.isArray(operation?.patches) ? operation.patches : [];
+    if (!patches.length) {
+      return null;
+    }
+
+    const current = normalizeText(currentContent);
+    for (const rawPatch of patches) {
+      const from = Number(rawPatch?.from);
+      const to = Number(rawPatch?.to);
+      const expected = String(rawPatch?.expected ?? '');
+      if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < from || to > current.length) {
+        return {
+          ok: false,
+          code: 'stale_patch_range',
+          reason: 'Codex 要修改的位置已经无法和当前 Overleaf 内容对齐，所以没有写入。请重新运行任务。'
+        };
+      }
+      if (current.slice(from, to) !== expected) {
+        return {
+          ok: false,
+          code: 'stale_patch_range',
+          reason: 'Codex 要修改的具体位置已经被你或协作者改过，所以没有覆盖它。请查看差异后重试。'
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      reconciled: true,
+      strategy: 'patch-range'
+    };
   }
 
   function updateExpectedFileContent(baseFileLookup, filePath, content) {
@@ -99,6 +137,7 @@
     updateExpectedFileContent,
     removeExpectedFile,
     moveExpectedFile,
+    checkPatchRangeFreshness,
     normalizeText,
     normalizePath
   };
