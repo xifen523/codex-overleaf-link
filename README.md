@@ -27,11 +27,11 @@ Codex Overleaf Link bridges the two: it adds a Codex panel directly inside Overl
 curl -fsSL "https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh?$(date +%s)" | bash
 ```
 
-Then load the extension in Chrome:
+The installer opens Chrome's extension page, opens Finder to the extension folder, and copies the folder path.
+Chrome still requires one manual approval step for unpacked extensions:
 
-1. Open `chrome://extensions` (the installer opens it automatically on macOS).
-2. Enable **Developer mode**.
-3. Click **Load unpacked** and select `~/.codex-overleaf/source/extension`.
+1. Enable **Developer mode** in `chrome://extensions`.
+2. Click **Load unpacked** and select `~/Codex Overleaf Link Extension`.
 
 Open any Overleaf project — the Codex panel appears on the right.
 

@@ -41,15 +41,24 @@ test('repository ships a one-command macOS installer', () => {
   assert.match(installer, /scripts\/install-native-host\.mjs/);
   assert.match(installer, /chrome:\/\/extensions/);
   assert.match(installer, /extension/);
+  assert.match(installer, /CODEX_OVERLEAF_EXTENSION_LINK/);
+  assert.match(installer, /Codex Overleaf Link Extension/);
+  assert.match(installer, /ln -s/);
+  assert.match(installer, /pbcopy/);
+  assert.match(installer, /open -R/);
   assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash/);
-  assert.match(readme, /~\/\.codex-overleaf\/source\/extension/);
+  assert.match(readme, /~\/Codex Overleaf Link Extension/);
+  assert.doesNotMatch(readme, /select `~\/\.codex-overleaf\/source\/extension`/);
 });
 
 test('one-command installer works on macOS Bash 3.2 when extension id is unset', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-install-test-'));
   const binDir = path.join(tempDir, 'bin');
   const installDir = path.join(tempDir, 'source');
+  const visibleExtensionLink = path.join(tempDir, 'Codex Overleaf Link Extension');
   const nodeLog = path.join(tempDir, 'node-args.json');
+  const openLog = path.join(tempDir, 'open-args.txt');
+  const pbcopyLog = path.join(tempDir, 'pbcopy.txt');
   fs.mkdirSync(binDir, { recursive: true });
 
   fs.writeFileSync(path.join(binDir, 'git'), [
@@ -67,10 +76,20 @@ test('one-command installer works on macOS Bash 3.2 when extension id is unset',
     `for arg in "$@"; do printf '%s\\n' "$arg"; done > "${nodeLog}"`,
     'exit 0'
   ].join('\n'));
-  fs.writeFileSync(path.join(binDir, 'open'), '#!/bin/sh\nexit 0\n');
+  fs.writeFileSync(path.join(binDir, 'open'), [
+    '#!/bin/bash',
+    `for arg in "$@"; do printf '%s\\n' "$arg"; done >> "${openLog}"`,
+    'exit 0'
+  ].join('\n'));
+  fs.writeFileSync(path.join(binDir, 'pbcopy'), [
+    '#!/bin/bash',
+    `cat > "${pbcopyLog}"`,
+    'exit 0'
+  ].join('\n'));
   fs.chmodSync(path.join(binDir, 'git'), 0o755);
   fs.chmodSync(path.join(binDir, 'node'), 0o755);
   fs.chmodSync(path.join(binDir, 'open'), 0o755);
+  fs.chmodSync(path.join(binDir, 'pbcopy'), 0o755);
 
   const result = spawnSync('/bin/bash', [path.join(__dirname, '../install.sh')], {
     env: {
@@ -86,4 +105,10 @@ test('one-command installer works on macOS Bash 3.2 when extension id is unset',
   const nodeArgs = fs.readFileSync(nodeLog, 'utf8');
   assert.match(nodeArgs, /scripts\/install-native-host\.mjs/);
   assert.doesNotMatch(nodeArgs, /--extension-id/);
+  assert.equal(fs.readlinkSync(visibleExtensionLink), path.join(installDir, 'extension'));
+  assert.equal(fs.readFileSync(pbcopyLog, 'utf8'), visibleExtensionLink);
+  const openArgs = fs.readFileSync(openLog, 'utf8');
+  assert.match(openArgs, /chrome:\/\/extensions/);
+  assert.match(openArgs, /-R/);
+  assert.match(openArgs, /Codex Overleaf Link Extension/);
 });

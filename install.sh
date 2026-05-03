@@ -35,15 +35,43 @@ else
   node "$INSTALL_DIR/scripts/install-native-host.mjs" "$@"
 fi
 
+EXTENSION_DIR="$INSTALL_DIR/extension"
+VISIBLE_EXTENSION_DIR="${CODEX_OVERLEAF_EXTENSION_LINK:-$HOME/Codex Overleaf Link Extension}"
+LOAD_UNPACKED_PATH="$EXTENSION_DIR"
+
+if [ -L "$VISIBLE_EXTENSION_DIR" ]; then
+  rm "$VISIBLE_EXTENSION_DIR"
+fi
+
+if [ ! -e "$VISIBLE_EXTENSION_DIR" ]; then
+  ln -s "$EXTENSION_DIR" "$VISIBLE_EXTENSION_DIR"
+  LOAD_UNPACKED_PATH="$VISIBLE_EXTENSION_DIR"
+else
+  echo "Could not create visible extension shortcut because this path already exists:" >&2
+  echo "  $VISIBLE_EXTENSION_DIR" >&2
+  echo "Use the real extension directory instead:" >&2
+  echo "  $EXTENSION_DIR" >&2
+fi
+
+COPIED_EXTENSION_PATH=0
+if command -v pbcopy >/dev/null 2>&1; then
+  printf "%s" "$LOAD_UNPACKED_PATH" | pbcopy >/dev/null 2>&1 && COPIED_EXTENSION_PATH=1
+fi
+
 echo
 echo "Codex Overleaf Link native host is installed."
-echo "Next steps:"
-echo "  1. Open chrome://extensions"
-echo "  2. Enable Developer mode"
-echo "  3. Click Load unpacked"
-echo "  4. Select: $INSTALL_DIR/extension"
-echo "  5. Reload the extension after future updates"
+echo
+echo "Chrome extension setup:"
+echo "  Chrome does not allow scripts to load unpacked extensions automatically."
+echo "  In the Chrome extensions page, enable Developer mode, click Load unpacked, then choose:"
+echo "  $LOAD_UNPACKED_PATH"
+if [ "$COPIED_EXTENSION_PATH" = "1" ]; then
+  echo "  This folder path has also been copied to your clipboard."
+fi
+echo
+echo "After loading or reloading the extension, refresh the Overleaf page."
 
 if command -v open >/dev/null 2>&1; then
   open "chrome://extensions" >/dev/null 2>&1 || true
+  open -R "$LOAD_UNPACKED_PATH" >/dev/null 2>&1 || true
 fi
