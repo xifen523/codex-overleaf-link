@@ -3536,6 +3536,8 @@
       finishedAt: '',
       events: [],
       undoOperations: [],
+      undoTrackedChanges: [],
+      undoExpectedFiles: [],
       undoStatus: ''
     };
     const active = getActiveSession(state);
@@ -4502,7 +4504,7 @@
     const existing = root.querySelector('[data-run-undo]');
     const button = existing.cloneNode(true);
     existing.replaceWith(button);
-    const undoCount = run.undoOperations?.length || 0;
+    const undoCount = getRunUndoCount(run);
     if (!undoCount && run.undoStatus !== 'applied') {
       button.hidden = true;
       return;
@@ -4534,7 +4536,12 @@
 
   async function undoRun(runId) {
     const run = findRunRecord(runId);
-    if (!run?.undoOperations?.length || run.undoStatus === 'applied') {
+    if (!getRunUndoCount(run) || run.undoStatus === 'applied') {
+      return;
+    }
+
+    if (Array.isArray(run.undoTrackedChanges) && run.undoTrackedChanges.length) {
+      await undoRunTrackedChanges(runId, run);
       return;
     }
 
@@ -4599,6 +4606,60 @@
     setRunUndoStatus(runId, result.skipped?.length ? 'partial' : 'applied');
   }
 
+  async function undoRunTrackedChanges(runId, run) {
+    const approved = await showPluginConfirm({
+      title: '拒绝本轮 Overleaf 留痕改动？',
+      message: [
+        truncateRunTitle(run.task),
+        '',
+        `将通过 Overleaf 自己的 Reject/拒绝功能撤销 ${formatTrackedChangeFiles(run.undoTrackedChanges)}。`,
+        '',
+        '这不会用文本补丁重写文件；如果插件不能确认对应留痕记录，会停止并让你在 Overleaf 审阅面板手动处理。'
+      ].join('\n'),
+      confirmLabel: '拒绝本轮改动',
+      cancelLabel: '取消',
+      destructive: true
+    });
+    if (!approved) {
+      return;
+    }
+
+    setRunUndoStatus(runId, 'running');
+    appendRunRecordEvent(runId, {
+      title: '开始拒绝本轮 Overleaf 留痕改动',
+      status: 'running',
+      detail: { '将撤销': formatTrackedChangeFiles(run.undoTrackedChanges) }
+    });
+
+    const result = await callPageBridge('rejectTrackedChanges', {
+      trackedChanges: run.undoTrackedChanges || [],
+      expectedFiles: run.undoExpectedFiles || []
+    });
+    appendRunRecordEvent(runId, {
+      title: `撤销结果：已拒绝 ${result.applied?.length || 0} 条留痕，跳过 ${result.skipped?.length || 0} 条`,
+      status: result.skipped?.length ? 'failed' : 'completed',
+      detail: {
+        '已拒绝': (result.applied || []).map(item => ({
+          '文件': item.trackedChange?.path || '未知文件',
+          '记录': item.trackedChange?.label || item.trackedChange?.id || item.trackedChange?.key
+        })),
+        '跳过': (result.skipped || []).map(item => ({
+          '文件': item.trackedChange?.path || '未知文件',
+          '记录': item.trackedChange?.label || item.trackedChange?.id || item.trackedChange?.key || '',
+          '原因': item.result?.reason || item.result?.error || '未知原因'
+        }))
+      }
+    });
+    setRunUndoStatus(runId, result.skipped?.length ? 'partial' : 'applied');
+  }
+
+  function getRunUndoCount(run) {
+    if (!run) {
+      return 0;
+    }
+    return (run.undoOperations?.length || 0) + (run.undoTrackedChanges?.length || 0);
+  }
+
   function appendUndoReviewingPolicyEvent(runId, reviewingPolicy) {
     if (!reviewingPolicy || reviewingPolicy.policy !== 'no-trace-undo') {
       return;
@@ -4641,6 +4702,7 @@
     const appliedOperations = applyResult.applied
       .map(item => item.operation)
       .filter(Boolean);
+    const trackedChanges = normalizeApplyTrackedChanges(applyResult?.trackedChanges || []);
     const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
     if (!record) {
       return;
@@ -4650,14 +4712,51 @@
       ...(Array.isArray(record.appliedOperations) ? record.appliedOperations : []),
       ...appliedOperations
     ];
+    record.appliedOperations = combinedAppliedOperations;
+
+    if (state.requireReviewing === true) {
+      const combinedTrackedChanges = mergeTrackedChanges([
+        ...(Array.isArray(record.undoTrackedChanges) ? record.undoTrackedChanges : []),
+        ...trackedChanges
+      ]);
+      record.undoOperations = [];
+      record.undoBaseFiles = [];
+      record.undoTrackedChanges = combinedTrackedChanges;
+      record.undoExpectedFiles = selectExpectedFilesForTrackedUndo(project, combinedAppliedOperations, combinedTrackedChanges);
+      record.undoStatus = '';
+      record.partialWriteback = Boolean(applyResult.skipped?.length);
+      refreshRunCardControls(record.id);
+      if (combinedTrackedChanges.length) {
+        appendRunEvent({
+          title: `已创建撤销点：可通过 Overleaf 拒绝本轮 ${combinedTrackedChanges.length} 条留痕改动`,
+          status: 'completed',
+          detail: combinedTrackedChanges.map(change => ({
+            '文件': change.path,
+            '记录': change.label || change.id || change.key
+          }))
+        });
+      } else {
+        appendRunEvent({
+          title: '没有创建自动撤销点：未识别到本轮 Overleaf 留痕记录',
+          status: 'failed',
+          detail: {
+            '原因': '本轮是在 Reviewing/Track Changes 下写入的，但插件没有可靠识别 Overleaf 生成的留痕记录。为了避免用文本补丁制造新的红线，自动撤销已禁用。',
+            '下一步': '请在 Overleaf 审阅面板手动拒绝这轮建议，或重新运行后再尝试。'
+          }
+        });
+      }
+      return;
+    }
+
     const checkpoint = buildUndoCheckpoint(project, combinedAppliedOperations);
     if (!checkpoint.undoOperations.length) {
       return;
     }
 
-    record.appliedOperations = combinedAppliedOperations;
     record.undoOperations = checkpoint.undoOperations;
     record.undoBaseFiles = checkpoint.undoBaseFiles;
+    record.undoTrackedChanges = [];
+    record.undoExpectedFiles = [];
     record.undoStatus = '';
     record.partialWriteback = Boolean(applyResult.skipped?.length);
     refreshRunCardControls(record.id);
@@ -4671,6 +4770,65 @@
         '原因': operation.reason
       }))
     });
+  }
+
+  function normalizeApplyTrackedChanges(changes = []) {
+    const seen = new Set();
+    const normalized = [];
+    for (const change of changes || []) {
+      const key = typeof change?.key === 'string' ? change.key : '';
+      if (!key || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      normalized.push({
+        key,
+        id: typeof change.id === 'string' ? change.id : '',
+        path: typeof change.path === 'string' ? change.path : '',
+        label: typeof change.label === 'string' ? change.label : ''
+      });
+    }
+    return normalized;
+  }
+
+  function mergeTrackedChanges(changes = []) {
+    return normalizeApplyTrackedChanges(changes);
+  }
+
+  function selectExpectedFilesForTrackedUndo(project, operations = [], trackedChanges = []) {
+    const paths = new Set();
+    for (const change of trackedChanges || []) {
+      if (change.path) {
+        paths.add(change.path);
+      }
+    }
+    for (const operation of operations || []) {
+      if (operation?.path) {
+        paths.add(operation.path);
+      }
+      if (operation?.to) {
+        paths.add(operation.to);
+      }
+    }
+    return (project?.files || [])
+      .filter(file => paths.has(file.path) && typeof file.content === 'string')
+      .map(file => ({
+        path: file.path,
+        content: file.content
+      }));
+  }
+
+  function formatTrackedChangeFiles(changes = []) {
+    const files = [];
+    const seen = new Set();
+    for (const change of changes || []) {
+      const path = change?.path || '未知文件';
+      if (!seen.has(path)) {
+        seen.add(path);
+        files.push(path);
+      }
+    }
+    return files.join(', ') || '本轮留痕改动';
   }
 
   function appendRunRecordEvent(runId, event) {
@@ -4862,7 +5020,7 @@
     const operations = input.operations || [];
     const applyResults = input.applyResults || [];
     const record = currentRunView?.recordId ? findRunRecord(currentRunView.recordId, currentRunView.sessionId) : null;
-    const undoCount = record?.undoOperations?.length || 0;
+    const undoCount = getRunUndoCount(record);
     const report = buildHumanCompletionReport({
       ...input,
       operations,
@@ -4989,7 +5147,7 @@
       return;
     }
     const record = currentRunView?.recordId ? findRunRecord(currentRunView.recordId, currentRunView.sessionId) : null;
-    const undoAvailable = Boolean(record?.undoOperations?.length);
+    const undoAvailable = getRunUndoCount(record) > 0;
     appendRunEvent({
       title: applied.length
         ? `部分写入已完成：${applied.length} 项已经进入 Overleaf，${skipped.length} 项没有写入。`

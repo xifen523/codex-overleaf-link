@@ -87,6 +87,9 @@
         requireReviewing: params.requireReviewing === true
       });
     }
+    if (method === 'rejectTrackedChanges') {
+      return rejectTrackedChanges(params);
+    }
     if (method === 'triggerCompile') {
       return compileBridge.triggerCompile(params);
     }
@@ -1094,13 +1097,17 @@
     if (options.reviewingPolicy === 'no-trace-undo') {
       return applyOperationsWithNoTraceUndo(operations, options);
     }
+    const trackReviewingChanges = options.requireReviewing === true && (operations || []).length > 0;
     if (options.requireReviewing === true && (operations || []).length > 0) {
       const reviewing = await ensureReviewing({ waitMs: 1800 });
       if (!reviewing.ok) {
         return buildReviewingRequiredBlockedResult(operations, reviewing);
       }
     }
-    return applyOperationsCore(operations, options);
+    return applyOperationsCore(operations, {
+      ...options,
+      trackReviewingChanges
+    });
   }
 
   async function applyOperationsWithNoTraceUndo(operations, options = {}) {
@@ -1150,12 +1157,19 @@
   async function applyOperationsCore(operations, options = {}) {
     const applied = [];
     const skipped = [];
+    const trackedChanges = [];
     const baseFileLookup = window.CodexOverleafStaleGuard?.buildBaseFileLookup(options.baseFiles);
 
     for (const rawOperation of operations) {
       const operation = normalizeOperationPaths(rawOperation);
       if (operation.type === 'edit') {
-        const result = await applyEditOperation(operation, { baseFileLookup });
+        const result = await applyEditOperation(operation, {
+          baseFileLookup,
+          trackReviewingChanges: options.trackReviewingChanges === true
+        });
+        if (result.ok && Array.isArray(result.trackedChanges)) {
+          trackedChanges.push(...result.trackedChanges);
+        }
         (result.ok ? applied : skipped).push({ operation, result });
       } else if (['create', 'rename', 'move', 'delete'].includes(operation.type)) {
         const result = await applyFileTreeOperation(operation, { baseFileLookup });
@@ -1178,8 +1192,142 @@
     return {
       ok: skipped.length === 0,
       applied,
+      skipped,
+      trackedChanges: mergeTrackedChangeRefs(trackedChanges)
+    };
+  }
+
+  async function rejectTrackedChanges(params = {}) {
+    const trackedChanges = normalizeTrackedChangeRefs(params.trackedChanges || []);
+    const expectedFiles = Array.isArray(params.expectedFiles) ? params.expectedFiles : [];
+    const applied = [];
+    const skipped = [];
+
+    if (!trackedChanges.length) {
+      return {
+        ok: false,
+        applied,
+        skipped: [{
+          trackedChange: null,
+          result: {
+            ok: false,
+            code: 'missing_tracked_changes',
+            reason: '这轮写入没有可识别的 Overleaf 留痕记录；为避免制造新的红线，Codex 没有执行文本补丁撤销。'
+          }
+        }]
+      };
+    }
+
+    for (const trackedChange of trackedChanges) {
+      if (trackedChange.path && getActiveFilePath() !== trackedChange.path) {
+        const opened = await openFileByPath(trackedChange.path);
+        if (!opened.ok) {
+          skipped.push({
+            trackedChange,
+            result: {
+              ok: false,
+              code: 'tracked_change_file_open_failed',
+              reason: `无法打开 ${trackedChange.path} 来查找这轮写入的留痕记录；Codex 没有用文本补丁伪撤销。`
+            }
+          });
+          continue;
+        }
+      }
+
+      const node = findTrackedChangeNode(trackedChange);
+      if (!node) {
+        skipped.push({
+          trackedChange,
+          result: {
+            ok: false,
+            code: 'tracked_change_not_found',
+            reason: '没有在 Overleaf 页面里找到这轮写入对应的留痕记录；Codex 没有用文本补丁伪撤销。'
+          }
+        });
+        continue;
+      }
+
+      const rejectControl = findRejectControlForTrackedChangeNode(node);
+      if (!rejectControl) {
+        skipped.push({
+          trackedChange,
+          result: {
+            ok: false,
+            code: 'tracked_change_reject_control_not_found',
+            reason: '找到了这轮写入的留痕记录，但没有找到对应的 Reject/拒绝按钮；Codex 没有用文本补丁伪撤销。'
+          }
+        });
+        continue;
+      }
+
+      clickNode(rejectControl);
+      await delay(180);
+
+      if (findTrackedChangeNode(trackedChange)) {
+        skipped.push({
+          trackedChange,
+          result: {
+            ok: false,
+            code: 'tracked_change_reject_not_confirmed',
+            reason: 'Codex 点击了 Reject/拒绝，但 Overleaf 页面仍显示这条留痕记录；请在 Overleaf 审阅面板手动拒绝。'
+          }
+        });
+        continue;
+      }
+
+      applied.push({
+        trackedChange,
+        result: {
+          ok: true,
+          method: 'overleaf-review-reject'
+        }
+      });
+    }
+
+    if (applied.length > 0) {
+      const verification = await verifyExpectedFilesAfterTrackedReject(expectedFiles);
+      if (!verification.ok) {
+        skipped.push({
+          trackedChange: null,
+          result: verification
+        });
+      }
+    }
+
+    if (applied.length > 0) {
+      compileBridge.markSourceEdited();
+    }
+
+    return {
+      ok: skipped.length === 0,
+      applied,
       skipped
     };
+  }
+
+  async function verifyExpectedFilesAfterTrackedReject(expectedFiles) {
+    for (const file of expectedFiles || []) {
+      if (!file?.path || typeof file.content !== 'string') {
+        continue;
+      }
+      const opened = await openFileByPath(file.path);
+      if (!opened.ok) {
+        return {
+          ok: false,
+          code: 'tracked_change_undo_verify_open_failed',
+          reason: `撤销后无法打开 ${file.path} 验证内容；请刷新 Overleaf 后检查。`
+        };
+      }
+      const verified = await verifyActiveEditorText(file.content, file.path, 800);
+      if (!verified.ok) {
+        return {
+          ...verified,
+          code: 'tracked_change_undo_verify_failed',
+          reason: `${file.path} 拒绝留痕后内容没有回到写入前状态；请在 Overleaf 审阅面板检查这轮修改。`
+        };
+      }
+    }
+    return { ok: true };
   }
 
   function buildNoTraceUndoBlockedResult(operations, disabled) {
@@ -1232,6 +1380,10 @@
       }
     }
 
+    const trackReviewingChanges = options.trackReviewingChanges === true;
+    const trackedBefore = trackReviewingChanges
+      ? collectTrackedChangeRefsForPaths(collectOperationPaths([operation]))
+      : [];
     const current = readActiveEditorText();
     const freshness = window.CodexOverleafStaleGuard?.checkOperationFreshness(
       operation,
@@ -1277,6 +1429,12 @@
     if (!verified.ok) {
       return verified;
     }
+    const trackedChanges = [];
+    if (trackReviewingChanges) {
+      await delay(120);
+      const trackedAfter = collectTrackedChangeRefsForPaths(collectOperationPaths([operation]));
+      trackedChanges.push(...diffTrackedChangeRefs(trackedBefore, trackedAfter));
+    }
     window.CodexOverleafStaleGuard?.updateExpectedFileContent(
       options.baseFileLookup,
       operation.path,
@@ -1285,7 +1443,8 @@
     return {
       ...result,
       verified: true,
-      verifiedContent: nextContent
+      verifiedContent: nextContent,
+      trackedChanges: mergeTrackedChangeRefs(trackedChanges)
     };
   }
 
@@ -1589,6 +1748,184 @@
         ? window.CodexOverleafProjectFiles.normalizePath(operation.to)
         : operation.to
     };
+  }
+
+  function collectOperationPaths(operations = []) {
+    const paths = new Set();
+    for (const rawOperation of operations || []) {
+      const operation = normalizeOperationPaths(rawOperation);
+      for (const value of [operation?.path, operation?.to]) {
+        if (typeof value === 'string' && value) {
+          paths.add(value);
+        }
+      }
+    }
+    return Array.from(paths);
+  }
+
+  function collectTrackedChangeRefsForPaths(paths = []) {
+    const pathSet = new Set((paths || []).filter(Boolean));
+    const activePath = getActiveFilePath();
+    return collectTrackedChangeNodes()
+      .map(node => trackedChangeRefFromNode(node, activePath))
+      .filter(ref => ref.key)
+      .filter(ref => !pathSet.size || !ref.path || pathSet.has(ref.path));
+  }
+
+  function collectTrackedChangeNodes() {
+    const selector = [
+      '[data-change-id]',
+      '[data-review-id]',
+      '[data-track-change-id]',
+      '[data-ol-change-id]',
+      '[data-path][class*="change" i]',
+      '[class*="track-change" i]',
+      '[class*="review-change" i]',
+      '[class*="suggest" i]',
+      '[aria-label*="change" i]',
+      '[title*="change" i]'
+    ].join(',');
+    return uniqueNodes([
+      ...collectElements(selector, 1200),
+      ...collectElements('*', 3500).filter(isTrackedChangeNode)
+    ]).filter(isTrackedChangeNode);
+  }
+
+  function isTrackedChangeNode(node) {
+    if (!node || isInsideCodexPanel(node)) {
+      return false;
+    }
+    const signal = normalizeReviewingSignalText(readNodeSignalText(node));
+    const tag = (node.tagName || '').toLowerCase();
+    if (tag === 'button' && /\b(?:accept|reject|decline|discard|批准|接受|拒绝|丢弃)\b/i.test(signal)) {
+      return false;
+    }
+    if (readTrackedChangeId(node)) {
+      return true;
+    }
+    return /\b(?:tracked change|track change|review change|suggestion|insert(?:ion)?|delet(?:e|ion)|change)\b/i.test(signal)
+      || /留痕|建议|插入|删除|更改|修改/.test(signal);
+  }
+
+  function trackedChangeRefFromNode(node, fallbackPath = '') {
+    const id = readTrackedChangeId(node);
+    const key = id ? `id:${id}` : `sig:${compact(readNodeSignalText(node), 180)}`;
+    const path = window.CodexOverleafProjectFiles.normalizePath(
+      node.getAttribute?.('data-path')
+      || node.getAttribute?.('data-file-path')
+      || node.getAttribute?.('data-doc-path')
+      || fallbackPath
+      || ''
+    );
+    return {
+      key,
+      id,
+      path,
+      label: compact(readNodeSignalText(node), 180)
+    };
+  }
+
+  function readTrackedChangeId(node) {
+    for (const attribute of [
+      'data-change-id',
+      'data-review-id',
+      'data-track-change-id',
+      'data-ol-change-id',
+      'data-id',
+      'id'
+    ]) {
+      const value = node.getAttribute?.(attribute) || '';
+      if (value && /\b(?:change|review|track|suggest)|\d|[a-f0-9-]{8,}/i.test(value)) {
+        return String(value);
+      }
+    }
+    return '';
+  }
+
+  function normalizeTrackedChangeRefs(refs = []) {
+    const seen = new Set();
+    const normalized = [];
+    for (const ref of refs || []) {
+      if (!ref || typeof ref !== 'object') {
+        continue;
+      }
+      const key = typeof ref.key === 'string' ? ref.key : '';
+      if (!key || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      normalized.push({
+        key,
+        id: typeof ref.id === 'string' ? ref.id : '',
+        path: typeof ref.path === 'string'
+          ? window.CodexOverleafProjectFiles.normalizePath(ref.path)
+          : '',
+        label: compact(String(ref.label || ''), 180)
+      });
+    }
+    return normalized;
+  }
+
+  function diffTrackedChangeRefs(before = [], after = []) {
+    const beforeKeys = new Set((before || []).map(ref => ref.key).filter(Boolean));
+    const seen = new Set();
+    const added = [];
+    for (const ref of after || []) {
+      if (!ref?.key || beforeKeys.has(ref.key) || seen.has(ref.key)) {
+        continue;
+      }
+      seen.add(ref.key);
+      added.push(ref);
+    }
+    return added;
+  }
+
+  function mergeTrackedChangeRefs(refs = []) {
+    return normalizeTrackedChangeRefs(refs);
+  }
+
+  function findTrackedChangeNode(ref = {}) {
+    const targetKey = ref.key || '';
+    if (!targetKey) {
+      return null;
+    }
+    return collectTrackedChangeNodes()
+      .find(node => trackedChangeRefFromNode(node, ref.path || getActiveFilePath()).key === targetKey)
+      || null;
+  }
+
+  function findRejectControlForTrackedChangeNode(node) {
+    const scopes = [];
+    let current = node;
+    for (let index = 0; current && index < 6; index += 1) {
+      scopes.push(current);
+      current = current.parentElement;
+    }
+
+    for (const scope of scopes) {
+      const candidates = typeof scope.querySelectorAll === 'function'
+        ? Array.from(scope.querySelectorAll('button,[role="button"],[aria-label],[title]'))
+        : [];
+      const reject = candidates.find(isRejectTrackedChangeControl);
+      if (reject) {
+        return reject;
+      }
+    }
+    return isRejectTrackedChangeControl(node) ? node : null;
+  }
+
+  function isRejectTrackedChangeControl(node) {
+    if (!node || node.disabled) {
+      return false;
+    }
+    if (/^(true|disabled)$/i.test(node.getAttribute?.('aria-disabled') || '')) {
+      return false;
+    }
+    const signal = normalizeReviewingSignalText(readNodeSignalText(node));
+    if (/\b(?:accept|approve|apply|resolve|接受|批准|应用)\b/i.test(signal)) {
+      return false;
+    }
+    return /\b(?:reject|decline|discard|revert|拒绝|丢弃|还原)\b/i.test(signal);
   }
 
   function collectReviewingSignals(params = {}) {

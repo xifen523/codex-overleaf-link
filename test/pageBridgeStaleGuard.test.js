@@ -377,6 +377,134 @@ test('page bridge applies undo operations with Reviewing disabled and leaves Edi
   assert.equal(result.reviewingPolicy.leftEditing, true);
 });
 
+test('page bridge records and rejects Overleaf tracked changes for Reviewing writes', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+  assert.equal(write.trackedChanges.length, 1);
+  assert.equal(write.trackedChanges[0].path, 'main.tex');
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: write.trackedChanges,
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ]
+  });
+
+  assert.equal(undo.ok, true, undo.error || JSON.stringify(undo));
+  assert.equal(undo.applied.length, 1);
+  assert.equal(undo.skipped.length, 0);
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getDispatchCount(), 1);
+  assert.equal(bridge.getTrackedChangeCount(), 0);
+  assert.equal(bridge.getRejectClickCount(), 1);
+});
+
+test('page bridge records tracked changes for each edited file in a Reviewing write', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    files: {
+      'main.tex': 'alpha beta gamma',
+      'refs.bib': 'title = {Old}'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' },
+      { path: 'refs.bib', content: 'title = {Old}' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      },
+      {
+        type: 'edit',
+        path: 'refs.bib',
+        patches: [
+          { from: 9, to: 12, expected: 'Old', insert: 'New' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.deepEqual(Array.from(write.trackedChanges, change => change.path).sort(), ['main.tex', 'refs.bib']);
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+  assert.equal(bridge.getFile('refs.bib'), 'title = {New}');
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: write.trackedChanges,
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' },
+      { path: 'refs.bib', content: 'title = {Old}' }
+    ]
+  });
+
+  assert.equal(undo.ok, true, undo.error || JSON.stringify(undo));
+  assert.equal(undo.applied.length, 2);
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getFile('refs.bib'), 'title = {Old}');
+  assert.equal(bridge.getTrackedChangeCount(), 0);
+  assert.equal(bridge.getRejectClickCount(), 2);
+});
+
+test('page bridge refuses tracked-change undo when the Overleaf review marker cannot be found', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    files: {
+      'main.tex': 'alpha delta gamma'
+    }
+  });
+
+  const result = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: [
+      { key: 'missing-change', path: 'main.tex' }
+    ],
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.code, 'tracked_change_not_found');
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+});
+
 test('page bridge disables Reviewing through an Overleaf mode dropdown before undo', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -547,15 +675,19 @@ function createPageBridgeHarness({
   modeOptionRole = 'menuitem',
   modeOptionClassName = 'mode-option',
   internalReviewingState = undefined,
-  dispatchApplies = true
+  dispatchApplies = true,
+  trackChangesOnDispatch = false
 }) {
   const fileMap = new Map(Object.entries(files));
+  const trackedChanges = [];
   let selectedPath = activePath;
   let listener = null;
   let pendingResult = null;
   let lastDispatchChanges = null;
+  let dispatchCount = 0;
   let reviewingActive = reviewingOk;
   let reviewingClickCount = 0;
+  let rejectClickCount = 0;
   let modeMenuOpen = false;
   let modeOptionClickCount = 0;
 
@@ -581,6 +713,7 @@ function createPageBridgeHarness({
       if (/aria-label|title|review|track|button|\*/i.test(selector)) {
         return [
           makeReviewingButton(),
+          ...trackedChanges.filter(change => change.path === selectedPath).map(makeTrackedChangeNode),
           ...(includeLooseEditingButton ? [makeLooseEditingButton()] : []),
           ...(modeMenuOpen ? [makeModeOption('Editing'), makeModeOption('Reviewing')] : [])
         ];
@@ -662,11 +795,20 @@ function createPageBridgeHarness({
     getLastDispatchChanges() {
       return JSON.parse(JSON.stringify(lastDispatchChanges));
     },
+    getDispatchCount() {
+      return dispatchCount;
+    },
     getReviewingClickCount() {
       return reviewingClickCount;
     },
     getModeOptionClickCount() {
       return modeOptionClickCount;
+    },
+    getRejectClickCount() {
+      return rejectClickCount;
+    },
+    getTrackedChangeCount() {
+      return trackedChanges.length;
     },
     isReviewingActive() {
       return reviewingActive;
@@ -685,9 +827,19 @@ function createPageBridgeHarness({
     return {
       state: { doc },
       dispatch(transaction) {
+        dispatchCount += 1;
         lastDispatchChanges = transaction.changes;
         if (dispatchApplies) {
+          const before = fileMap.get(selectedPath) || '';
           fileMap.set(selectedPath, applyEditorChanges(fileMap.get(selectedPath) || '', transaction.changes));
+          if (reviewingActive && trackChangesOnDispatch) {
+            trackedChanges.push({
+              id: `change-${trackedChanges.length + 1}`,
+              path: selectedPath,
+              before,
+              after: fileMap.get(selectedPath) || ''
+            });
+          }
         }
       }
     };
@@ -831,6 +983,75 @@ function createPageBridgeHarness({
       },
       click() {
         return undefined;
+      },
+      dispatchEvent() {
+        this.click();
+        return true;
+      }
+    };
+  }
+
+  function makeTrackedChangeNode(change) {
+    return {
+      tagName: 'DIV',
+      textContent: `Tracked change ${change.id}`,
+      innerText: `Tracked change ${change.id}`,
+      id: `tracked-${change.id}`,
+      className: 'review-change-row track-change',
+      disabled: false,
+      parentElement: null,
+      getAttribute(attribute) {
+        if (attribute === 'data-change-id' || attribute === 'data-review-id') {
+          return change.id;
+        }
+        if (attribute === 'data-path') {
+          return change.path;
+        }
+        if (attribute === 'aria-label' || attribute === 'title') {
+          return `Tracked change ${change.id}`;
+        }
+        return '';
+      },
+      querySelectorAll(selector) {
+        if (/button|role|aria-label|title|\*/i.test(selector)) {
+          return [makeRejectTrackedChangeButton(change)];
+        }
+        return [];
+      },
+      closest() {
+        return null;
+      }
+    };
+  }
+
+  function makeRejectTrackedChangeButton(change) {
+    return {
+      tagName: 'BUTTON',
+      textContent: 'Reject',
+      innerText: 'Reject',
+      id: `reject-${change.id}`,
+      className: 'review-reject-change',
+      disabled: false,
+      parentElement: null,
+      getAttribute(attribute) {
+        if (attribute === 'aria-label' || attribute === 'title') {
+          return `Reject change ${change.id}`;
+        }
+        if (attribute === 'role') {
+          return 'button';
+        }
+        if (attribute === 'aria-disabled') {
+          return 'false';
+        }
+        return '';
+      },
+      click() {
+        rejectClickCount += 1;
+        fileMap.set(change.path, change.before);
+        const index = trackedChanges.indexOf(change);
+        if (index >= 0) {
+          trackedChanges.splice(index, 1);
+        }
       },
       dispatchEvent() {
         this.click();

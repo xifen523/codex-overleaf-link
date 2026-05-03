@@ -478,6 +478,8 @@
       appliedOperations: Array.isArray(run.appliedOperations) ? run.appliedOperations : [],
       undoOperations: Array.isArray(run.undoOperations) ? run.undoOperations : [],
       undoBaseFiles: normalizeRunFiles(run.undoBaseFiles),
+      undoTrackedChanges: normalizeRunTrackedChanges(run.undoTrackedChanges),
+      undoExpectedFiles: normalizeRunFiles(run.undoExpectedFiles),
       undoStatus: typeof run.undoStatus === 'string' ? run.undoStatus : ''
     };
   }
@@ -509,6 +511,25 @@
         path: file.path,
         content: file.content
       }));
+  }
+
+  function normalizeRunTrackedChanges(changes) {
+    const seen = new Set();
+    const normalized = [];
+    for (const change of Array.isArray(changes) ? changes : []) {
+      const key = typeof change?.key === 'string' ? change.key : '';
+      if (!key || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      normalized.push({
+        key,
+        id: typeof change.id === 'string' ? change.id : '',
+        path: typeof change.path === 'string' ? change.path : '',
+        label: typeof change.label === 'string' ? change.label : ''
+      });
+    }
+    return normalized;
   }
 
   function normalizeFocusFiles(value) {
@@ -680,6 +701,8 @@
       appliedOperations: [],
       undoOperations: undoPayload.undoOperations,
       undoBaseFiles: undoPayload.undoBaseFiles,
+      undoTrackedChanges: undoPayload.undoTrackedChanges,
+      undoExpectedFiles: undoPayload.undoExpectedFiles,
       undoStatus: typeof run.undoStatus === 'string' ? run.undoStatus : ''
     };
   }
@@ -732,20 +755,28 @@
     if (!keepUndoPayload) {
       return {
         undoOperations: [],
-        undoBaseFiles: []
+        undoBaseFiles: [],
+        undoTrackedChanges: [],
+        undoExpectedFiles: []
       };
     }
 
     const undoOperations = safeJsonClone(Array.isArray(run.undoOperations) ? run.undoOperations : []);
     const undoBaseFiles = normalizeRunFiles(run.undoBaseFiles);
+    const undoTrackedChanges = normalizeRunTrackedChanges(run.undoTrackedChanges);
+    const undoExpectedFiles = normalizeRunFiles(run.undoExpectedFiles);
     const payload = {
       undoOperations,
-      undoBaseFiles
+      undoBaseFiles,
+      undoTrackedChanges,
+      undoExpectedFiles
     };
-    if (!undoOperations.length || estimateJsonBytes(payload) > limits.maxUndoBytesPerRun) {
+    if ((!undoOperations.length && !undoTrackedChanges.length) || estimateJsonBytes(payload) > limits.maxUndoBytesPerRun) {
       return {
         undoOperations: [],
-        undoBaseFiles: []
+        undoBaseFiles: [],
+        undoTrackedChanges: [],
+        undoExpectedFiles: []
       };
     }
     return payload;

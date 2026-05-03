@@ -858,6 +858,21 @@ test('undo flow uses no-trace restoring instead of requiring Reviewing write mod
   assert.match(contentScript, /无留痕撤销/);
 });
 
+test('reviewing write undo rejects Overleaf tracked changes instead of text patching', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const undoRunBody = contentScript.match(/async function undoRun\(runId\) \{[\s\S]*?\n  function appendUndoReviewingPolicyEvent/)?.[0] || '';
+  const recordUndoBody = contentScript.match(/function recordUndoFromApply\(project, applyResult\) \{[\s\S]*?\n  function appendRunRecordEvent/)?.[0] || '';
+
+  assert.match(undoRunBody, /rejectTrackedChanges/);
+  assert.match(undoRunBody, /run\.undoTrackedChanges/);
+  assert.match(recordUndoBody, /applyResult\?\.trackedChanges/);
+  assert.match(recordUndoBody, /undoTrackedChanges/);
+  assert.match(recordUndoBody, /没有创建自动撤销点/);
+});
+
 test('change preview is grouped by file with edit evidence instead of raw operation counts', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
