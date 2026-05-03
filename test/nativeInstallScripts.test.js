@@ -29,3 +29,16 @@ test('package exposes install and uninstall native host commands', () => {
   assert.equal(pkg.scripts['install:native'], 'node scripts/install-native-host.mjs');
   assert.equal(pkg.scripts['uninstall:native'], 'node scripts/uninstall-native-host.mjs');
 });
+
+test('repository ships a one-command macOS installer for community users', () => {
+  const installer = fs.readFileSync(path.join(__dirname, '../install.sh'), 'utf8');
+  const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
+
+  assert.match(installer, /CODEX_OVERLEAF_INSTALL_DIR/);
+  assert.match(installer, /github\.com\/Ghqqqq\/codex-overleaf-link\.git/);
+  assert.match(installer, /scripts\/install-native-host\.mjs/);
+  assert.match(installer, /chrome:\/\/extensions/);
+  assert.match(installer, /extension/);
+  assert.match(readme, /curl -fsSL https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh \| bash/);
+  assert.match(readme, /~\/\.codex-overleaf\/source\/extension/);
+});

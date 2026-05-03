@@ -15,6 +15,7 @@
   const PANEL_MIN_WIDTH = 340;
   const PANEL_MAX_WIDTH = 760;
   const PAGE_MIN_WIDTH = 520;
+  const INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash';
   const pageBridgeReady = injectPageBridge();
   const {
     createSession,
@@ -338,6 +339,9 @@
       next.textContent = `下一步：${result.nextStep}`;
       body.append(next);
     }
+    if (result.installCommand) {
+      renderInstallCommand(body, result.installCommand);
+    }
 
     const details = root.querySelector('[data-diagnostics-result-details]');
     const technical = root.querySelector('[data-diagnostics-result-technical]');
@@ -345,6 +349,34 @@
     details.open = false;
     details.hidden = !technicalText;
     technical.textContent = technicalText;
+  }
+
+  function renderInstallCommand(container, command) {
+    const wrap = document.createElement('div');
+    wrap.className = 'codex-install-command';
+
+    const label = document.createElement('div');
+    label.className = 'codex-install-command-label';
+    label.textContent = '在终端运行：';
+    wrap.append(label);
+
+    const code = document.createElement('code');
+    code.textContent = command;
+    wrap.append(code);
+
+    const copyButton = document.createElement('button');
+    copyButton.type = 'button';
+    copyButton.textContent = '复制安装命令';
+    copyButton.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(command);
+      copyButton.textContent = '已复制';
+      setTimeout(() => {
+        copyButton.textContent = '复制安装命令';
+      }, 1400);
+    });
+    wrap.append(copyButton);
+
+    container.append(wrap);
   }
 
   function appendDiagnosticsParagraph(container, text) {
@@ -825,6 +857,7 @@
         status: 'failed',
         summary: '插件没有连上本机服务，所以暂时不能调用本地 Codex 或同步本地 workspace。',
         nextStep: '确认 native host 已安装，并重新加载 Chrome 扩展后再试。',
+        installCommand: INSTALL_COMMAND,
         technical: response?.error?.message || 'native host 没有响应'
       };
     }

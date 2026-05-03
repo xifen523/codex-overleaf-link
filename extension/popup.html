@@ -5,7 +5,7 @@
     <title>Codex Overleaf Link</title>
     <style>
       body {
-        width: 260px;
+        width: 320px;
         margin: 0;
         padding: 14px;
         color: #1d252c;
@@ -27,8 +27,40 @@
         cursor: pointer;
       }
 
+      button.secondary {
+        margin-top: 8px;
+        border-color: #c6d0da;
+        background: #f7f9fb;
+        color: #26323c;
+      }
+
       p {
         margin: 8px 0 0;
+      }
+
+      .install {
+        margin-top: 12px;
+        padding: 10px;
+        border: 1px solid #d8e0e8;
+        border-radius: 8px;
+        background: #f7f9fb;
+      }
+
+      .install[hidden] {
+        display: none;
+      }
+
+      code {
+        display: block;
+        margin-top: 8px;
+        padding: 8px;
+        overflow: auto;
+        border-radius: 6px;
+        background: #eef2f6;
+        color: #26323c;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       }
     </style>
   </head>
@@ -36,6 +68,12 @@
     <h1>Codex Overleaf Link</h1>
     <button id="open-panel">Open panel in Overleaf</button>
     <p id="status">Use this on an Overleaf project tab.</p>
+    <div id="native-install" class="install" hidden>
+      <strong>Native host not connected</strong>
+      <p>Run this command in Terminal, then reload this extension in Chrome.</p>
+      <code id="install-command"></code>
+      <button id="copy-install-command" class="secondary" type="button">Copy install command</button>
+    </div>
     <script src="src/popup.js"></script>
   </body>
 </html>

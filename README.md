@@ -49,28 +49,38 @@ The current native host installer targets the user-level Chrome Native Messaging
 
 ## Quick Start
 
-Clone the repository:
+Run the installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash
+```
+
+The installer downloads the repository to `~/.codex-overleaf/source`, installs the macOS Native Messaging host, and opens `chrome://extensions`.
+
+Load the Chrome extension:
+
+1. Enable **Developer mode**.
+2. Click **Load unpacked**.
+3. Select `~/.codex-overleaf/source/extension`.
+4. Confirm that the extension id is `illdpneeeopfffmiepaejglgmhpmdhdc`.
+
+Open an Overleaf project. The Codex panel should appear on the right side of the page.
+
+### Manual Install
+
+If you prefer to keep the checkout somewhere else, clone the repository and install the native host manually:
 
 ```bash
 git clone https://github.com/Ghqqqq/codex-overleaf-link.git
 cd codex-overleaf-link
-```
-
-Install the native host:
-
-```bash
 npm run install:native
 ```
-
-Load the Chrome extension:
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
 3. Click **Load unpacked**.
 4. Select the repository's `extension/` directory.
 5. Confirm that the extension id is `illdpneeeopfffmiepaejglgmhpmdhdc`.
-
-Open an Overleaf project. The Codex panel should appear on the right side of the page.
 
 ## Extension ID
 
@@ -136,14 +146,20 @@ Use the extension only on machines where you are comfortable storing local copie
 
 ## Updating
 
-Pull the latest repository changes, reinstall the native host runtime, and reload the Chrome extension:
+If you used the quick installer, rerun it to update `~/.codex-overleaf/source` and reinstall the native host runtime:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash
+```
+
+Then reload **Codex Overleaf Link** in `chrome://extensions` and refresh the Overleaf page.
+
+If you installed from a manual checkout, pull the latest repository changes, reinstall the native host runtime, and reload the Chrome extension:
 
 ```bash
 git pull
 npm run install:native
 ```
-
-Then open `chrome://extensions`, click reload on **Codex Overleaf Link**, and refresh the Overleaf page.
 
 ## Uninstall
 
