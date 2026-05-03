@@ -22,7 +22,7 @@ All notable changes to Codex Overleaf Link are documented here.
 
 - Local test suite: `npm test` passed on 2026-05-03 with 428 tests passing.
 - Release smoke test: run `npm run smoke:extension -- --url https://www.overleaf.com/project/<project-id> --profile-dir <logged-in-chrome-profile>` against a real Overleaf project before tagging a public beta.
-- GitHub Actions: the `Test` workflow runs `npm test` on pushes to `main` and pull requests.
+- GitHub Actions: the `Test` workflow passed on 2026-05-03.
 
 ### Local Data
 
