@@ -24,7 +24,7 @@ Codex Overleaf Link bridges the two: it adds a Codex panel directly inside Overl
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash
+curl -fsSL "https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh?$(date +%s)" | bash
 ```
 
 Then load the extension in Chrome:
@@ -54,7 +54,7 @@ Then load `extension/` as an unpacked extension in Chrome.
 Rerun the same install command — it pulls the latest and reinstalls the native host:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash
+curl -fsSL "https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh?$(date +%s)" | bash
 ```
 
 Then reload the extension in `chrome://extensions` and refresh the Overleaf page.

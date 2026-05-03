@@ -41,7 +41,7 @@ test('repository ships a one-command macOS installer', () => {
   assert.match(installer, /scripts\/install-native-host\.mjs/);
   assert.match(installer, /chrome:\/\/extensions/);
   assert.match(installer, /extension/);
-  assert.match(readme, /curl -fsSL https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh \| bash/);
+  assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash/);
   assert.match(readme, /~\/\.codex-overleaf\/source\/extension/);
 });
 
