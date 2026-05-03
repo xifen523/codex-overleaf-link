@@ -68,6 +68,44 @@ test('keeps distant edits in long LaTeX files as separate patches', () => {
   assert.ok(patches.every(patch => patch.to - patch.from < 80));
 });
 
+test('splits a rewritten wrapped paragraph into token-local patches', () => {
+  const oldText = [
+    'As generalized models of restless multi-armed bandits, weakly\n',
+    'coupled networked systems have garnered attention due to\n',
+    'applications such as fairness-aware multiple access and\n',
+    'sustainable distributed load balancing in data centers.\n',
+    'In these systems, agents are networked in the sense that their\n',
+    'actions are constrained by global constraints, while they are\n',
+    'weakly coupled since individual rewards and costs depend solely\n',
+    "on each agent's own states and actions.\n",
+    'We have proven that our algorithms achieve sublinear regrets and\n',
+    'constraint violations, regardless of the existence of a presumed\n',
+    'strictly feasible policy.\n'
+  ].join('');
+  const newText = [
+    'As a generalization of restless multi-armed bandits, weakly\n',
+    'coupled networked systems have garnered attention due to\n',
+    'applications such as fairness-aware multiple access and\n',
+    'sustainable distributed load balancing in data centers.\n',
+    'In these systems, agents are coupled through global\n',
+    'constraints, while they remain weakly coupled because\n',
+    "individual rewards and costs depend solely on each agent's\n",
+    'own state and action.\n',
+    'We prove that our algorithms achieve sublinear regrets and\n',
+    'constraint violations, regardless of whether a strictly\n',
+    'feasible policy exists.\n'
+  ].join('');
+
+  const patches = computeTextPatches(oldText, newText);
+
+  assert.equal(applyPatches(oldText, patches), newText);
+  assert.ok(patches.length > 3, `expected token-local patches, got ${patches.length}`);
+  assert.ok(
+    patches.every(patch => Math.max(patch.to - patch.from, patch.insert.length) < 160),
+    JSON.stringify(patches, null, 2)
+  );
+});
+
 function applyPatches(text, patches) {
   return patches.slice().sort((left, right) => right.from - left.from).reduce((next, patch) => {
     assert.equal(next.slice(patch.from, patch.to), patch.expected);

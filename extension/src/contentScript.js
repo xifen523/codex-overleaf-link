@@ -11,18 +11,15 @@
   const STREAM_SAVE_DELAY_MS = 1000;
   const MAX_RUN_EVENTS = 300;
   const MAX_SAFE_UNDO_REPLACEALL_CHARS = 2000;
-  const MODEL_DISPLAY_LABELS = Object.freeze({
-    'gpt-5.5': '5.5',
-    'gpt-5.4': '5.4',
-    'gpt-5.4-mini': '5.4m',
-    'gpt-5.3-codex': '5.3C',
-    'gpt-5.3-codex-spark': '5.3S',
-    'gpt-5.2': '5.2'
-  });
+  const PANEL_DEFAULT_WIDTH = 380;
+  const PANEL_MIN_WIDTH = 340;
+  const PANEL_MAX_WIDTH = 760;
+  const PAGE_MIN_WIDTH = 520;
   const pageBridgeReady = injectPageBridge();
   const {
     createSession,
     deleteSession,
+    deriveSessionTitle,
     getActiveSession,
     isDisplayableSession,
     normalizePanelState,
@@ -61,6 +58,7 @@
   let logAutoFollow = true;
   let userScrollIntentUntil = 0;
   let runCancellationRequested = false;
+  let activePluginConfirmResolve = null;
 
   chrome.runtime.onMessage.addListener(message => {
     if (message?.type === 'codex-overleaf/open-panel') {
@@ -86,6 +84,7 @@
       panel = document.createElement('aside');
       panel.id = PANEL_ID;
       panel.innerHTML = `
+        <div class="codex-panel-resize-handle" data-panel-resize-handle title="拖动调整 Codex 面板宽度，双击恢复默认宽度" aria-label="调整 Codex 面板宽度" role="separator"></div>
         <div class="codex-vscode-head">
           <div class="codex-vscode-title">CODEX</div>
           <div class="codex-vscode-head-actions" aria-label="Codex actions">
@@ -166,12 +165,12 @@
               <input type="checkbox" data-require-reviewing>
               <span class="codex-review-label">留痕</span>
             </label>
-            <label class="codex-recompile-toggle" title="写入 .tex/.bib/.sty/.cls 后自动触发编译验证">
+            <label class="codex-recompile-toggle" title="Codex 写入后自动点击 Overleaf Recompile，并把编译结果记录到本轮任务。只问不改时不会触发。">
               <input type="checkbox" data-auto-recompile>
-              <span class="codex-recompile-label">自动编译</span>
+              <span class="codex-recompile-label">写后编译</span>
             </label>
             <div class="codex-select-shell codex-model-picker" data-model-picker>
-              <span data-model-display>5.4</span>
+              <span data-model-display>GPT-5.4</span>
               <select data-model aria-label="Model">
                 <option value="gpt-5.5">GPT-5.5</option>
                 <option value="gpt-5.4">GPT-5.4</option>
@@ -204,6 +203,8 @@
       document.documentElement.classList.add('codex-overleaf-panel-mounted');
 
       panel.querySelector('[data-new-session]').addEventListener('click', () => startNewSession());
+      panel.querySelector('[data-panel-resize-handle]').addEventListener('pointerdown', startPanelResize);
+      panel.querySelector('[data-panel-resize-handle]').addEventListener('dblclick', resetPanelWidth);
       panel.querySelector('[data-composer-form]').addEventListener('submit', event => {
         event.preventDefault();
         safeRunTask();
@@ -1455,14 +1456,113 @@
     return error.code === 'codex_cancelled' || /cancelled by the user|was cancelled/i.test(error.message || '');
   }
 
-  function showThreadResumeFailedPrompt() {
+  async function showThreadResumeFailedPrompt() {
+    const confirmed = await showPluginConfirm({
+      title: '无法恢复上一轮 Codex 会话',
+      message: '是否新建一个 Codex 线程继续任务？\n\n取消会放弃本次运行。',
+      confirmLabel: '新建线程',
+      cancelLabel: '取消'
+    });
+    return confirmed ? 'new' : 'cancel';
+  }
+
+  async function showPluginConfirm({
+    title = 'Codex 确认',
+    message = '',
+    confirmLabel = '确定',
+    cancelLabel = '取消',
+    destructive = false
+  } = {}) {
+    if (!panel) {
+      ensurePanelOpen();
+    }
+
+    if (activePluginConfirmResolve) {
+      activePluginConfirmResolve(false);
+      activePluginConfirmResolve = null;
+    }
+
     return new Promise(resolve => {
-      const confirmed = window.confirm(
-        '无法恢复上一轮 Codex 会话。是否新建？\n\n' +
-        '点击"确定"新建一个 Codex 线程继续任务。\n' +
-        '点击"取消"放弃本次运行。'
-      );
-      resolve(confirmed ? 'new' : 'cancel');
+      let settled = false;
+      const overlay = document.createElement('div');
+      overlay.className = 'codex-plugin-confirm';
+      overlay.setAttribute('data-plugin-confirm', 'true');
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.setAttribute('aria-label', title);
+
+      const card = document.createElement('section');
+      card.className = 'codex-plugin-confirm-card';
+
+      const head = document.createElement('div');
+      head.className = 'codex-plugin-confirm-head';
+      const icon = document.createElement('img');
+      icon.className = 'codex-plugin-confirm-icon';
+      icon.alt = '';
+      icon.setAttribute('aria-hidden', 'true');
+      icon.src = chrome.runtime.getURL('assets/icons/codex-overleaf-dialog-icon.png');
+      const titleWrap = document.createElement('div');
+      const brand = document.createElement('div');
+      brand.className = 'codex-plugin-confirm-brand';
+      brand.textContent = 'Codex 确认';
+      const titleEl = document.createElement('div');
+      titleEl.className = 'codex-plugin-confirm-title';
+      titleEl.textContent = title;
+      titleWrap.append(brand, titleEl);
+      head.append(icon, titleWrap);
+
+      const body = document.createElement('div');
+      body.className = 'codex-plugin-confirm-body';
+      body.textContent = String(message || '');
+
+      const actions = document.createElement('div');
+      actions.className = 'codex-plugin-confirm-actions';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'codex-plugin-confirm-cancel';
+      cancel.textContent = cancelLabel;
+      const confirm = document.createElement('button');
+      confirm.type = 'button';
+      confirm.className = 'codex-plugin-confirm-confirm';
+      if (destructive) {
+        confirm.dataset.destructive = 'true';
+      }
+      confirm.textContent = confirmLabel;
+      actions.append(cancel, confirm);
+      card.append(head, body, actions);
+      overlay.append(card);
+      panel.append(overlay);
+
+      const cleanup = value => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        activePluginConfirmResolve = null;
+        document.removeEventListener('keydown', onKeydown, true);
+        overlay.remove();
+        resolve(value);
+      };
+      activePluginConfirmResolve = cleanup;
+      const onKeydown = event => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          cleanup(false);
+        } else if (event.key === 'Enter') {
+          event.preventDefault();
+          cleanup(true);
+        }
+      };
+
+      overlay.addEventListener('click', event => {
+        if (event.target === overlay) {
+          cleanup(false);
+        }
+      });
+      cancel.addEventListener('click', () => cleanup(false));
+      confirm.addEventListener('click', () => cleanup(true));
+      document.addEventListener('keydown', onKeydown, true);
+      confirm.focus();
     });
   }
 
@@ -1771,13 +1871,17 @@
 
     const deleteOperations = operations.filter(operation => operation.type === 'delete');
     if (deleteOperations.length) {
-      const approved = window.confirm([
-        'Codex 要删除 Overleaf 文件，是否允许？',
-        '',
-        formatOperationFiles(deleteOperations),
-        '',
-        '未确认删除时，其它改动仍可继续同步。'
-      ].join('\n'));
+      const approved = await showPluginConfirm({
+        title: '允许 Codex 删除文件？',
+        message: [
+          formatOperationFiles(deleteOperations),
+          '',
+          '未确认删除时，其它改动仍可继续同步。'
+        ].join('\n'),
+        confirmLabel: '允许删除',
+        cancelLabel: '跳过删除',
+        destructive: true
+      });
       if (!approved) {
         operations = operations.filter(operation => operation.type !== 'delete');
       }
@@ -1820,7 +1924,7 @@
     const appliedPaths = getAppliedOperationPaths(applied);
     if (appliedPaths.length) {
       await autoRecompileAfterWriteback(appliedPaths).catch(error => {
-        appendRunEvent({ title: `自动编译出错：${error.message}`, status: 'failed' });
+        appendRunEvent({ title: `写后编译出错：${error.message}`, status: 'failed' });
       });
     }
     const summaryLine = appendChangeSummary({
@@ -1938,7 +2042,7 @@
     const hasCompilableFile = writtenPaths.some(filePath => CompileAdapter.isCompilableFile(filePath));
     if (!hasCompilableFile) return;
 
-    appendRunEvent({ title: '正在自动编译（写入了 .tex/.bib/.sty/.cls 文件）。', status: 'running' });
+    appendRunEvent({ title: '正在写后编译：已写入 LaTeX 文件，正在触发 Overleaf Recompile。', status: 'running' });
 
     try {
       const result = await callPageBridge('triggerCompile', { waitForSaveMs: 5000 });
@@ -1950,10 +2054,10 @@
           appendRunEvent({ title: `编译完成，状态：${compile?.status || '未知'}`, status: 'completed' });
         }
       } else {
-        appendRunEvent({ title: `自动编译未成功：${result?.reason || '未知原因'}`, status: 'failed' });
+        appendRunEvent({ title: `写后编译未成功：${result?.reason || '未知原因'}`, status: 'failed' });
       }
     } catch (error) {
-      appendRunEvent({ title: `自动编译出错：${error.message}`, status: 'failed' });
+      appendRunEvent({ title: `写后编译出错：${error.message}`, status: 'failed' });
     }
   }
 
@@ -2043,7 +2147,12 @@
 
     if (result.status === 'requires_task_confirmation') {
       appendPlannedChangeSummary(result.summary, '准备修改');
-      const approved = window.confirm(formatSummary('应用修改？', result.summary));
+      const approved = await showPluginConfirm({
+        title: '应用这些修改？',
+        message: formatSummary('修改摘要', result.summary),
+        confirmLabel: '应用修改',
+        cancelLabel: '取消'
+      });
       if (!approved) {
         appendLog('已取消：Codex 没有写入任何文件。');
         const summaryLine = appendChangeSummary({ notes, summary: result.summary, status: 'rejected' });
@@ -2113,7 +2222,13 @@
       applyResults.push(applied);
       appendApplyResult(applied);
       recordUndoFromApply(project, applied);
-      const approved = window.confirm(formatDeletePlan(result.deletePlan || []));
+      const approved = await showPluginConfirm({
+        title: '确认删除计划？',
+        message: formatDeletePlan(result.deletePlan || []),
+        confirmLabel: '确认删除',
+        cancelLabel: '保留非删除修改',
+        destructive: true
+      });
       if (approved) {
         const pendingOperations = result.pendingOperations || [];
         appendOperationsPreview(pendingOperations, '用户已确认删除，准备写入');
@@ -2954,9 +3069,11 @@
         mode: prefs.mode || '',
         requireReviewing: prefs.requireReviewing !== false,
         autoRecompile: prefs.autoRecompile !== false,
+        panelWidth: prefs.panelWidth || PANEL_DEFAULT_WIDTH,
         sessions: sessions.map(session => ({
           id: session.id,
-          title: session.title || 'New task',
+          title: session.title || '',
+          titleSource: session.titleSource || 'auto',
           focusFiles: session.focusFiles || [],
           codexThreadId: session.codexThreadId || '',
           createdAt: session.createdAt,
@@ -3006,7 +3123,8 @@
         StorageDb.buildSessionRecord({
           ...session,
           projectId,
-          title: session.title || 'New task',
+          title: session.title || '',
+          titleSource: session.titleSource || 'auto',
           codexThreadId: session.codexThreadId || '',
           status: 'active',
           focusFiles: Array.isArray(session.focusFiles) ? session.focusFiles : [],
@@ -3118,10 +3236,6 @@
     state.autoRecompile = panel.querySelector('[data-auto-recompile]')?.checked !== false;
   }
 
-  function formatModelDisplayLabel(model) {
-    return MODEL_DISPLAY_LABELS[model] || String(model || '').replace(/^gpt-/i, '');
-  }
-
   function updateModelDisplay() {
     const modelSelect = panel?.querySelector('[data-model]');
     const modelDisplay = panel?.querySelector('[data-model-display]');
@@ -3129,7 +3243,7 @@
       return;
     }
     const fullLabel = modelSelect.options[modelSelect.selectedIndex]?.textContent || modelSelect.value;
-    modelDisplay.textContent = formatModelDisplayLabel(modelSelect.value);
+    modelDisplay.textContent = fullLabel;
     modelDisplay.title = fullLabel;
   }
 
@@ -3152,6 +3266,7 @@
     if (recompileCheckbox) {
       recompileCheckbox.checked = state.autoRecompile !== false;
     }
+    applyPanelWidth(state.panelWidth || PANEL_DEFAULT_WIDTH, { persist: false });
     updateModelDisplay();
     syncModeControls();
     applySessionLabel();
@@ -3167,7 +3282,7 @@
   function applySessionLabel() {
     const label = panel.querySelector('[data-session-label]');
     const active = getActiveSession(state);
-    label.textContent = active && isDisplayableSession(active) ? active.title : '';
+    label.textContent = active && isDisplayableSession(active) ? getSessionDisplayTitle(active) : '';
   }
 
   async function startNewSession() {
@@ -3204,13 +3319,17 @@
       return;
     }
 
-    const approved = window.confirm([
-      '删除这个 Codex 会话？',
-      '',
-      target.title || 'New task',
-      '',
-      '这会删除当前 Overleaf 项目的插件会话、运行记录，并清理插件隔离的本地 Codex 历史。不会修改 Overleaf 文件。'
-    ].join('\n'));
+    const approved = await showPluginConfirm({
+      title: '删除这个 Codex 会话？',
+      message: [
+        getSessionDisplayTitle(target),
+        '',
+        '这会删除当前 Overleaf 项目的插件会话、运行记录，并清理插件隔离的本地 Codex 历史。不会修改 Overleaf 文件。'
+      ].join('\n'),
+      confirmLabel: '删除',
+      cancelLabel: '取消',
+      destructive: true
+    });
     if (!approved) {
       return;
     }
@@ -3264,12 +3383,15 @@
       undoStatus: ''
     };
     const active = getActiveSession(state);
-    const title = active?.title && active.title !== 'New task'
-      ? active.title
-      : truncateRunTitle(task);
+    const titlePatch = active?.titleSource !== 'manual'
+      ? {
+        title: deriveSessionTitle([], task),
+        titleSource: 'auto'
+      }
+      : {};
     state = updateActiveSession(state, {
       runs: [...(state.runs || []), record].slice(-20),
-      title
+      ...titlePatch
     });
     saveStateSoon();
 
@@ -3577,11 +3699,21 @@
           <span class="codex-session-row-title"></span>
           <time></time>
         </button>
+        <input type="text" class="codex-session-title-input" aria-label="重命名会话" maxlength="80" hidden>
+        <button type="button" class="codex-session-rename" title="重命名" aria-label="重命名">✎</button>
         <button type="button" class="codex-session-delete" title="Delete session" aria-label="Delete session">×</button>
       `;
-      row.querySelector('.codex-session-row-title').textContent = session.title || 'New task';
+      const displayTitle = getSessionDisplayTitle(session);
+      const switchButton = row.querySelector('.codex-session-switch');
+      switchButton.title = displayTitle;
+      row.querySelector('.codex-session-row-title').textContent = displayTitle;
       row.querySelector('time').textContent = formatSessionTime(session.updatedAt || session.createdAt);
-      row.querySelector('.codex-session-switch').addEventListener('click', () => switchSession(session.id));
+      switchButton.addEventListener('click', () => switchSession(session.id));
+      const renameButton = row.querySelector('.codex-session-rename');
+      renameButton.addEventListener('click', event => {
+        event.stopPropagation();
+        beginSessionRename(row, session.id);
+      });
       const deleteButton = row.querySelector('.codex-session-delete');
       deleteButton.disabled = isRunningSession;
       deleteButton.title = isRunningSession ? '任务运行中，先中断后再删除' : 'Delete session';
@@ -3597,6 +3729,133 @@
       viewAll.hidden = showAll || sessions.length <= 3;
       viewAll.textContent = `查看全部（${sessions.length} 个）`;
     }
+  }
+
+  function getSessionDisplayTitle(session) {
+    const title = typeof session?.title === 'string' ? session.title.trim() : '';
+    if (title && title !== 'New task') {
+      return title;
+    }
+    return deriveSessionTitle(session?.runs, session?.task) || '新会话';
+  }
+
+  function beginSessionRename(row, sessionId) {
+    const session = findSessionById(sessionId);
+    const input = row?.querySelector('.codex-session-title-input');
+    const switchButton = row?.querySelector('.codex-session-switch');
+    if (!session || !input || !switchButton) {
+      return;
+    }
+
+    let settled = false;
+    row.dataset.editing = 'true';
+    input.value = getSessionDisplayTitle(session);
+    input.hidden = false;
+    switchButton.hidden = true;
+    input.focus();
+    input.select();
+
+    const cleanup = () => {
+      input.removeEventListener('keydown', onKeydown);
+      input.removeEventListener('blur', onBlur);
+    };
+    const finish = commit => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      if (!commit) {
+        renderSessionList();
+        return;
+      }
+      commitSessionRename(sessionId, input.value);
+    };
+    const onKeydown = event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      }
+    };
+    const onBlur = () => finish(true);
+    input.addEventListener('keydown', onKeydown);
+    input.addEventListener('blur', onBlur);
+  }
+
+  async function commitSessionRename(sessionId, title) {
+    const session = findSessionById(sessionId);
+    if (!session) {
+      return;
+    }
+    const cleanTitle = String(title || '').replace(/\s+/g, ' ').trim();
+    const titleSource = cleanTitle ? 'manual' : 'auto';
+    replaceSessionInState({
+      ...session,
+      title: cleanTitle || deriveSessionTitle(session.runs, session.task),
+      titleSource,
+      updatedAt: new Date().toISOString()
+    });
+    await saveState();
+    applySessionLabel();
+    renderSessionList();
+  }
+
+  function startPanelResize(event) {
+    if (event.button !== undefined && event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = panel?.getBoundingClientRect?.().width || state.panelWidth || PANEL_DEFAULT_WIDTH;
+    const handle = event.currentTarget;
+    document.documentElement.classList.add('codex-overleaf-panel-resizing');
+    handle?.setPointerCapture?.(event.pointerId);
+
+    const onPointerMove = moveEvent => {
+      const width = startWidth + (startX - moveEvent.clientX);
+      applyPanelWidth(width, { persist: false });
+    };
+    const onPointerUp = () => {
+      document.removeEventListener('pointermove', onPointerMove, true);
+      document.removeEventListener('pointerup', onPointerUp, true);
+      document.documentElement.classList.remove('codex-overleaf-panel-resizing');
+      saveStateSoon();
+    };
+    document.addEventListener('pointermove', onPointerMove, true);
+    document.addEventListener('pointerup', onPointerUp, true);
+  }
+
+  function resetPanelWidth(event) {
+    event?.preventDefault?.();
+    applyPanelWidth(PANEL_DEFAULT_WIDTH);
+  }
+
+  function applyPanelWidth(width, options = {}) {
+    const nextWidth = clampPanelWidth(width);
+    document.documentElement.style.setProperty('--codex-overleaf-panel-width', `${nextWidth}px`);
+    if (state) {
+      state.panelWidth = nextWidth;
+    }
+    if (options.persist !== false) {
+      saveStateSoon();
+    }
+    return nextWidth;
+  }
+
+  function clampPanelWidth(width) {
+    const viewportWidth = Number(window.innerWidth);
+    const viewportMax = Number.isFinite(viewportWidth)
+      ? Math.max(PANEL_MIN_WIDTH, viewportWidth - PAGE_MIN_WIDTH)
+      : PANEL_MAX_WIDTH;
+    const maxWidth = Math.min(PANEL_MAX_WIDTH, viewportMax);
+    const numericWidth = Number(width);
+    if (!Number.isFinite(numericWidth)) {
+      return PANEL_DEFAULT_WIDTH;
+    }
+    return Math.round(Math.min(maxWidth, Math.max(PANEL_MIN_WIDTH, numericWidth)));
   }
 
   function getRunningSessionIds() {
@@ -4136,15 +4395,19 @@
       return;
     }
 
-    const approved = window.confirm([
-      '无留痕撤销本轮写入？',
-      '',
-      truncateRunTitle(run.task),
-      '',
-      `将撤销本轮对 ${formatOperationFiles(run.undoOperations)} 的写入。`,
-      '',
-      '如果 Overleaf 正在使用 Reviewing/Track Changes，Codex 会先临时关闭它，撤销后再恢复。'
-    ].join('\n'));
+    const approved = await showPluginConfirm({
+      title: '无留痕撤销本轮写入？',
+      message: [
+        truncateRunTitle(run.task),
+        '',
+        `将撤销本轮对 ${formatOperationFiles(run.undoOperations)} 的写入。`,
+        '',
+        '如果 Overleaf 正在使用 Reviewing/Track Changes，Codex 会先临时关闭它，撤销后再恢复。'
+      ].join('\n'),
+      confirmLabel: '撤销写入',
+      cancelLabel: '取消',
+      destructive: true
+    });
     if (!approved) {
       return;
     }

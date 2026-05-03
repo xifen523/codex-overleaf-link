@@ -1,5 +1,5 @@
 :root.codex-overleaf-panel-mounted {
-  --codex-overleaf-panel-width: 340px;
+  --codex-overleaf-panel-width: 380px;
 }
 
 :root.codex-overleaf-panel-mounted body {
@@ -22,6 +22,37 @@
   color: #cccccc;
   font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   overflow: hidden;
+}
+
+:root.codex-overleaf-panel-resizing,
+:root.codex-overleaf-panel-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+#codex-overleaf-panel .codex-panel-resize-handle {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+}
+
+#codex-overleaf-panel .codex-panel-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+}
+
+#codex-overleaf-panel .codex-panel-resize-handle:hover::after,
+:root.codex-overleaf-panel-resizing #codex-overleaf-panel .codex-panel-resize-handle::after {
+  background: #4dd0be;
 }
 
 #codex-overleaf-panel.is-open {
@@ -263,6 +294,103 @@
   font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
+#codex-overleaf-panel .codex-plugin-confirm {
+  position: fixed;
+  z-index: 2147483647;
+  inset: 0 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--codex-overleaf-panel-width);
+  height: 100vh;
+  padding: 14px;
+  background: rgba(12, 12, 12, 0.68);
+}
+
+#codex-overleaf-panel .codex-plugin-confirm-card {
+  width: 100%;
+  max-height: min(520px, calc(100vh - 28px));
+  overflow: hidden;
+  border: 1px solid #3a3d41;
+  border-radius: 8px;
+  background: #1f1f1f;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.52);
+}
+
+#codex-overleaf-panel .codex-plugin-confirm-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid #2b2b2b;
+}
+
+#codex-overleaf-panel .codex-plugin-confirm-icon {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+#codex-overleaf-panel .codex-plugin-confirm-brand {
+  color: #8ab4f8;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+#codex-overleaf-panel .codex-plugin-confirm-title {
+  margin-top: 2px;
+  color: #f0f0f0;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+#codex-overleaf-panel .codex-plugin-confirm-body {
+  max-height: 300px;
+  overflow: auto;
+  padding: 12px 14px;
+  color: #d4d4d4;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+#codex-overleaf-panel .codex-plugin-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid #2b2b2b;
+}
+
+#codex-overleaf-panel .codex-plugin-confirm-actions button {
+  min-width: 72px;
+  height: 30px;
+  border: 1px solid #3a3d41;
+  border-radius: 6px;
+  padding: 0 12px;
+  font-weight: 650;
+}
+
+#codex-overleaf-panel .codex-plugin-confirm-cancel {
+  background: #252526;
+  color: #cccccc;
+}
+
+#codex-overleaf-panel .codex-plugin-confirm-confirm {
+  border-color: #22715d;
+  background: #23856e;
+  color: #ffffff;
+}
+
+#codex-overleaf-panel .codex-plugin-confirm-confirm[data-destructive="true"] {
+  border-color: #b84e46;
+  background: #8f2c25;
+}
+
 #codex-overleaf-panel .codex-vscode-main {
   display: flex;
   flex: 1 1 auto;
@@ -297,7 +425,7 @@
 
 #codex-overleaf-panel .codex-session-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 24px;
+  grid-template-columns: minmax(0, 1fr) 24px 24px;
   align-items: center;
   min-height: 26px;
   border-radius: 4px;
@@ -352,6 +480,23 @@
   white-space: nowrap;
 }
 
+#codex-overleaf-panel .codex-session-title-input {
+  grid-column: 1 / 2;
+  min-width: 0;
+  min-height: 26px;
+  border: 1px solid #3d5f58;
+  border-radius: 4px;
+  background: #1c2222;
+  color: #e8e8e8;
+  font: inherit;
+  padding: 3px 6px;
+}
+
+#codex-overleaf-panel .codex-session-title-input[hidden] {
+  display: none;
+}
+
+#codex-overleaf-panel .codex-session-rename,
 #codex-overleaf-panel .codex-session-delete {
   width: 22px;
   height: 22px;
@@ -360,11 +505,19 @@
   opacity: 0.45;
 }
 
+#codex-overleaf-panel .codex-session-rename {
+  font-size: 12px;
+  opacity: 0;
+}
+
+#codex-overleaf-panel .codex-session-row:hover .codex-session-rename,
+#codex-overleaf-panel .codex-session-rename:focus-visible,
 #codex-overleaf-panel .codex-session-row:hover .codex-session-delete,
 #codex-overleaf-panel .codex-session-delete:focus-visible {
   opacity: 1;
 }
 
+#codex-overleaf-panel .codex-session-rename:hover,
 #codex-overleaf-panel .codex-session-delete:hover {
   color: #cccccc;
 }
@@ -846,7 +999,7 @@
 
 #codex-overleaf-panel .codex-composer-toolbar {
   display: grid;
-  grid-template-columns: 26px 42px auto minmax(0, 1fr) minmax(54px, 66px) 28px;
+  grid-template-columns: 26px 42px minmax(0, 1fr) minmax(112px, 150px) 66px 28px;
   align-items: center;
   gap: 4px;
   padding: 4px 6px 6px;
@@ -904,6 +1057,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   cursor: pointer;
   font-size: 12px;
   color: #a0a0a0;
@@ -915,6 +1069,8 @@
 }
 
 #codex-overleaf-panel .codex-recompile-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -945,6 +1101,7 @@
 #codex-overleaf-panel .codex-model-picker {
   position: relative;
   width: 100%;
+  max-width: 150px;
   min-width: 0;
   overflow: hidden;
 }
@@ -958,7 +1115,7 @@
   font-size: 13px;
   line-height: 26px;
   pointer-events: none;
-  text-overflow: clip;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

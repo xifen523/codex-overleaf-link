@@ -72,13 +72,25 @@
     }
 
     async function triggerCompile(params = {}) {
-      const template = state.capturedRequestTemplate;
-      if (!template) {
-        return { ok: false, reason: 'No compile request template captured yet. Compile once manually in Overleaf first.' };
-      }
-
       const saveResult = await deps.waitForSaveState({ deadlineMs: params.waitForSaveMs || 5000 });
       const sourceChangeTimestamp = state.lastKnownSourceEditTimestamp;
+      const template = state.capturedRequestTemplate;
+      if (!template) {
+        const clicked = clickOverleafCompileButton();
+        if (!clicked) {
+          return { ok: false, reason: 'No Overleaf Recompile button or compile request template is available.' };
+        }
+        const captured = await waitForCapturedCompile(params.captureTimeoutMs || 60000);
+        if (!captured.ok) {
+          return captured;
+        }
+        return {
+          ok: true,
+          compile: state.lastCompileResponse,
+          saveStateVerified: saveResult.ok,
+          triggeredBy: 'overleaf-button'
+        };
+      }
 
       try {
         const response = await pageWindow.fetch(template.url, {
@@ -192,6 +204,76 @@
       markSourceEdited();
     }
 
+    function clickOverleafCompileButton() {
+      const candidates = findOverleafCompileButtons();
+      for (const candidate of candidates) {
+        if (isDisabled(candidate)) {
+          continue;
+        }
+        if (typeof candidate.click === 'function') {
+          candidate.click();
+          return true;
+        }
+        if (typeof candidate.dispatchEvent === 'function') {
+          const EventCtor = pageWindow.MouseEvent || pageWindow.Event;
+          if (EventCtor) {
+            candidate.dispatchEvent(new EventCtor('click', { bubbles: true, cancelable: true }));
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    function findOverleafCompileButtons() {
+      if (typeof pageDocument.querySelectorAll !== 'function') {
+        return [];
+      }
+      const selectors = [
+        'button',
+        '[role="button"]',
+        '[aria-label*="compile" i]',
+        '[title*="compile" i]',
+        '[data-testid*="compile" i]'
+      ];
+      const nodes = [];
+      for (const selector of selectors) {
+        try {
+          nodes.push(...Array.from(pageDocument.querySelectorAll(selector)));
+        } catch (_e) { /* ignore unsupported selectors in tests/older browsers */ }
+      }
+      return uniqueNodes(nodes).filter(isCompileButton);
+    }
+
+    function isCompileButton(node) {
+      const text = [
+        node.textContent,
+        node.innerText,
+        node.getAttribute?.('aria-label'),
+        node.getAttribute?.('title'),
+        node.getAttribute?.('data-testid')
+      ].filter(Boolean).join(' ').toLowerCase();
+      return /\b(recompile|compile)\b/.test(text) || /重新编译|编译/.test(text);
+    }
+
+    function isDisabled(node) {
+      return Boolean(node.disabled
+        || node.getAttribute?.('disabled') != null
+        || node.getAttribute?.('aria-disabled') === 'true');
+    }
+
+    async function waitForCapturedCompile(timeoutMs) {
+      const startCompileAt = state.lastCompileAt;
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (state.lastCompileAt > startCompileAt && state.lastCompileResponse) {
+          return { ok: true };
+        }
+        await delay(100);
+      }
+      return { ok: false, reason: 'Clicked Overleaf Recompile, but no compile result was captured.' };
+    }
+
     return {
       getCompileLog,
       getCompileState,
@@ -205,6 +287,14 @@
   function isLikelyEditorInputTarget(target) {
     return Boolean(target.matches?.('textarea, [contenteditable="true"], .cm-content, .CodeMirror-code')
       || target.closest?.('.cm-content, .CodeMirror-code, .cm-editor, .CodeMirror'));
+  }
+
+  function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function uniqueNodes(nodes) {
+    return Array.from(new Set(nodes.filter(Boolean)));
   }
 
   return {

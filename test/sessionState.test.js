@@ -34,7 +34,51 @@ test('creates a fresh session with empty history', () => {
   assert.deepEqual(session.history, []);
   assert.deepEqual(session.runs, []);
   assert.deepEqual(session.focusFiles, []);
-  assert.equal(session.title, 'New task');
+  assert.equal(session.title, '');
+  assert.equal(session.titleSource, 'auto');
+});
+
+test('derives compact auto titles from the first task without context tokens', () => {
+  const state = normalizePanelState({
+    activeSessionId: 'session_a',
+    sessions: [{
+      id: 'session_a',
+      title: '',
+      titleSource: 'auto',
+      task: '',
+      runs: []
+    }]
+  });
+
+  const updated = updateActiveSession(state, {
+    title: '帮我检查一下语法问题并直接修复这篇论文中的明显错误 @context @file:paper.tex',
+    titleSource: 'auto'
+  });
+
+  assert.equal(updated.sessions[0].title, '帮我检查一下语法问题并直接修复这篇论文中的明显…');
+  assert.equal(updated.sessions[0].titleSource, 'auto');
+});
+
+test('manual session titles survive later task updates', () => {
+  const state = normalizePanelState({
+    activeSessionId: 'session_a',
+    sessions: [{
+      id: 'session_a',
+      title: 'AAAI 摘要润色',
+      titleSource: 'manual',
+      task: 'old draft',
+      runs: []
+    }]
+  });
+
+  const updated = updateActiveSession(state, {
+    task: '帮我检查语法问题并修正',
+    title: '帮我检查语法问题并修正',
+    titleSource: 'auto'
+  });
+
+  assert.equal(updated.sessions[0].title, 'AAAI 摘要润色');
+  assert.equal(updated.sessions[0].titleSource, 'manual');
 });
 
 test('normalizes focus files as session scoped context', () => {

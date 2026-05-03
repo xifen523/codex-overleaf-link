@@ -98,10 +98,144 @@ function computeLineAnchoredPatches(oldValue, newValue) {
       return;
     }
     if (group.oldText !== group.newText) {
-      patches.push(computeSingleTextPatch(group.oldText, group.newText, group.oldStart));
+      const tokenPatches = computeTokenAnchoredPatches(group.oldText, group.newText, group.oldStart);
+      if (tokenPatches) {
+        patches.push(...tokenPatches);
+      } else {
+        patches.push(computeSingleTextPatch(group.oldText, group.newText, group.oldStart));
+      }
     }
     group = null;
   }
+}
+
+function computeTokenAnchoredPatches(oldValue, newValue, offset = 0) {
+  const MAX_GROUP_CHARS = 20000;
+  const MAX_TOKENS = 3000;
+  const MAX_PRODUCT = 4000000;
+  const MAX_PATCHES = 80;
+
+  if (
+    oldValue.length > MAX_GROUP_CHARS
+    || newValue.length > MAX_GROUP_CHARS
+  ) {
+    return null;
+  }
+
+  const oldTokens = splitTextTokens(oldValue);
+  const newTokens = splitTextTokens(newValue);
+  if (
+    oldTokens.length === 0
+    || newTokens.length === 0
+    || oldTokens.length > MAX_TOKENS
+    || newTokens.length > MAX_TOKENS
+    || oldTokens.length * newTokens.length > MAX_PRODUCT
+  ) {
+    return null;
+  }
+
+  const edits = computePartEdits(
+    oldTokens.map(token => token.text),
+    newTokens.map(token => token.text)
+  );
+  const patches = [];
+  let oldOffset = 0;
+  let newOffset = 0;
+  let group = null;
+
+  for (const edit of edits) {
+    if (edit.type === 'equal') {
+      flushGroup();
+      oldOffset = oldTokens[edit.oldIndex].end;
+      newOffset = newTokens[edit.newIndex].end;
+      continue;
+    }
+
+    if (!group) {
+      group = {
+        oldStart: oldOffset,
+        newStart: newOffset,
+        oldEnd: oldOffset,
+        newEnd: newOffset
+      };
+    }
+
+    if (edit.type === 'remove') {
+      group.oldEnd = oldTokens[edit.oldIndex].end;
+      oldOffset = group.oldEnd;
+    } else if (edit.type === 'add') {
+      group.newEnd = newTokens[edit.newIndex].end;
+      newOffset = group.newEnd;
+    }
+  }
+  flushGroup();
+
+  if (!patches.length || patches.length > MAX_PATCHES) {
+    return null;
+  }
+  return patches;
+
+  function flushGroup() {
+    if (!group) {
+      return;
+    }
+    const oldText = oldValue.slice(group.oldStart, group.oldEnd);
+    const newText = newValue.slice(group.newStart, group.newEnd);
+    if (oldText !== newText) {
+      patches.push({
+        from: offset + group.oldStart,
+        to: offset + group.oldEnd,
+        expected: oldText,
+        insert: newText
+      });
+    }
+    group = null;
+  }
+}
+
+function splitTextTokens(text) {
+  const tokens = [];
+  let index = 0;
+  while (index < text.length) {
+    const start = index;
+    const char = text[index];
+    if (/\s/.test(char)) {
+      index += 1;
+      while (index < text.length && /\s/.test(text[index])) {
+        index += 1;
+      }
+    } else if (char === '\\') {
+      index += 1;
+      if (index < text.length && /[A-Za-z@]/.test(text[index])) {
+        while (index < text.length && /[A-Za-z@]/.test(text[index])) {
+          index += 1;
+        }
+      } else if (index < text.length) {
+        index += 1;
+      }
+    } else if (/[A-Za-z0-9_]/.test(char)) {
+      index += 1;
+      while (index < text.length && /[A-Za-z0-9_]/.test(text[index])) {
+        index += 1;
+      }
+    } else {
+      index += 1;
+      while (
+        index < text.length
+        && !/\s/.test(text[index])
+        && text[index] !== '\\'
+        && !/[A-Za-z0-9_]/.test(text[index])
+      ) {
+        index += 1;
+      }
+    }
+    tokens.push({
+      text: text.slice(start, index),
+      start,
+      end: index
+    });
+  }
+  return tokens;
 }
 
 function splitTextParts(text) {

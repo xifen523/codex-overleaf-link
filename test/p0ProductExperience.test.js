@@ -440,6 +440,28 @@ test('session list keeps the selected historical session reachable', () => {
   assert.match(sessionState, /activeSessionId/);
 });
 
+test('session titles auto-name once and can be manually renamed inline', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const startRunBody = contentScript.match(/function startRunView\(\{ task, mode, model, reasoningEffort \}\) \{[\s\S]*?\n  function finishRunView/)?.[0] || '';
+  const sessionListBody = contentScript.match(/function renderSessionList\(\{ showAll = false \} = \{\}\) \{[\s\S]*?\n  function getRunningSessionIds/)?.[0] || '';
+
+  assert.match(startRunBody, /active\?\.titleSource !== 'manual'/);
+  assert.match(startRunBody, /deriveSessionTitle/);
+  assert.match(sessionListBody, /codex-session-rename/);
+  assert.match(sessionListBody, /codex-session-title-input/);
+  assert.match(contentScript, /function beginSessionRename/);
+  assert.match(contentScript, /cleanTitle \? 'manual' : 'auto'/);
+  assert.match(css, /\.codex-session-rename/);
+  assert.match(css, /\.codex-session-title-input/);
+});
+
 test('high-volume Codex stream output is throttled before panel rendering and storage writes', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -862,4 +884,35 @@ test('stale write copy explains user or collaborator edits without snapshot jarg
   assert.match(staleGuard, /Codex 没有覆盖它/);
   assert.doesNotMatch(staleGuard, /task-start snapshot/);
   assert.doesNotMatch(staleGuard, /captured the project snapshot/);
+});
+
+test('confirmation prompts render as Codex plugin dialogs instead of browser page alerts', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+
+  assert.doesNotMatch(contentScript, /window\.confirm\s*\(/);
+  assert.match(contentScript, /data-plugin-confirm/);
+  assert.match(contentScript, /async function showPluginConfirm\(/);
+  assert.match(contentScript, /Codex 确认/);
+  const confirmBody = contentScript.match(/async function showPluginConfirm\([\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
+  assert.match(confirmBody, /assets\/icons\/codex-overleaf-dialog-icon\.png/);
+  assert.doesNotMatch(confirmBody, /assets\/icons\/codex-overleaf-icon\.png/);
+  assert.doesNotMatch(confirmBody, /assets\/icons\/icon32\.png/);
+  assert.equal(
+    fs.existsSync(path.join(__dirname, '../extension/assets/icons/codex-overleaf-dialog-icon.png')),
+    true
+  );
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../extension/manifest.json'), 'utf8'));
+  assert.equal(
+    manifest.web_accessible_resources[0].resources.includes('assets/icons/codex-overleaf-dialog-icon.png'),
+    true
+  );
+  assert.match(css, /\.codex-plugin-confirm/);
+  assert.match(css, /\.codex-plugin-confirm-card/);
 });

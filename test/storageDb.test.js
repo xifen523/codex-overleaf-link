@@ -250,6 +250,7 @@ test('extractLightweightPrefs extracts correct fields', () => {
     mode: 'confirm',
     requireReviewing: true,
     autoRecompile: true,
+    panelWidth: 512,
     activeSessionByProject: { proj_1: 'ses_1' },
     extraField: 'should be ignored',
     sessions: [{ id: 'ses_1' }]
@@ -261,6 +262,7 @@ test('extractLightweightPrefs extracts correct fields', () => {
   assert.equal(prefs.mode, 'confirm');
   assert.equal(prefs.requireReviewing, true);
   assert.equal(prefs.autoRecompile, true);
+  assert.equal(prefs.panelWidth, 512);
   assert.deepEqual(prefs.activeSessionByProject, { proj_1: 'ses_1' });
   assert.equal(prefs.extraField, undefined);
   assert.equal(prefs.sessions, undefined);
@@ -274,6 +276,7 @@ test('extractLightweightPrefs defaults missing values', () => {
   assert.equal(prefs.mode, '');
   assert.equal(prefs.requireReviewing, true);
   assert.equal(prefs.autoRecompile, true);
+  assert.equal(prefs.panelWidth, 0);
   assert.deepEqual(prefs.activeSessionByProject, {});
 });
 

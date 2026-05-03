@@ -37,7 +37,7 @@ test('composer selects reserve room for the dropdown chevron', () => {
   assert.match(selectBody, /text-overflow:\s*ellipsis/);
 });
 
-test('composer model picker uses a compact selected display while preserving model ids', () => {
+test('composer model picker shows the full selected model name while preserving model ids', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -49,14 +49,65 @@ test('composer model picker uses a compact selected display while preserving mod
   const modelSelect = contentScript.match(/<select data-model[\s\S]*?<\/select>/)?.[0] || '';
 
   assert.match(contentScript, /data-model-display/);
-  assert.match(contentScript, /const MODEL_DISPLAY_LABELS/);
-  assert.match(contentScript, /'gpt-5\.5': '5\.5'/);
-  assert.match(contentScript, /'gpt-5\.3-codex-spark': '5\.3S'/);
+  assert.match(contentScript, /<span data-model-display>GPT-5\.4<\/span>/);
+  assert.doesNotMatch(contentScript, /const MODEL_DISPLAY_LABELS/);
+  assert.doesNotMatch(contentScript, /'gpt-5\.5': '5\.5'/);
+  assert.doesNotMatch(contentScript, /'gpt-5\.3-codex-spark': '5\.3S'/);
   assert.match(contentScript, /function updateModelDisplay/);
+  assert.match(contentScript, /modelDisplay\.textContent = fullLabel/);
   assert.match(modelSelect, /<option value="gpt-5\.5">GPT-5\.5<\/option>/);
   assert.match(modelSelect, /<option value="gpt-5\.3-codex-spark">GPT-5\.3 Codex Spark<\/option>/);
-  assert.match(css, /\.codex-model-picker \[data-model-display\]\s*\{[\s\S]*padding:\s*0 16px 0 3px/);
+  assert.match(css, /\.codex-model-picker \[data-model-display\]\s*\{[\s\S]*text-overflow:\s*ellipsis/);
   assert.match(css, /\.codex-model-picker select\s*\{[\s\S]*opacity:\s*0/);
+});
+
+test('composer model picker stays compact when the side panel is wide', () => {
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+
+  const toolbarBlock = css.match(/#codex-overleaf-panel \.codex-composer-toolbar\s*\{[\s\S]*?\n\}/)?.[0] || '';
+  const modelBlock = css.match(/#codex-overleaf-panel \.codex-model-picker\s*\{[\s\S]*?\n\}/)?.[0] || '';
+
+  assert.doesNotMatch(toolbarBlock, /minmax\(96px,\s*1fr\)/);
+  assert.match(toolbarBlock, /grid-template-columns:\s*26px 42px minmax\(0,\s*1fr\) minmax\(112px,\s*150px\) 66px 28px/);
+  assert.match(modelBlock, /max-width:\s*150px/);
+});
+
+test('composer describes compile toggle as a post-write action', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /data-auto-recompile/);
+  assert.match(contentScript, /写后编译/);
+  assert.match(contentScript, /Codex 写入后自动点击 Overleaf Recompile/);
+  assert.doesNotMatch(contentScript, /<span class="codex-recompile-label">自动编译<\/span>/);
+});
+
+test('side panel can be resized and persists width as lightweight prefs', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+
+  assert.match(css, /--codex-overleaf-panel-width:\s*380px/);
+  assert.match(contentScript, /PANEL_DEFAULT_WIDTH = 380/);
+  assert.match(contentScript, /PANEL_MIN_WIDTH = 340/);
+  assert.match(contentScript, /PANEL_MAX_WIDTH = 760/);
+  assert.match(contentScript, /data-panel-resize-handle/);
+  assert.match(contentScript, /function startPanelResize/);
+  assert.match(contentScript, /function applyPanelWidth/);
+  assert.match(contentScript, /function clampPanelWidth/);
+  assert.match(contentScript, /saveStateSoon\(\)/);
+  assert.match(css, /\.codex-panel-resize-handle/);
+  assert.match(css, /cursor:\s*col-resize/);
 });
 
 test('composer sends through a form submit path with a guarded run handler', () => {

@@ -38,6 +38,7 @@
           id: legacy.id,
           projectId: projectId,
           title: legacy.title || '',
+          titleSource: legacy.titleSource === 'manual' ? 'manual' : 'auto',
           codexThreadId: '',
           status: 'active',
           focusFiles: Array.isArray(legacy.focusFiles) ? legacy.focusFiles : [],

@@ -13,6 +13,7 @@
     reasoningEffort: 'high',
     requireReviewing: true,
     autoOpen: true,
+    panelWidth: 380,
     task: '',
     focusFiles: [],
     session: null,
@@ -23,6 +24,9 @@
 
   const VALID_MODES = new Set(['ask', 'confirm', 'auto']);
   const VALID_REASONING = new Set(['low', 'medium', 'high', 'xhigh']);
+  const VALID_TITLE_SOURCES = new Set(['auto', 'manual']);
+  const LEGACY_DEFAULT_SESSION_TITLE = 'New task';
+  const SESSION_AUTO_TITLE_CHARS = 24;
   const MAX_RUN_EVENTS = 300;
   const STORAGE_DEFAULT_LIMITS = {
     maxSessions: 12,
@@ -69,6 +73,7 @@
     }
     state.requireReviewing = state.requireReviewing !== false;
     state.autoOpen = state.autoOpen !== false;
+    state.panelWidth = normalizePanelWidth(state.panelWidth);
     state.task = typeof state.task === 'string' ? state.task : '';
     state.model = typeof state.model === 'string' && state.model ? state.model : DEFAULT_PANEL_STATE.model;
     state.runs = normalizeRuns(state.runs, options);
@@ -99,6 +104,7 @@
       focusFiles: normalizeFocusFiles(state.focusFiles || legacySession.focusFiles),
       runs: state.runs,
       title: legacySession.title || deriveSessionTitle(state.runs, state.task),
+      titleSource: legacySession.titleSource,
       updatedAt: legacySession.updatedAt
     }, state, options)];
   }
@@ -107,13 +113,15 @@
     const history = Array.isArray(session.history) ? session.history.slice(-10) : [];
     const normalizedRuns = normalizeRuns(session.runs, options);
     const runs = normalizedRuns.length ? normalizedRuns : recoverRunsFromHistory(session, history);
-    const title = typeof session.title === 'string' && session.title.trim()
-      ? session.title.trim()
-      : deriveSessionTitle(runs, session.task);
+    const rawTitle = typeof session.title === 'string' ? session.title.trim() : '';
+    const derivedTitle = deriveSessionTitle(runs, session.task);
+    const titleSource = normalizeTitleSource(session.titleSource, rawTitle, derivedTitle);
+    const title = normalizeSessionTitle(rawTitle, derivedTitle, titleSource);
 
     return {
       id: session.id,
       title,
+      titleSource,
       createdAt: typeof session.createdAt === 'string' ? session.createdAt : new Date().toISOString(),
       updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : new Date().toISOString(),
       history,
@@ -206,13 +214,20 @@
   }
 
   function createSession(overrides = {}) {
+    const runs = Array.isArray(overrides.runs) ? normalizeRuns(overrides.runs) : [];
+    const rawTitle = typeof overrides.title === 'string' ? overrides.title.trim() : '';
+    const derivedTitle = deriveSessionTitle(runs, overrides.task || rawTitle);
+    const titleSource = VALID_TITLE_SOURCES.has(overrides.titleSource)
+      ? overrides.titleSource
+      : (rawTitle && rawTitle !== LEGACY_DEFAULT_SESSION_TITLE ? 'manual' : 'auto');
     return {
       id: `session_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-      title: overrides.title || 'New task',
+      title: normalizeSessionTitle(rawTitle, derivedTitle, titleSource),
+      titleSource,
       createdAt: overrides.createdAt || new Date().toISOString(),
       updatedAt: overrides.updatedAt || new Date().toISOString(),
       history: Array.isArray(overrides.history) ? overrides.history.slice(-10) : [],
-      runs: Array.isArray(overrides.runs) ? normalizeRuns(overrides.runs) : [],
+      runs,
       task: typeof overrides.task === 'string' ? overrides.task : '',
       mode: VALID_MODES.has(overrides.mode) ? overrides.mode : DEFAULT_PANEL_STATE.mode,
       model: typeof overrides.model === 'string' && overrides.model ? overrides.model : DEFAULT_PANEL_STATE.model,
@@ -230,6 +245,7 @@
     return {
       ...base,
       id: base.id,
+      titleSource: VALID_TITLE_SOURCES.has(base.titleSource) ? base.titleSource : 'auto',
       history: [
         ...(Array.isArray(base.history) ? base.history : []),
         {
@@ -252,10 +268,21 @@
       if (session.id !== activeSessionId) {
         return session;
       }
-      return normalizeSession({
+      const next = {
         ...session,
         ...patch,
         updatedAt: patch.updatedAt || new Date().toISOString()
+      };
+      if (
+        session.titleSource === 'manual' &&
+        patch.titleSource !== 'manual' &&
+        Object.prototype.hasOwnProperty.call(patch, 'title')
+      ) {
+        next.title = session.title;
+        next.titleSource = 'manual';
+      }
+      return normalizeSession({
+        ...next
       }, state);
     });
     return mirrorActiveSession({
@@ -321,11 +348,43 @@
   }
 
   function deriveSessionTitle(runs, task) {
-    const title = String(task || runs?.[runs.length - 1]?.task || '').trim();
-    if (!title) {
-      return 'New task';
+    const taskTitle = sanitizeAutoTitle(task);
+    if (taskTitle) {
+      return taskTitle;
     }
-    return title.length > 42 ? `${title.slice(0, 42)}...` : title;
+    const firstRunTask = Array.isArray(runs) && runs.length ? runs[0]?.task : '';
+    return sanitizeAutoTitle(firstRunTask);
+  }
+
+  function normalizeTitleSource(value, rawTitle, derivedTitle) {
+    if (VALID_TITLE_SOURCES.has(value)) {
+      return value;
+    }
+    if (rawTitle && rawTitle !== LEGACY_DEFAULT_SESSION_TITLE && rawTitle !== derivedTitle) {
+      return 'manual';
+    }
+    return 'auto';
+  }
+
+  function normalizeSessionTitle(rawTitle, derivedTitle, titleSource) {
+    if (titleSource === 'manual') {
+      return normalizeTextField(rawTitle === LEGACY_DEFAULT_SESSION_TITLE ? '' : rawTitle, STORAGE_DEFAULT_LIMITS.sessionTitleChars);
+    }
+    return sanitizeAutoTitle(rawTitle === LEGACY_DEFAULT_SESSION_TITLE ? '' : rawTitle) || derivedTitle || '';
+  }
+
+  function sanitizeAutoTitle(value) {
+    const title = String(value || '')
+      .replace(/@file:[^\s]+/g, ' ')
+      .replace(/@(context|compile-log)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!title) {
+      return '';
+    }
+    return title.length > SESSION_AUTO_TITLE_CHARS
+      ? `${title.slice(0, SESSION_AUTO_TITLE_CHARS - 1)}…`
+      : title;
   }
 
   function isDisplayableSession(session) {
@@ -336,7 +395,7 @@
     const hasRuns = Array.isArray(session.runs) && session.runs.length > 0;
     const hasHistory = Array.isArray(session.history) && session.history.length > 0;
     const title = typeof session.title === 'string' ? session.title.trim() : '';
-    const hasRealTitle = title.length > 0 && title !== 'New task';
+    const hasRealTitle = title.length > 0 && title !== LEGACY_DEFAULT_SESSION_TITLE;
     return hasTask || hasRuns || hasHistory || hasRealTitle;
   }
 
@@ -497,6 +556,7 @@
         : normalizeReasoning(source.reasoningEffort),
       requireReviewing: active ? active.requireReviewing !== false : source.requireReviewing !== false,
       autoOpen: source.autoOpen !== false,
+      panelWidth: normalizePanelWidth(source.panelWidth),
       task: normalizeTextField(active?.task || source.task || '', limits.taskChars),
       focusFiles: normalizeFocusFiles(active?.focusFiles || source.focusFiles),
       session: active ? {
@@ -530,6 +590,7 @@
       focusFiles: normalizeFocusFiles(source.focusFiles || legacySession.focusFiles),
       runs: Array.isArray(source.runs) ? source.runs : legacySession.runs,
       title: legacySession.title || deriveSessionTitle(source.runs, source.task),
+      titleSource: legacySession.titleSource,
       updatedAt: legacySession.updatedAt
     }];
   }
@@ -560,6 +621,7 @@
     return {
       id: session.id,
       title: normalizeTextField(title, limits.sessionTitleChars),
+      titleSource: VALID_TITLE_SOURCES.has(session.titleSource) ? session.titleSource : 'auto',
       createdAt: typeof session.createdAt === 'string' ? session.createdAt : new Date().toISOString(),
       updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : new Date().toISOString(),
       history: compactHistory(session.history, limits),
@@ -693,6 +755,14 @@
       : DEFAULT_PANEL_STATE.reasoningEffort;
   }
 
+  function normalizePanelWidth(value) {
+    const width = Number(value);
+    if (!Number.isFinite(width) || width <= 0) {
+      return DEFAULT_PANEL_STATE.panelWidth;
+    }
+    return Math.round(Math.min(760, Math.max(340, width)));
+  }
+
   function normalizeTextField(value, maxChars) {
     const text = typeof value === 'string' ? value : '';
     if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) {
@@ -728,8 +798,9 @@
     deleteSession,
     getActiveSession,
     isDisplayableSession,
-    normalizePanelState,
-    recordSessionResult,
+      normalizePanelState,
+      deriveSessionTitle,
+      recordSessionResult,
     selectVisibleSessionsForList,
     setActiveSession,
     updateActiveSession,

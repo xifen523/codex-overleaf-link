@@ -189,6 +189,7 @@
       id: input.id || generateId('ses'),
       projectId: input.projectId || '',
       title: typeof input.title === 'string' ? input.title : '',
+      titleSource: input.titleSource === 'manual' ? 'manual' : 'auto',
       codexThreadId: typeof input.codexThreadId === 'string' ? input.codexThreadId : '',
       status: typeof input.status === 'string' && input.status ? input.status : 'active',
       focusFiles: Array.isArray(input.focusFiles) ? input.focusFiles.slice() : [],
@@ -254,6 +255,7 @@
       mode: typeof state.mode === 'string' ? state.mode : '',
       requireReviewing: state.requireReviewing !== false,
       autoRecompile: state.autoRecompile !== false,
+      panelWidth: Number.isFinite(Number(state.panelWidth)) ? Math.round(Number(state.panelWidth)) : 0,
       activeSessionByProject: state.activeSessionByProject || {}
     };
     return prefs;

@@ -54,6 +54,7 @@
     {
       "resources": [
         "assets/icons/codex-overleaf-icon.png",
+        "assets/icons/codex-overleaf-dialog-icon.png",
         "src/shared/reviewing.js",
         "src/shared/projectFiles.js",
         "src/shared/staleGuard.js",

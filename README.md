@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="extension/assets/icons/codex-overleaf-icon.png" width="112" alt="Codex Overleaf Link logo">
+  <img src="extension/assets/icons/codex-overleaf-icon.png" width="128" alt="Codex Overleaf Link logo">
   <h1>Codex Overleaf Link</h1>
   <p><strong>Use local Codex from inside an Overleaf project.</strong></p>
   <p>
