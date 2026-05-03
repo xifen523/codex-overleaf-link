@@ -82,9 +82,8 @@ test('composer describes compile toggle as a post-write action', () => {
   );
 
   assert.match(contentScript, /data-auto-recompile/);
-  assert.match(contentScript, /写后编译/);
+  assert.match(contentScript, /<span class="codex-recompile-label">自动编译<\/span>/);
   assert.match(contentScript, /Codex 写入后自动点击 Overleaf Recompile/);
-  assert.doesNotMatch(contentScript, /<span class="codex-recompile-label">自动编译<\/span>/);
 });
 
 test('side panel can be resized and persists width as lightweight prefs', () => {

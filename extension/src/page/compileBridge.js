@@ -74,6 +74,28 @@
     async function triggerCompile(params = {}) {
       const saveResult = await deps.waitForSaveState({ deadlineMs: params.waitForSaveMs || 5000 });
       const sourceChangeTimestamp = state.lastKnownSourceEditTimestamp;
+      if (params.preferUiClick === true) {
+        const clicked = clickOverleafCompileButton();
+        if (clicked) {
+          const captured = await waitForCapturedCompile(params.captureTimeoutMs || 60000);
+          if (captured.ok) {
+            return {
+              ok: true,
+              compile: state.lastCompileResponse,
+              saveStateVerified: saveResult.ok,
+              triggeredBy: 'overleaf-button'
+            };
+          }
+          return {
+            ok: true,
+            compile: { ok: true, status: 'triggered' },
+            resultCaptured: false,
+            reason: captured.reason,
+            saveStateVerified: saveResult.ok,
+            triggeredBy: 'overleaf-button'
+          };
+        }
+      }
       const template = state.capturedRequestTemplate;
       if (!template) {
         const clicked = clickOverleafCompileButton();

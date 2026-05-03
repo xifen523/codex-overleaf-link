@@ -768,6 +768,7 @@ test('auto recompile is based on successfully applied Overleaf writes', () => {
   assert.doesNotMatch(runTaskBody, /response\.result\.syncChanges[\s\S]*autoRecompileAfterWriteback/);
   assert.match(applySyncBody, /const appliedPaths = getAppliedOperationPaths\(applied\)/);
   assert.match(applySyncBody, /autoRecompileAfterWriteback\(appliedPaths\)/);
+  assert.match(contentScript, /preferUiClick:\s*true/);
 });
 
 test('@compile-log context is preserved across Codex run retries', () => {

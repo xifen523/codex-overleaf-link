@@ -167,7 +167,7 @@
             </label>
             <label class="codex-recompile-toggle" title="Codex 写入后自动点击 Overleaf Recompile，并把编译结果记录到本轮任务。只问不改时不会触发。">
               <input type="checkbox" data-auto-recompile>
-              <span class="codex-recompile-label">写后编译</span>
+              <span class="codex-recompile-label">自动编译</span>
             </label>
             <div class="codex-select-shell codex-model-picker" data-model-picker>
               <span data-model-display>GPT-5.4</span>
@@ -2045,11 +2045,16 @@
     appendRunEvent({ title: '正在写后编译：已写入 LaTeX 文件，正在触发 Overleaf Recompile。', status: 'running' });
 
     try {
-      const result = await callPageBridge('triggerCompile', { waitForSaveMs: 5000 });
+      const result = await callPageBridge('triggerCompile', {
+        preferUiClick: true,
+        waitForSaveMs: 5000
+      });
       if (result?.ok) {
         const compile = result.compile;
         if (compile?.status === 'success') {
           appendRunEvent({ title: '编译成功。', status: 'completed' });
+        } else if (compile?.status === 'triggered') {
+          appendRunEvent({ title: '已触发 Overleaf 编译；页面会继续显示编译进度。', status: 'completed' });
         } else {
           appendRunEvent({ title: `编译完成，状态：${compile?.status || '未知'}`, status: 'completed' });
         }

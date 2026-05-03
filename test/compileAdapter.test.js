@@ -311,3 +311,69 @@ test('compile bridge can click Overleaf Recompile before a request template is c
   assert.equal(fetchCount, 1);
   assert.equal(result.compile.status, 'success');
 });
+
+test('compile bridge prefers the Overleaf Recompile button for visible auto compile', async () => {
+  const CompileBridge = require('../extension/src/page/compileBridge');
+  let clicked = 0;
+  let directCompileFetches = 0;
+  const compileJson = { status: 'success', outputFiles: [{ path: 'output.log', url: '/output.log' }] };
+  const pageWindow = {
+    location: { origin: 'https://www.overleaf.com' },
+    CodexOverleafCompileAdapter: {
+      parseCompileResponse(json) {
+        return { ok: true, status: json.status, logUrl: json.outputFiles[0].url };
+      }
+    },
+    fetch: async (_url, init = {}) => {
+      if (init?.body === 'direct-template') {
+        directCompileFetches += 1;
+      }
+      return {
+        ok: true,
+        clone() {
+          return {
+            async json() {
+              return compileJson;
+            }
+          };
+        },
+        async json() {
+          return compileJson;
+        }
+      };
+    }
+  };
+  const recompileButton = {
+    textContent: 'Recompile',
+    disabled: false,
+    getAttribute(name) {
+      return name === 'aria-label' ? 'Recompile' : null;
+    },
+    click() {
+      clicked += 1;
+      void pageWindow.fetch('/project/abc/compile', { method: 'POST' });
+    }
+  };
+  const pageDocument = {
+    addEventListener() {},
+    querySelectorAll(selector) {
+      return /button|\[role="button"\]/.test(selector) ? [recompileButton] : [];
+    }
+  };
+
+  const bridge = CompileBridge.create({
+    document: pageDocument,
+    getActiveFilePath: () => 'main.tex',
+    waitForSaveState: async () => ({ ok: true }),
+    window: pageWindow
+  });
+  bridge.install();
+  await pageWindow.fetch('/project/abc/compile', { method: 'POST', body: 'direct-template' });
+
+  const result = await bridge.triggerCompile({ preferUiClick: true, waitForSaveMs: 10, captureTimeoutMs: 200 });
+
+  assert.equal(result.ok, true);
+  assert.equal(clicked, 1);
+  assert.equal(directCompileFetches, 1);
+  assert.equal(result.triggeredBy, 'overleaf-button');
+});
