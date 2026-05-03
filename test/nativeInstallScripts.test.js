@@ -30,7 +30,7 @@ test('package exposes install and uninstall native host commands', () => {
   assert.equal(pkg.scripts['uninstall:native'], 'node scripts/uninstall-native-host.mjs');
 });
 
-test('repository ships a one-command macOS installer for community users', () => {
+test('repository ships a one-command macOS installer', () => {
   const installer = fs.readFileSync(path.join(__dirname, '../install.sh'), 'utf8');
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
 
