@@ -45,6 +45,7 @@ test('repository ships a one-command macOS installer', () => {
   assert.match(installer, /Codex Overleaf Link Extension/);
   assert.match(installer, /ln -s/);
   assert.match(installer, /pbcopy/);
+  assert.match(installer, /open -a "Google Chrome" "chrome:\/\/extensions"/);
   assert.match(installer, /open -R/);
   assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash/);
   assert.match(readme, /~\/Codex Overleaf Link Extension/);
@@ -108,7 +109,7 @@ test('one-command installer works on macOS Bash 3.2 when extension id is unset',
   assert.equal(fs.readlinkSync(visibleExtensionLink), path.join(installDir, 'extension'));
   assert.equal(fs.readFileSync(pbcopyLog, 'utf8'), visibleExtensionLink);
   const openArgs = fs.readFileSync(openLog, 'utf8');
-  assert.match(openArgs, /chrome:\/\/extensions/);
+  assert.match(openArgs, /-a\nGoogle Chrome\nchrome:\/\/extensions/);
   assert.match(openArgs, /-R/);
   assert.match(openArgs, /Codex Overleaf Link Extension/);
 });

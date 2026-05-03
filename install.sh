@@ -72,6 +72,6 @@ echo
 echo "After loading or reloading the extension, refresh the Overleaf page."
 
 if command -v open >/dev/null 2>&1; then
-  open "chrome://extensions" >/dev/null 2>&1 || true
+  open -a "Google Chrome" "chrome://extensions" >/dev/null 2>&1 || open "chrome://extensions" >/dev/null 2>&1 || true
   open -R "$LOAD_UNPACKED_PATH" >/dev/null 2>&1 || true
 fi
