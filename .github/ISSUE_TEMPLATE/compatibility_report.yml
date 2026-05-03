@@ -1,0 +1,72 @@
+name: Compatibility report
+description: Report an Overleaf UI/API compatibility break.
+title: "[Compatibility]: "
+labels:
+  - compatibility
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this when Overleaf changed behavior and the extension can no longer detect, compile, or write reliably.
+  - type: dropdown
+    id: failure_area
+    attributes:
+      label: What stopped working?
+      options:
+        - Overleaf editor changed or current file is not detected
+        - Compile output is not captured
+        - Writeback failed or was not verified
+        - Project tree or file selection is wrong
+        - Reviewing / Track Changes detection failed
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: overleaf_page
+    attributes:
+      label: Overleaf page
+      placeholder: https://www.overleaf.com/project/<project-id>
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: Chrome 124 on macOS 14.4
+    validations:
+      required: true
+  - type: input
+    id: extension_id
+    attributes:
+      label: Extension ID
+      placeholder: illdpneeeopfffmiepaejglgmhpmdhdc
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Extension diagnostics
+      description: Paste local environment, page status, or project snapshot diagnostics. Redact private content.
+      render: text
+  - type: textarea
+    id: native_host_logs
+    attributes:
+      label: Native host logs
+      description: Include relevant native host logs if available.
+      render: text
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Open the project.
+        2. Click ...
+        3. The extension reports ...
+    validations:
+      required: true
+  - type: textarea
+    id: observed_change
+    attributes:
+      label: What seems to have changed in Overleaf?
+      description: For example, editor DOM changed, compile request shape changed, or writeback no longer updates the file.
+

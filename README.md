@@ -7,7 +7,7 @@
     <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="platform">
     <img src="https://img.shields.io/badge/chrome-MV3-green" alt="chrome manifest v3">
     <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="node version">
-    <img src="https://img.shields.io/badge/tests-passing-success" alt="tests">
+    <a href="https://github.com/Ghqqqq/codex-overleaf-link/actions/workflows/test.yml"><img src="https://github.com/Ghqqqq/codex-overleaf-link/actions/workflows/test.yml/badge.svg" alt="tests"></a>
     <img src="https://img.shields.io/badge/dependencies-0-orange" alt="zero dependencies">
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="license">
   </p>
@@ -98,6 +98,14 @@ Remove the extension from `chrome://extensions`. Optionally delete `~/.codex-ove
 - **Model picker** — switch models and reasoning effort from the panel.
 - **Session history** — multi-session management with rename, resume, and delete.
 - **Isolated Codex home** — plugin sessions stay under `~/.codex-overleaf/codex-home`, not global `~/.codex/sessions`.
+
+## Known Limitations and Safety
+
+- This is an unofficial Overleaf integration. It is not affiliated with or endorsed by Overleaf.
+- The browser bridge depends on Overleaf page internals, including editor, project tree, compile, and save-state behavior. Overleaf UI changes may require extension updates.
+- Writeback, save detection, and compile-log capture are best-effort browser integrations. Review diffs and keep Overleaf history / Reviewing enabled for important documents.
+- Project content is mirrored locally so Codex can work on it. Plugin Codex sessions are stored under `~/.codex-overleaf/codex-home`; local project mirrors are stored under `~/.codex-overleaf/projects`.
+- The bridge runs locally and uses your existing Codex CLI account. Project content sent to Codex is handled by Codex/OpenAI under that account; this project does not operate a separate backend.
 
 ## How It Works
 
