@@ -22,9 +22,29 @@ test('normalizes missing panel state with defaults and a session id', () => {
   assert.equal(state.mode, DEFAULT_PANEL_STATE.mode);
   assert.equal(state.model, DEFAULT_PANEL_STATE.model);
   assert.equal(state.reasoningEffort, DEFAULT_PANEL_STATE.reasoningEffort);
+  assert.equal(state.locale, 'en');
   assert.match(state.session.id, /^session_/);
   assert.equal(state.sessions.length, 1);
   assert.equal(state.activeSessionId, state.session.id);
+});
+
+test('normalizes locale as a global panel preference across sessions', () => {
+  const state = normalizePanelState({
+    locale: 'zh',
+    activeSessionId: 'session_a',
+    sessions: [
+      { id: 'session_a', title: 'A', runs: [] },
+      { id: 'session_b', title: 'B', runs: [] }
+    ]
+  });
+
+  assert.equal(state.locale, 'zh');
+
+  const switched = setActiveSession(state, 'session_b');
+  assert.equal(switched.locale, 'zh');
+
+  const compact = prepareStateForStorage(switched);
+  assert.equal(compact.locale, 'zh');
 });
 
 test('creates a fresh session with empty history', () => {

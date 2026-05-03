@@ -248,6 +248,7 @@ test('extractLightweightPrefs extracts correct fields', () => {
     model: 'gpt-5.4',
     reasoningEffort: 'high',
     mode: 'confirm',
+    locale: 'zh',
     requireReviewing: true,
     autoRecompile: true,
     panelWidth: 512,
@@ -260,6 +261,7 @@ test('extractLightweightPrefs extracts correct fields', () => {
   assert.equal(prefs.model, 'gpt-5.4');
   assert.equal(prefs.reasoningEffort, 'high');
   assert.equal(prefs.mode, 'confirm');
+  assert.equal(prefs.locale, 'zh');
   assert.equal(prefs.requireReviewing, true);
   assert.equal(prefs.autoRecompile, true);
   assert.equal(prefs.panelWidth, 512);
@@ -274,6 +276,7 @@ test('extractLightweightPrefs defaults missing values', () => {
   assert.equal(prefs.model, '');
   assert.equal(prefs.reasoningEffort, '');
   assert.equal(prefs.mode, '');
+  assert.equal(prefs.locale, '');
   assert.equal(prefs.requireReviewing, true);
   assert.equal(prefs.autoRecompile, true);
   assert.equal(prefs.panelWidth, 0);

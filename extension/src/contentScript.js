@@ -38,6 +38,7 @@
     mapAgentEventToActivity,
     translateRawError
   } = window.CodexOverleafAgentTranscript;
+  const i18n = window.CodexOverleafI18n;
   const nativeChannel = window.CodexOverleafNativeChannel.create({
     chrome,
     crypto
@@ -80,31 +81,43 @@
     await refreshProbe({ quiet: true });
   }
 
+  function getLocale() {
+    return i18n?.normalizeLocale?.(state?.locale) || 'en';
+  }
+
+  function tr(key, params) {
+    return i18n?.t?.(getLocale(), key, params) || key;
+  }
+
   function ensurePanelOpen() {
     if (!panel) {
       panel = document.createElement('aside');
       panel.id = PANEL_ID;
       panel.innerHTML = `
-        <div class="codex-panel-resize-handle" data-panel-resize-handle title="拖动调整 Codex 面板宽度，双击恢复默认宽度" aria-label="调整 Codex 面板宽度" role="separator"></div>
+        <div class="codex-panel-resize-handle" data-panel-resize-handle title="Drag to resize the Codex panel. Double click to reset." aria-label="Drag to resize the Codex panel. Double click to reset." role="separator"></div>
         <div class="codex-vscode-head">
           <div class="codex-vscode-title">CODEX</div>
           <div class="codex-vscode-head-actions" aria-label="Codex actions">
-            <button type="button" data-refresh title="重新检测当前文件状态；不会同步或修改文件" aria-label="重新检测当前文件状态">↻</button>
+            <button type="button" data-refresh title="Refresh current file status. This will not sync or modify files." aria-label="Refresh current file status. This will not sync or modify files.">↻</button>
             <div class="codex-diagnostics-wrap">
-              <button type="button" data-diagnostics-menu title="排查问题" aria-label="排查问题" aria-expanded="false">⋯</button>
+              <button type="button" data-diagnostics-menu title="Diagnostics" aria-label="Diagnostics" aria-expanded="false">⋯</button>
               <div class="codex-diagnostics-menu" data-diagnostics-popover hidden>
-                <div class="codex-diagnostics-hint">遇到无法运行、无法写入、读不到文件时使用</div>
+                <div class="codex-diagnostics-hint" data-i18n="diagnosticsHint">Use when Codex cannot run, write, or read files</div>
                 <button type="button" data-diagnostics-native-env>
-                  <span>检查本机连接</span>
-                  <small>Codex、Native Host、LaTeX 工具</small>
+                  <span data-i18n="diagnosticsNativeTitle">Check Local Connection</span>
+                  <small data-i18n="diagnosticsNativeSubtitle">Codex, Native Host, LaTeX tools</small>
                 </button>
                 <button type="button" data-diagnostics-page-state>
-                  <span>检查 Overleaf 写入</span>
-                  <small>当前文件、写入能力、留痕状态</small>
+                  <span data-i18n="diagnosticsPageTitle">Check Overleaf Write Access</span>
+                  <small data-i18n="diagnosticsPageSubtitle">Current file, write access, track changes</small>
                 </button>
                 <button type="button" data-diagnostics-snapshot>
-                  <span>检查项目读取</span>
-                  <small>完整项目、资源文件、读取来源</small>
+                  <span data-i18n="diagnosticsSnapshotTitle">Check Project Read</span>
+                  <small data-i18n="diagnosticsSnapshotSubtitle">Full project, assets, read source</small>
+                </button>
+                <button type="button" data-language-toggle>
+                  <span data-i18n="switchLanguage">Switch to Chinese</span>
+                  <small data-i18n="switchLanguageHint">Change panel language</small>
                 </button>
               </div>
               <section class="codex-diagnostics-result" data-diagnostics-result hidden>
@@ -113,23 +126,23 @@
                     <div class="codex-diagnostics-result-title" data-diagnostics-result-title></div>
                     <div class="codex-diagnostics-result-subtitle" data-diagnostics-result-subtitle></div>
                   </div>
-                  <button type="button" data-diagnostics-result-close title="关闭" aria-label="关闭诊断结果">×</button>
+                  <button type="button" data-diagnostics-result-close title="Close" aria-label="Close diagnostics result">×</button>
                 </div>
                 <div class="codex-diagnostics-result-body" data-diagnostics-result-body></div>
                 <details class="codex-diagnostics-technical" data-diagnostics-result-details>
-                  <summary>技术细节</summary>
+                  <summary data-i18n="technicalDetails">Technical Details</summary>
                   <pre data-diagnostics-result-technical></pre>
                 </details>
               </section>
             </div>
-            <button type="button" data-new-session title="新建会话" aria-label="新建会话">✎</button>
+            <button type="button" data-new-session title="New Session" aria-label="New Session">✎</button>
           </div>
         </div>
 
         <div class="codex-vscode-main" data-main>
           <section class="codex-task-section">
             <div class="codex-section-head">
-              <span>任务</span>
+              <span data-i18n="tasks">Tasks</span>
               <span data-session-count></span>
             </div>
             <div class="codex-session-list" data-session-list></div>
@@ -145,30 +158,30 @@
         <div class="codex-probe-line" data-probe-status>Checking Overleaf state...</div>
 
         <form class="codex-composer" data-composer-form>
-          <textarea data-task rows="3" placeholder="问 Codex 任何事。输入 @ 添加上下文"></textarea>
+          <textarea data-task rows="3" placeholder="Ask Codex anything. Type @ to add context"></textarea>
           <div class="codex-context-summary" data-context-summary hidden></div>
           <div class="codex-mode-row">
-            <span class="codex-mode-label">模式</span>
-            <div class="codex-mode-switch" role="group" aria-label="写入模式">
-              <button type="button" data-mode-choice="ask" aria-pressed="false" title="只读取和分析，不写入 Overleaf">只问不改</button>
-              <button type="button" data-mode-choice="confirm" aria-pressed="false" title="先给出修改方案，确认后写入">建议修改</button>
-              <button type="button" data-mode-choice="auto" aria-pressed="false" title="授权后直接写入，删除仍需确认">自动写入</button>
+            <span class="codex-mode-label" data-i18n="mode">Mode</span>
+            <div class="codex-mode-switch" role="group" aria-label="Write mode">
+              <button type="button" data-mode-choice="ask" aria-pressed="false" title="Read and analyze only. Do not write to Overleaf.">Ask</button>
+              <button type="button" data-mode-choice="confirm" aria-pressed="false" title="Show a change plan first, then write after approval.">Suggest</button>
+              <button type="button" data-mode-choice="auto" aria-pressed="false" title="Write directly after authorization. Deletes still require confirmation.">Auto</button>
             </div>
-            <select data-mode aria-label="模式" hidden>
-              <option value="ask">只问不改</option>
-              <option value="confirm">建议修改</option>
-              <option value="auto">自动写入</option>
+            <select data-mode aria-label="Mode" hidden>
+              <option value="ask">Ask</option>
+              <option value="confirm">Suggest</option>
+              <option value="auto">Auto</option>
             </select>
           </div>
           <div class="codex-composer-toolbar">
-            <button type="button" data-add-context title="添加 @ 上下文" aria-label="添加 @ 上下文" aria-expanded="false">＋</button>
-            <label class="codex-review-toggle" title="开启后，写入前会确认并尝试切到 Overleaf Reviewing/Track Changes；删除仍需确认。">
+            <button type="button" data-add-context title="Add @ context" aria-label="Add @ context" aria-expanded="false">＋</button>
+            <label class="codex-review-toggle" title="When enabled, Codex checks or switches Overleaf Reviewing/Track Changes before writing. Deletes still require confirmation.">
               <input type="checkbox" data-require-reviewing>
-              <span class="codex-review-label">留痕</span>
+              <span class="codex-review-label" data-i18n="requireReviewing">Track</span>
             </label>
-            <label class="codex-recompile-toggle" title="Codex 写入后自动点击 Overleaf Recompile，并把编译结果记录到本轮任务。只问不改时不会触发。">
+            <label class="codex-recompile-toggle" title="After Codex writes, click Overleaf Recompile and record the compile result for this task. Ask mode will not trigger it.">
               <input type="checkbox" data-auto-recompile>
-              <span class="codex-recompile-label">自动编译</span>
+              <span class="codex-recompile-label" data-i18n="autoCompile">Auto Compile</span>
             </label>
             <div class="codex-select-shell codex-model-picker" data-model-picker>
               <span data-model-display>GPT-5.4</span>
@@ -187,15 +200,15 @@
               <option value="high">High</option>
               <option value="xhigh">XHigh</option>
             </select>
-            <button type="submit" data-run title="发送" aria-label="发送">↑</button>
+            <button type="submit" data-run title="Send" aria-label="Send">↑</button>
           </div>
           <div class="codex-context-tray" data-context-tray hidden>
             <div class="codex-context-head">
-              <span>@ 上下文</span>
-              <button type="button" data-context-refresh title="刷新文件列表" aria-label="刷新文件列表">↻</button>
+              <span data-i18n="contextTitle">@ Context</span>
+              <button type="button" data-context-refresh title="Refresh file list" aria-label="Refresh file list">↻</button>
             </div>
             <div class="codex-context-selection" data-context-selection></div>
-            <div class="codex-context-status" data-context-status>输入 @ 添加上下文：@文件、@compile-log、@current-section。</div>
+            <div class="codex-context-status" data-context-status>Type @ to add context: @file, @compile-log, @current-section.</div>
             <div class="codex-context-files" data-context-file-list></div>
           </div>
         </form>
@@ -235,6 +248,7 @@
         closeDiagnosticsMenu();
         inspectProjectSnapshot();
       });
+      panel.querySelector('[data-language-toggle]').addEventListener('click', () => toggleLanguage());
       panel.querySelector('[data-diagnostics-result-close]').addEventListener('click', () => closeDiagnosticsResult());
       panel.querySelector('[data-view-all]').addEventListener('click', () => renderSessionList({ showAll: true }));
       panel.querySelector('[data-add-context]').addEventListener('click', () => toggleContextTray());
@@ -284,6 +298,102 @@
     button.setAttribute('aria-expanded', 'false');
   }
 
+  async function toggleLanguage() {
+    state = normalizePanelState({
+      ...state,
+      locale: i18n?.getOppositeLocale?.(getLocale()) || 'zh'
+    });
+    closeDiagnosticsMenu();
+    applyLocaleToPanel();
+    await saveState();
+  }
+
+  function applyLocaleToPanel() {
+    if (!panel) {
+      return;
+    }
+
+    panel.querySelectorAll('[data-i18n]').forEach(element => {
+      element.textContent = tr(element.dataset.i18n);
+    });
+
+    setElementTitleAndAria('[data-panel-resize-handle]', tr('resizePanel'), tr('resizePanel'));
+    setElementTitleAndAria('[data-refresh]', tr('refreshProbe'), tr('refreshProbe'));
+    setElementTitleAndAria('[data-diagnostics-menu]', tr('diagnosticsMenu'), tr('diagnosticsMenu'));
+    setElementTitleAndAria('[data-diagnostics-result-close]', tr('close'), tr('closeDiagnostics'));
+    setElementTitleAndAria('[data-new-session]', tr('newSession'), tr('newSession'));
+    setElementTitleAndAria('[data-add-context]', tr('addContext'), tr('addContext'));
+    setElementTitleAndAria('[data-context-refresh]', tr('refreshFileList'), tr('refreshFileList'));
+    setElementTitleAndAria('[data-run]', currentRunView ? tr('cancelRun') : tr('send'), currentRunView ? tr('cancelRun') : tr('send'));
+
+    const actions = panel.querySelector('.codex-vscode-head-actions');
+    if (actions) {
+      actions.setAttribute('aria-label', tr('codexActions'));
+    }
+    const task = panel.querySelector('[data-task]');
+    if (task) {
+      task.placeholder = tr('placeholder');
+    }
+    const modeSwitch = panel.querySelector('.codex-mode-switch');
+    if (modeSwitch) {
+      modeSwitch.setAttribute('aria-label', tr('writeMode'));
+    }
+    const modeSelect = panel.querySelector('[data-mode]');
+    if (modeSelect) {
+      modeSelect.setAttribute('aria-label', tr('mode'));
+      for (const option of modeSelect.options) {
+        option.textContent = formatModeLabel(option.value);
+      }
+    }
+    for (const button of panel.querySelectorAll('[data-mode-choice]')) {
+      const mode = button.dataset.modeChoice;
+      button.textContent = formatModeLabel(mode);
+      button.title = tr(`mode${capitalizeModeKey(mode)}Title`);
+    }
+    const reviewToggle = panel.querySelector('.codex-review-toggle');
+    if (reviewToggle) {
+      reviewToggle.title = tr('requireReviewingTitle');
+    }
+    const recompileToggle = panel.querySelector('.codex-recompile-toggle');
+    if (recompileToggle) {
+      recompileToggle.title = tr('autoCompileTitle');
+    }
+    const contextStatus = panel.querySelector('[data-context-status]');
+    if (contextStatus && !contextStatus.dataset.customStatus) {
+      contextStatus.textContent = tr('contextStatus');
+    }
+    const emptyRunLabel = panel.querySelector('.empty-runs div');
+    if (emptyRunLabel) {
+      emptyRunLabel.textContent = tr('emptyRunLabel');
+    }
+
+    syncModeControls();
+    renderSessionList();
+    renderContextSelection();
+  }
+
+  function setElementTitleAndAria(selector, title, ariaLabel) {
+    const element = panel?.querySelector(selector);
+    if (!element) {
+      return;
+    }
+    element.title = title;
+    element.setAttribute('aria-label', ariaLabel || title);
+  }
+
+  function capitalizeModeKey(mode) {
+    if (mode === 'ask') {
+      return 'Ask';
+    }
+    if (mode === 'confirm') {
+      return 'Confirm';
+    }
+    if (mode === 'auto') {
+      return 'Auto';
+    }
+    return '';
+  }
+
   function installDiagnosticsDismiss() {
     document.addEventListener('click', event => {
       const wrap = panel?.querySelector('.codex-diagnostics-wrap');
@@ -301,12 +411,12 @@
     }
   }
 
-  function showDiagnosticsLoading(title, subtitle = '正在检查当前状态。') {
+  function showDiagnosticsLoading(title, subtitle = tr('diagnosticsLoading')) {
     showDiagnosticsResult({
       title,
       subtitle,
       status: 'running',
-      summary: '正在读取信息，不会修改 Overleaf 文件。'
+      summary: tr('diagnosticsLoadingSummary')
     });
   }
 
@@ -318,12 +428,12 @@
 
     root.hidden = false;
     root.dataset.status = result.status || 'info';
-    root.querySelector('[data-diagnostics-result-title]').textContent = result.title || '诊断结果';
+    root.querySelector('[data-diagnostics-result-title]').textContent = result.title || tr('diagnosticsResult');
     root.querySelector('[data-diagnostics-result-subtitle]').textContent = result.subtitle || '';
 
     const body = root.querySelector('[data-diagnostics-result-body]');
     body.textContent = '';
-    appendDiagnosticsParagraph(body, result.summary || '没有返回可展示的诊断结果。');
+    appendDiagnosticsParagraph(body, result.summary || tr('diagnosticsNoResult'));
     if (Array.isArray(result.bullets) && result.bullets.length) {
       const list = document.createElement('ul');
       for (const item of result.bullets) {
@@ -336,7 +446,7 @@
     if (result.nextStep) {
       const next = document.createElement('p');
       next.className = 'codex-diagnostics-next-step';
-      next.textContent = `下一步：${result.nextStep}`;
+      next.textContent = `${tr('nextStepPrefix')}${result.nextStep}`;
       body.append(next);
     }
     if (result.installCommand) {
@@ -357,7 +467,7 @@
 
     const label = document.createElement('div');
     label.className = 'codex-install-command-label';
-    label.textContent = '在终端运行：';
+    label.textContent = tr('runInTerminal');
     wrap.append(label);
 
     const code = document.createElement('code');
@@ -366,12 +476,12 @@
 
     const copyButton = document.createElement('button');
     copyButton.type = 'button';
-    copyButton.textContent = '复制安装命令';
+    copyButton.textContent = tr('copyInstallCommand');
     copyButton.addEventListener('click', async () => {
       await navigator.clipboard.writeText(command);
-      copyButton.textContent = '已复制';
+      copyButton.textContent = tr('copied');
       setTimeout(() => {
-        copyButton.textContent = '复制安装命令';
+        copyButton.textContent = tr('copyInstallCommand');
       }, 1400);
     });
     wrap.append(copyButton);
@@ -502,7 +612,7 @@
     }
 
     const loadId = ++contextLoadId;
-    setContextStatus('正在读取可添加的 @文件...');
+    setContextStatus(tr('contextLoadingFiles'));
     list.textContent = '';
 
     try {
@@ -520,7 +630,7 @@
       if (loadId !== contextLoadId) {
         return;
       }
-      setContextStatus(`读取文件失败：${error.message}`);
+      setContextStatus(tr('contextReadFailed', { message: error.message }));
     }
   }
 
@@ -540,14 +650,14 @@
     renderContextSelection();
 
     if (!files.length) {
-      setContextStatus('没有从当前 Overleaf 项目读取到可用文本文件。');
+      setContextStatus(tr('contextNoFiles'));
       return;
     }
 
     const selected = getActiveFocusFiles();
     setContextStatus(selected.length
-      ? `已添加 ${selected.length} 个 @file；后续任务会优先围绕它们。`
-      : '默认使用整个项目。可添加 @file；@compile-log 和 @current-section 将作为后续上下文能力。');
+      ? tr('contextSelectedFiles', { count: selected.length })
+      : tr('contextDefaultWholeProject'));
 
     const tree = buildContextTree(files);
     for (const child of tree.children) {
@@ -659,7 +769,7 @@
     button.disabled = !selectable;
     button.setAttribute('aria-pressed', selectable && selected.includes(file.path) ? 'true' : 'false');
     button.style.paddingLeft = `${depth * 14 + 7}px`;
-    button.title = selectable ? file.path : `${file.path}（非文本资源，当前只作为项目结构显示）`;
+    button.title = selectable ? file.path : tr('contextResourceTitle', { path: file.path });
     if (selectable) {
       button.addEventListener('click', () => selectFocusFile(file.path));
     }
@@ -672,7 +782,7 @@
     meta.className = 'codex-context-file-meta';
     meta.textContent = selectable
       ? (file.content ? `${String(file.content).length} chars` : file.source || '')
-      : '资源';
+      : tr('resource');
 
     button.append(name, meta);
     container.append(button);
@@ -688,7 +798,7 @@
     selection.textContent = '';
     const selected = getActiveFocusFiles();
     addButton.dataset.hasFocus = selected.length ? 'true' : 'false';
-    addButton.title = selected.length ? `@context：${selected.map(path => `@file:${path}`).join(', ')}` : '添加 @ 上下文';
+    addButton.title = selected.length ? `@context: ${selected.map(path => `@file:${path}`).join(', ')}` : tr('addContext');
 
     const chip = document.createElement('div');
     chip.className = 'codex-context-chip';
@@ -698,15 +808,15 @@
     dot.setAttribute('aria-hidden', 'true');
 
     const label = document.createElement('span');
-    label.textContent = selected.length ? selected.map(path => `@file:${path}`).join(', ') : '默认：整个项目';
+    label.textContent = selected.length ? selected.map(path => `@file:${path}`).join(', ') : tr('contextWholeProjectChip');
     chip.append(dot, label);
 
     if (selected.length) {
       const clear = document.createElement('button');
       clear.type = 'button';
       clear.dataset.contextClear = '';
-      clear.title = '清除全部 @file';
-      clear.setAttribute('aria-label', '清除全部 @file');
+      clear.title = tr('clearFiles');
+      clear.setAttribute('aria-label', tr('clearFiles'));
       clear.textContent = '×';
       clear.addEventListener('click', clearFocusFile);
       chip.append(clear);
@@ -745,8 +855,8 @@
     clear.type = 'button';
     clear.className = 'codex-context-summary-clear';
     clear.setAttribute('data-context-summary-clear', '');
-    clear.title = '清除全部 @file';
-    clear.setAttribute('aria-label', '清除全部 @file');
+    clear.title = tr('clearFiles');
+    clear.setAttribute('aria-label', tr('clearFiles'));
     clear.textContent = '×';
     clear.addEventListener('click', clearFocusFile);
     summary.append(clear);
@@ -815,11 +925,12 @@
     const status = panel?.querySelector('[data-context-status]');
     if (status) {
       status.textContent = text;
+      status.dataset.customStatus = 'true';
     }
   }
 
   async function inspectProjectSnapshot() {
-    showDiagnosticsLoading('检查项目读取', '确认插件能否读取完整 Overleaf 项目。');
+    showDiagnosticsLoading(tr('diagnosticsSnapshotTitle'), tr('diagnosticsSnapshotLoading'));
     try {
       const project = await callPageBridge('getProjectSnapshot', {
         force: true,
@@ -836,7 +947,7 @@
         title: '项目读取失败',
         subtitle: '插件没有拿到 Overleaf 项目内容。',
         status: 'failed',
-        summary: '这通常是 Overleaf 页面还没加载完成，或者当前页面接口暂时没有返回项目文件。',
+        summary: tr('diagnosticsSnapshotErrorSummary'),
         nextStep: '刷新 Overleaf 页面，等左侧文件树加载完成后重试。',
         technical: error?.stack || error?.message || String(error)
       });
@@ -844,7 +955,7 @@
   }
 
   async function inspectNativeEnvironment() {
-    showDiagnosticsLoading('检查本机连接', '确认本机 Codex、Native Host 和 LaTeX 工具是否可用。');
+    showDiagnosticsLoading(tr('diagnosticsNativeTitle'), tr('diagnosticsNativeLoading'));
     const response = await sendBackgroundNative({ method: 'bridge.ping', params: {} });
     showDiagnosticsResult(formatNativeEnvironmentResult(response));
   }
@@ -868,7 +979,7 @@
         title: '本机连接可用',
         subtitle: 'Native Host 已响应。',
         status: 'completed',
-        summary: '本机服务已经连接，但没有返回 Codex 或 LaTeX 的工具详情。',
+        summary: tr('diagnosticsNativeEmptySummary'),
         nextStep: '如果运行任务失败，请重新安装 native host 或检查终端里的 codex 命令。',
         technical: JSON.stringify(response.result || {}, null, 2)
       };
@@ -911,7 +1022,7 @@
   }
 
   async function inspectPageStateDiagnostics() {
-    showDiagnosticsLoading('检查 Overleaf 写入', '确认当前文件、写入能力和留痕状态。');
+    showDiagnosticsLoading(tr('diagnosticsPageTitle'), tr('diagnosticsPageLoading'));
     try {
       const probe = await callPageBridge('probe', {
         manualOverride: state?.requireReviewing === false
@@ -2475,7 +2586,7 @@
       setRefreshProbeLoading(true);
       const status = panel?.querySelector('[data-probe-status]');
       if (status) {
-        status.textContent = '正在重新检测当前文件、写入权限和留痕状态...';
+        status.textContent = tr('refreshProbeLoading');
         status.dataset.ok = 'false';
         status.dataset.refreshing = 'true';
       }
@@ -2488,7 +2599,7 @@
       const status = panel?.querySelector('[data-probe-status]');
       if (status) {
         status.textContent = userInitiated
-          ? `已重新检测：${formatProbeStatusBar(probe)}`
+          ? tr('refreshProbeDone', { status: formatProbeStatusBar(probe) })
           : formatProbeStatusBar(probe);
         status.dataset.ok = isProbeReadyForCurrentMode(probe) ? 'true' : 'false';
         status.dataset.refreshing = 'false';
@@ -2505,7 +2616,7 @@
       }
       const status = panel?.querySelector('[data-probe-status]');
       if (status) {
-        status.textContent = '检测失败：请刷新 Overleaf 页面后重试';
+        status.textContent = tr('refreshProbeFailed');
         status.dataset.ok = 'false';
         status.dataset.refreshing = 'false';
       }
@@ -2534,17 +2645,17 @@
     const editorWritable = readiness.editorWritable;
 
     if (state?.mode === 'ask') {
-      return `只问不改 · ${readiness.contextLabel}`;
+      return `${formatModeLabel('ask')} · ${readiness.contextLabel}`;
     }
     if (reviewingOk) {
       return editorWritable
-        ? `可以运行 · ${readiness.contextLabel}`
-        : `${formatModeLabel(state?.mode)} · 写入时验证编辑器`;
+        ? `${tr('canRun')} · ${readiness.contextLabel}`
+        : `${formatModeLabel(state?.mode)} · ${tr('validatingEditor')}`;
     }
     if (readiness.contextReady) {
-      return '需要开启 Reviewing';
+      return tr('needsReviewing');
     }
-    return '需要开启 Reviewing 并打开文件';
+    return tr('needsReviewingAndFile');
   }
 
   function isProbeReadyForCurrentMode(probe) {
@@ -2558,12 +2669,12 @@
     const hasFocus = focusFiles.length > 0;
     const hasTexFocus = focusFiles.some(file => /\.tex$/i.test(file));
     const contextLabel = editorOk
-      ? '已读到当前文件'
+      ? tr('currentFileContext')
       : hasTexFocus
-        ? '已选择 @file 上下文'
+        ? tr('fileContext')
         : hasFocus
-          ? '已选择 @context'
-          : '将读取整个项目';
+          ? tr('contextContext')
+          : tr('wholeProjectContext');
     return {
       reviewingOk: probe.reviewing?.ok === true,
       editorOk,
@@ -2575,15 +2686,15 @@
 
   function formatModeLabel(mode) {
     if (mode === 'ask') {
-      return '只问不改';
+      return tr('modeAsk');
     }
     if (mode === 'confirm') {
-      return '建议修改';
+      return tr('modeConfirm');
     }
     if (mode === 'auto') {
-      return '自动写入';
+      return tr('modeAuto');
     }
-    return mode || '未知模式';
+    return mode || tr('unknownMode');
   }
 
   function formatRunStatusText(status) {
@@ -3105,6 +3216,7 @@
         model: prefs.model || '',
         reasoningEffort: prefs.reasoningEffort || '',
         mode: prefs.mode || '',
+        locale: prefs.locale || '',
         requireReviewing: prefs.requireReviewing !== false,
         autoRecompile: prefs.autoRecompile !== false,
         panelWidth: prefs.panelWidth || PANEL_DEFAULT_WIDTH,
@@ -3312,6 +3424,7 @@
     renderRunHistory();
     renderContextSelection();
     renderContextSummary();
+    applyLocaleToPanel();
     if (!panel.querySelector('[data-context-tray]')?.hidden) {
       renderContextFiles(contextProject);
     }
@@ -3397,8 +3510,8 @@
   function setRunning(running) {
     const runButton = panel.querySelector('[data-run]');
     runButton.disabled = false;
-    runButton.title = running ? '中断当前任务' : '发送';
-    runButton.setAttribute('aria-label', running ? '中断当前任务' : '发送');
+    runButton.title = running ? tr('cancelRun') : tr('send');
+    runButton.setAttribute('aria-label', running ? tr('cancelRun') : tr('send'));
     panel.querySelector('[data-new-session]').disabled = false;
     panel.querySelector('[data-diagnostics-snapshot]').disabled = running;
     if (running) {
@@ -3500,12 +3613,12 @@
   function formatProcessedSummary(status, elapsedMs) {
     const elapsed = formatElapsed(elapsedMs);
     if (status === 'failed') {
-      return `处理失败 ${elapsed}`;
+      return tr('processedFailed', { elapsed });
     }
     if (status === 'running') {
-      return `处理中 ${elapsed}`;
+      return tr('processing', { elapsed });
     }
-    return `已处理 ${elapsed}`;
+    return tr('processed', { elapsed });
   }
 
   function appendNativeEvent(event) {
@@ -3742,9 +3855,9 @@
           <span class="codex-session-row-title"></span>
           <time></time>
         </button>
-        <input type="text" class="codex-session-title-input" aria-label="重命名会话" maxlength="80" hidden>
-        <button type="button" class="codex-session-rename" title="重命名" aria-label="重命名">✎</button>
-        <button type="button" class="codex-session-delete" title="Delete session" aria-label="Delete session">×</button>
+        <input type="text" class="codex-session-title-input" aria-label="${tr('renameSession')}" maxlength="80" hidden>
+        <button type="button" class="codex-session-rename" title="${tr('renameSession')}" aria-label="${tr('renameSession')}">✎</button>
+        <button type="button" class="codex-session-delete" title="${tr('deleteSession')}" aria-label="${tr('deleteSession')}">×</button>
       `;
       const displayTitle = getSessionDisplayTitle(session);
       const switchButton = row.querySelector('.codex-session-switch');
@@ -3759,7 +3872,7 @@
       });
       const deleteButton = row.querySelector('.codex-session-delete');
       deleteButton.disabled = isRunningSession;
-      deleteButton.title = isRunningSession ? '任务运行中，先中断后再删除' : 'Delete session';
+      deleteButton.title = isRunningSession ? tr('deleteRunningSession') : tr('deleteSession');
       deleteButton.addEventListener('click', event => {
         event.stopPropagation();
         deleteSessionWithConfirm(session.id);
@@ -3770,7 +3883,7 @@
     const viewAll = panel.querySelector('[data-view-all]');
     if (viewAll) {
       viewAll.hidden = showAll || sessions.length <= 3;
-      viewAll.textContent = `查看全部（${sessions.length} 个）`;
+      viewAll.textContent = tr('viewAllSessions', { count: sessions.length });
     }
   }
 
@@ -3779,7 +3892,7 @@
     if (title && title !== 'New task') {
       return title;
     }
-    return deriveSessionTitle(session?.runs, session?.task) || '新会话';
+    return deriveSessionTitle(session?.runs, session?.task) || tr('newSessionFallback');
   }
 
   function beginSessionRename(row, sessionId) {
@@ -3926,7 +4039,7 @@
       icon.setAttribute('aria-hidden', 'true');
       icon.src = chrome.runtime.getURL('assets/icons/codex-overleaf-icon.png');
       const label = document.createElement('div');
-      label.textContent = '开始一个 Codex 任务';
+      label.textContent = tr('emptyRunLabel');
       empty.append(icon, label);
       log.append(empty);
       return;
@@ -3952,7 +4065,7 @@
       <div class="transcript-turn-main">
         <div class="run-prompt" data-run-task></div>
         <div class="run-turn-meta">
-          <button type="button" data-run-undo hidden title="撤销本轮写入到 Overleaf 的改动">撤销改动</button>
+          <button type="button" data-run-undo hidden title="Undo this run's writes to Overleaf">Undo</button>
         </div>
         <details class="run-process" data-run-process>
           <summary data-run-process-summary>

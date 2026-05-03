@@ -33,6 +33,7 @@
         "src/shared/reviewing.js",
         "src/shared/projectFiles.js",
         "src/shared/undoOperations.js",
+        "src/shared/i18n.js",
         "src/shared/sessionState.js",
         "src/shared/storageKeys.js",
         "src/shared/staleGuard.js",

@@ -253,6 +253,7 @@
       model: typeof state.model === 'string' ? state.model : '',
       reasoningEffort: typeof state.reasoningEffort === 'string' ? state.reasoningEffort : '',
       mode: typeof state.mode === 'string' ? state.mode : '',
+      locale: typeof state.locale === 'string' ? state.locale : '',
       requireReviewing: state.requireReviewing !== false,
       autoRecompile: state.autoRecompile !== false,
       panelWidth: Number.isFinite(Number(state.panelWidth)) ? Math.round(Number(state.panelWidth)) : 0,

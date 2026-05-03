@@ -8,6 +8,10 @@ test('normal state refresh writes user-facing status instead of raw probe diagno
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
   const refreshProbeBody = contentScript.match(/async function refreshProbe\(options = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
   assert.match(refreshProbeBody, /appendProbeUserStatus\(probe\)/);
@@ -24,6 +28,10 @@ test('manual refresh gives visible feedback without appending task transcript me
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
@@ -32,9 +40,10 @@ test('manual refresh gives visible feedback without appending task transcript me
 
   assert.match(contentScript, /addEventListener\('click', \(\) => refreshProbe\(\{\s*userInitiated:\s*true\s*\}\)\)/);
   assert.match(refreshProbeBody, /const userInitiated = options\.userInitiated === true/);
-  assert.match(refreshProbeBody, /正在重新检测当前文件、写入权限和留痕状态/);
-  assert.match(refreshProbeBody, /已重新检测：\$\{formatProbeStatusBar\(probe\)\}/);
-  assert.match(refreshProbeBody, /检测失败：请刷新 Overleaf 页面后重试/);
+  assert.match(refreshProbeBody, /tr\('refreshProbeLoading'\)/);
+  assert.match(refreshProbeBody, /tr\('refreshProbeDone', \{ status: formatProbeStatusBar\(probe\) \}\)/);
+  assert.match(refreshProbeBody, /tr\('refreshProbeFailed'\)/);
+  assert.match(i18n, /正在重新检测当前文件、写入权限和留痕状态/);
   assert.match(refreshProbeBody, /setRefreshProbeLoading\(true\)/);
   assert.match(refreshProbeBody, /setRefreshProbeLoading\(false\)/);
   assert.match(refreshProbeBody, /!userInitiated/);
@@ -59,9 +68,13 @@ test('probe status copy describes the next user action without internal editor w
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
 
-  assert.match(contentScript, /将读取整个项目/);
-  assert.match(contentScript, /已选择 @file 上下文/);
+  assert.match(i18n, /wholeProjectContext:\s*'将读取整个项目'/);
+  assert.match(i18n, /fileContext:\s*'已选择 @file 上下文'/);
   assert.doesNotMatch(contentScript, /需要打开一个 \.tex 文件/);
   assert.doesNotMatch(contentScript, /Codex 没读到当前文件/);
   assert.doesNotMatch(contentScript, /左侧文件列表点开要处理的 \.tex 文件/);
@@ -90,7 +103,7 @@ test('write modes are not mislabeled as analysis-only when editor writability pr
 
   assert.doesNotMatch(contentScript, /只能分析 · 当前编辑器不可写/);
   assert.match(contentScript, /formatModeLabel\(state\?\.mode\)/);
-  assert.match(contentScript, /写入时验证编辑器/);
+  assert.match(contentScript, /tr\('validatingEditor'\)/);
 });
 
 test('ask mode probe copy does not mention write verification or Reviewing requirements', () => {
@@ -102,7 +115,7 @@ test('ask mode probe copy does not mention write verification or Reviewing requi
   const noticeBody = contentScript.match(/function formatProbeUserNotice\(probe\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
   assert.match(statusBody, /state\?\.mode === 'ask'/);
-  assert.match(statusBody, /只问不改 · \$\{readiness\.contextLabel\}/);
+  assert.match(statusBody, /\$\{formatModeLabel\('ask'\)\} · \$\{readiness\.contextLabel\}/);
   assert.match(noticeBody, /state\?\.mode === 'ask'/);
   assert.match(noticeBody, /不会写入 Overleaf/);
 });

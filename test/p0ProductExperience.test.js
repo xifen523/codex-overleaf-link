@@ -3,17 +3,23 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-test('composer exposes user-facing Overleaf task modes instead of internal mode names', () => {
+test('composer defaults to English task modes and keeps Chinese translations available', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
 
-  assert.match(contentScript, /<option value="ask">只问不改<\/option>/);
-  assert.match(contentScript, /<option value="confirm">建议修改<\/option>/);
-  assert.match(contentScript, /<option value="auto">自动写入<\/option>/);
-  assert.doesNotMatch(contentScript, />Auto<\/option>/);
-  assert.doesNotMatch(contentScript, />Confirm<\/option>/);
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /<option value="ask">Ask<\/option>/);
+  assert.match(contentScript, /<option value="confirm">Suggest<\/option>/);
+  assert.match(contentScript, /<option value="auto">Auto<\/option>/);
+  assert.match(i18n, /modeAsk:\s*'只问不改'/);
+  assert.match(i18n, /modeConfirm:\s*'建议修改'/);
+  assert.match(i18n, /modeAuto:\s*'自动写入'/);
 });
 
 test('composer shows confirm and auto as explicit visible write-mode choices', () => {
@@ -487,13 +493,18 @@ test('reviewing safety toggle is labeled instead of a mysterious check icon', ()
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
 
-  assert.match(contentScript, />留痕</);
-  assert.match(contentScript, /开启后，写入前会确认并尝试切到 Overleaf Reviewing\/Track Changes；删除仍需确认。/);
+  assert.match(contentScript, /data-i18n="requireReviewing">Track</);
+  assert.match(i18n, /requireReviewing:\s*'留痕'/);
+  assert.match(i18n, /开启后，写入前会确认并尝试切到 Overleaf Reviewing\/Track Changes；删除仍需确认。/);
   assert.match(css, /\.codex-review-label/);
 });
 
@@ -868,9 +879,13 @@ test('context picker presents Cursor-style @ context concepts', () => {
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
 
-  assert.match(contentScript, /添加 @ 上下文/);
-  assert.match(contentScript, /@文件/);
+  assert.match(i18n, /addContext:\s*'添加 @ 上下文'/);
+  assert.match(i18n, /@文件/);
   assert.match(contentScript, /@compile-log/);
   assert.match(contentScript, /@current-section/);
   assert.match(contentScript, /@context/);

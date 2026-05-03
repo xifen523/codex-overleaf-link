@@ -12,6 +12,10 @@ test('add context button opens a visible Overleaf project file picker', () => {
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
 
   assert.match(contentScript, /data-add-context[^>]+aria-expanded="false"/);
   assert.match(contentScript, /data-context-tray/);
@@ -27,8 +31,8 @@ test('add context button opens a visible Overleaf project file picker', () => {
   assert.match(contentScript, /function renderContextSummary\(/);
   assert.match(contentScript, /nextFocusFiles/);
   assert.match(contentScript, /data-context-summary-clear/);
-  assert.match(contentScript, /清除全部 @file/);
-  assert.match(contentScript, /添加 @ 上下文/);
+  assert.match(i18n, /clearFiles:\s*'清除全部 @file'/);
+  assert.match(i18n, /addContext:\s*'添加 @ 上下文'/);
   assert.match(contentScript, /@compile-log/);
   assert.match(contentScript, /@current-section/);
   assert.match(contentScript, /focusFiles: getActiveFocusFiles\(\)/);

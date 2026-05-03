@@ -11,6 +11,7 @@
     mode: 'confirm',
     model: 'gpt-5.4',
     reasoningEffort: 'high',
+    locale: 'en',
     requireReviewing: true,
     autoOpen: true,
     panelWidth: 380,
@@ -24,6 +25,7 @@
 
   const VALID_MODES = new Set(['ask', 'confirm', 'auto']);
   const VALID_REASONING = new Set(['low', 'medium', 'high', 'xhigh']);
+  const VALID_LOCALES = new Set(['en', 'zh']);
   const VALID_TITLE_SOURCES = new Set(['auto', 'manual']);
   const LEGACY_DEFAULT_SESSION_TITLE = 'New task';
   const SESSION_AUTO_TITLE_CHARS = 24;
@@ -70,6 +72,9 @@
     }
     if (!VALID_REASONING.has(state.reasoningEffort)) {
       state.reasoningEffort = DEFAULT_PANEL_STATE.reasoningEffort;
+    }
+    if (!VALID_LOCALES.has(state.locale)) {
+      state.locale = DEFAULT_PANEL_STATE.locale;
     }
     state.requireReviewing = state.requireReviewing !== false;
     state.autoOpen = state.autoOpen !== false;
@@ -554,6 +559,7 @@
       reasoningEffort: VALID_REASONING.has(active?.reasoningEffort)
         ? active.reasoningEffort
         : normalizeReasoning(source.reasoningEffort),
+      locale: normalizeLocale(source.locale),
       requireReviewing: active ? active.requireReviewing !== false : source.requireReviewing !== false,
       autoOpen: source.autoOpen !== false,
       panelWidth: normalizePanelWidth(source.panelWidth),
@@ -753,6 +759,10 @@
     return VALID_REASONING.has(reasoningEffort)
       ? reasoningEffort
       : DEFAULT_PANEL_STATE.reasoningEffort;
+  }
+
+  function normalizeLocale(locale) {
+    return VALID_LOCALES.has(locale) ? locale : DEFAULT_PANEL_STATE.locale;
   }
 
   function normalizePanelWidth(value) {

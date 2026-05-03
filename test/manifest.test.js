@@ -9,6 +9,7 @@ const {
   getChromeNativeHostManifestPath,
   validateChromeExtensionId
 } = require('../native-host/src/manifest');
+const extensionManifest = require('../extension/manifest.json');
 
 test('validates Chrome extension ids', () => {
   assert.equal(validateChromeExtensionId('abcdefghijklmnopabcdefghijklmnop'), true);
@@ -42,4 +43,10 @@ test('returns the user-level macOS Chrome native host manifest path', () => {
 
 test('rejects invalid extension ids when building the manifest', () => {
   assert.throws(() => buildHostManifest({ extensionId: 'bad', bridgePath: '/tmp/bridge' }), /Invalid Chrome extension id/);
+});
+
+test('content script loads shared i18n before the panel script', () => {
+  const scripts = extensionManifest.content_scripts[0].js;
+  assert.ok(scripts.indexOf('src/shared/i18n.js') > -1);
+  assert.ok(scripts.indexOf('src/shared/i18n.js') < scripts.indexOf('src/contentScript.js'));
 });

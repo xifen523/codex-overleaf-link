@@ -13,7 +13,7 @@ test('composer keeps the send button in a fixed visible toolbar column', () => {
     'utf8'
   );
 
-  assert.match(contentScript, /data-run title="发送" aria-label="发送"/);
+  assert.match(contentScript, /data-run title="Send" aria-label="Send"/);
   assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*display: grid/);
   assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*grid-template-columns:/);
   assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*grid-column: 6/);
@@ -80,10 +80,14 @@ test('composer describes compile toggle as a post-write action', () => {
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
 
   assert.match(contentScript, /data-auto-recompile/);
-  assert.match(contentScript, /<span class="codex-recompile-label">自动编译<\/span>/);
-  assert.match(contentScript, /Codex 写入后自动点击 Overleaf Recompile/);
+  assert.match(contentScript, /<span class="codex-recompile-label" data-i18n="autoCompile">Auto Compile<\/span>/);
+  assert.match(i18n, /Codex 写入后自动点击 Overleaf Recompile/);
 });
 
 test('side panel can be resized and persists width as lightweight prefs', () => {
@@ -116,7 +120,7 @@ test('composer sends through a form submit path with a guarded run handler', () 
   );
 
   assert.match(contentScript, /<form class="codex-composer" data-composer-form>/);
-  assert.match(contentScript, /<button type="submit" data-run title="发送" aria-label="发送">↑<\/button>/);
+  assert.match(contentScript, /<button type="submit" data-run title="Send" aria-label="Send">↑<\/button>/);
   assert.match(contentScript, /\[data-composer-form\]'\)\.addEventListener\('submit'/);
   assert.match(contentScript, /event\.preventDefault\(\);\s*safeRunTask\(\);/);
   assert.match(contentScript, /requestSubmit\(\)/);
@@ -176,7 +180,7 @@ test('clicking the running spinner requests cancellation instead of being disabl
   assert.match(contentScript, /async function cancelActiveRun\(/);
   assert.match(contentScript, /method:\s*'codex\.cancel'/);
   assert.doesNotMatch(setRunningBody, /\[data-run\]'\)\.disabled = running/);
-  assert.match(setRunningBody, /aria-label', running \? '中断当前任务' : '发送'/);
+  assert.match(setRunningBody, /aria-label', running \? tr\('cancelRun'\) : tr\('send'\)/);
 });
 
 test('task failures after a user cancellation request render as interrupted', () => {

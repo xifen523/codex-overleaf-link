@@ -18,11 +18,15 @@ test('project snapshot action lives in the diagnostics menu instead of the heade
   assert.match(contentScript, /data-diagnostics-native-env/);
   assert.match(contentScript, /data-diagnostics-page-state/);
   assert.match(contentScript, /data-diagnostics-snapshot/);
+  assert.match(contentScript, /data-language-toggle/);
   assert.match(contentScript, /data-diagnostics-result/);
-  assert.match(contentScript, /遇到无法运行、无法写入、读不到文件时使用/);
-  assert.match(contentScript, /检查本机连接/);
-  assert.match(contentScript, /检查 Overleaf 写入/);
-  assert.match(contentScript, /检查项目读取/);
+  assert.match(contentScript, /Use when Codex cannot run, write, or read files/);
+  assert.match(contentScript, /Check Local Connection/);
+  assert.match(contentScript, /Check Overleaf Write Access/);
+  assert.match(contentScript, /Check Project Read/);
+  assert.match(contentScript, /Switch to Chinese/);
+  assert.match(contentScript, /function toggleLanguage\(/);
+  assert.match(contentScript, /function applyLocaleToPanel\(/);
   assert.match(contentScript, /function inspectNativeEnvironment\(/);
   assert.match(contentScript, /function formatNativeEnvironmentResult\(/);
   assert.match(contentScript, /function toggleDiagnosticsMenu\(/);
@@ -47,9 +51,9 @@ test('diagnostics render in a floating result panel instead of the task transcri
   assert.doesNotMatch(nativeBody, /appendLog\(/);
   assert.doesNotMatch(pageBody, /appendLog\(/);
   assert.doesNotMatch(snapshotBody, /appendLog\(/);
-  assert.match(nativeBody, /showDiagnosticsLoading\('检查本机连接'/);
-  assert.match(pageBody, /showDiagnosticsLoading\('检查 Overleaf 写入'/);
-  assert.match(snapshotBody, /showDiagnosticsLoading\('检查项目读取'/);
+  assert.match(nativeBody, /showDiagnosticsLoading\(tr\('diagnosticsNativeTitle'\)/);
+  assert.match(pageBody, /showDiagnosticsLoading\(tr\('diagnosticsPageTitle'\)/);
+  assert.match(snapshotBody, /showDiagnosticsLoading\(tr\('diagnosticsSnapshotTitle'\)/);
   assert.match(nativeBody, /showDiagnosticsResult\(formatNativeEnvironmentResult/);
   assert.match(pageBody, /showDiagnosticsResult\(formatPageStateDiagnosticsResult/);
   assert.match(snapshotBody, /showDiagnosticsResult\(formatProjectSnapshotDiagnosticsResult/);
@@ -67,7 +71,7 @@ test('diagnostic summaries use natural language while raw details stay collapsed
   assert.match(contentScript, /插件没有确认当前编辑器可以写入/);
   assert.match(contentScript, /插件已读到完整 Overleaf 项目/);
   assert.match(contentScript, /没有读到完整的 Overleaf 项目/);
-  assert.match(contentScript, /<summary>技术细节<\/summary>/);
+  assert.match(contentScript, /<summary data-i18n="technicalDetails">Technical Details<\/summary>/);
 });
 
 test('diagnostic result floats inside the Codex panel with visible side margins', () => {
