@@ -151,3 +151,15 @@ test('run controller truncates session history summaries while preserving change
   assert.match(result, /涉及文件：file-0\.tex, file-1\.tex/);
   assert.match(result, /等/);
 });
+
+test('run controller localizes session history changed file labels in English', () => {
+  const result = RunController.buildSessionHistoryResult({
+    locale: 'en',
+    assistantMessage: 'Conclusion: no issues.',
+    syncChanges: Array.from({ length: 10 }, (_, index) => ({ path: `file-${index}.tex` }))
+  });
+
+  assert.match(result, /Files changed: file-0\.tex, file-1\.tex/);
+  assert.match(result, /and more/);
+  assert.doesNotMatch(result, /涉及文件| 等/);
+});

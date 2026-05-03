@@ -14,7 +14,8 @@
         return {
           type: 'delete',
           path: change.path,
-          reason: '本地 Codex workspace 删除了这个文件。'
+          reasonKey: 'localWorkspaceDelete',
+          reason: 'Local Codex workspace deleted this file.'
         };
       }
       if (change.type === 'write' && existingPaths.has(change.path)) {
@@ -24,21 +25,25 @@
             type: 'edit',
             path: change.path,
             patches,
-            reason: `同步本地 Codex workspace 中的局部文件改动（${patches.length} 处）。`
+            reasonKey: 'localWorkspacePatch',
+            reasonParams: { count: patches.length },
+            reason: `Synced ${patches.length} local Codex workspace edit${patches.length === 1 ? '' : 's'}.`
           };
         }
         return {
           type: 'edit',
           path: change.path,
           replaceAll: String(change.content ?? ''),
-          reason: '同步本地 Codex workspace 中的文件内容。'
+          reasonKey: 'localWorkspaceContent',
+          reason: 'Synced file content from the local Codex workspace.'
         };
       }
       return {
         type: 'create',
         path: change.path,
         content: change.content || '',
-        reason: '同步本地 Codex workspace 中的新文件。'
+        reasonKey: 'localWorkspaceCreate',
+        reason: 'Synced a new file from the local Codex workspace.'
       };
     }).filter(operation => operation.path);
   }
@@ -161,29 +166,46 @@
     };
   }
 
-  function formatUnsupportedLocalChangeSummary(changes = []) {
+  function formatUnsupportedLocalChangeSummary(changes = [], locale = 'zh') {
     if (!changes.length) {
       return '';
     }
+    const isEnglish = locale === 'en';
     const visibleChanges = changes.slice(0, 5);
     const lines = [
-      'Codex 在本地生成了这些文件，但插件没有同步回 Overleaf：',
-      ...visibleChanges.map(change => `- ${change.path || '未命名文件'}：${formatUnsupportedLocalChangeReason(change.reason)}`)
+      isEnglish
+        ? 'Codex generated these local files, but the extension did not sync them back to Overleaf:'
+        : 'Codex 在本地生成了这些文件，但插件没有同步回 Overleaf：',
+      ...visibleChanges.map(change => {
+        const path = change.path || (isEnglish ? 'unnamed file' : '未命名文件');
+        const reason = formatUnsupportedLocalChangeReason(change.reason, locale);
+        return isEnglish ? `- ${path}: ${reason}` : `- ${path}：${reason}`;
+      })
     ];
     if (changes.length > visibleChanges.length) {
-      lines.push(`另外 ${changes.length - visibleChanges.length} 个文件未显示。`);
+      const hiddenCount = changes.length - visibleChanges.length;
+      lines.push(isEnglish
+        ? `${hiddenCount} more file${hiddenCount === 1 ? '' : 's'} not shown.`
+        : `另外 ${hiddenCount} 个文件未显示。`);
     }
     return lines.join('\n');
   }
 
-  function formatUnsupportedLocalChangeReason(reason) {
+  function formatUnsupportedLocalChangeReason(reason, locale = 'zh') {
+    const isEnglish = locale === 'en';
     if (reason === 'generated_artifact') {
-      return 'LaTeX 构建产物，默认不写回。';
+      return isEnglish
+        ? 'LaTeX build artifact; not written back by default.'
+        : 'LaTeX 构建产物，默认不写回。';
     }
     if (reason === 'unsupported_non_text_file') {
-      return '非文本文件，暂不支持自动写回。';
+      return isEnglish
+        ? 'Non-text file; automatic writeback is not supported yet.'
+        : '非文本文件，暂不支持自动写回。';
     }
-    return '当前类型暂不支持自动写回。';
+    return isEnglish
+      ? 'This file type is not supported for automatic writeback yet.'
+      : '当前类型暂不支持自动写回。';
   }
 
   function getAppliedSyncChanges(syncChanges = [], applied = {}) {

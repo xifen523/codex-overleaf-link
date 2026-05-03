@@ -96,6 +96,8 @@ test('blocks edits when the base snapshot lacks the target file', () => {
   assert.deepEqual(result, {
     ok: false,
     code: 'missing_base_file',
+    reasonKey: 'missingBaseFile',
+    reasonParams: { filePath: 'appendix.tex' },
     reason: 'appendix.tex 在任务开始时没有被 Codex 读到。Codex 没有覆盖它；请刷新项目内容后重试。'
   });
 });

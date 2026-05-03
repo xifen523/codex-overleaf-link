@@ -29,7 +29,9 @@ test('buildSyncApplyOperations prefers local text patches for existing files', (
           insert: 'gamm'
         }
       ],
-      reason: '同步本地 Codex workspace 中的局部文件改动（1 处）。'
+      reasonKey: 'localWorkspacePatch',
+      reasonParams: { count: 1 },
+      reason: 'Synced 1 local Codex workspace edit.'
     }
   ]);
 });
@@ -82,4 +84,18 @@ test('unsupported local changes are reported with per-file user-readable reasons
   assert.match(summary, /- main\.pdf：LaTeX 构建产物，默认不写回。/);
   assert.match(summary, /- diagram\.png：非文本文件，暂不支持自动写回。/);
   assert.match(summary, /- unknown\.bin：当前类型暂不支持自动写回。/);
+});
+
+test('unsupported local changes are localized in English', () => {
+  const summary = WritebackController.formatUnsupportedLocalChangeSummary([
+    { path: 'main.pdf', reason: 'generated_artifact' },
+    { path: 'diagram.png', reason: 'unsupported_non_text_file' },
+    { path: 'unknown.bin', reason: 'unknown_reason' }
+  ], 'en');
+
+  assert.match(summary, /Codex generated these local files, but the extension did not sync them back to Overleaf/);
+  assert.match(summary, /- main\.pdf: LaTeX build artifact; not written back by default\./);
+  assert.match(summary, /- diagram\.png: Non-text file; automatic writeback is not supported yet\./);
+  assert.match(summary, /- unknown\.bin: This file type is not supported for automatic writeback yet\./);
+  assert.doesNotMatch(summary, /[\u4e00-\u9fff]/);
 });

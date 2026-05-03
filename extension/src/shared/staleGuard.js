@@ -34,6 +34,8 @@
       return {
         ok: false,
         code: 'missing_base_file',
+        reasonKey: 'missingBaseFile',
+        reasonParams: { filePath },
         reason: `${filePath || '这个文件'} 在任务开始时没有被 Codex 读到。Codex 没有覆盖它；请刷新项目内容后重试。`
       };
     }
@@ -48,6 +50,8 @@
       return {
         ok: false,
         code: 'stale_snapshot',
+        reasonKey: 'staleSnapshot',
+        reasonParams: { filePath },
         reason: `${filePath} 在任务执行期间被你或协作者改过，Codex 没有覆盖它。请查看差异后重试。`
       };
     }
@@ -70,6 +74,7 @@
         return {
           ok: false,
           code: 'stale_patch_range',
+          reasonKey: 'stalePatchLocation',
           reason: 'Codex 要修改的位置已经无法和当前 Overleaf 内容对齐，所以没有写入。请重新运行任务。'
         };
       }
@@ -77,6 +82,7 @@
         return {
           ok: false,
           code: 'stale_patch_range',
+          reasonKey: 'stalePatchConflict',
           reason: 'Codex 要修改的具体位置已经被你或协作者改过，所以没有覆盖它。请查看差异后重试。'
         };
       }

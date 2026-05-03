@@ -93,6 +93,14 @@
     return i18n?.t?.(getLocale(), key, params) || key;
   }
 
+  function tx(en, zh) {
+    return getLocale() === 'zh' ? zh : en;
+  }
+
+  function listSeparator() {
+    return getLocale() === 'zh' ? '、' : ', ';
+  }
+
   function ensurePanelOpen() {
     if (!panel) {
       panel = document.createElement('aside');
@@ -260,7 +268,7 @@
       panel.querySelector('[data-context-refresh]').addEventListener('click', () => loadContextFiles({ force: true }));
       for (const button of panel.querySelectorAll('[data-mode-choice]')) {
         button.addEventListener('click', () => {
-          selectMode(button.dataset.modeChoice).catch(error => appendPlainLog(`切换模式失败：${error.message}`));
+          selectMode(button.dataset.modeChoice).catch(error => appendPlainLog(tr('modeSwitchFailedToast', { message: error.message })));
         });
       }
 
@@ -949,11 +957,11 @@
       showDiagnosticsResult(formatProjectSnapshotDiagnosticsResult(project));
     } catch (error) {
       showDiagnosticsResult({
-        title: '项目读取失败',
-        subtitle: '插件没有拿到 Overleaf 项目内容。',
+        title: tx('Project Read Failed', '项目读取失败'),
+        subtitle: tx('The extension did not receive Overleaf project content.', '插件没有拿到 Overleaf 项目内容。'),
         status: 'failed',
         summary: tr('diagnosticsSnapshotErrorSummary'),
-        nextStep: '刷新 Overleaf 页面，等左侧文件树加载完成后重试。',
+        nextStep: tx('Reload Overleaf, wait for the left file tree to finish loading, then retry.', '刷新 Overleaf 页面，等左侧文件树加载完成后重试。'),
         technical: error?.stack || error?.message || String(error)
       });
     }
@@ -968,24 +976,24 @@
   function formatNativeEnvironmentResult(response) {
     if (!response?.ok) {
       return {
-        title: '本机连接异常',
-        subtitle: '插件没有连上本机服务。',
+        title: tx('Local Connection Problem', '本机连接异常'),
+        subtitle: tx('The extension could not connect to the local service.', '插件没有连上本机服务。'),
         status: 'failed',
-        summary: '插件没有连上本机服务，所以暂时不能调用本地 Codex 或同步本地 workspace。',
-        nextStep: '确认 native host 已安装，并重新加载 Chrome 扩展后再试。',
+        summary: tx('The extension is not connected to the local service, so it cannot run local Codex or sync the local workspace yet.', '插件没有连上本机服务，所以暂时不能调用本地 Codex 或同步本地 workspace。'),
+        nextStep: tx('Make sure the native host is installed, reload the Chrome extension, then try again.', '确认 native host 已安装，并重新加载 Chrome 扩展后再试。'),
         installCommand: INSTALL_COMMAND,
-        technical: response?.error?.message || 'native host 没有响应'
+        technical: response?.error?.message || tx('native host did not respond', 'native host 没有响应')
       };
     }
 
     const environment = response.result?.environment;
     if (!environment) {
       return {
-        title: '本机连接可用',
-        subtitle: 'Native Host 已响应。',
+        title: tx('Local Connection Available', '本机连接可用'),
+        subtitle: tx('Native Host responded.', 'Native Host 已响应。'),
         status: 'completed',
         summary: tr('diagnosticsNativeEmptySummary'),
-        nextStep: '如果运行任务失败，请重新安装 native host 或检查终端里的 codex 命令。',
+        nextStep: tx('If tasks fail to run, reinstall the native host or check the codex command in Terminal.', '如果运行任务失败，请重新安装 native host 或检查终端里的 codex 命令。'),
         technical: JSON.stringify(response.result || {}, null, 2)
       };
     }
@@ -995,33 +1003,35 @@
     const latexOk = latexTools.length > 0;
     const bullets = [
       codexOk
-        ? `Codex 可用：${environment.codex.path || '已在 PATH 中找到'}`
-        : 'Codex 没有找到：插件不能启动本地 Codex。',
+        ? tx(`Codex available: ${environment.codex.path || 'found on PATH'}`, `Codex 可用：${environment.codex.path || '已在 PATH 中找到'}`)
+        : tx('Codex was not found: the extension cannot start local Codex.', 'Codex 没有找到：插件不能启动本地 Codex。'),
       latexOk
-        ? `LaTeX 工具可用：${latexTools.join(', ')}`
-        : 'LaTeX 工具没有找到：可以编辑文本，但不能在本地编译验证。'
+        ? tx(`LaTeX tools available: ${latexTools.join(', ')}`, `LaTeX 工具可用：${latexTools.join(', ')}`)
+        : tx('LaTeX tools were not found: text editing works, but local compile checks are limited.', 'LaTeX 工具没有找到：可以编辑文本，但不能在本地编译验证。')
     ];
 
     if (codexOk && latexOk) {
       return {
-        title: '本机连接正常',
-        subtitle: 'Codex 和 LaTeX 都可以使用。',
+        title: tx('Local Connection OK', '本机连接正常'),
+        subtitle: tx('Codex and LaTeX are available.', 'Codex 和 LaTeX 都可以使用。'),
         status: 'completed',
-        summary: 'Codex 已连接，本机 LaTeX 工具可用。你可以让 Codex 读取、修改并本地检查 Overleaf 项目。',
+        summary: tx('Codex is connected and local LaTeX tools are available. Codex can read, edit, and locally check this Overleaf project.', 'Codex 已连接，本机 LaTeX 工具可用。你可以让 Codex 读取、修改并本地检查 Overleaf 项目。'),
         bullets,
         technical: JSON.stringify(environment, null, 2)
       };
     }
 
     return {
-      title: codexOk ? '本机连接部分可用' : 'Codex 不可用',
-      subtitle: codexOk ? 'Codex 可用，但编译工具不完整。' : '没有找到本机 Codex。',
+      title: codexOk ? tx('Local Connection Partially Available', '本机连接部分可用') : tx('Codex Unavailable', 'Codex 不可用'),
+      subtitle: codexOk ? tx('Codex is available, but compile tools are incomplete.', 'Codex 可用，但编译工具不完整。') : tx('Local Codex was not found.', '没有找到本机 Codex。'),
       status: codexOk ? 'warning' : 'failed',
       summary: codexOk
-        ? '本机 Codex 可以运行，但没有找到 LaTeX 编译工具；修改文件不受影响，编译验证会受限。'
-        : '插件已经连上 native host，但没有找到本机 Codex，所以不能启动任务。',
+        ? tx('Local Codex can run, but LaTeX compile tools were not found. File edits are unaffected, but compile verification is limited.', '本机 Codex 可以运行，但没有找到 LaTeX 编译工具；修改文件不受影响，编译验证会受限。')
+        : tx('The extension reached the native host, but local Codex was not found, so tasks cannot start.', '插件已经连上 native host，但没有找到本机 Codex，所以不能启动任务。'),
       bullets,
-      nextStep: codexOk ? '如需编译验证，请确认 latexmk 或 pdflatex 在终端 PATH 中可用。' : '请确认终端里可以运行 codex，然后重新加载扩展。',
+      nextStep: codexOk
+        ? tx('For compile verification, make sure latexmk or pdflatex is available on your Terminal PATH.', '如需编译验证，请确认 latexmk 或 pdflatex 在终端 PATH 中可用。')
+        : tx('Make sure codex works in Terminal, then reload the extension.', '请确认终端里可以运行 codex，然后重新加载扩展。'),
       technical: JSON.stringify(environment, null, 2)
     };
   }
@@ -1035,11 +1045,11 @@
       showDiagnosticsResult(formatPageStateDiagnosticsResult(probe));
     } catch (error) {
       showDiagnosticsResult({
-        title: 'Overleaf 页面检查失败',
-        subtitle: '插件没有读到当前页面状态。',
+        title: tx('Overleaf Page Check Failed', 'Overleaf 页面检查失败'),
+        subtitle: tx('The extension did not read the current page state.', '插件没有读到当前页面状态。'),
         status: 'failed',
-        summary: '这通常表示 Overleaf 页面还在加载，或者页面脚本暂时不可用。',
-        nextStep: '刷新 Overleaf 页面，点开要处理的 .tex 文件后再试。',
+        summary: tx('This usually means Overleaf is still loading, or the page script is temporarily unavailable.', '这通常表示 Overleaf 页面还在加载，或者页面脚本暂时不可用。'),
+        nextStep: tx('Reload Overleaf, open the .tex file you want to work on, then try again.', '刷新 Overleaf 页面，点开要处理的 .tex 文件后再试。'),
         technical: error?.stack || error?.message || String(error)
       });
     }
@@ -1051,32 +1061,32 @@
     const writable = probe?.capabilities?.editor?.write !== false;
     const readable = probe?.editor?.ok === true;
     const bullets = [
-      readable ? '当前文件已经读到。' : '还没有确认当前文件内容。',
-      writable ? '当前编辑器写入能力会在写入时再次验证。' : '当前编辑器暂时不可写。',
-      reviewingOk ? '留痕/Reviewing 状态已确认。' : '留痕/Reviewing 状态还没有确认。'
+      readable ? tx('Current file was read.', '当前文件已经读到。') : tx('Current file content has not been verified yet.', '还没有确认当前文件内容。'),
+      writable ? tx('Editor write access will be verified again during writeback.', '当前编辑器写入能力会在写入时再次验证。') : tx('The current editor is not writable yet.', '当前编辑器暂时不可写。'),
+      reviewingOk ? tx('Reviewing/Track Changes status is verified.', '留痕/Reviewing 状态已确认。') : tx('Reviewing/Track Changes status is not verified yet.', '留痕/Reviewing 状态还没有确认。')
     ];
 
     if (readable && writable) {
       return {
-        title: 'Overleaf 页面可用',
+        title: tx('Overleaf Page Ready', 'Overleaf 页面可用'),
         subtitle: formatProbeStatusBar(probe),
         status: reviewingOk || state?.mode === 'ask' ? 'completed' : 'warning',
-        summary: '当前 Overleaf 文件可以读取和写入。写入前插件仍会再次验证，避免覆盖用户或协作者的新改动。',
+        summary: tx('The current Overleaf file can be read and written. The extension still verifies before writing to avoid overwriting new user or collaborator edits.', '当前 Overleaf 文件可以读取和写入。写入前插件仍会再次验证，避免覆盖用户或协作者的新改动。'),
         bullets,
-        nextStep: reviewingOk || state?.mode === 'ask' ? '' : '如果需要留痕写入，请先在 Overleaf 开启 Reviewing/Track Changes。',
+        nextStep: reviewingOk || state?.mode === 'ask' ? '' : tx('If you need tracked writes, turn on Overleaf Reviewing/Track Changes first.', '如果需要留痕写入，请先在 Overleaf 开启 Reviewing/Track Changes。'),
         technical: formatPageDiagnosticsTechnicalDetails(probe)
       };
     }
 
     return {
-      title: readable ? '当前文件已读取，但写入状态不完整' : '还没有确认当前文件',
+      title: readable ? tx('Current File Read, Write Status Incomplete', '当前文件已读取，但写入状态不完整') : tx('Current File Not Verified Yet', '还没有确认当前文件'),
       subtitle: formatProbeStatusBar(probe),
       status: 'warning',
       summary: readable
-        ? '插件已读到当前 Overleaf 文件，但还没有确认当前编辑器可以写入。'
-        : '插件没有确认当前编辑器可以写入。通常是还没点开 .tex 文件，或者 Overleaf 页面仍在加载。',
+        ? tx('The extension read the current Overleaf file, but has not verified that the current editor can be written.', '插件已读到当前 Overleaf 文件，但还没有确认当前编辑器可以写入。')
+        : tx('The extension has not verified that the current editor can be written. Usually this means no .tex file is open yet, or Overleaf is still loading.', '插件没有确认当前编辑器可以写入。通常是还没点开 .tex 文件，或者 Overleaf 页面仍在加载。'),
       bullets,
-      nextStep: '在 Overleaf 左侧文件树点开要处理的 .tex 文件，等编辑器加载完成后重新检测。',
+      nextStep: tx('Open the target .tex file from the left Overleaf file tree, wait for the editor to load, then check again.', '在 Overleaf 左侧文件树点开要处理的 .tex 文件，等编辑器加载完成后重新检测。'),
       technical: formatPageDiagnosticsTechnicalDetails(probe)
     };
   }
@@ -1090,38 +1100,44 @@
     const warningText = [...warnings.blocking, ...warnings.nonBlocking].map(formatProjectSnapshotWarning);
     const source = project?.capabilities?.method || 'unknown';
     const bullets = [
-      `文本文件：${textCount} 个`,
-      `资源文件：${binaryCount} 个`,
-      project?.activePath ? `当前文件：${project.activePath}` : '当前文件：未识别'
+      tx(`Text files: ${textCount}`, `文本文件：${textCount} 个`),
+      tx(`Asset files: ${binaryCount}`, `资源文件：${binaryCount} 个`),
+      project?.activePath ? tx(`Current file: ${project.activePath}`, `当前文件：${project.activePath}`) : tx('Current file: not detected', '当前文件：未识别')
     ];
 
     if (fullProject && files.length) {
       return {
-        title: '项目读取正常',
-        subtitle: `读取来源：${source}`,
+        title: tx('Project Read OK', '项目读取正常'),
+        subtitle: tx(`Read source: ${source}`, `读取来源：${source}`),
         status: 'completed',
-        summary: `插件已读到完整 Overleaf 项目：${textCount} 个文本文件${binaryCount ? `，${binaryCount} 个资源文件` : ''}。`,
+        summary: tx(
+          `The extension read the full Overleaf project: ${textCount} text file(s)${binaryCount ? `, ${binaryCount} asset file(s)` : ''}.`,
+          `插件已读到完整 Overleaf 项目：${textCount} 个文本文件${binaryCount ? `，${binaryCount} 个资源文件` : ''}。`
+        ),
         bullets: warningText.length ? [...bullets, ...warningText] : bullets,
         technical: formatProjectSnapshotLog(project)
       };
     }
 
     return {
-      title: files.length ? '没有读到完整项目' : '没有读到项目文件',
-      subtitle: `读取来源：${source}`,
+      title: files.length ? tx('Full Project Not Read', '没有读到完整项目') : tx('No Project Files Read', '没有读到项目文件'),
+      subtitle: tx(`Read source: ${source}`, `读取来源：${source}`),
       status: 'warning',
       summary: files.length
-        ? `没有读到完整的 Overleaf 项目。当前只读到 ${textCount} 个文本文件${binaryCount ? `，${binaryCount} 个资源文件` : ''}。`
-        : '没有读到完整的 Overleaf 项目，也没有拿到可用文件内容。',
+        ? tx(
+          `The full Overleaf project was not read. Currently read ${textCount} text file(s)${binaryCount ? `, ${binaryCount} asset file(s)` : ''}.`,
+          `没有读到完整的 Overleaf 项目。当前只读到 ${textCount} 个文本文件${binaryCount ? `，${binaryCount} 个资源文件` : ''}。`
+        )
+        : tx('The full Overleaf project was not read, and no usable file content was available.', '没有读到完整的 Overleaf 项目，也没有拿到可用文件内容。'),
       bullets: warningText.length ? [...bullets, ...warningText] : bullets,
-      nextStep: '刷新 Overleaf 页面，等左侧文件树加载完成后重试；如果只想处理一个文件，可以用 + 添加 @file 上下文。',
+      nextStep: tx('Reload Overleaf and wait for the left file tree to load, then retry. If you only want one file, use + to add @file context.', '刷新 Overleaf 页面，等左侧文件树加载完成后重试；如果只想处理一个文件，可以用 + 添加 @file 上下文。'),
       technical: formatProjectSnapshotLog(project)
     };
   }
 
   function formatPageDiagnosticsTechnicalDetails(probe) {
     const lines = [];
-    lines.push(`状态：${formatProbeStatusBar(probe || {})}`);
+    lines.push(tx(`Status: ${formatProbeStatusBar(probe || {})}`, `状态：${formatProbeStatusBar(probe || {})}`));
     const diagnostics = probe?.reviewingDiagnostics;
     if (diagnostics) {
       lines.push(`Reviewing controls: ${diagnostics.controlCount || 0}; body=${Boolean(diagnostics.bodyTextHasReviewing)}; text=${Boolean(diagnostics.textContentHasReviewing)}`);
@@ -1179,18 +1195,21 @@
     const runSessionId = currentRunView.sessionId;
     clearTaskComposer();
     appendRunEvent({
-      title: '我会先理解你的请求，再检查相关 Overleaf 文件。',
+      title: tx('I will first understand your request, then inspect the relevant Overleaf files.', '我会先理解你的请求，再检查相关 Overleaf 文件。'),
       status: 'running',
       detail: {
-        '模式': formatModeLabel(state.mode),
-        '模型': state.model,
-        '推理强度': state.reasoningEffort,
-        '要求留痕': state.requireReviewing ? '是' : '否',
+        [tr('mode')]: formatModeLabel(state.mode),
+        [tx('Model', '模型')]: state.model,
+        [tx('Reasoning effort', '推理强度')]: state.reasoningEffort,
+        [tx('Track required', '要求留痕')]: state.requireReviewing ? tx('yes', '是') : tx('no', '否'),
         '@context': formatContextItems(getActiveFocusFiles())
       }
     });
     appendRunEvent({
-      title: `这轮会优先参考：${formatContextItems(getActiveFocusFiles())}`,
+      title: tx(
+        `This run will prioritize: ${formatContextItems(getActiveFocusFiles())}`,
+        `这轮会优先参考：${formatContextItems(getActiveFocusFiles())}`
+      ),
       status: 'completed'
     });
 
@@ -1201,7 +1220,7 @@
       }
 
       appendRunEvent({
-        title: '正在同步 Overleaf 项目到本地 Codex workspace。',
+        title: tx('Syncing the Overleaf project to the local Codex workspace.', '正在同步 Overleaf 项目到本地 Codex workspace。'),
         status: 'running'
       });
       const project = await getRunProjectSnapshot();
@@ -1224,16 +1243,16 @@
       const restrictToFocusFiles = runController.shouldRestrictWritebackToFocus({ focusFiles });
       if (snapshotWarnings.blocking.length && !warmMirrorReuse.useExistingMirror && !focusedPartialSnapshot) {
         for (const warning of snapshotWarnings.blocking) {
-          appendLog(`无法继续：${formatProjectSnapshotWarning(warning)}`);
+          appendLog(tx(`Cannot continue: ${formatProjectSnapshotWarning(warning)}`, `无法继续：${formatProjectSnapshotWarning(warning)}`));
         }
         appendCompletionReport({
-          conclusion: '这轮没有继续：没有读到完整的 Overleaf 项目内容。',
+          conclusion: tx('This run did not continue: the full Overleaf project was not read.', '这轮没有继续：没有读到完整的 Overleaf 项目内容。'),
           status: 'blocked',
           operations: [],
           applyResults: [],
-          nextStep: '请刷新 Overleaf 项目或重新打开要处理的 .tex 文件后再试。'
+          nextStep: tx('Reload the Overleaf project or reopen the .tex file you want to process, then retry.', '请刷新 Overleaf 项目或重新打开要处理的 .tex 文件后再试。')
         });
-        finishRunView('已阻止：没有读到完整项目', 'failed');
+        finishRunView(tx('Blocked: full project was not read', '已阻止：没有读到完整项目'), 'failed');
         return;
       }
 
@@ -1242,18 +1261,21 @@
         fileOverlays = warmMirrorReuse.fileOverlays;
         appendRunEvent({
           title: warmMirrorReuse.partialSnapshot
-            ? '没有读到完整 Overleaf 项目，但本地 workspace 刚同步过；继续使用最近的完整 workspace，并叠加当前文件内容。'
-            : '使用已预热的本地 workspace（仅同步焦点文件差异）。',
+            ? tx('The full Overleaf project was not read, but the local workspace was synced recently. Continuing with the latest full workspace plus current-file overlay.', '没有读到完整 Overleaf 项目，但本地 workspace 刚同步过；继续使用最近的完整 workspace，并叠加当前文件内容。')
+            : tx('Using the warmed local workspace and syncing only focus-file deltas.', '使用已预热的本地 workspace（仅同步焦点文件差异）。'),
           status: 'completed'
         });
       } else if (focusedPartialSnapshot) {
         appendRunEvent({
-          title: `只读到你选择的上下文文件：${focusFiles.join(', ')}；本轮将只基于这些文件运行和写回。`,
+          title: tx(
+            `Only selected context files were read: ${focusFiles.join(', ')}. This run will read and write only these files.`,
+            `只读到你选择的上下文文件：${focusFiles.join(', ')}；本轮将只基于这些文件运行和写回。`
+          ),
           status: 'completed'
         });
       } else {
         for (const warning of snapshotWarnings.nonBlocking) {
-          appendLog(`提示：${formatProjectSnapshotWarning(warning)}`);
+          appendLog(tx(`Note: ${formatProjectSnapshotWarning(warning)}`, `提示：${formatProjectSnapshotWarning(warning)}`));
         }
       }
 
@@ -1263,16 +1285,22 @@
       // Resolve @compile-log if mentioned in task
       let compileLogContext = null;
       if (/\b@compile-log\b/i.test(task)) {
-        appendRunEvent({ title: '正在获取编译日志 (@compile-log)。', status: 'running' });
+        appendRunEvent({ title: tx('Fetching compile log (@compile-log).', '正在获取编译日志 (@compile-log)。'), status: 'running' });
         compileLogContext = await resolveCompileLogContext();
         if (compileLogContext.available) {
-          appendRunEvent({ title: `编译日志已获取（${(compileLogContext.errors || []).length} 个错误，${(compileLogContext.warnings || []).length} 个警告）。`, status: 'completed' });
+          appendRunEvent({
+            title: tx(
+              `Compile log fetched (${(compileLogContext.errors || []).length} errors, ${(compileLogContext.warnings || []).length} warnings).`,
+              `编译日志已获取（${(compileLogContext.errors || []).length} 个错误，${(compileLogContext.warnings || []).length} 个警告）。`
+            ),
+            status: 'completed'
+          });
         } else {
-          appendRunEvent({ title: `编译日志不可用：${compileLogContext.reason}`, status: 'failed' });
+          appendRunEvent({ title: tx(`Compile log unavailable: ${compileLogContext.reason}`, `编译日志不可用：${compileLogContext.reason}`), status: 'failed' });
         }
       }
 
-      appendRunEvent({ title: '本地 Codex session 开始运行。', status: 'running' });
+      appendRunEvent({ title: tx('Local Codex session is starting.', '本地 Codex session 开始运行。'), status: 'running' });
       let response = await sendNative({
         method: 'codex.run',
         params: buildCodexRunParams({
@@ -1291,20 +1319,20 @@
       if (!response.ok && response.error?.code === 'mirror_stale' && useExistingMirror) {
         if (project?.capabilities?.fullProjectSnapshot === false) {
           appendRunEvent({
-            title: '最近的本地 workspace 已过期，而且这次没有读到完整 Overleaf 项目；Codex 没有继续。',
+            title: tx('The recent local workspace is stale, and this run did not read the full Overleaf project. Codex did not continue.', '最近的本地 workspace 已过期，而且这次没有读到完整 Overleaf 项目；Codex 没有继续。'),
             status: 'failed'
           });
           appendCompletionReport({
-            conclusion: '这轮没有继续：Overleaf 没有提供完整项目内容，本地 workspace 也不够新。',
+            conclusion: tx('This run did not continue: Overleaf did not provide the full project, and the local workspace is not fresh enough.', '这轮没有继续：Overleaf 没有提供完整项目内容，本地 workspace 也不够新。'),
             status: 'blocked',
             operations: [],
             applyResults: [],
-            nextStep: '请刷新 Overleaf 项目，等文件列表加载完成后重试；也可以先选中一个具体 .tex 文件作为 @context。'
+            nextStep: tx('Reload the Overleaf project and wait for the file list to load, then retry. You can also select a specific .tex file as @context first.', '请刷新 Overleaf 项目，等文件列表加载完成后重试；也可以先选中一个具体 .tex 文件作为 @context。')
           });
-          finishRunView('已阻止：本地 workspace 过期', 'failed');
+          finishRunView(tx('Blocked: local workspace is stale', '已阻止：本地 workspace 过期'), 'failed');
           return;
         }
-        appendRunEvent({ title: '预热 workspace 已过期，正在重新完整同步。', status: 'running' });
+        appendRunEvent({ title: tx('Warmed workspace is stale. Running a fresh full sync.', '预热 workspace 已过期，正在重新完整同步。'), status: 'running' });
         useExistingMirror = false;
         response = await sendNative({
           method: 'codex.run',
@@ -1333,7 +1361,7 @@
               await StorageDb.putRecord('sessions', record);
             }
           }
-          appendRunEvent({ title: '正在新建 Codex 会话线程。', status: 'running' });
+          appendRunEvent({ title: tx('Creating a new Codex conversation thread.', '正在新建 Codex 会话线程。'), status: 'running' });
           response = await sendNative({
             method: 'codex.run',
             params: buildCodexRunParams({
@@ -1348,8 +1376,8 @@
             })
           });
         } else {
-          appendRunEvent({ title: '已取消：用户选择不新建线程。', status: 'rejected' });
-          finishRunView('已取消', 'rejected');
+          appendRunEvent({ title: tx('Cancelled: user chose not to create a new thread.', '已取消：用户选择不新建线程。'), status: 'rejected' });
+          finishRunView(tx('Cancelled', '已取消'), 'rejected');
           return;
         }
       }
@@ -1357,10 +1385,10 @@
       if (!response.ok) {
         if (runCancellationRequested || isRunCancellationError(response.error)) {
           appendRunCancelledReport();
-          finishRunView('已中断', 'rejected');
+          finishRunView(tx('Cancelled', '已中断'), 'rejected');
           return;
         }
-        const translated = translateRawError(response.error.message, { mode: state.mode });
+        const translated = translateRawError(response.error.message, { mode: state.mode, locale: getLocale() });
         appendRunEvent({
           title: translated.conclusion,
           status: 'failed',
@@ -1381,7 +1409,7 @@
           errorMessage: response.error.message,
           mode: state.mode
         });
-        finishRunView('本地 Codex 错误', 'failed');
+        finishRunView(tx('Local Codex error', '本地 Codex 错误'), 'failed');
         return;
       }
 
@@ -1396,7 +1424,10 @@
         unsupportedChanges: response.result.unsupportedChanges || []
       });
 
-      finishRunView(syncOutcome.hasSkippedOperations ? '同步完成但有跳过项' : '同步完成', syncOutcome.hasSkippedOperations ? 'failed' : 'completed');
+      finishRunView(
+        syncOutcome.hasSkippedOperations ? tx('Sync completed with skipped items', '同步完成但有跳过项') : tx('Sync completed', '同步完成'),
+        syncOutcome.hasSkippedOperations ? 'failed' : 'completed'
+      );
       try {
         const runSessionForHistory = findSessionById(runSessionId) || getActiveSession(state);
         const updatedSession = recordSessionResult(runSessionForHistory, {
@@ -1427,10 +1458,10 @@
         applyStateToPanel();
       } catch (persistenceError) {
         appendRunEvent({
-          title: 'Codex 结果已生成，但保存本地会话记录失败。',
+          title: tx('Codex result was generated, but saving local session history failed.', 'Codex 结果已生成，但保存本地会话记录失败。'),
           status: 'failed',
           detail: {
-            '影响': '本轮回答已经显示；刷新页面后，这轮可能不会出现在历史 session 里。'
+            [tx('Impact', '影响')]: tx('This answer is already visible. After reloading, this run may not appear in session history.', '本轮回答已经显示；刷新页面后，这轮可能不会出现在历史 session 里。')
           },
           technicalDetail: {
             message: persistenceError.message,
@@ -1441,10 +1472,10 @@
     } catch (error) {
       if (runCancellationRequested || isRunCancellationError(error)) {
         appendRunCancelledReport();
-        finishRunView('已中断', 'rejected');
+        finishRunView(tx('Cancelled', '已中断'), 'rejected');
         return;
       }
-      const translated = translateRawError(error.message, { mode: state?.mode });
+      const translated = translateRawError(error.message, { mode: state?.mode, locale: getLocale() });
       appendRunEvent({
         title: translated.conclusion,
         status: 'failed',
@@ -1471,7 +1502,7 @@
         errorMessage: error.message,
         mode: state?.mode
       });
-      finishRunView('任务失败', 'failed');
+      finishRunView(tx('Task failed', '任务失败'), 'failed');
     } finally {
       setRunning(false);
       nativeChannel.clearActiveRequest();
@@ -1487,7 +1518,7 @@
     }
 
     appendRunEvent({
-      title: '正在确认 Overleaf 留痕状态。',
+      title: tx('Checking Overleaf Reviewing/Track Changes before starting.', '正在确认 Overleaf 留痕状态。'),
       status: 'running'
     });
 
@@ -1497,7 +1528,7 @@
     } catch (error) {
       result = {
         ok: false,
-        reason: error?.message || 'Overleaf 没有返回留痕状态',
+        reason: error?.message || tx('Overleaf did not return track changes status', 'Overleaf 没有返回留痕状态'),
         reviewing: null
       };
     }
@@ -1505,20 +1536,24 @@
     if (result?.ok) {
       appendRunEvent({
         title: result.activated
-          ? '已开启 Overleaf 留痕，开始处理任务。'
-          : 'Overleaf 留痕已经开启，开始处理任务。',
+          ? tx('Overleaf Reviewing/Track Changes is now on. Starting the task.', '已开启 Overleaf 留痕，开始处理任务。')
+          : tx('Overleaf Reviewing/Track Changes is already on. Starting the task.', 'Overleaf 留痕已经开启，开始处理任务。'),
         status: 'completed'
       });
       return result;
     }
 
-    const reason = result?.reason || 'Overleaf 没有返回留痕状态';
+    const reason = localizeVisibleReason(result?.reason || tx('Overleaf did not return track changes status', 'Overleaf 没有返回留痕状态'));
+    const nextStep = tx(
+      'You may not have permission, or this Overleaf page did not expose the Reviewing switch. Switch to Reviewing manually and retry, or turn off Track before writing.',
+      '你可能没有权限，或 Overleaf 当前页面没有暴露切换入口。可以手动切到 Reviewing 后重试，或关闭“留痕”再运行。'
+    );
     appendRunEvent({
-      title: '任务未开始：无法开启 Overleaf 留痕。',
+      title: tx('Task not started: could not enable Overleaf Reviewing/Track Changes.', '任务未开始：无法开启 Overleaf 留痕。'),
       status: 'failed',
       detail: {
-        '原因': reason,
-        '下一步': '你可能没有权限，或 Overleaf 当前页面没有暴露切换入口。可以手动切到 Reviewing 后重试，或关闭“留痕”再运行。'
+        [tr('detailReason')]: reason,
+        [tr('detailNext')]: nextStep
       },
       technicalDetail: {
         reason,
@@ -1526,13 +1561,13 @@
       }
     });
     appendCompletionReport({
-      conclusion: '这轮任务没有开始：Codex 没有运行，也没有写入文件。',
+      conclusion: tx('This task did not start: Codex did not run and no files were written.', '这轮任务没有开始：Codex 没有运行，也没有写入文件。'),
       status: 'blocked',
       operations: [],
       applyResults: [],
-      nextStep: '你可能没有权限，或 Overleaf 当前页面没有暴露切换入口。可以手动切到 Reviewing 后重试，或关闭“留痕”再运行。'
+      nextStep
     });
-    finishRunView('未开始：无法开启留痕', 'failed');
+    finishRunView(tx('Not started: could not enable Track Changes', '未开始：无法开启留痕'), 'failed');
     return {
       ok: false,
       reason,
@@ -1541,7 +1576,7 @@
   }
 
   function buildSessionHistoryResult({ assistantMessage = '', syncOutcome = {}, syncChanges = [] } = {}) {
-    return runController.buildSessionHistoryResult({ assistantMessage, syncOutcome, syncChanges });
+    return runController.buildSessionHistoryResult({ assistantMessage, syncOutcome, syncChanges, locale: getLocale() });
   }
 
   function truncateSessionHistoryText(value, maxLength) {
@@ -1557,7 +1592,7 @@
       nativeChannel.clearActiveRequest();
       currentRunView = null;
       console.error('[codex-overleaf] failed to start task', error);
-      appendPlainLog(`无法启动 Codex 任务：${error.message}`);
+      appendPlainLog(tx(`Could not start Codex task: ${error.message}`, `无法启动 Codex 任务：${error.message}`));
     });
   }
 
@@ -1569,7 +1604,7 @@
     panel.dataset.cancelling = 'true';
     setRunning(true);
     appendRunEvent({
-      title: '正在中断当前 Codex 任务。',
+      title: tx('Cancelling the current Codex task.', '正在中断当前 Codex 任务。'),
       status: 'running'
     });
 
@@ -1585,8 +1620,9 @@
       }
     });
     if (!response?.ok) {
+      const message = response?.error?.message || tx('native host did not respond', 'native host 没有响应');
       appendRunEvent({
-        title: `中断请求没有送达：${response?.error?.message || 'native host 没有响应'}`,
+        title: tx(`Cancel request was not delivered: ${message}`, `中断请求没有送达：${message}`),
         status: 'failed'
       });
     }
@@ -1607,19 +1643,19 @@
 
   async function showThreadResumeFailedPrompt() {
     const confirmed = await showPluginConfirm({
-      title: '无法恢复上一轮 Codex 会话',
-      message: '是否新建一个 Codex 线程继续任务？\n\n取消会放弃本次运行。',
-      confirmLabel: '新建线程',
-      cancelLabel: '取消'
+      title: tr('threadResumeFailedTitle'),
+      message: tr('threadResumeFailedMessage'),
+      confirmLabel: tr('threadResumeNew'),
+      cancelLabel: tr('confirmDefaultCancel')
     });
     return confirmed ? 'new' : 'cancel';
   }
 
   async function showPluginConfirm({
-    title = 'Codex 确认',
+    title = tr('confirmDefaultTitle'),
     message = '',
-    confirmLabel = '确定',
-    cancelLabel = '取消',
+    confirmLabel = tr('confirmDefaultConfirm'),
+    cancelLabel = tr('confirmDefaultCancel'),
     destructive = false
   } = {}) {
     if (!panel) {
@@ -1653,7 +1689,7 @@
       const titleWrap = document.createElement('div');
       const brand = document.createElement('div');
       brand.className = 'codex-plugin-confirm-brand';
-      brand.textContent = 'Codex 确认';
+      brand.textContent = tr('confirmBrand');
       const titleEl = document.createElement('div');
       titleEl.className = 'codex-plugin-confirm-title';
       titleEl.textContent = title;
@@ -1741,15 +1777,15 @@
 
   function appendRunCancelledReport() {
     appendRunEvent({
-      title: '已中断当前 Codex 任务。',
+      title: tx('Current Codex task was cancelled.', '已中断当前 Codex 任务。'),
       status: 'failed'
     });
     appendCompletionReport({
-      conclusion: '这轮已中断，没有继续同步或写入 Overleaf。',
+      conclusion: tx('This run was cancelled. It did not continue syncing or writing to Overleaf.', '这轮已中断，没有继续同步或写入 Overleaf。'),
       status: 'rejected',
       operations: [],
       applyResults: [],
-      nextStep: '可以修改任务后重新运行。'
+      nextStep: tx('Edit the task and run again.', '可以修改任务后重新运行。')
     });
   }
 
@@ -1781,7 +1817,7 @@
     function setDecisionStatus(actions, accepted) {
       const status = document.createElement('span');
       status.className = 'codex-diff-decision-label';
-      status.textContent = accepted ? '已接受' : '已拒绝';
+      status.textContent = accepted ? tr('diffAccepted') : tr('diffRejected');
       actions.replaceChildren(status);
     }
 
@@ -1835,19 +1871,19 @@
       if (readonly) {
         const status = document.createElement('span');
         status.className = 'codex-diff-readonly-label';
-        status.textContent = '已写入';
+        status.textContent = tr('diffWritten');
         actions.append(status);
       } else {
         const acceptBtn = document.createElement('button');
         acceptBtn.type = 'button';
         acceptBtn.dataset.diffAccept = '';
         acceptBtn.textContent = '✓';
-        acceptBtn.title = '接受';
+        acceptBtn.title = tr('diffAccept');
         const rejectBtn = document.createElement('button');
         rejectBtn.type = 'button';
         rejectBtn.dataset.diffReject = '';
         rejectBtn.textContent = '✗';
-        rejectBtn.title = '拒绝';
+        rejectBtn.title = tr('diffReject');
 
         acceptBtn.addEventListener('click', () => decideFileChange(change.path, true));
         rejectBtn.addEventListener('click', () => decideFileChange(change.path, false));
@@ -1905,11 +1941,11 @@
       summary.className = 'codex-diff-toolbar-summary';
       const rejectAllBtn = document.createElement('button');
       rejectAllBtn.type = 'button';
-      rejectAllBtn.textContent = '拒绝全部';
+      rejectAllBtn.textContent = tr('diffRejectAll');
       const acceptAllBtn = document.createElement('button');
       acceptAllBtn.type = 'button';
       acceptAllBtn.dataset.diffAcceptAll = '';
-      acceptAllBtn.textContent = '接受全部';
+      acceptAllBtn.textContent = tr('diffAcceptAll');
 
       function finish(accepted) {
         if (finished) {
@@ -1922,7 +1958,7 @@
 
       function updateSummary() {
         const pending = review.getPendingCount();
-        summary.textContent = pending ? `待处理 ${pending} 个` : '已完成选择';
+        summary.textContent = pending ? tr('diffPendingCount', { count: pending }) : tr('diffSelectionDone');
       }
 
       function finishIfAllDecided() {
@@ -1951,7 +1987,7 @@
     });
   }
 
-  function renderReadOnlyDiffReview(syncChanges, title = '已写入的 Codex 改动') {
+  function renderReadOnlyDiffReview(syncChanges, title = tr('diffWrittenChangesTitle')) {
     const visibleChanges = (syncChanges || []).filter(change => change?.diff?.length);
     if (!visibleChanges.length || !currentRunView?.events) {
       return;
@@ -1973,45 +2009,50 @@
     let operations = buildSyncApplyOperations(syncChanges, project);
     if (!operations.length) {
       appendRunEvent({
-        title: 'Codex 没有产生需要同步回 Overleaf 的文件改动。',
+        title: tx('Codex did not produce file changes that need to sync back to Overleaf.', 'Codex 没有产生需要同步回 Overleaf 的文件改动。'),
         status: 'completed'
       });
       appendCompletionReport({
-        conclusion: assistantMessage || 'Codex 已完成本地处理，没有需要同步回 Overleaf 的改动。',
-        status: state.mode === 'ask' ? '只问不改' : 'completed',
+        conclusion: assistantMessage || tx('Codex finished locally. There are no changes to sync back to Overleaf.', 'Codex 已完成本地处理，没有需要同步回 Overleaf 的改动。'),
+        status: state.mode === 'ask' ? tr('modeAsk') : 'completed',
         operations: [],
         applyResults: [],
-        unchangedReason: assistantMessage ? '没有产生需要同步回 Overleaf 的文件改动。' : formatUnsupportedLocalChangeSummary(unsupportedChanges),
+        unchangedReason: assistantMessage
+          ? tx('No file changes need to sync back to Overleaf.', '没有产生需要同步回 Overleaf 的文件改动。')
+          : formatUnsupportedLocalChangeSummary(unsupportedChanges),
         mode: state.mode,
-        nextStep: '可以继续追问，或调整 @context 后重新运行。'
+        nextStep: tx('You can continue the conversation, or adjust @context and run again.', '可以继续追问，或调整 @context 后重新运行。')
       });
       return {
-        summaryLine: assistantMessage || '没有需要同步的改动',
+        summaryLine: assistantMessage || tx('No changes to sync', '没有需要同步的改动'),
         hasSkippedOperations: false
       };
     }
 
     if (state.mode === 'confirm') {
       appendRunEvent({
-        title: `本地 Codex 产生了 ${operations.length} 项改动，请查看差异后确认。`,
+        title: tx(
+          `Local Codex produced ${operations.length} change(s). Review the diff before applying.`,
+          `本地 Codex 产生了 ${operations.length} 项改动，请查看差异后确认。`
+        ),
         status: 'running'
       });
       const accepted = await renderDiffReview(syncChanges);
       if (!accepted.length) {
         appendRunEvent({
-          title: '已取消同步：Overleaf 没有被修改。',
+          title: tx('Sync cancelled: Overleaf was not modified.', '已取消同步：Overleaf 没有被修改。'),
           status: 'completed'
         });
         appendCompletionReport({
-          conclusion: '你取消了同步，本地 Codex 改动没有写回 Overleaf。',
+          conclusion: tx('You cancelled syncing. Local Codex changes were not written back to Overleaf.', '你取消了同步，本地 Codex 改动没有写回 Overleaf。'),
           status: 'rejected',
           operations: [],
           applyResults: [],
           mode: state.mode,
-          nextStep: '可以重新运行任务，或切换到自动写入后再同步。'
+          nextStep: tx('Run the task again, or switch to Auto if you want changes synced directly.', '可以重新运行任务，或切换到自动写入后再同步。')
         });
         return {
-          summaryLine: '已取消同步',
+          summaryLine: tx('Sync cancelled', '已取消同步'),
           hasSkippedOperations: false
         };
       }
@@ -2021,14 +2062,10 @@
     const deleteOperations = operations.filter(operation => operation.type === 'delete');
     if (deleteOperations.length) {
       const approved = await showPluginConfirm({
-        title: '允许 Codex 删除文件？',
-        message: [
-          formatOperationFiles(deleteOperations),
-          '',
-          '未确认删除时，其它改动仍可继续同步。'
-        ].join('\n'),
-        confirmLabel: '允许删除',
-        cancelLabel: '跳过删除',
+        title: tr('deleteFilePromptTitle'),
+        message: tr('deleteFilePromptMessage', { files: formatOperationFiles(deleteOperations) }),
+        confirmLabel: tr('deleteFileConfirm'),
+        cancelLabel: tr('deleteFileCancel'),
         destructive: true
       });
       if (!approved) {
@@ -2036,21 +2073,30 @@
       }
     }
 
-    appendOperationsPreview(operations, '同步本地 Codex 改动到 Overleaf');
+    appendOperationsPreview(operations, tx('Sync local Codex changes to Overleaf', '同步本地 Codex 改动到 Overleaf'));
     const reviewing = await ensureReviewingBeforeWrite(operations);
     if (!reviewing.ok) {
       const blocked = buildReviewingBlockedApplyResult(operations, reviewing);
       appendApplyResult(blocked);
       appendCompletionReport({
-        conclusion: '这轮没有写入：已开启“留痕”要求，但 Codex 没能确认 Overleaf 正在用 Reviewing/Track Changes。',
+        conclusion: tx(
+          'No files were written: Track is enabled, but Codex could not verify Overleaf Reviewing/Track Changes.',
+          '这轮没有写入：已开启“留痕”要求，但 Codex 没能确认 Overleaf 正在用 Reviewing/Track Changes。'
+        ),
         status: 'failed',
         operations,
         applyResults: [blocked],
         mode: state.mode,
-        nextStep: '请在 Overleaf 手动切到 Reviewing/Track Changes 后重新运行，或关闭“留痕”再写入。'
+        nextStep: tx(
+          'Switch Overleaf to Reviewing/Track Changes manually and rerun, or turn off Track before writing.',
+          '请在 Overleaf 手动切到 Reviewing/Track Changes 后重新运行，或关闭“留痕”再写入。'
+        )
       });
       return {
-        summaryLine: '已阻止写入：未确认 Overleaf Reviewing/Track Changes',
+        summaryLine: tx(
+          'Write blocked: Overleaf Reviewing/Track Changes was not verified',
+          '已阻止写入：未确认 Overleaf Reviewing/Track Changes'
+        ),
         hasSkippedOperations: true
       };
     }
@@ -2073,19 +2119,22 @@
     const appliedPaths = getAppliedOperationPaths(applied);
     if (appliedPaths.length) {
       await autoRecompileAfterWriteback(appliedPaths).catch(error => {
-        appendRunEvent({ title: `写后编译出错：${error.message}`, status: 'failed' });
+        appendRunEvent({
+          title: tx(`Post-write compile failed: ${error.message}`, `写后编译出错：${error.message}`),
+          status: 'failed'
+        });
       });
     }
     const summaryLine = appendChangeSummary({
-      notes: '本地 Codex 改动已同步回 Overleaf。',
+      notes: tx('Local Codex changes were synced back to Overleaf.', '本地 Codex 改动已同步回 Overleaf。'),
       operations,
       applyResults: [applied],
       status: 'synced from local Codex workspace'
     });
-    const syncedConclusion = assistantMessage || '本地 Codex 改动已同步回 Overleaf。';
+    const syncedConclusion = assistantMessage || tx('Local Codex changes were synced back to Overleaf.', '本地 Codex 改动已同步回 Overleaf。');
     const partialSyncConclusion = assistantMessage
-      ? `${assistantMessage}\n\n同步提示：本地 Codex 改动已尝试写回 Overleaf，但有部分项目被跳过。`
-      : '本地 Codex 改动已尝试同步回 Overleaf，但有部分项目被跳过。';
+      ? `${assistantMessage}\n\n${tx('Sync note: local Codex changes were sent to Overleaf, but some items were skipped.', '同步提示：本地 Codex 改动已尝试写回 Overleaf，但有部分项目被跳过。')}`
+      : tx('Local Codex changes were sent to Overleaf, but some items were skipped.', '本地 Codex 改动已尝试同步回 Overleaf，但有部分项目被跳过。');
     appendCompletionReport({
       conclusion: applied.skipped?.length
         ? partialSyncConclusion
@@ -2096,7 +2145,7 @@
 	      mode: state.mode,
 	      nextStep: applied.skipped?.length
 	        ? formatWritebackSkippedNextStep(applied)
-	        : '请在 Overleaf 中查看同步后的文件。'
+	        : tx('Review the synced file in Overleaf.', '请在 Overleaf 中查看同步后的文件。')
 	    });
 
     return {
@@ -2111,7 +2160,7 @@
     }
 
     appendRunEvent({
-      title: '正在确认 Overleaf 最新内容，并刷新本地 Codex workspace。',
+      title: tx('Checking latest Overleaf content and refreshing the local Codex workspace.', '正在确认 Overleaf 最新内容，并刷新本地 Codex workspace。'),
       status: 'running'
     });
 
@@ -2130,7 +2179,10 @@
     });
     if (!freshProject?.files?.length || freshProject?.capabilities?.fullProjectSnapshot === false) {
       appendRunEvent({
-        title: 'Overleaf 已写入，但没有读到完整项目；暂不刷新本地 Codex workspace baseline，下一轮会重新读取。',
+        title: tx(
+          'Overleaf was written, but the full project was not read. The local Codex workspace baseline was not refreshed; the next run will reread it.',
+          'Overleaf 已写入，但没有读到完整项目；暂不刷新本地 Codex workspace baseline，下一轮会重新读取。'
+        ),
         status: 'failed'
       });
       return;
@@ -2147,14 +2199,18 @@
     });
     if (response?.ok) {
       appendRunEvent({
-        title: '已刷新本地 Codex workspace，下一轮会从最新 Overleaf 内容开始。',
+        title: tx('Local Codex workspace refreshed. The next run will start from the latest Overleaf content.', '已刷新本地 Codex workspace，下一轮会从最新 Overleaf 内容开始。'),
         status: 'completed'
       });
       return;
     }
 
+    const message = response?.error?.message || tx('native host did not respond', 'native host 没有响应');
     appendRunEvent({
-      title: `Overleaf 已写入，但刷新本地 workspace 失败：${response?.error?.message || 'native host 没有响应'}`,
+      title: tx(
+        `Overleaf was written, but refreshing the local workspace failed: ${message}`,
+        `Overleaf 已写入，但刷新本地 workspace 失败：${message}`
+      ),
       status: 'failed'
     });
   }
@@ -2178,7 +2234,7 @@
   }
 
   function formatUnsupportedLocalChangeSummary(changes = []) {
-    return writebackController.formatUnsupportedLocalChangeSummary(changes);
+    return writebackController.formatUnsupportedLocalChangeSummary(changes, getLocale());
   }
 
   async function autoRecompileAfterWriteback(writtenPaths = []) {
@@ -2191,7 +2247,13 @@
     const hasCompilableFile = writtenPaths.some(filePath => CompileAdapter.isCompilableFile(filePath));
     if (!hasCompilableFile) return;
 
-    appendRunEvent({ title: '正在写后编译：已写入 LaTeX 文件，正在触发 Overleaf Recompile。', status: 'running' });
+    appendRunEvent({
+      title: tx(
+        'Post-write compile: LaTeX files were written, triggering Overleaf Recompile.',
+        '正在写后编译：已写入 LaTeX 文件，正在触发 Overleaf Recompile。'
+      ),
+      status: 'running'
+    });
 
     try {
       const result = await callPageBridge('triggerCompile', {
@@ -2201,17 +2263,18 @@
       if (result?.ok) {
         const compile = result.compile;
         if (compile?.status === 'success') {
-          appendRunEvent({ title: '编译成功。', status: 'completed' });
+          appendRunEvent({ title: tx('Compile succeeded.', '编译成功。'), status: 'completed' });
         } else if (compile?.status === 'triggered') {
-          appendRunEvent({ title: '已触发 Overleaf 编译；页面会继续显示编译进度。', status: 'completed' });
+          appendRunEvent({ title: tx('Overleaf compile was triggered. The page will continue showing progress.', '已触发 Overleaf 编译；页面会继续显示编译进度。'), status: 'completed' });
         } else {
-          appendRunEvent({ title: `编译完成，状态：${compile?.status || '未知'}`, status: 'completed' });
+          appendRunEvent({ title: tx(`Compile finished with status: ${compile?.status || 'unknown'}`, `编译完成，状态：${compile?.status || '未知'}`), status: 'completed' });
         }
       } else {
-        appendRunEvent({ title: `写后编译未成功：${result?.reason || '未知原因'}`, status: 'failed' });
+        const reason = result?.reason || tx('unknown reason', '未知原因');
+        appendRunEvent({ title: tx(`Post-write compile did not succeed: ${reason}`, `写后编译未成功：${reason}`), status: 'failed' });
       }
     } catch (error) {
-      appendRunEvent({ title: `写后编译出错：${error.message}`, status: 'failed' });
+      appendRunEvent({ title: tx(`Post-write compile failed: ${error.message}`, `写后编译出错：${error.message}`), status: 'failed' });
     }
   }
 
@@ -2269,7 +2332,7 @@
     const notes = result.notes?.trim() || '';
     if (notes) {
       appendRunEvent({
-        title: 'Codex 总结',
+        title: tx('Codex Summary', 'Codex 总结'),
         status: 'completed',
         detail: notes
       });
@@ -2278,40 +2341,40 @@
 
     if (mode === 'ask') {
       appendRunEvent({
-        title: '本轮没有写入，无需撤销。',
+        title: tr('undoNoWritesTitle'),
         status: 'completed'
       });
       const summaryLine = appendChangeSummary({
         notes,
         operations: [],
-        status: '只问不改'
+        status: tr('modeAsk')
       });
       appendCompletionReport({
-        conclusion: notes || '这轮只做了检查和说明，没有写入文件。',
-        status: '只问不改',
+        conclusion: notes || tx('This run only inspected and explained; no files were written.', '这轮只做了检查和说明，没有写入文件。'),
+        status: tr('modeAsk'),
         notes,
         userReport: result.userReport,
         mode,
         operations: [],
         applyResults: [],
-        nextStep: '可以继续追问，或切换到建议修改/自动写入后让 Codex 修改文件。'
+        nextStep: tx('Continue the conversation, or switch to Suggest/Auto to let Codex edit files.', '可以继续追问，或切换到建议修改/自动写入后让 Codex 修改文件。')
       });
-      return { status: '只问不改', summaryLine };
+      return { status: tr('modeAsk'), summaryLine };
     }
 
     if (result.status === 'requires_task_confirmation') {
-      appendPlannedChangeSummary(result.summary, '准备修改');
+      appendPlannedChangeSummary(result.summary, tx('Preparing changes', '准备修改'));
       const approved = await showPluginConfirm({
-        title: '应用这些修改？',
-        message: formatSummary('修改摘要', result.summary),
-        confirmLabel: '应用修改',
-        cancelLabel: '取消'
+        title: tx('Apply these changes?', '应用这些修改？'),
+        message: formatSummary(tx('Change Summary', '修改摘要'), result.summary),
+        confirmLabel: tx('Apply changes', '应用修改'),
+        cancelLabel: tr('confirmDefaultCancel')
       });
       if (!approved) {
-        appendLog('已取消：Codex 没有写入任何文件。');
+        appendLog(tx('Cancelled: Codex did not write any files.', '已取消：Codex 没有写入任何文件。'));
         const summaryLine = appendChangeSummary({ notes, summary: result.summary, status: 'rejected' });
         appendCompletionReport({
-          conclusion: '你取消了这轮修改，Codex 没有写入文件。',
+          conclusion: tx('You cancelled this change. Codex did not write files.', '你取消了这轮修改，Codex 没有写入文件。'),
           status: 'rejected',
           notes,
           summary: result.summary,
@@ -2319,7 +2382,7 @@
           mode,
           operations: [],
           applyResults: [],
-          nextStep: '可以调整任务描述后重新运行，或切到只问不改先让 Codex 解释方案。'
+          nextStep: tx('Adjust the task and run again, or switch to Ask first so Codex can explain the plan.', '可以调整任务描述后重新运行，或切到只问不改先让 Codex 解释方案。')
         });
         return { status: 'rejected', summaryLine };
       }
@@ -2330,7 +2393,7 @@
         appendLog(`Confirm failed: ${confirmed.error.message}`);
         const summaryLine = appendChangeSummary({ notes, operations: [], status: 'confirm failed' });
         appendCompletionReport({
-          conclusion: '确认后没有拿到可写入的修改。',
+          conclusion: tx('No writable changes were returned after confirmation.', '确认后没有拿到可写入的修改。'),
           status: 'confirm failed',
           notes,
           userReport: result.userReport,
@@ -2342,7 +2405,7 @@
         return { status: 'confirm failed', summaryLine };
       }
       const operations = confirmed.result.operations || [];
-      appendOperationsPreview(operations, '用户已确认，准备写入');
+      appendOperationsPreview(operations, tx('Confirmed; preparing to write', '用户已确认，准备写入'));
       const applied = await applyTaskOperations(project, operations, { allowHighRisk: true });
       appendApplyResult(applied);
       recordUndoFromApply(project, applied);
@@ -2353,7 +2416,7 @@
         status: 'confirmed and applied'
       });
       appendCompletionReport({
-        conclusion: notes || '已按你的确认写入修改。',
+        conclusion: notes || tx('Changes were written after your confirmation.', '已按你的确认写入修改。'),
         status: 'confirmed and applied',
         notes,
         userReport: result.userReport,
@@ -2371,26 +2434,26 @@
     if (result.status === 'delete_plan_required') {
       const operations = result.operations || [];
       const applyResults = [];
-      appendOperationsPreview(operations, '准备先写入非删除修改');
+      appendOperationsPreview(operations, tx('Preparing to write non-delete changes first', '准备先写入非删除修改'));
       const applied = await applyTaskOperations(project, operations);
       applyResults.push(applied);
       appendApplyResult(applied);
       recordUndoFromApply(project, applied);
       const approved = await showPluginConfirm({
-        title: '确认删除计划？',
+        title: tx('Confirm delete plan?', '确认删除计划？'),
         message: formatDeletePlan(result.deletePlan || []),
-        confirmLabel: '确认删除',
-        cancelLabel: '保留非删除修改',
+        confirmLabel: tx('Confirm deletes', '确认删除'),
+        cancelLabel: tx('Keep non-delete changes', '保留非删除修改'),
         destructive: true
       });
       if (approved) {
         const pendingOperations = result.pendingOperations || [];
-        appendOperationsPreview(pendingOperations, '用户已确认删除，准备写入');
+        appendOperationsPreview(pendingOperations, tx('Deletes confirmed; preparing to write', '用户已确认删除，准备写入'));
         const deleteApplied = await applyTaskOperations(project, pendingOperations, { allowHighRisk: true });
         applyResults.push(deleteApplied);
         appendApplyResult(deleteApplied);
         recordUndoFromApply(project, deleteApplied);
-        appendLog('已按确认删除文件。');
+        appendLog(tx('Deleted files after confirmation.', '已按确认删除文件。'));
         const summaryLine = appendChangeSummary({
           notes,
           operations: [...operations, ...pendingOperations],
@@ -2398,7 +2461,7 @@
           status: 'applied with delete plan'
         });
         appendCompletionReport({
-          conclusion: notes || '已写入修改，并按你的确认处理删除项。',
+          conclusion: notes || tx('Changes were written, and delete items were handled after your confirmation.', '已写入修改，并按你的确认处理删除项。'),
           status: 'applied with delete plan',
           notes,
           userReport: result.userReport,
@@ -2412,7 +2475,7 @@
           hasSkippedOperations: hasSkippedApplyOperations(applyResults)
         };
       }
-      appendLog('已取消删除；非删除修改已保留。');
+      appendLog(tx('Deletes cancelled; non-delete changes were kept.', '已取消删除；非删除修改已保留。'));
       const summaryLine = appendChangeSummary({
         notes,
         operations,
@@ -2421,7 +2484,7 @@
         deletePlanRejected: true
       });
       appendCompletionReport({
-        conclusion: '已保留非删除修改；删除项没有写入。',
+        conclusion: tx('Non-delete changes were kept; delete items were not written.', '已保留非删除修改；删除项没有写入。'),
         status: 'applied without deletes',
         notes,
         userReport: result.userReport,
@@ -2429,7 +2492,7 @@
         operations,
         applyResults,
         deletePlanRejected: true,
-        nextStep: '如果仍需要删除文件，请重新运行并单独确认删除。'
+        nextStep: tx('If files still need to be deleted, rerun and confirm deletion separately.', '如果仍需要删除文件，请重新运行并单独确认删除。')
       });
       return {
         status: 'applied without deletes',
@@ -2439,11 +2502,11 @@
     }
 
     const operations = result.operations || [];
-    appendOperationsPreview(operations, '准备写入');
+    appendOperationsPreview(operations, tx('Preparing to write', '准备写入'));
     const applied = await applyTaskOperations(project, operations, { allowHighRisk: mode === 'confirm' });
     appendApplyResult(applied);
     recordUndoFromApply(project, applied);
-    appendLog(mode === 'auto' ? '自动写入任务完成。' : '任务完成。');
+    appendLog(mode === 'auto' ? tx('Auto write task completed.', '自动写入任务完成。') : tx('Task completed.', '任务完成。'));
     const summaryLine = appendChangeSummary({
       notes,
       operations,
@@ -2451,7 +2514,7 @@
       status: result.status || 'completed'
     });
     appendCompletionReport({
-      conclusion: notes || '这轮任务已完成。',
+      conclusion: notes || tx('This run is complete.', '这轮任务已完成。'),
       status: result.status || 'completed',
       notes,
       userReport: result.userReport,
@@ -2470,15 +2533,15 @@
     const partitioned = partitionOperationsForApply(operations, options);
     if (!partitioned.safe.length) {
       appendRunEvent({
-        title: '本轮没有写入，无需撤销。',
+        title: tr('undoNoWritesTitle'),
         status: 'completed'
       });
     } else {
       appendRunEvent({
-        title: '已保存本轮写入前的可恢复版本。',
+        title: tx('Saved a recoverable version before this run writes.', '已保存本轮写入前的可恢复版本。'),
         status: 'completed',
         detail: {
-          '将写入的文件': formatOperationFiles(partitioned.safe)
+          [tx('Files to write', '将写入的文件')]: formatOperationFiles(partitioned.safe)
         }
       });
     }
@@ -2510,26 +2573,26 @@
     }
 
     appendRunEvent({
-      title: '正在确认 Overleaf 已开启 Reviewing/Track Changes。',
+      title: tx('Verifying Overleaf Reviewing/Track Changes before writing.', '正在确认 Overleaf 已开启 Reviewing/Track Changes。'),
       status: 'running'
     });
     const result = await callPageBridge('ensureReviewing', { waitMs: 1800 });
     if (result?.ok) {
       appendRunEvent({
         title: result.activated
-          ? '已切到 Overleaf Reviewing/Track Changes，接下来写入会留痕。'
-          : '已确认 Overleaf Reviewing/Track Changes 正在开启，接下来写入会留痕。',
+          ? tx('Switched to Overleaf Reviewing/Track Changes. Upcoming writes will be tracked.', '已切到 Overleaf Reviewing/Track Changes，接下来写入会留痕。')
+          : tx('Overleaf Reviewing/Track Changes is on. Upcoming writes will be tracked.', '已确认 Overleaf Reviewing/Track Changes 正在开启，接下来写入会留痕。'),
         status: 'completed'
       });
       return result;
     }
 
     appendRunEvent({
-      title: '已阻止写入：Codex 没能确认 Overleaf 正在用 Reviewing/Track Changes。',
+      title: tx('Write blocked: Codex could not verify Overleaf Reviewing/Track Changes.', '已阻止写入：Codex 没能确认 Overleaf 正在用 Reviewing/Track Changes。'),
       status: 'failed',
       detail: {
-        '原因': result?.reason || 'Overleaf 没有返回留痕状态',
-        '状态': result?.reviewing?.status || 'unknown'
+          [tr('detailReason')]: localizeVisibleReason(result?.reason || tx('Overleaf did not return track changes status', 'Overleaf 没有返回留痕状态')),
+        [tx('Status', '状态')]: result?.reviewing?.status || 'unknown'
       }
     });
     return {
@@ -2549,7 +2612,10 @@
           result: {
             ok: false,
             code: 'reviewing_not_enabled',
-            reason: '已开启“留痕”要求，但写入前没有确认 Overleaf 正在用 Reviewing/Track Changes。Codex 没有写入这个文件。'
+            reason: tx(
+              'Track is enabled, but Overleaf Reviewing/Track Changes was not verified before writing. Codex did not write this file.',
+              '已开启“留痕”要求，但写入前没有确认 Overleaf 正在用 Reviewing/Track Changes。Codex 没有写入这个文件。'
+            )
           }
         })),
         ...(extraSkipped || [])
@@ -2705,22 +2771,25 @@
   function formatRunStatusText(status) {
     const value = String(status || '');
     const labels = {
-      completed: '已完成',
-      rejected: '已取消',
-      'confirm failed': '确认失败',
-      'confirmed and applied': '已应用建议修改',
-      'applied with delete plan': '已应用并删除确认项',
-      'applied without deletes': '已应用非删除修改',
-      '只问不改': '只问不改'
+      completed: tx('Completed', '已完成'),
+      rejected: tx('Cancelled', '已取消'),
+      'confirm failed': tx('Confirmation failed', '确认失败'),
+      'confirmed and applied': tx('Suggested changes applied', '已应用建议修改'),
+      'applied with delete plan': tx('Applied with confirmed deletes', '已应用并删除确认项'),
+      'applied without deletes': tx('Applied without deletes', '已应用非删除修改'),
+      '只问不改': tr('modeAsk')
     };
-    return labels[value] || value || '已完成';
+    return labels[value] || value || tx('Completed', '已完成');
   }
 
   function formatContextItems(focusFiles = []) {
     const fileItems = (focusFiles || []).map(path => `@file:${path}`);
     return fileItems.length
       ? fileItems.join(', ')
-      : '@whole-project（默认）；可添加 @file、@compile-log、@current-section';
+      : tx(
+        '@whole-project (default); add @file, @compile-log, or @current-section',
+        '@whole-project（默认）；可添加 @file、@compile-log、@current-section'
+      );
   }
 
   function appendProbeUserStatus(probe) {
@@ -2750,14 +2819,20 @@
     if (state?.mode === 'ask') {
       return {
         ready: true,
-        message: `可以运行：当前是“只问不改”，Codex ${readiness.contextLabel}，不会写入 Overleaf。`
+        message: tx(
+          `Ready: current mode is Ask. Codex ${readiness.contextLabel} and will not write to Overleaf.`,
+          `可以运行：当前是“只问不改”，Codex ${readiness.contextLabel}，不会写入 Overleaf。`
+        )
       };
     }
 
     if (reviewingOk && editorOk && editorWriteBlocked) {
       return {
         ready: true,
-        message: `可以运行：已选择“${formatModeLabel(state?.mode)}”。当前页面暂时没有暴露可写编辑器，写入时会重新打开目标文件并验证；如果写回失败，再刷新 Overleaf 页面后重试。`
+        message: tx(
+          `Ready: ${formatModeLabel(state?.mode)} is selected. This page has not exposed a writable editor yet; Codex will reopen and verify the target file when writing. If writeback fails, reload Overleaf and retry.`,
+          `可以运行：已选择“${formatModeLabel(state?.mode)}”。当前页面暂时没有暴露可写编辑器，写入时会重新打开目标文件并验证；如果写回失败，再刷新 Overleaf 页面后重试。`
+        )
       };
     }
 
@@ -2765,21 +2840,33 @@
       return {
         ready: true,
         message: manualOverride
-          ? `可以运行：你已确认 Overleaf 已开启留痕，Codex ${readiness.contextLabel}。`
-          : `可以运行：Codex 已确认 Overleaf Reviewing/Track Changes 已开启，并且${readiness.contextLabel}。`
+          ? tx(
+            `Ready: you confirmed Overleaf Track Changes is on. Codex ${readiness.contextLabel}.`,
+            `可以运行：你已确认 Overleaf 已开启留痕，Codex ${readiness.contextLabel}。`
+          )
+          : tx(
+            `Ready: Codex verified Overleaf Reviewing/Track Changes is on and ${readiness.contextLabel}.`,
+            `可以运行：Codex 已确认 Overleaf Reviewing/Track Changes 已开启，并且${readiness.contextLabel}。`
+          )
       };
     }
 
     if (readiness.contextReady) {
       return {
         ready: false,
-        message: `还不能安全写入：Codex ${readiness.contextLabel}，但没有确认 Overleaf 已开启 Reviewing/Track Changes。请先打开 Reviewing，或关闭下方的安全检查。`
+        message: tx(
+          `Not safe to write yet: Codex ${readiness.contextLabel}, but Overleaf Reviewing/Track Changes was not verified. Turn on Reviewing first, or disable Track below.`,
+          `还不能安全写入：Codex ${readiness.contextLabel}，但没有确认 Overleaf 已开启 Reviewing/Track Changes。请先打开 Reviewing，或关闭下方的安全检查。`
+        )
       };
     }
 
     return {
       ready: false,
-      message: '还不能安全写入：请先在 Overleaf 打开 Reviewing/Track Changes；Codex 会在运行时读取整个项目，也可以用 @file 指定重点文件。'
+      message: tx(
+        'Not safe to write yet: turn on Overleaf Reviewing/Track Changes first. Codex will read the whole project at run time; you can also use @file to focus on specific files.',
+        '还不能安全写入：请先在 Overleaf 打开 Reviewing/Track Changes；Codex 会在运行时读取整个项目，也可以用 @file 指定重点文件。'
+      )
     };
   }
 
@@ -2937,16 +3024,22 @@
   function formatProjectSnapshotUserLog(project) {
     const files = project?.files || [];
     if (!files.length) {
-      return '还没有读到 Overleaf 项目文件。请确认项目已加载完成，或在 Overleaf 点开一个 .tex 文件后重试。';
+      return tx(
+        'No Overleaf project files were read yet. Make sure the project has loaded, or open a .tex file in Overleaf and retry.',
+        '还没有读到 Overleaf 项目文件。请确认项目已加载完成，或在 Overleaf 点开一个 .tex 文件后重试。'
+      );
     }
 
     const textCount = files.filter(isTextSnapshotFile).length;
     const binaryCount = files.length - textCount;
-    const resourceText = binaryCount ? `，${binaryCount} 个资源文件` : '';
-    const activePath = project.activePath ? `，当前文件：${project.activePath}` : '';
+    const resourceText = binaryCount ? tx(`, ${binaryCount} asset file(s)`, `，${binaryCount} 个资源文件`) : '';
+    const activePath = project.activePath ? tx(`, current file: ${project.activePath}`, `，当前文件：${project.activePath}`) : '';
     const focusFiles = getActiveFocusFiles();
-    const focusText = focusFiles.length ? `，优先处理：${focusFiles.join(', ')}` : '';
-    return `已读取 Overleaf 项目：${textCount} 个文本文件${resourceText}${activePath}${focusText}。`;
+    const focusText = focusFiles.length ? tx(`, focus: ${focusFiles.join(', ')}`, `，优先处理：${focusFiles.join(', ')}`) : '';
+    return tx(
+      `Read Overleaf project: ${textCount} text file(s)${resourceText}${activePath}${focusText}.`,
+      `已读取 Overleaf 项目：${textCount} 个文本文件${resourceText}${activePath}${focusText}。`
+    );
   }
 
   function formatProjectSnapshotFileSize(file) {
@@ -2961,22 +3054,22 @@
 
   function formatProjectSnapshotWarning(warning) {
     if (/No source files were captured/i.test(warning)) {
-      return '没有读取到项目源文件。请确认 Overleaf 页面加载完成，或点开一个 .tex 文件后重试。';
+      return tx('No project source files were read. Make sure Overleaf has loaded, or open a .tex file and retry.', '没有读取到项目源文件。请确认 Overleaf 页面加载完成，或点开一个 .tex 文件后重试。');
     }
     if (/Full project snapshot was not captured/i.test(warning)) {
-      return '没有读到完整的 Overleaf 项目。为了避免本地 workspace 用残缺快照覆盖项目，请刷新 Overleaf 或稍后重试。';
+      return tx('The full Overleaf project was not read. To avoid refreshing the local workspace from an incomplete snapshot, reload Overleaf or retry later.', '没有读到完整的 Overleaf 项目。为了避免本地 workspace 用残缺快照覆盖项目，请刷新 Overleaf 或稍后重试。');
     }
     if (/empty or still loading/i.test(warning)) {
-      return '读取到的文件内容还在加载中。请等 Overleaf 加载完成后重试。';
+      return tx('Some file content is still loading. Wait for Overleaf to finish loading, then retry.', '读取到的文件内容还在加载中。请等 Overleaf 加载完成后重试。');
     }
     if (/suspiciously short|shorter than 80 characters/i.test(warning)) {
-      return '部分文件内容很短，可能还没完全加载。结果可能不完整。';
+      return tx('Some file content is very short and may not have fully loaded. Results may be incomplete.', '部分文件内容很短，可能还没完全加载。结果可能不完整。');
     }
     if (/identical captured content/i.test(warning)) {
-      return '多个文件内容看起来相同，Overleaf 文件切换可能没有成功。请刷新页面后重试。';
+      return tx('Several files appear to have identical captured content, so Overleaf file switching may have failed. Reload and retry.', '多个文件内容看起来相同，Overleaf 文件切换可能没有成功。请刷新页面后重试。');
     }
     if (/were skipped/i.test(warning)) {
-      return '有些项目文件被跳过，通常是图片、PDF 或无法读取的文件。';
+      return tx('Some project files were skipped, usually images, PDFs, or unreadable files.', '有些项目文件被跳过，通常是图片、PDF 或无法读取的文件。');
     }
     return warning;
   }
@@ -3303,7 +3396,7 @@
       try {
         await chrome.storage.local.set({ [storageKey]: prepareStateForStorage(state) });
       } catch (fallbackError) {
-        appendStorageNoticeOnce('save-failed', `保存会话状态失败：${error.message}`);
+        appendStorageNoticeOnce('save-failed', tx(`Failed to save session state: ${error.message}`, `保存会话状态失败：${error.message}`));
       }
     }
   }
@@ -3323,7 +3416,7 @@
     saveStateTimer = setTimeout(() => {
       saveStateTimer = null;
       saveState().catch(error => {
-        appendPlainLog(`保存会话状态失败：${formatStateSaveError(error)}`);
+        appendPlainLog(tx(`Failed to save session state: ${formatStateSaveError(error)}`, `保存会话状态失败：${formatStateSaveError(error)}`));
       });
     }, delayMs);
   }
@@ -3338,7 +3431,7 @@
 
   function formatStateSaveError(error) {
     if (isStorageQuotaError(error)) {
-      return '本地会话记录太大，请删除一些旧任务后重试。';
+      return tx('Local session history is too large. Delete some old tasks and retry.', '本地会话记录太大，请删除一些旧任务后重试。');
     }
     return error?.message || String(error);
   }
@@ -3466,19 +3559,19 @@
       return;
     }
     if (isSessionRunning(target)) {
-      showPluginToast('这个会话正在运行。请先中断任务，再删除。', { status: 'warning' });
+      showPluginToast(tr('deleteSessionRunningToast'), { status: 'warning' });
       return;
     }
 
     const approved = await showPluginConfirm({
-      title: '删除这个 Codex 会话？',
+      title: tr('deleteSessionTitle'),
       message: [
         getSessionDisplayTitle(target),
         '',
-        '这会删除当前 Overleaf 项目的插件会话、运行记录，并清理对应的插件本地 Codex 线程历史。不会修改 Overleaf 文件，也不会影响全局 Codex 历史。'
+        tr('deleteSessionMessage')
       ].join('\n'),
-      confirmLabel: '删除',
-      cancelLabel: '取消',
+      confirmLabel: tr('deleteSessionConfirm'),
+      cancelLabel: tr('confirmDefaultCancel'),
       destructive: true
     });
     if (!approved) {
@@ -3498,14 +3591,14 @@
         }
       });
       if (!response?.ok) {
-        showPluginToast(`已删除这个插件会话，但对应的插件本地 Codex 线程历史没有清理完成：${response?.error?.message || 'native host 没有返回成功状态'}`, { status: 'warning', sticky: true });
+        showPluginToast(tr('deleteSessionHistoryFailedToast', { message: response?.error?.message || 'native host did not return success' }), { status: 'warning', sticky: true });
       } else if (response.result?.skipped) {
-        showPluginToast('已删除这个插件会话；这个旧会话没有可识别的本地 Codex 线程历史，未清理本地历史。', { status: 'info' });
+        showPluginToast(tr('deleteSessionNoThreadToast'), { status: 'info' });
       } else {
-        showPluginToast('已删除这个插件会话。', { status: 'completed' });
+        showPluginToast(tr('deleteSessionDoneToast'), { status: 'completed' });
       }
     } catch (error) {
-      showPluginToast(`已删除这个插件会话，但对应的插件本地 Codex 线程历史没有清理完成：${error.message}`, { status: 'warning', sticky: true });
+      showPluginToast(tr('deleteSessionHistoryFailedToast', { message: error.message }), { status: 'warning', sticky: true });
     }
   }
 
@@ -3533,7 +3626,7 @@
       model,
       reasoningEffort,
       status: 'running',
-      statusText: '处理中',
+      statusText: tr('processing', { elapsed: '' }).trim(),
       startedAt: new Date().toISOString(),
       finishedAt: '',
       events: [],
@@ -3595,7 +3688,7 @@
       visibleView.root.dataset.status = status;
       visibleView.root.title = [
         text,
-        record?.mode ? `模式：${formatModeLabel(record.mode)}` : '',
+        record?.mode ? `${tr('mode')}: ${formatModeLabel(record.mode)}` : '',
         record?.model,
         record?.reasoningEffort
       ].filter(Boolean).join(' · ');
@@ -3630,7 +3723,7 @@
       return;
     }
 
-    const activity = mapAgentEventToActivity(event);
+    const activity = mapAgentEventToActivity(event, { locale: getLocale() });
     if (!activity?.visible || activity.kind === 'technical') {
       return;
     }
@@ -4060,7 +4153,7 @@
     root.dataset.status = run.status || 'completed';
     root.dataset.runId = run.id;
     root.title = [
-      `模式：${formatModeLabel(run.mode)}`,
+      `${tr('mode')}: ${formatModeLabel(run.mode)}`,
       run.model,
       run.reasoningEffort,
       run.startedAt ? formatEventTime(run.startedAt) : ''
@@ -4110,12 +4203,12 @@
       return run.statusText;
     }
     if (run.status === 'running') {
-      return '处理中';
+      return tr('processing', { elapsed: '' }).trim();
     }
     if (run.startedAt && run.finishedAt) {
       return formatProcessedSummary(run.status || 'completed', new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime());
     }
-    return run.status === 'failed' ? '处理失败' : '已处理';
+    return run.status === 'failed' ? tx('Failed', '处理失败') : tx('Done', '已处理');
   }
 
   function renderRunEvent(event) {
@@ -4454,7 +4547,7 @@
 
     const title = document.createElement('div');
     title.className = 'run-technical-event-title';
-    title.textContent = event.title || '技术详情';
+    title.textContent = event.title || tr('technicalDetails');
 
     const body = document.createElement('pre');
     body.textContent = formatEventDetail(buildTechnicalEventDetail(event));
@@ -4468,17 +4561,17 @@
     }
 
     const detail = {
-      '步骤': event?.title || '',
-      '状态': event?.status || ''
+      [tx('Step', '步骤')]: event?.title || '',
+      [tx('Status', '状态')]: event?.status || ''
     };
     if (event?.timestamp) {
-      detail['时间'] = formatEventTime(event.timestamp);
+      detail[tx('Time', '时间')] = formatEventTime(event.timestamp);
     }
     if (hasNonEmptyDetail(event?.detail)) {
-      detail['内容'] = event.detail;
+      detail[tx('Content', '内容')] = event.detail;
     }
     if (hasNonEmptyDetail(event?.technicalDetail)) {
-      detail['原始事件'] = event.technicalDetail;
+      detail[tx('Raw event', '原始事件')] = event.technicalDetail;
     }
     return detail;
   }
@@ -4515,11 +4608,11 @@
     button.hidden = false;
     button.disabled = run.undoStatus === 'running' || run.undoStatus === 'applied';
     button.textContent = run.undoStatus === 'applied'
-      ? '已撤销'
-      : (run.partialWriteback ? '撤销已写入部分' : '撤销改动');
+      ? tr('undoApplied')
+      : (run.partialWriteback ? tr('undoPartialRun') : tr('undoRun'));
     button.title = run.undoStatus === 'applied'
-      ? '本轮写入已经撤销'
-      : (run.partialWriteback ? '撤销本轮已经写入 Overleaf 的部分改动' : '撤销本轮写入到 Overleaf 的改动');
+      ? tr('undoAppliedTitle')
+      : (run.partialWriteback ? tr('undoPartialRunTitle') : tr('undoRunTitle'));
     button.addEventListener('click', event => {
       event.stopPropagation();
       undoRun(run.id);
@@ -4554,27 +4647,25 @@
     });
     if (unsafeFullFileUndo) {
       appendRunRecordEvent(runId, {
-        title: '已阻止旧格式全文撤销',
+        title: tr('undoUnsafeFullFileTitle'),
         status: 'failed',
         detail: {
-          '文件': unsafeFullFileUndo.path,
-          '原因': '这个撤销点会用全文替换恢复文件，在 Overleaf 留痕模式下会把整篇文档标成改动。请重新运行任务生成局部撤销点，或手动处理这次历史改动。'
+          [tr('detailFile')]: unsafeFullFileUndo.path,
+          [tr('detailReason')]: tr('undoUnsafeFullFileReason')
         }
       });
       return;
     }
 
     const approved = await showPluginConfirm({
-      title: '无留痕撤销本轮写入？',
+      title: tr('undoNoTraceTitle'),
       message: [
         truncateRunTitle(run.task),
         '',
-        `将撤销本轮对 ${formatOperationFiles(undoOperations)} 的写入。`,
-        '',
-        '如果 Overleaf 正在使用 Reviewing/Track Changes，Codex 会先切到 Editing；撤销后会保持 Editing，下一轮写入会按需要重新切到 Reviewing。'
+        tr('undoNoTraceMessage', { files: formatOperationFiles(undoOperations) })
       ].join('\n'),
-      confirmLabel: '撤销写入',
-      cancelLabel: '取消',
+      confirmLabel: tr('undoConfirm'),
+      cancelLabel: tr('confirmDefaultCancel'),
       destructive: true
     });
     if (!approved) {
@@ -4583,9 +4674,9 @@
 
     setRunUndoStatus(runId, 'running');
     appendRunRecordEvent(runId, {
-      title: '开始无留痕撤销本轮写入',
+      title: tr('undoNoTraceStarted'),
       status: 'running',
-      detail: { '将撤销': formatOperationFiles(undoOperations) }
+      detail: { [tr('detailWillUndo')]: formatOperationFiles(undoOperations) }
     });
 
     const result = await callPageBridge('applyOperations', {
@@ -4595,17 +4686,17 @@
     });
     appendUndoReviewingPolicyEvent(runId, result.reviewingPolicy);
     appendRunRecordEvent(runId, {
-      title: `撤销结果：已撤销 ${result.applied?.length || 0} 项，跳过 ${result.skipped?.length || 0} 项`,
+      title: tr('undoResult', { applied: result.applied?.length || 0, skipped: result.skipped?.length || 0 }),
       status: result.skipped?.length ? 'failed' : 'completed',
       detail: {
-        '已撤销': (result.applied || []).map(item => ({
-          '动作': formatOperationType(item.operation?.type),
-          '文件': item.operation?.path
+        [tr('detailUndone')]: (result.applied || []).map(item => ({
+          [tr('detailAction')]: formatOperationType(item.operation?.type),
+          [tr('detailFile')]: item.operation?.path
         })),
-        '跳过': (result.skipped || []).map(item => ({
-          '动作': formatOperationType(item.operation?.type),
-          '文件': item.operation?.path,
-          '原因': item.result?.reason || item.result?.error || '未知原因'
+        [tr('detailSkipped')]: (result.skipped || []).map(item => ({
+          [tr('detailAction')]: formatOperationType(item.operation?.type),
+          [tr('detailFile')]: item.operation?.path,
+          [tr('detailReason')]: formatApplyResultReason(item)
         }))
       }
     });
@@ -4615,20 +4706,16 @@
   async function undoRunTrackedChanges(runId, run) {
     const trackedUndo = Array.isArray(run.undoTrackedChanges) && run.undoTrackedChanges.length > 0;
     const approved = await showPluginConfirm({
-      title: trackedUndo ? '拒绝本轮 Overleaf 留痕改动？' : '撤销本轮 Overleaf 写入？',
+      title: trackedUndo ? tr('undoTrackedTitle') : tr('undoNativeTitle'),
       message: [
         truncateRunTitle(run.task),
         '',
         trackedUndo
-          ? `将通过 Overleaf 自己的 Reject/拒绝功能撤销 ${formatTrackedChangeFiles(run.undoTrackedChanges)}。`
-          : `将通过 Overleaf 自己的 Undo/撤销功能回退 ${formatTrackedUndoFiles(run)}。`,
-        '',
-        trackedUndo
-          ? '这不会用文本补丁重写文件；如果插件不能确认对应留痕记录，会停止并让你在 Overleaf 审阅面板手动处理。'
-          : '执行前会确认当前内容仍是本轮写入后的内容；如果你已经手动改过，Codex 会停止，避免撤掉你的新修改。'
+          ? tr('undoTrackedMessage', { files: formatTrackedChangeFiles(run.undoTrackedChanges) })
+          : tr('undoNativeMessage', { files: formatTrackedUndoFiles(run) })
       ].join('\n'),
-      confirmLabel: trackedUndo ? '拒绝本轮改动' : '撤销写入',
-      cancelLabel: '取消',
+      confirmLabel: trackedUndo ? tr('undoTrackedConfirm') : tr('undoConfirm'),
+      cancelLabel: tr('confirmDefaultCancel'),
       destructive: true
     });
     if (!approved) {
@@ -4637,9 +4724,9 @@
 
     setRunUndoStatus(runId, 'running');
     appendRunRecordEvent(runId, {
-      title: trackedUndo ? '开始拒绝本轮 Overleaf 留痕改动' : '开始用 Overleaf 原生撤销回退本轮写入',
+      title: trackedUndo ? tr('undoTrackedStarted') : tr('undoNativeStarted'),
       status: 'running',
-      detail: { '将撤销': trackedUndo ? formatTrackedChangeFiles(run.undoTrackedChanges) : formatTrackedUndoFiles(run) }
+      detail: { [tr('detailWillUndo')]: trackedUndo ? formatTrackedChangeFiles(run.undoTrackedChanges) : formatTrackedUndoFiles(run) }
     });
 
     const result = await callPageBridge('rejectTrackedChanges', {
@@ -4649,18 +4736,18 @@
     });
     appendRunRecordEvent(runId, {
       title: trackedUndo
-        ? `撤销结果：已拒绝 ${result.applied?.length || 0} 条留痕，跳过 ${result.skipped?.length || 0} 条`
-        : `撤销结果：已撤销 ${result.applied?.length || 0} 个文件，跳过 ${result.skipped?.length || 0} 项`,
+        ? tr('undoTrackedResult', { applied: result.applied?.length || 0, skipped: result.skipped?.length || 0 })
+        : tr('undoNativeResult', { applied: result.applied?.length || 0, skipped: result.skipped?.length || 0 }),
       status: result.skipped?.length ? 'failed' : 'completed',
       detail: {
-        [trackedUndo ? '已拒绝' : '已撤销']: (result.applied || []).map(item => ({
-          '文件': item.trackedChange?.path || '未知文件',
-          '记录': item.trackedChange?.label || item.trackedChange?.id || item.trackedChange?.key
+        [trackedUndo ? tr('detailRejected') : tr('detailUndone')]: (result.applied || []).map(item => ({
+          [tr('detailFile')]: item.trackedChange?.path || tr('unknownFile'),
+          [tr('detailRecord')]: item.trackedChange?.label || item.trackedChange?.id || item.trackedChange?.key
         })),
-        '跳过': (result.skipped || []).map(item => ({
-          '文件': item.trackedChange?.path || '未知文件',
-          '记录': item.trackedChange?.label || item.trackedChange?.id || item.trackedChange?.key || '',
-          '原因': item.result?.reason || item.result?.error || '未知原因'
+        [tr('detailSkipped')]: (result.skipped || []).map(item => ({
+          [tr('detailFile')]: item.trackedChange?.path || tr('unknownFile'),
+          [tr('detailRecord')]: item.trackedChange?.label || item.trackedChange?.id || item.trackedChange?.key || '',
+          [tr('detailReason')]: formatBridgeResultReason(item.result, item.trackedChange?.path)
         }))
       }
     });
@@ -4682,17 +4769,17 @@
     }
     if (reviewingPolicy.disabled && reviewingPolicy.leftEditing) {
       appendRunRecordEvent(runId, {
-        title: '撤销时已切到 Editing；撤销后保持 Editing。',
+        title: tr('undoSwitchedEditing'),
         status: 'completed'
       });
       return;
     }
     if (reviewingPolicy.disabled && !reviewingPolicy.restored) {
       appendRunRecordEvent(runId, {
-        title: '撤销已执行，但没有确认 Overleaf 留痕模式已恢复。',
+        title: tr('undoReviewingRestoreUnverified'),
         status: 'failed',
         detail: {
-          '下一步': '请在 Overleaf 手动确认 Reviewing/Track Changes 是否需要重新开启。'
+          [tr('detailNext')]: tr('undoReviewingRestoreNext')
         }
       });
     }
@@ -4763,28 +4850,28 @@
       refreshRunCardControls(record.id);
       if (combinedTrackedChanges.length) {
         appendRunEvent({
-          title: `已创建撤销点：可通过 Overleaf 拒绝本轮 ${combinedTrackedChanges.length} 条留痕改动`,
+          title: tr('undoCheckpointTracked', { count: combinedTrackedChanges.length }),
           status: 'completed',
           detail: combinedTrackedChanges.map(change => ({
-            '文件': change.path,
-            '记录': change.label || change.id || change.key
+            [tr('detailFile')]: change.path,
+            [tr('detailRecord')]: change.label || change.id || change.key
           }))
         });
       } else if (hasTrackedEditorUndo(record)) {
         appendRunEvent({
-          title: `已创建撤销点：可通过 Overleaf 原生 Undo 回退本轮 ${formatTrackedUndoFiles(record)}`,
+          title: tr('undoCheckpointNative', { files: formatTrackedUndoFiles(record) }),
           status: 'completed',
           detail: {
-            '方式': '没有识别到具体留痕节点，但已保存写入前和写入后的文件内容。撤销时会优先使用 Overleaf 自己的 Undo/撤销功能，并在执行前确认当前内容仍是本轮写入后的内容。'
+            [tr('detailMethod')]: tr('undoCheckpointNativeMethod')
           }
         });
       } else {
         appendRunEvent({
-          title: '没有创建自动撤销点：未识别到本轮 Overleaf 留痕记录',
+          title: tr('undoCheckpointMissing'),
           status: 'failed',
           detail: {
-            '原因': '本轮是在 Reviewing/Track Changes 下写入的，但插件没有可靠识别 Overleaf 生成的留痕记录。为了避免用文本补丁制造新的红线，自动撤销已禁用。',
-            '下一步': '请在 Overleaf 审阅面板手动拒绝这轮建议，或重新运行后再尝试。'
+            [tr('detailReason')]: tr('undoCheckpointMissingReason'),
+            [tr('detailNext')]: tr('undoCheckpointMissingNext')
           }
         });
       }
@@ -4804,13 +4891,13 @@
     record.partialWriteback = Boolean(applyResult.skipped?.length);
     refreshRunCardControls(record.id);
     appendRunEvent({
-      title: `已创建撤销点：可撤销本轮 ${record.undoOperations.length} 项写入`,
+      title: tr('undoCheckpointPlain', { count: record.undoOperations.length }),
       status: 'completed',
       detail: checkpoint.undoOperations.map(operation => ({
-        '动作': formatOperationType(operation.type),
-        '文件': operation.path,
-        '目标': operation.to,
-        '原因': operation.reason
+        [tr('detailAction')]: formatOperationType(operation.type),
+        [tr('detailFile')]: operation.path,
+        [tr('detailTarget')]: operation.to,
+        [tr('detailReason')]: operation.reason
       }))
     });
   }
@@ -4894,13 +4981,13 @@
     const files = [];
     const seen = new Set();
     for (const change of changes || []) {
-      const path = change?.path || '未知文件';
+      const path = change?.path || tr('unknownFile');
       if (!seen.has(path)) {
         seen.add(path);
         files.push(path);
       }
     }
-    return files.join(', ') || '本轮留痕改动';
+    return files.join(', ') || tx('this run\'s tracked changes', '本轮留痕改动');
   }
 
   function appendRunRecordEvent(runId, event) {
@@ -5022,7 +5109,7 @@
   function appendSummary(summary) {
     if (!summary) {
       appendRunEvent({
-        title: '本轮未修改文件。',
+        title: tx('No files were changed in this run.', '本轮未修改文件。'),
         status: 'completed'
       });
       return;
@@ -5031,45 +5118,48 @@
     const total = Object.values(summary.counts || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
     if (!total) {
       appendRunEvent({
-        title: '本轮未修改文件。',
+        title: tx('No files were changed in this run.', '本轮未修改文件。'),
         status: 'completed',
         detail: {
-          '说明': 'Codex 没有提出需要写入 Overleaf 的修改。'
+          [tx('Note', '说明')]: tx('Codex did not propose changes that need to be written to Overleaf.', 'Codex 没有提出需要写入 Overleaf 的修改。')
         }
       });
       return;
     }
 
     appendRunEvent({
-      title: `准备修改 ${summary.affectedFiles?.length || 0} 个文件。`,
+      title: tx(`Preparing to modify ${summary.affectedFiles?.length || 0} file(s).`, `准备修改 ${summary.affectedFiles?.length || 0} 个文件。`),
       status: 'completed',
       detail: {
-        '会影响的文件': summary.affectedFiles?.length ? summary.affectedFiles : '无',
-        '编辑': summary.counts?.edit || 0,
-        '新建': summary.counts?.create || 0,
-        '重命名': summary.counts?.rename || 0,
-        '移动': summary.counts?.move || 0,
-        '删除': summary.counts?.delete || 0,
-        '需要单独确认的删除': summary.deletePlan?.length ? summary.deletePlan : '无'
+        [tx('Affected files', '会影响的文件')]: summary.affectedFiles?.length ? summary.affectedFiles : tr('noneValue'),
+        [tr('operationEdit')]: summary.counts?.edit || 0,
+        [tr('operationCreate')]: summary.counts?.create || 0,
+        [tr('operationRename')]: summary.counts?.rename || 0,
+        [tr('operationMove')]: summary.counts?.move || 0,
+        [tr('operationDelete')]: summary.counts?.delete || 0,
+        [tx('Deletes requiring separate confirmation', '需要单独确认的删除')]: summary.deletePlan?.length ? summary.deletePlan : tr('noneValue')
       }
     });
   }
 
   function appendPlannedChangeSummary(summary, title) {
     if (!summary) {
-      appendRunEvent({ title: `${title}：没有文件需要修改`, status: 'completed' });
+      appendRunEvent({
+        title: tx(`${title}: no files need changes`, `${title}：没有文件需要修改`),
+        status: 'completed'
+      });
       return;
     }
     const files = summary.affectedFiles || [];
     appendRunEvent({
       title: files.length
-        ? `${title}：${files.join(', ')}`
-        : `${title}：没有文件需要修改`,
+        ? tx(`${title}: ${files.join(', ')}`, `${title}：${files.join(', ')}`)
+        : tx(`${title}: no files need changes`, `${title}：没有文件需要修改`),
       status: 'completed',
       detail: {
-        '编辑': summary.counts?.edit || 0,
-        '新建': summary.counts?.create || 0,
-        '删除': summary.counts?.delete || 0
+        [tr('operationEdit')]: summary.counts?.edit || 0,
+        [tr('operationCreate')]: summary.counts?.create || 0,
+        [tr('operationDelete')]: summary.counts?.delete || 0
       }
     });
   }
@@ -5095,6 +5185,7 @@
     const undoCount = getRunUndoCount(record);
     const report = buildHumanCompletionReport({
       ...input,
+      locale: getLocale(),
       operations,
       applyResults,
       undoCount,
@@ -5111,27 +5202,27 @@
 
   function formatCompletionWork(operations, input) {
     if (input.deletePlanRejected) {
-      return '已保留非删除修改，删除项已取消。';
+      return tx('Non-delete changes were kept; delete items were cancelled.', '已保留非删除修改，删除项已取消。');
     }
     if (!operations?.length) {
-      return '本轮未修改文件。';
+      return tx('No files were changed in this run.', '本轮未修改文件。');
     }
     return groupOperationsByFile(operations)
-      .map(group => `${group.path}: ${group.operations.map(operation => formatOperationType(operation.type)).join('、')}`)
-      .join('；');
+      .map(group => `${group.path}: ${group.operations.map(operation => formatOperationType(operation.type)).join(listSeparator())}`)
+      .join(getLocale() === 'zh' ? '；' : '; ');
   }
 
   function formatCompletionNextStep(input, skippedCount) {
     if (skippedCount) {
-      return '请展开写入结果查看跳过原因，处理后可以重试。';
+      return tx('Expand the write result, review the skipped reasons, then retry after fixing them.', '请展开写入结果查看跳过原因，处理后可以重试。');
     }
     if (input.status === 'rejected') {
-      return '可以调整任务描述后重新运行。';
+      return tx('Adjust the task description and run again.', '可以调整任务描述后重新运行。');
     }
     if (input.status === 'blocked' || input.status === 'failed') {
-      return '请处理上面的原因后重试。';
+      return tx('Fix the reason above, then retry.', '请处理上面的原因后重试。');
     }
-    return '可以继续追问，或运行下一项任务。';
+    return tx('Continue the conversation or run the next task.', '可以继续追问，或运行下一项任务。');
   }
 
   function collectAffectedFiles(operations = [], summary, applyResults = []) {
@@ -5161,7 +5252,7 @@
   function appendOperationsPreview(operations, title) {
     if (!operations?.length) {
       appendRunEvent({
-        title: `${title}：本轮未修改文件`,
+        title: tx(`${title}: no files changed in this run`, `${title}：本轮未修改文件`),
         status: 'completed'
       });
       return;
@@ -5169,11 +5260,11 @@
 
     const groups = groupOperationsByFile(operations);
     appendRunEvent({
-      title: `${title}：${groups.length} 个文件`,
+      title: tx(`${title}: ${groups.length} file(s)`, `${title}：${groups.length} 个文件`),
       status: 'completed',
       detail: groups.map(group => ({
-        '文件': group.path,
-        '修改': group.operations.map(formatFileChangePreview)
+        [tr('detailFile')]: group.path,
+        [tx('Changes', '修改')]: group.operations.map(formatFileChangePreview)
       }))
     });
   }
@@ -5182,7 +5273,7 @@
     const groups = [];
     const byPath = new Map();
     for (const operation of operations || []) {
-      const path = operation?.path || operation?.from || operation?.to || '未知文件';
+      const path = operation?.path || operation?.from || operation?.to || tr('unknownFile');
       if (!byPath.has(path)) {
         byPath.set(path, { path, operations: [] });
         groups.push(byPath.get(path));
@@ -5194,22 +5285,47 @@
 
   function formatFileChangePreview(operation) {
     const parts = [formatOperationType(operation?.type)];
-    if (operation?.reason) {
-      parts.push(`原因：${operation.reason}`);
+    const reason = formatOperationReason(operation);
+    if (reason) {
+      parts.push(tx(`reason: ${reason}`, `原因：${reason}`));
     }
     if (operation?.type === 'edit') {
       if (Array.isArray(operation.patches) && operation.patches.length) {
-        parts.push(`局部修改 ${operation.patches.length} 处`);
+        parts.push(tx(`local edit in ${operation.patches.length} place(s)`, `局部修改 ${operation.patches.length} 处`));
       } else if (operation.find || operation.replace) {
-        parts.push(`把「${truncateInline(operation.find || '')}」改为「${truncateInline(operation.replace || '')}」`);
+        parts.push(tx(
+          `replace "${truncateInline(operation.find || '')}" with "${truncateInline(operation.replace || '')}"`,
+          `把「${truncateInline(operation.find || '')}」改为「${truncateInline(operation.replace || '')}」`
+        ));
       } else if (operation.replaceAll) {
-        parts.push(`全文替换为 ${String(operation.replaceAll).length} 字符`);
+        parts.push(tx(`full-text replacement, ${String(operation.replaceAll).length} chars`, `全文替换为 ${String(operation.replaceAll).length} 字符`));
       }
     }
     if (operation?.to) {
-      parts.push(`目标：${operation.to}`);
+      parts.push(tx(`target: ${operation.to}`, `目标：${operation.to}`));
     }
-    return parts.join('；');
+    return parts.join(getLocale() === 'zh' ? '；' : '; ');
+  }
+
+  function formatOperationReason(operation) {
+    const key = operation?.reasonKey || '';
+    const count = Number(operation?.reasonParams?.count || 0);
+    if (key === 'localWorkspaceDelete') {
+      return tx('Local Codex workspace deleted this file.', '本地 Codex workspace 删除了这个文件。');
+    }
+    if (key === 'localWorkspacePatch') {
+      return tx(
+        `Synced ${count || 0} local Codex workspace edit${Number(count) === 1 ? '' : 's'}.`,
+        `同步本地 Codex workspace 中的局部文件改动（${count || 0} 处）。`
+      );
+    }
+    if (key === 'localWorkspaceContent') {
+      return tx('Synced file content from the local Codex workspace.', '同步本地 Codex workspace 中的文件内容。');
+    }
+    if (key === 'localWorkspaceCreate') {
+      return tx('Synced a new file from the local Codex workspace.', '同步本地 Codex workspace 中的新文件。');
+    }
+    return localizeVisibleReason(operation?.reason || '');
   }
 
   function appendPartialWritebackWarning(result) {
@@ -5222,22 +5338,28 @@
     const undoAvailable = getRunUndoCount(record) > 0;
     appendRunEvent({
       title: applied.length
-        ? `部分写入已完成：${applied.length} 项已经进入 Overleaf，${skipped.length} 项没有写入。`
-        : `写入被跳过：${skipped.length} 项没有写入 Overleaf。`,
+        ? tx(
+          `Partial writeback completed: ${applied.length} item(s) were written to Overleaf, ${skipped.length} item(s) were not written.`,
+          `部分写入已完成：${applied.length} 项已经进入 Overleaf，${skipped.length} 项没有写入。`
+        )
+        : tx(
+          `Writeback skipped: ${skipped.length} item(s) were not written to Overleaf.`,
+          `写入被跳过：${skipped.length} 项没有写入 Overleaf。`
+        ),
       status: 'failed',
       detail: {
-        '恢复操作': undoAvailable
-          ? '点击本轮的“撤销已写入部分”按钮，可以先回退已经进入 Overleaf 的改动。'
-          : '本轮没有可自动撤销的写入；请按下面的文件列表手动检查。'
+        [tx('Recovery', '恢复操作')]: undoAvailable
+          ? tx('Use this run\'s "Undo written parts" button to roll back the changes already written to Overleaf.', '点击本轮的“撤销已写入部分”按钮，可以先回退已经进入 Overleaf 的改动。')
+          : tx('No automatic undo is available for this run. Review the file list below manually.', '本轮没有可自动撤销的写入；请按下面的文件列表手动检查。')
         ,
-        '已经写入，可点“撤销已写入部分”回退': applied.map(item => ({
-          '动作': formatOperationType(item.operation?.type),
-          '文件': item.operation?.path || item.operation?.to || '未知文件'
+        [tx('Written; can be rolled back with Undo written parts', '已经写入，可点“撤销已写入部分”回退')]: applied.map(item => ({
+          [tr('detailAction')]: formatOperationType(item.operation?.type),
+          [tr('detailFile')]: item.operation?.path || item.operation?.to || tr('unknownFile')
         })),
-        '没有写入，需要处理后重试': skipped.map(item => ({
-          '动作': formatOperationType(item.operation?.type),
-          '文件': item.operation?.path || item.operation?.to || '未知文件',
-          '原因': item.result?.reason || item.result?.error || '未知原因'
+        [tx('Not written; fix and retry', '没有写入，需要处理后重试')]: skipped.map(item => ({
+          [tr('detailAction')]: formatOperationType(item.operation?.type),
+          [tr('detailFile')]: item.operation?.path || item.operation?.to || tr('unknownFile'),
+          [tr('detailReason')]: formatApplyResultReason(item)
         }))
       }
     });
@@ -5246,9 +5368,9 @@
   function formatWritebackSkippedNextStep(result = {}) {
     const appliedCount = result.applied?.length || 0;
     if (appliedCount > 0) {
-      return '请查看跳过原因。已写入的部分可以点击“撤销已写入部分”回退，处理冲突后再重试。';
+      return tx('Review the skipped reasons. You can use "Undo written parts" to roll back what already reached Overleaf, then fix conflicts and retry.', '请查看跳过原因。已写入的部分可以点击“撤销已写入部分”回退，处理冲突后再重试。');
     }
-    return '这轮没有任何内容写入。请查看跳过原因，处理后重试。';
+    return tx('Nothing was written in this run. Review the skipped reasons, fix them, and retry.', '这轮没有任何内容写入。请查看跳过原因，处理后重试。');
   }
 
   function appendApplyResult(result) {
@@ -5258,32 +5380,207 @@
     const applied = result.applied?.length || 0;
     const skipped = result.skipped?.length || 0;
     appendRunEvent({
-      title: `写入结果：已写入 ${applied} 项，跳过 ${skipped} 项`,
+      title: tx(`Write result: wrote ${applied} item(s), skipped ${skipped}`, `写入结果：已写入 ${applied} 项，跳过 ${skipped} 项`),
       status: skipped ? 'failed' : 'completed',
       detail: {
-        '已写入': (result.applied || []).map(item => ({
-          '动作': formatOperationType(item.operation?.type),
-          '文件': item.operation?.path,
-          '状态': item.result?.status
+        [tx('Written', '已写入')]: (result.applied || []).map(item => ({
+          [tr('detailAction')]: formatOperationType(item.operation?.type),
+          [tr('detailFile')]: item.operation?.path,
+          [tx('Status', '状态')]: item.result?.status
         })),
-        '跳过': (result.skipped || []).map(item => ({
-          '动作': formatOperationType(item.operation?.type),
-          '文件': item.operation?.path,
-          '原因': item.result?.reason || item.result?.error || '未知原因'
+        [tr('detailSkipped')]: (result.skipped || []).map(item => ({
+          [tr('detailAction')]: formatOperationType(item.operation?.type),
+          [tr('detailFile')]: item.operation?.path,
+          [tr('detailReason')]: formatApplyResultReason(item)
         }))
       }
     });
   }
 
+  function formatApplyResultReason(item = {}) {
+    const result = item.result || {};
+    const operation = item.operation || {};
+    const key = result.reasonKey || '';
+    const code = result.code || '';
+    const filePath = result.reasonParams?.filePath || operation.path || operation.from || operation.to || '';
+    if (key === 'missingBaseFile' || code === 'missing_base_file') {
+      const target = filePath || tx('this file', '这个文件');
+      return tx(
+        `${target} was not read when the task started. Codex did not overwrite it; refresh the project content and retry.`,
+        `${target} 在任务开始时没有被 Codex 读到。Codex 没有覆盖它；请刷新项目内容后重试。`
+      );
+    }
+    if (key === 'staleSnapshot' || code === 'stale_snapshot') {
+      const target = filePath || tx('this file', '这个文件');
+      return tx(
+        `${target} changed while Codex was working, so Codex did not overwrite it. Review the diff and retry.`,
+        `${target} 在任务执行期间被你或协作者改过，Codex 没有覆盖它。请查看差异后重试。`
+      );
+    }
+    if (key === 'stalePatchLocation') {
+      return tx(
+        'The edit location no longer matches the current Overleaf content, so nothing was written. Rerun the task.',
+        'Codex 要修改的位置已经无法和当前 Overleaf 内容对齐，所以没有写入。请重新运行任务。'
+      );
+    }
+    if (key === 'stalePatchConflict' || code === 'stale_patch_range') {
+      return tx(
+        'The exact edit location was changed by you or a collaborator, so Codex did not overwrite it. Review the diff and retry.',
+        'Codex 要修改的具体位置已经被你或协作者改过，所以没有覆盖它。请查看差异后重试。'
+      );
+    }
+    if (code === 'stale_patch') {
+      return tx(
+        'This exact text changed since Codex read it, so nothing was written. Rerun after Codex reads the latest Overleaf content.',
+        '这处内容已经和 Codex 读取时不同，所以没有写入。请重新运行，让 Codex 先读取你的最新 Overleaf 内容。'
+      );
+    }
+    if (code === 'invalid_patch') {
+      return tx(
+        'Codex produced an invalid local edit range, so nothing was written.',
+        'Codex 生成的局部写入范围无效，所以没有写入。'
+      );
+    }
+    if (code === 'write_verification_failed') {
+      return tx(
+        'After writing, the editor content did not match Codex\'s expected result, so the write was not marked successful. Reload Overleaf and retry.',
+        '写入后读回内容和 Codex 预期不一致，已停止把这次操作标记为成功。请刷新 Overleaf 后重试。'
+      );
+    }
+    if (code === 'file_tree_verification_failed') {
+      return tx(
+        'Overleaf did not confirm the file-tree operation, so Codex did not mark it successful.',
+        'Overleaf 文件树操作没有被确认，Codex 已停止把这次操作标记为成功。'
+      );
+    }
+    if (code === 'path_exists_in_snapshot') {
+      const target = filePath || tx('this file', '这个文件');
+      return tx(
+        `${target} already existed when the task started. Codex did not overwrite it; edit the file instead or choose another filename.`,
+        `${target} 在任务开始前已经存在。Codex 没有覆盖它；请改用修改文件或换一个文件名。`
+      );
+    }
+    if (code === 'path_created_since_snapshot') {
+      const target = filePath || tx('this file', '这个文件');
+      return tx(
+        `${target} was created by you or a collaborator while Codex was working, so Codex did not overwrite it. Review the diff and retry.`,
+        `${target} 在任务执行期间被你或协作者新建了，Codex 没有覆盖它。请查看差异后重试。`
+      );
+    }
+    return localizeVisibleReason(result.reason || result.error || result.code || tr('unknownReason'));
+  }
+
+  function formatBridgeResultReason(result = {}, fallbackPath = '') {
+    const code = result.code || '';
+    const path = result.path || fallbackPath || '';
+    if (getLocale() !== 'en') {
+      return localizeVisibleReason(result.reason || result.error || result.code || tr('unknownReason'));
+    }
+    if (code === 'missing_tracked_changes') {
+      return 'No matching Overleaf tracked-change records were found for this run, so Codex did not undo with text patches.';
+    }
+    if (code === 'tracked_change_file_open_failed') {
+      return path
+        ? `Could not open ${path} to find this run's tracked changes. Handle them manually in the Overleaf review tools.`
+        : 'Could not open the file to find this run\'s tracked changes. Handle them manually in the Overleaf review tools.';
+    }
+    if (code === 'tracked_change_not_found') {
+      return 'No matching tracked changes were found on the Overleaf page for this run.';
+    }
+    if (code === 'tracked_change_reject_control_not_found') {
+      return path
+        ? `Some tracked changes in ${path} remain, but the matching Reject button was not found. Reject them manually in Overleaf.`
+        : 'Some tracked changes remain, but the matching Reject button was not found. Reject them manually in Overleaf.';
+    }
+    if (code === 'tracked_change_reject_not_confirmed') {
+      return 'Codex clicked Reject, but Overleaf still shows this tracked change. Reject it manually in the Overleaf review panel.';
+    }
+    if (code === 'tracked_change_editor_undo_open_failed') {
+      return path ? `Could not open ${path} for Overleaf native undo.` : 'Could not open the file for Overleaf native undo.';
+    }
+    if (code === 'tracked_change_editor_undo_current_mismatch') {
+      return path
+        ? `${path} no longer matches this run's written content, so Codex did not use Overleaf native undo.`
+        : 'The current content no longer matches this run\'s written content, so Codex did not use Overleaf native undo.';
+    }
+    if (code === 'editor_undo_control_not_found') {
+      return path
+        ? `Could not find Overleaf's editor Undo button to undo this run in ${path}.`
+        : 'Could not find Overleaf\'s editor Undo button to undo this run.';
+    }
+    if (code === 'editor_undo_no_progress') {
+      return path
+        ? `Codex clicked Overleaf Undo, but ${path} did not change.`
+        : 'Codex clicked Overleaf Undo, but the file did not change.';
+    }
+    if (code === 'editor_undo_max_iterations') {
+      return path
+        ? `${path} did not return to its pre-run content after repeated Overleaf native undo steps. Codex stopped to avoid undoing other edits.`
+        : 'The file did not return to its pre-run content after repeated Overleaf native undo steps. Codex stopped to avoid undoing other edits.';
+    }
+    if (code === 'tracked_change_undo_max_iterations') {
+      return path
+        ? `${path} still has tracked changes left. Codex stopped to avoid rejecting unrelated edits.`
+        : 'Tracked changes are still left. Codex stopped to avoid rejecting unrelated edits.';
+    }
+    if (code === 'tracked_change_undo_verify_open_failed') {
+      return path
+        ? `Could not open ${path} after undo to verify content. Reload Overleaf and check manually.`
+        : 'Could not open the file after undo to verify content. Reload Overleaf and check manually.';
+    }
+    if (code === 'tracked_change_undo_verify_failed') {
+      return path
+        ? `${path} did not return to its pre-run content after rejecting tracked changes. Check this run's changes in the Overleaf review panel.`
+        : 'The file did not return to its pre-run content after rejecting tracked changes. Check this run\'s changes in the Overleaf review panel.';
+    }
+    return localizeVisibleReason(result.reason || result.error || result.code || tr('unknownReason'));
+  }
+
+  function localizeVisibleReason(reason) {
+    const text = String(reason || '').trim();
+    if (!text || getLocale() !== 'en') {
+      return text;
+    }
+    let match = text.match(/^(.+?) 在任务开始时没有被 Codex 读到。Codex 没有覆盖它；请刷新项目内容后重试。$/);
+    if (match) {
+      return `${match[1]} was not read when the task started. Codex did not overwrite it; refresh the project content and retry.`;
+    }
+    match = text.match(/^(.+?) 在任务执行期间被你或协作者改过，Codex 没有覆盖它。请查看差异后重试。$/);
+    if (match) {
+      return `${match[1]} changed while Codex was working, so Codex did not overwrite it. Review the diff and retry.`;
+    }
+    if (text.includes('Codex 要修改的位置已经无法和当前 Overleaf 内容对齐')) {
+      return 'The edit location no longer matches the current Overleaf content, so nothing was written. Rerun the task.';
+    }
+    if (text.includes('Codex 要修改的具体位置已经被你或协作者改过')) {
+      return 'The exact edit location was changed by you or a collaborator, so Codex did not overwrite it. Review the diff and retry.';
+    }
+    const patchMatch = text.match(/^同步本地 Codex workspace 中的局部文件改动（(\d+) 处）。$/);
+    if (patchMatch) {
+      const count = Number(patchMatch[1]) || 0;
+      return `Synced ${count} local Codex workspace edit${count === 1 ? '' : 's'}.`;
+    }
+    if (text === '本地 Codex workspace 删除了这个文件。') {
+      return 'Local Codex workspace deleted this file.';
+    }
+    if (text === '同步本地 Codex workspace 中的文件内容。') {
+      return 'Synced file content from the local Codex workspace.';
+    }
+    if (text === '同步本地 Codex workspace 中的新文件。') {
+      return 'Synced a new file from the local Codex workspace.';
+    }
+    return text;
+  }
+
   function formatOperationType(type) {
     const labels = {
-      edit: '编辑',
-      create: '新建',
-      rename: '重命名',
-      move: '移动',
-      delete: '删除'
+      edit: tr('operationEdit'),
+      create: tr('operationCreate'),
+      rename: tr('operationRename'),
+      move: tr('operationMove'),
+      delete: tr('operationDelete')
     };
-    return labels[type] || type || '未知';
+    return labels[type] || type || tr('operationUnknown');
   }
 
   function formatOperationFiles(operations = []) {
@@ -5297,7 +5594,7 @@
       seen.add(path);
       files.push(path);
     }
-    return files.length ? files.join(', ') : '无';
+    return files.length ? files.join(', ') : tr('noneValue');
   }
 
   function appendLog(text) {
@@ -5328,7 +5625,7 @@
       last.dataset.repeatCount = String(repeatCount);
       const textNode = last.querySelector('[data-toast-text]');
       if (textNode) {
-        textNode.textContent = `${value}（${repeatCount} 次）`;
+        textNode.textContent = `${value}${tr('repeatCountSuffix', { count: repeatCount })}`;
       }
       return;
     }
@@ -5348,7 +5645,7 @@
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'codex-toast-close';
-    close.setAttribute('aria-label', 'Dismiss notification');
+    close.setAttribute('aria-label', tr('dismissNotification'));
     close.textContent = '×';
     close.addEventListener('click', () => item.remove());
     item.append(close);
@@ -5431,17 +5728,17 @@
     }
     const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
     if (seconds < 60) {
-      return '刚刚';
+      return tx('just now', '刚刚');
     }
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) {
-      return `${minutes} 分钟`;
+      return tx(`${minutes} min`, `${minutes} 分钟`);
     }
     const hours = Math.floor(minutes / 60);
     if (hours < 24) {
-      return `${hours} 小时`;
+      return tx(`${hours}h`, `${hours} 小时`);
     }
-    return `${Math.floor(hours / 24)} 天`;
+    return tx(`${Math.floor(hours / 24)}d`, `${Math.floor(hours / 24)} 天`);
   }
 
   function formatElapsed(ms) {

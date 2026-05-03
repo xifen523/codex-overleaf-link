@@ -16,6 +16,14 @@ test('translates raw write-mode errors into user-facing remediation', () => {
   assert.doesNotMatch(JSON.stringify(translated), /Mode must be/);
 });
 
+test('translates raw errors in English when the panel locale is English', () => {
+  const translated = translateRawError('Mode must be "confirm" or "auto"', { mode: 'ask', locale: 'en' });
+
+  assert.equal(translated.conclusion, 'No files were written: this task needs write access, but the current mode is Ask.');
+  assert.equal(translated.nextStep, 'Switch to Suggest or Auto and run the task again.');
+  assert.doesNotMatch(JSON.stringify(translated), /Mode must be/);
+});
+
 test('timeout remediation does not tell users to raise a default Codex timeout', () => {
   const translated = translateRawError('Codex app-server timed out after 600000ms');
 
@@ -88,6 +96,20 @@ test('maps native glue sync events to the same visible Overleaf workspace story'
   assert.doesNotMatch(completed.title, /tmp|private/);
   assert.equal(changes.visible, true);
   assert.match(changes.title, /Codex 本地改动已收集：main\.tex、refs\.bib/);
+});
+
+test('maps native glue sync events in English when requested', () => {
+  const started = mapAgentEventToActivity({
+    type: 'overleaf.sync.started',
+    detail: { fileCount: 4 }
+  }, { locale: 'en' });
+  const completed = mapAgentEventToActivity({
+    type: 'overleaf.sync.completed',
+    detail: { fileCount: 4 }
+  }, { locale: 'en' });
+
+  assert.equal(started.title, 'Syncing the Overleaf project into the local Codex workspace: 4 text files.');
+  assert.equal(completed.title, 'Synced 4 text files. Local Codex will work from this workspace.');
 });
 
 test('maps Codex app-server events to native-feeling transcript lines', () => {
@@ -331,6 +353,60 @@ test('builds fallback final reports without raw operation JSON', () => {
   assert.doesNotMatch(report.text, /"type"|"find"|"replace"|old|new/);
 });
 
+test('builds fallback final reports in English when requested', () => {
+  const report = buildHumanCompletionReport({
+    locale: 'en',
+    status: 'completed',
+    notes: 'Updated the abstract.',
+    operations: [
+      { type: 'edit', path: 'main.tex', reason: 'improve grammar' }
+    ],
+    applyResults: [
+      {
+        applied: [{ operation: { type: 'edit', path: 'main.tex' }, result: { status: 'ok' } }],
+        skipped: []
+      }
+    ],
+    undoCount: 1,
+    includeWriteResult: true
+  });
+
+  assert.equal(report.title, 'Task report');
+  assert.match(report.text, /Conclusion: Updated the abstract\./);
+  assert.match(report.text, /Changes:\n- main\.tex: edit/);
+  assert.match(report.text, /Write result: wrote 1 item, skipped 0 items/);
+  assert.match(report.text, /Undo: this run has 1 reversible write/);
+  assert.doesNotMatch(report.text, /结论|写入结果|可撤销/);
+});
+
+test('local workspace sync reasons are localized in English reports', () => {
+  const report = buildHumanCompletionReport({
+    locale: 'en',
+    status: 'completed',
+    notes: 'Local Codex changes were synced back to Overleaf.',
+    operations: [
+      {
+        type: 'edit',
+        path: 'draft.tex',
+        reasonKey: 'localWorkspacePatch',
+        reasonParams: { count: 42 },
+        reason: 'Synced 42 local Codex workspace edits.'
+      },
+      {
+        type: 'edit',
+        path: 'legacy.tex',
+        reason: '同步本地 Codex workspace 中的局部文件改动（2 处）。'
+      }
+    ],
+    applyResults: [],
+    includeWriteResult: true
+  });
+
+  assert.match(report.text, /draft\.tex: edit \(Synced 42 local Codex workspace edits\.\)/);
+  assert.match(report.text, /legacy\.tex: edit \(Synced 2 local Codex workspace edits\.\)/);
+  assert.doesNotMatch(report.text, /同步本地|局部文件改动|处/);
+});
+
 test('fallback final reports include skipped write reasons directly', () => {
   const report = buildHumanCompletionReport({
     status: 'failed',
@@ -361,6 +437,49 @@ test('fallback final reports include skipped write reasons directly', () => {
   assert.match(report.text, /跳过原因：\n- draft\.tex：编辑没有写入（Overleaf Reviewing\/Track Changes was not confirmed before writing\.）/);
   assert.match(report.text, /可撤销：本轮没有可撤销的写入/);
   assert.doesNotMatch(report.text, /"type"|"code"|"result"/);
+});
+
+test('fallback final reports localize stale skipped reasons in English', () => {
+  const report = buildHumanCompletionReport({
+    locale: 'en',
+    status: 'failed',
+    notes: 'Local Codex changes were sent to Overleaf, but some items were skipped.',
+    operations: [
+      { type: 'edit', path: 'draft.tex', reasonKey: 'localWorkspacePatch', reasonParams: { count: 2 } }
+    ],
+    applyResults: [
+      {
+        applied: [],
+        skipped: [
+          {
+            operation: { type: 'edit', path: 'draft.tex' },
+            result: {
+              code: 'stale_snapshot',
+              reasonKey: 'staleSnapshot',
+              reasonParams: { filePath: 'draft.tex' },
+              reason: 'draft.tex 在任务执行期间被你或协作者改过，Codex 没有覆盖它。请查看差异后重试。'
+            }
+          }
+        ]
+      }
+    ],
+    undoCount: 0,
+    includeWriteResult: true
+  });
+
+  assert.match(report.text, /Skipped:\n- draft\.tex: edit was not written \(draft\.tex changed while Codex was working/);
+  assert.doesNotMatch(report.text, /任务执行期间|没有覆盖|跳过原因/);
+});
+
+test('English unchanged reasons translate unsupported local change summaries', () => {
+  const report = formatHumanReport({
+    conclusion: 'No files changed.',
+    unchangedReason: 'Codex 在本地生成了这些文件，但插件没有同步回 Overleaf：\n- main.pdf：LaTeX 构建产物，默认不写回。'
+  }, 'en');
+
+  assert.match(report, /Why nothing changed: Codex generated these local files/);
+  assert.match(report, /main\.pdf: LaTeX build artifact; not written back by default\./);
+  assert.doesNotMatch(report, /插件|同步|构建产物/);
 });
 
 test('storage quota errors are not presented as missing ask-mode analysis', () => {

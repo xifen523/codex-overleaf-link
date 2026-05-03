@@ -55,8 +55,8 @@ test('run timeline uses user-facing action transcript and undo language', () => 
   assert.match(contentScript, /本地 Codex session 开始运行/);
   assert.match(contentScript, /同步本地 Codex 改动到 Overleaf/);
   assert.match(contentScript, /本地 Codex 改动已同步回 Overleaf/);
-  assert.match(contentScript, /已创建撤销点：可撤销本轮/);
-  assert.match(contentScript, /撤销本轮/);
+  assert.match(contentScript, /undoCheckpointPlain/);
+  assert.match(contentScript, /undoNoTraceTitle/);
   assert.doesNotMatch(contentScript, /Starting \$\{state\.mode\} task/);
   assert.doesNotMatch(contentScript, /Apply result:/);
   assert.doesNotMatch(contentScript, /Undo checkpoint recorded:/);
@@ -240,7 +240,7 @@ test('deleting a UI session also clears plugin-isolated Codex history', () => {
 
   assert.match(deleteBody, /codex\.history\.clearPlugin/);
   assert.match(deleteBody, /threadId:\s*target\.codexThreadId/);
-  assert.match(deleteBody, /对应的插件本地 Codex 线程历史/);
+  assert.match(deleteBody, /deleteSessionMessage/);
   assert.doesNotMatch(deleteBody, /清理插件隔离的本地 Codex 历史/);
   assert.doesNotMatch(deleteBody, /This deletes local session history/);
 });
@@ -567,7 +567,7 @@ test('write tasks preflight Reviewing before syncing or starting local Codex', (
   assert.match(preflightBody, /state\?\.requireReviewing/);
   assert.match(preflightBody, /callPageBridge\('ensureReviewing'/);
   assert.match(preflightBody, /任务未开始：无法开启 Overleaf 留痕/);
-  assert.match(preflightBody, /finishRunView\('未开始：无法开启留痕', 'failed'\)/);
+  assert.match(preflightBody, /finishRunView\(tx\('Not started: could not enable Track Changes', '未开始：无法开启留痕'\), 'failed'\)/);
 });
 
 test('write preflight gives natural feedback for automatic Reviewing activation', () => {
@@ -591,7 +591,7 @@ test('native and raw agent events go through the human transcript mapper', () =>
   const appendNativeEventBody = contentScript.match(/function appendNativeEvent\(event\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
   assert.match(contentScript, /CodexOverleafAgentTranscript/);
-  assert.match(appendNativeEventBody, /mapAgentEventToActivity\(event\)/);
+  assert.match(appendNativeEventBody, /mapAgentEventToActivity\(event,\s*\{\s*locale:\s*getLocale\(\)\s*\}\)/);
   assert.match(contentScript, /appendTechnicalEvent/);
   assert.doesNotMatch(contentScript, /function mapAgentActivity\(event\)/);
 });
@@ -637,7 +637,7 @@ test('Codex realtime deltas update one stream instead of appending raw event row
   assert.match(contentScript, /document\.createElement\('strong'\)/);
   assert.doesNotMatch(contentScript, /run-stream-text[\s\S]{0,240}\.innerHTML/);
   assert.match(css, /\.run-stream-text/);
-  assert.match(agentTranscript, /if \(method === 'item\/reasoning\/textDelta'\) \{\s*return technicalOnly\(event\);\s*\}/);
+  assert.match(agentTranscript, /if \(method === 'item\/reasoning\/textDelta'\) \{\s*return technicalOnly\(event, locale\);\s*\}/);
   assert.doesNotMatch(contentScript, /technicalDetail:\s*normalizeRawAgentEvent\(event\)/);
 });
 
@@ -776,9 +776,9 @@ test('confirm diff review uses immediate per-file decisions and batch accept rej
 
   assert.match(createDiffBody, /card\.dataset\.decision = readonly \? 'accepted' : 'pending'/);
   assert.match(createDiffBody, /function decideFileChange\(path, accepted\)/);
-  assert.match(createDiffBody, /status\.textContent = accepted \? '已接受' : '已拒绝'/);
-  assert.match(renderDiffBody, /acceptAllBtn\.textContent = '接受全部'/);
-  assert.match(renderDiffBody, /rejectAllBtn\.textContent = '拒绝全部'/);
+  assert.match(createDiffBody, /status\.textContent = accepted \? tr\('diffAccepted'\) : tr\('diffRejected'\)/);
+  assert.match(renderDiffBody, /acceptAllBtn\.textContent = tr\('diffAcceptAll'\)/);
+  assert.match(renderDiffBody, /rejectAllBtn\.textContent = tr\('diffRejectAll'\)/);
   assert.doesNotMatch(renderDiffBody, /应用选中/);
   assert.match(renderDiffBody, /finishIfAllDecided/);
   assert.match(css, /\.codex-diff-file\[data-decision="accepted"\]/);
@@ -853,8 +853,8 @@ test('partial writeback report tells the user what already changed and how to re
   assert.match(contentScript, /写入被跳过/);
   assert.match(contentScript, /function formatWritebackSkippedNextStep/);
   assert.match(contentScript, /这轮没有任何内容写入。请查看跳过原因，处理后重试。/);
-  assert.match(contentScript, /撤销改动/);
-  assert.match(contentScript, /撤销已写入部分/);
+  assert.match(contentScript, /undoRun/);
+  assert.match(contentScript, /undoPartialRun/);
   assert.match(contentScript, /recordUndoFromApply\(project, applied\)[\s\S]*appendPartialWritebackWarning\(applied\)/);
   assert.match(contentScript, /appendPartialWritebackWarning\(applied\)/);
 });
@@ -870,7 +870,7 @@ test('undo flow blocks legacy full-file replaceAll restores that would mark whol
   assert.match(contentScript, /function findUnsafeFullFileUndoOperation\(/);
   assert.match(undoRunBody, /findUnsafeFullFileUndoOperation\(undoOperations,\s*\{/);
   assert.match(undoRunBody, /allowSnapshotRestore:\s*undoRestore\.snapshotRestore/);
-  assert.match(contentScript, /已阻止旧格式全文撤销/);
+  assert.match(contentScript, /undoUnsafeFullFileTitle/);
 });
 
 test('undo flow uses no-trace restoring instead of requiring Reviewing write mode', () => {
@@ -882,7 +882,7 @@ test('undo flow uses no-trace restoring instead of requiring Reviewing write mod
 
   assert.doesNotMatch(undoRunBody, /ensureReviewingBeforeWrite\(run\.undoOperations\)/);
   assert.match(undoRunBody, /reviewingPolicy:\s*'no-trace-undo'/);
-  assert.match(contentScript, /无留痕撤销/);
+  assert.match(contentScript, /undoNoTraceTitle/);
 });
 
 test('no-trace undo restores original file snapshots in one operation per file', () => {
@@ -916,7 +916,7 @@ test('reviewing write undo rejects Overleaf tracked changes instead of text patc
   assert.match(undoRunBody, /run\.undoTrackedChanges/);
   assert.match(recordUndoBody, /applyResult\?\.trackedChanges/);
   assert.match(recordUndoBody, /undoTrackedChanges/);
-  assert.match(recordUndoBody, /没有创建自动撤销点/);
+  assert.match(recordUndoBody, /undoCheckpointMissing/);
 });
 
 test('reviewing write undo passes post-run content so Overleaf native undo can revert the whole transaction', () => {
@@ -939,7 +939,7 @@ test('reviewing write undo passes post-run content so Overleaf native undo can r
   assert.match(contentScript, /hasTrackedEditorUndo\(run\)/);
   assert.match(undoCountBody, /hasTrackedEditorUndo\(run\)\s*\?\s*1\s*:\s*0/);
   assert.match(recordUndoBody, /hasTrackedEditorUndo\(record\)/);
-  assert.match(recordUndoBody, /可通过 Overleaf 原生 Undo 回退/);
+  assert.match(recordUndoBody, /undoCheckpointNative/);
   assert.match(pageBridge, /function rejectTrackedChangesViaEditorUndo/);
   assert.match(pageBridge, /rejectTrackedChangesViaEditorUndo\(expectedFiles,\s*postFiles,\s*applied\)[\s\S]*?if \(!trackedChanges\.length\)/);
   assert.match(pageBridge, /function findEditorUndoControl/);
@@ -1005,7 +1005,7 @@ test('confirmation prompts render as Codex plugin dialogs instead of browser pag
   assert.doesNotMatch(contentScript, /window\.confirm\s*\(/);
   assert.match(contentScript, /data-plugin-confirm/);
   assert.match(contentScript, /async function showPluginConfirm\(/);
-  assert.match(contentScript, /Codex 确认/);
+  assert.match(contentScript, /confirmBrand/);
   const confirmBody = contentScript.match(/async function showPluginConfirm\([\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
   assert.match(confirmBody, /assets\/icons\/codex-overleaf-dialog-icon\.png/);
   assert.doesNotMatch(confirmBody, /assets\/icons\/codex-overleaf-icon\.png/);
@@ -1021,4 +1021,32 @@ test('confirmation prompts render as Codex plugin dialogs instead of browser pag
   );
   assert.match(css, /\.codex-plugin-confirm/);
   assert.match(css, /\.codex-plugin-confirm-card/);
+});
+
+test('English locale is applied to dialogs, diff review, undo controls, and transcripts', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
+
+  const confirmBody = contentScript.match(/async function showPluginConfirm\([\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
+  const diffBody = contentScript.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderReadOnlyDiffReview/)?.[0] || '';
+  const undoBody = contentScript.match(/function configureUndoButton\(root, run\) \{[\s\S]*?\n  function refreshRunCard/)?.[0] || '';
+  const transcriptCallBody = contentScript.match(/function appendNativeEvent\(event\) \{[\s\S]*?\n  function appendRunEvent/)?.[0] || '';
+  const completionBody = contentScript.match(/function appendCompletionReport\(input = \{\}\) \{[\s\S]*?\n  function formatCompletionWork/)?.[0] || '';
+
+  assert.match(i18n, /confirmBrand:\s*'Codex Confirm'/);
+  assert.match(i18n, /diffAcceptAll:\s*'Accept all'/);
+  assert.match(i18n, /undoRun:\s*'Undo changes'/);
+  assert.match(confirmBody, /brand\.textContent = tr\('confirmBrand'\)/);
+  assert.match(diffBody, /tr\('diffAccepted'\)/);
+  assert.match(diffBody, /tr\('diffAcceptAll'\)/);
+  assert.match(undoBody, /tr\('undoRun'\)/);
+  assert.match(undoBody, /tr\('undoApplied'\)/);
+  assert.match(transcriptCallBody, /mapAgentEventToActivity\(event,\s*\{\s*locale:\s*getLocale\(\)\s*\}\)/);
+  assert.match(completionBody, /locale:\s*getLocale\(\)/);
 });

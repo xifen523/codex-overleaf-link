@@ -25,3 +25,18 @@ test('i18n keeps internal mode ids while translating labels', () => {
   assert.equal(I18n.t('zh', 'modeConfirm'), '建议修改');
   assert.equal(I18n.t('zh', 'modeAuto'), '自动写入');
 });
+
+test('i18n covers plugin dialogs, diff review, toasts, and undo actions', () => {
+  assert.equal(I18n.t('en', 'confirmBrand'), 'Codex Confirm');
+  assert.equal(I18n.t('zh', 'confirmBrand'), 'Codex 确认');
+  assert.equal(I18n.t('en', 'deleteSessionTitle'), 'Delete this Codex session?');
+  assert.equal(I18n.t('zh', 'deleteSessionTitle'), '删除这个 Codex 会话？');
+  assert.equal(I18n.t('en', 'diffAcceptAll'), 'Accept all');
+  assert.equal(I18n.t('zh', 'diffAcceptAll'), '接受全部');
+  assert.equal(I18n.t('en', 'undoRun'), 'Undo changes');
+  assert.equal(I18n.t('zh', 'undoRun'), '撤销改动');
+  assert.equal(I18n.t('en', 'undoApplied'), 'Undone');
+  assert.equal(I18n.t('zh', 'undoApplied'), '已撤销');
+  assert.equal(I18n.t('en', 'dismissNotification'), 'Dismiss notification');
+  assert.equal(I18n.t('zh', 'dismissNotification'), '关闭通知');
+});

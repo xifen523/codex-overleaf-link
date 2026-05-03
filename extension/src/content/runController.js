@@ -48,7 +48,7 @@
     return params;
   }
 
-  function buildSessionHistoryResult({ assistantMessage = '', syncOutcome = {}, syncChanges = [] } = {}) {
+  function buildSessionHistoryResult({ assistantMessage = '', syncOutcome = {}, syncChanges = [], locale = 'zh' } = {}) {
     const parts = [];
     const finalAnswer = truncateSessionHistoryText(assistantMessage, 1600);
     if (finalAnswer) {
@@ -59,7 +59,10 @@
       .map(change => change?.path)
       .filter(Boolean)));
     if (changedFiles.length) {
-      parts.push(`涉及文件：${changedFiles.slice(0, 8).join(', ')}${changedFiles.length > 8 ? ' 等' : ''}`);
+      const visibleFiles = changedFiles.slice(0, 8).join(', ');
+      parts.push(locale === 'en'
+        ? `Files changed: ${visibleFiles}${changedFiles.length > 8 ? ' and more' : ''}`
+        : `涉及文件：${visibleFiles}${changedFiles.length > 8 ? ' 等' : ''}`);
     }
 
     if (!parts.length) {

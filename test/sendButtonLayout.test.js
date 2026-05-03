@@ -203,7 +203,7 @@ test('undo button is visually prominent when a run has reversible writes', () =>
     'utf8'
   );
 
-  assert.match(contentScript, /撤销改动/);
+  assert.match(contentScript, /tr\('undoRun'\)/);
   assert.match(css, /#codex-overleaf-panel \[data-run-undo\]\s*\{[\s\S]*background:\s*#a14b00/);
   assert.match(css, /#codex-overleaf-panel \[data-run-undo\]\s*\{[\s\S]*border:\s*1px solid #f0883e/);
   assert.match(css, /#codex-overleaf-panel \[data-run-undo\]\s*\{[\s\S]*font-weight:\s*700/);
