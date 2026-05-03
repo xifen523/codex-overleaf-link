@@ -6,6 +6,8 @@
   const RUN_PROJECT_SYNC_MAX_AGE_MS = 30000;
   const RUN_SNAPSHOT_ZIP_TIMEOUT_MS = 30000;
   const SNAPSHOT_PAGE_BRIDGE_TIMEOUT_MS = 70000;
+  const CONTEXT_FILE_LIST_ZIP_TIMEOUT_MS = 12000;
+  const CONTEXT_FILE_LIST_PAGE_BRIDGE_TIMEOUT_MS = 20000;
   const WARM_MIRROR_MAX_AGE_MS = 5 * 60 * 1000;
   const STREAM_RENDER_FLUSH_MS = 80;
   const STREAM_SAVE_DELAY_MS = 1000;
@@ -632,8 +634,12 @@
       const project = await callPageBridge('getProjectFileList', {
         preferExact: true,
         force: Boolean(options.force),
-        maxAgeMs: 300000
+        maxAgeMs: 300000,
+        zipTimeoutMs: CONTEXT_FILE_LIST_ZIP_TIMEOUT_MS
       });
+      if (!project?.ok) {
+        throw new Error(project?.error || project?.reason || tr('unknownReason'));
+      }
       if (loadId !== contextLoadId) {
         return;
       }
@@ -3251,6 +3257,9 @@
   function getPageBridgeTimeoutMs(method) {
     if (method === 'getProjectSnapshot') {
       return SNAPSHOT_PAGE_BRIDGE_TIMEOUT_MS;
+    }
+    if (method === 'getProjectFileList') {
+      return CONTEXT_FILE_LIST_PAGE_BRIDGE_TIMEOUT_MS;
     }
     if (method === 'triggerCompile' || method === 'getCompileLog') {
       return 60000;
