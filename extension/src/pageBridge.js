@@ -1130,7 +1130,6 @@
     } catch (error) {
       applyError = error;
     }
-    const restored = await setReviewingEnabled(true, { waitMs: 1800 });
     if (applyError) {
       throw applyError;
     }
@@ -1140,9 +1139,10 @@
       reviewingPolicy: {
         policy: 'no-trace-undo',
         disabled: true,
-        restored: restored.ok === true,
-        disable: summarizeReviewingToggleResult(disabled),
-        restore: summarizeReviewingToggleResult(restored)
+        restored: false,
+        leftEditing: true,
+        reason: 'left_editing_after_undo',
+        disable: summarizeReviewingToggleResult(disabled)
       }
     };
   }

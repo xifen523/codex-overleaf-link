@@ -4558,7 +4558,7 @@
         '',
         `将撤销本轮对 ${formatOperationFiles(run.undoOperations)} 的写入。`,
         '',
-        '如果 Overleaf 正在使用 Reviewing/Track Changes，Codex 会先临时关闭它，撤销后再恢复。'
+        '如果 Overleaf 正在使用 Reviewing/Track Changes，Codex 会先切到 Editing；撤销后会保持 Editing，下一轮写入会按需要重新切到 Reviewing。'
       ].join('\n'),
       confirmLabel: '撤销写入',
       cancelLabel: '取消',
@@ -4603,9 +4603,9 @@
     if (!reviewingPolicy || reviewingPolicy.policy !== 'no-trace-undo') {
       return;
     }
-    if (reviewingPolicy.disabled && reviewingPolicy.restored) {
+    if (reviewingPolicy.disabled && reviewingPolicy.leftEditing) {
       appendRunRecordEvent(runId, {
-        title: '撤销时已临时关闭并恢复 Overleaf 留痕模式。',
+        title: '撤销时已切到 Editing；撤销后保持 Editing。',
         status: 'completed'
       });
       return;

@@ -341,7 +341,7 @@ test('page bridge rejects write-safety confirmation when Reviewing click does no
   assert.equal(bridge.getReviewingClickCount(), 1);
 });
 
-test('page bridge applies undo operations with Reviewing temporarily disabled and restored', async () => {
+test('page bridge applies undo operations with Reviewing disabled and leaves Editing active', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
     reviewingClickBehavior: 'toggle',
@@ -369,11 +369,12 @@ test('page bridge applies undo operations with Reviewing temporarily disabled an
 
   assert.equal(result.ok, true, result.error || JSON.stringify(result));
   assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
-  assert.equal(bridge.getReviewingClickCount(), 2);
-  assert.equal(bridge.isReviewingActive(), true);
+  assert.equal(bridge.getReviewingClickCount(), 1);
+  assert.equal(bridge.isReviewingActive(), false);
   assert.equal(result.reviewingPolicy.policy, 'no-trace-undo');
   assert.equal(result.reviewingPolicy.disabled, true);
-  assert.equal(result.reviewingPolicy.restored, true);
+  assert.equal(result.reviewingPolicy.restored, false);
+  assert.equal(result.reviewingPolicy.leftEditing, true);
 });
 
 test('page bridge disables Reviewing through an Overleaf mode dropdown before undo', async () => {
@@ -404,11 +405,12 @@ test('page bridge disables Reviewing through an Overleaf mode dropdown before un
 
   assert.equal(result.ok, true, result.error || JSON.stringify(result));
   assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
-  assert.equal(bridge.getReviewingClickCount(), 2);
-  assert.equal(bridge.getModeOptionClickCount(), 2);
-  assert.equal(bridge.isReviewingActive(), true);
+  assert.equal(bridge.getReviewingClickCount(), 1);
+  assert.equal(bridge.getModeOptionClickCount(), 1);
+  assert.equal(bridge.isReviewingActive(), false);
   assert.equal(result.reviewingPolicy.disabled, true);
-  assert.equal(result.reviewingPolicy.restored, true);
+  assert.equal(result.reviewingPolicy.restored, false);
+  assert.equal(result.reviewingPolicy.leftEditing, true);
 });
 
 test('page bridge blocks no-trace undo when Reviewing cannot be disabled', async () => {
