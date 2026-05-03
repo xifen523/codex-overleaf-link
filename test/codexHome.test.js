@@ -98,3 +98,34 @@ test('clearing plugin Codex history never removes the user global Codex sessions
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('clearing plugin Codex history by thread id removes only that Codex thread', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-home-'));
+  const userSessionFile = path.join(home, '.codex', 'sessions', '2026', '05', '02', 'user.jsonl');
+  const pluginThreadFile = path.join(getPluginCodexHome({ HOME: home }), 'sessions', '2026', '05', '02', 'thread-a.jsonl');
+  const otherPluginThreadFile = path.join(getPluginCodexHome({ HOME: home }), 'sessions', '2026', '05', '02', 'thread-a-extra.jsonl');
+  const archivedThreadFile = path.join(getPluginCodexHome({ HOME: home }), 'archived_sessions', '2026', '05', '02', 'thread-a.jsonl');
+  try {
+    fs.mkdirSync(path.dirname(userSessionFile), { recursive: true });
+    fs.mkdirSync(path.dirname(pluginThreadFile), { recursive: true });
+    fs.mkdirSync(path.dirname(archivedThreadFile), { recursive: true });
+    fs.writeFileSync(userSessionFile, '{"id":"thread-a","source":"vscode"}\n', 'utf8');
+    fs.writeFileSync(pluginThreadFile, '{"threadId":"thread-a","source":"overleaf-plugin"}\n', 'utf8');
+    fs.writeFileSync(otherPluginThreadFile, '{"threadId":"thread-a-extra","source":"overleaf-plugin"}\n', 'utf8');
+    fs.writeFileSync(archivedThreadFile, '{"threadId":"thread-a","source":"overleaf-plugin"}\n', 'utf8');
+
+    const result = clearPluginCodexHistory({ threadId: 'thread-a' }, { HOME: home });
+
+    assert.equal(result.scope, 'thread');
+    assert.deepEqual(result.removed.sort(), [
+      'archived_sessions/2026/05/02/thread-a.jsonl',
+      'sessions/2026/05/02/thread-a.jsonl'
+    ]);
+    assert.equal(fs.existsSync(pluginThreadFile), false);
+    assert.equal(fs.existsSync(archivedThreadFile), false);
+    assert.equal(fs.existsSync(otherPluginThreadFile), true);
+    assert.equal(fs.existsSync(userSessionFile), true);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});

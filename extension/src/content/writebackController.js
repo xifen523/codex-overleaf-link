@@ -165,13 +165,25 @@
     if (!changes.length) {
       return '';
     }
-    const files = changes
-      .slice(0, 5)
-      .map(change => change.path)
-      .filter(Boolean)
-      .join('、');
-    const suffix = changes.length > 5 ? ` 等 ${changes.length} 个文件` : `${changes.length} 个文件`;
-    return `Codex 在本地生成了不会同步回 Overleaf 的资源或编译产物：${files || suffix}。`;
+    const visibleChanges = changes.slice(0, 5);
+    const lines = [
+      'Codex 在本地生成了这些文件，但插件没有同步回 Overleaf：',
+      ...visibleChanges.map(change => `- ${change.path || '未命名文件'}：${formatUnsupportedLocalChangeReason(change.reason)}`)
+    ];
+    if (changes.length > visibleChanges.length) {
+      lines.push(`另外 ${changes.length - visibleChanges.length} 个文件未显示。`);
+    }
+    return lines.join('\n');
+  }
+
+  function formatUnsupportedLocalChangeReason(reason) {
+    if (reason === 'generated_artifact') {
+      return 'LaTeX 构建产物，默认不写回。';
+    }
+    if (reason === 'unsupported_non_text_file') {
+      return '非文本文件，暂不支持自动写回。';
+    }
+    return '当前类型暂不支持自动写回。';
   }
 
   function getAppliedSyncChanges(syncChanges = [], applied = {}) {

@@ -81,8 +81,24 @@ function buildCodexHomeEnv(env = process.env) {
   };
 }
 
-function clearPluginCodexHistory(env = process.env) {
+function clearPluginCodexHistory(optionsOrEnv = {}, maybeEnv = null) {
+  const { options, env } = normalizeClearHistoryArgs(optionsOrEnv, maybeEnv);
   const pluginHome = getPluginCodexHome(env);
+
+  if (options.threadId) {
+    return clearPluginCodexThreadHistory(pluginHome, options.threadId);
+  }
+
+  if (options.scope !== 'all') {
+    return {
+      pluginHome,
+      removed: [],
+      scope: 'thread',
+      skipped: true,
+      reason: 'missing_thread_id'
+    };
+  }
+
   const removed = [];
 
   for (const dirName of HISTORY_DIRS) {
@@ -96,8 +112,126 @@ function clearPluginCodexHistory(env = process.env) {
 
   return {
     pluginHome,
-    removed
+    removed,
+    scope: 'all'
   };
+}
+
+function normalizeClearHistoryArgs(optionsOrEnv, maybeEnv) {
+  if (maybeEnv) {
+    return {
+      options: normalizeClearHistoryOptions(optionsOrEnv),
+      env: maybeEnv
+    };
+  }
+
+  const first = optionsOrEnv || {};
+  const looksLikeEnv = hasAnyOwn(first, [
+    'HOME',
+    'CODEX_HOME',
+    'CODEX_OVERLEAF_CODEX_HOME',
+    'CODEX_OVERLEAF_USER_CODEX_HOME'
+  ]) && !hasAnyOwn(first, ['scope', 'threadId', 'sessionId']);
+
+  if (looksLikeEnv) {
+    return {
+      options: { scope: 'all' },
+      env: first
+    };
+  }
+
+  return {
+    options: normalizeClearHistoryOptions(first),
+    env: process.env
+  };
+}
+
+function normalizeClearHistoryOptions(options = {}) {
+  return {
+    ...options,
+    threadId: String(options.threadId || '').trim(),
+    scope: options.scope || (options.threadId ? 'thread' : '')
+  };
+}
+
+function clearPluginCodexThreadHistory(pluginHome, threadId) {
+  const removed = [];
+  for (const dirName of HISTORY_DIRS) {
+    const root = path.join(pluginHome, dirName);
+    if (!isInsideDirectory(root, pluginHome) || !fs.existsSync(root)) {
+      continue;
+    }
+    for (const filePath of listRegularFiles(root)) {
+      if (!fileContainsThreadId(filePath, threadId)) {
+        continue;
+      }
+      fs.rmSync(filePath, { force: true });
+      removed.push(toForwardSlashPath(path.relative(pluginHome, filePath)));
+      removeEmptyParents(path.dirname(filePath), root);
+    }
+  }
+  return {
+    pluginHome,
+    removed,
+    scope: 'thread',
+    threadId
+  };
+}
+
+function listRegularFiles(root) {
+  const files = [];
+  const stack = [root];
+  while (stack.length) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const child = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(child);
+      } else if (entry.isFile()) {
+        files.push(child);
+      }
+    }
+  }
+  return files;
+}
+
+function fileContainsThreadId(filePath, threadId) {
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size > 5 * 1024 * 1024) {
+      return false;
+    }
+    return fs.readFileSync(filePath, 'utf8').includes(JSON.stringify(threadId));
+  } catch {
+    return false;
+  }
+}
+
+function removeEmptyParents(startDir, stopDir) {
+  let current = path.resolve(startDir);
+  const stop = path.resolve(stopDir);
+  while (current && current !== stop && isInsideDirectory(current, stop)) {
+    try {
+      fs.rmdirSync(current);
+    } catch {
+      break;
+    }
+    current = path.dirname(current);
+  }
+}
+
+function hasAnyOwn(object, keys) {
+  return keys.some(key => Object.prototype.hasOwnProperty.call(object, key));
+}
+
+function toForwardSlashPath(filePath) {
+  return filePath.split(path.sep).join('/');
 }
 
 function isRegularFile(filePath) {

@@ -233,7 +233,9 @@ test('deleting a UI session also clears plugin-isolated Codex history', () => {
   const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
 
   assert.match(deleteBody, /codex\.history\.clearPlugin/);
-  assert.match(deleteBody, /插件隔离的本地 Codex 历史/);
+  assert.match(deleteBody, /threadId:\s*target\.codexThreadId/);
+  assert.match(deleteBody, /对应的插件本地 Codex 线程历史/);
+  assert.doesNotMatch(deleteBody, /清理插件隔离的本地 Codex 历史/);
   assert.doesNotMatch(deleteBody, /This deletes local session history/);
 });
 

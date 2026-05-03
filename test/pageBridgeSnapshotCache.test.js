@@ -421,6 +421,93 @@ test('file-tree operations are skipped when Overleaf does not reflect the reques
   assert.equal(result.skipped[0].result.code, 'file_tree_verification_failed');
 });
 
+test('delete operations fail verification when Overleaf still shows the file', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': 'Main'
+    },
+    internalState: {
+      fileTreeManager: {
+        async deleteEntity() {
+          // Simulate Overleaf returning before the tree actually changes.
+        }
+      }
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    operations: [
+      { type: 'delete', path: 'main.tex' }
+    ],
+    baseFiles: [
+      { path: 'main.tex', content: 'Main' }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped[0].operation.path, 'main.tex');
+  assert.equal(result.skipped[0].result.code, 'file_tree_verification_failed');
+});
+
+test('rename operations fail verification when Overleaf does not move the path', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': 'Main'
+    },
+    internalState: {
+      fileTreeManager: {
+        async renameEntity() {
+          // Simulate Overleaf returning without renaming anything.
+        }
+      }
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    operations: [
+      { type: 'rename', path: 'main.tex', to: 'renamed.tex' }
+    ],
+    baseFiles: [
+      { path: 'main.tex', content: 'Main' }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped[0].operation.path, 'main.tex');
+  assert.equal(result.skipped[0].result.code, 'file_tree_verification_failed');
+});
+
+test('move operations fail verification when Overleaf does not move the path', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': 'Main'
+    },
+    internalState: {
+      fileTreeManager: {
+        async moveEntity() {
+          // Simulate Overleaf returning without moving anything.
+        }
+      }
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    operations: [
+      { type: 'move', path: 'main.tex', to: 'moved-main.tex' }
+    ],
+    baseFiles: [
+      { path: 'main.tex', content: 'Main' }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped[0].operation.path, 'main.tex');
+  assert.equal(result.skipped[0].result.code, 'file_tree_verification_failed');
+});
+
 test('run snapshots never open inactive Overleaf files when ZIP fallback is unavailable', async () => {
   const bridge = createSnapshotHarness({
     files: {

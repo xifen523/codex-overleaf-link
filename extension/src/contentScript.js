@@ -3329,7 +3329,7 @@
       message: [
         getSessionDisplayTitle(target),
         '',
-        '这会删除当前 Overleaf 项目的插件会话、运行记录，并清理插件隔离的本地 Codex 历史。不会修改 Overleaf 文件。'
+        '这会删除当前 Overleaf 项目的插件会话、运行记录，并清理对应的插件本地 Codex 线程历史。不会修改 Overleaf 文件，也不会影响全局 Codex 历史。'
       ].join('\n'),
       confirmLabel: '删除',
       cancelLabel: '取消',
@@ -3346,13 +3346,18 @@
     try {
       const response = await sendBackgroundNative({
         method: 'codex.history.clearPlugin',
-        params: { sessionId }
+        params: {
+          sessionId,
+          threadId: target.codexThreadId || ''
+        }
       });
       if (!response?.ok) {
-        appendPlainLog(`已删除这个插件会话，但插件隔离的本地 Codex 历史没有清理完成：${response?.error?.message || 'native host 没有返回成功状态'}`);
+        appendPlainLog(`已删除这个插件会话，但对应的插件本地 Codex 线程历史没有清理完成：${response?.error?.message || 'native host 没有返回成功状态'}`);
+      } else if (response.result?.skipped) {
+        appendPlainLog('已删除这个插件会话；这个旧会话没有可识别的本地 Codex 线程历史，未清理本地历史。');
       }
     } catch (error) {
-      appendPlainLog(`已删除这个插件会话，但插件隔离的本地 Codex 历史没有清理完成：${error.message}`);
+      appendPlainLog(`已删除这个插件会话，但对应的插件本地 Codex 线程历史没有清理完成：${error.message}`);
     }
   }
 

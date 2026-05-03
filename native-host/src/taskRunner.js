@@ -147,7 +147,7 @@ function handleCodexCancel(request) {
 
 function handleCodexHistoryClear(request, env) {
   try {
-    return okResponse(request.id, clearPluginCodexHistory(env));
+    return okResponse(request.id, clearPluginCodexHistory(request.params || {}, env));
   } catch (error) {
     return errorResponse(request.id, 'codex_history_clear_failed', error.message);
   }

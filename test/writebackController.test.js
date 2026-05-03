@@ -70,3 +70,16 @@ test('getAppliedSyncChanges returns only changes that were actually written', ()
 
   assert.deepEqual(changes, [{ path: 'main.tex' }]);
 });
+
+test('unsupported local changes are reported with per-file user-readable reasons', () => {
+  const summary = WritebackController.formatUnsupportedLocalChangeSummary([
+    { path: 'main.pdf', reason: 'generated_artifact' },
+    { path: 'diagram.png', reason: 'unsupported_non_text_file' },
+    { path: 'unknown.bin', reason: 'unknown_reason' }
+  ]);
+
+  assert.match(summary, /Codex 在本地生成了这些文件，但插件没有同步回 Overleaf/);
+  assert.match(summary, /- main\.pdf：LaTeX 构建产物，默认不写回。/);
+  assert.match(summary, /- diagram\.png：非文本文件，暂不支持自动写回。/);
+  assert.match(summary, /- unknown\.bin：当前类型暂不支持自动写回。/);
+});
