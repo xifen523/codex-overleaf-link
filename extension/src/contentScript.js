@@ -2136,15 +2136,24 @@
         requireReviewing: state.requireReviewing === true
       })
       : { ok: true, applied: [], skipped: [] };
-    const saveVerification = await verifyPostWriteSaveState();
-    appendPostWriteSaveVerificationWarning(saveVerification);
+    const hasConfirmedApplyResult = hasApplyResultEntries(applied);
+    const saveVerification = hasConfirmedApplyResult
+      ? await verifyPostWriteSaveState()
+      : {
+        ok: false,
+        state: 'not_checked',
+        reason: 'No applied or skipped writeback entries were returned.'
+      };
+    if (hasConfirmedApplyResult) {
+      appendPostWriteSaveVerificationWarning(saveVerification);
+    }
     await refreshProjectMirrorAfterWriteback(project, applied, saveVerification);
     if (state.mode === 'auto') {
       renderReadOnlyDiffReview(getAppliedSyncChanges(syncChanges, applied));
     }
     appendApplyResult(applied);
     recordUndoFromApply(project, applied);
-    if (applied.skipped?.length) {
+    if (applied?.skipped?.length) {
       appendPartialWritebackWarning(applied);
     }
     const appliedPaths = getAppliedOperationPaths(applied);
@@ -2156,32 +2165,45 @@
         });
       });
     }
+    const hasSkippedApplyResult = Boolean(applied?.skipped?.length);
+    const writebackIncomplete = !hasConfirmedApplyResult || hasSkippedApplyResult;
     const summaryLine = appendChangeSummary({
-      notes: tx('Local Codex changes were synced back to Overleaf.', '本地 Codex 改动已同步回 Overleaf。'),
+      notes: hasConfirmedApplyResult
+        ? tx('Local Codex changes were synced back to Overleaf.', '本地 Codex 改动已同步回 Overleaf。')
+        : tx('Local Codex changes were sent to Overleaf, but Codex could not confirm the write result.', '本地 Codex 改动已发送到 Overleaf，但 Codex 没能确认写入结果。'),
       operations,
       applyResults: [applied],
-      status: 'synced from local Codex workspace'
+      status: writebackIncomplete ? 'writeback incomplete' : 'synced from local Codex workspace'
     });
     const syncedConclusion = assistantMessage || tx('Local Codex changes were synced back to Overleaf.', '本地 Codex 改动已同步回 Overleaf。');
     const partialSyncConclusion = assistantMessage
       ? `${assistantMessage}\n\n${tx('Sync note: local Codex changes were sent to Overleaf, but some items were skipped.', '同步提示：本地 Codex 改动已尝试写回 Overleaf，但有部分项目被跳过。')}`
       : tx('Local Codex changes were sent to Overleaf, but some items were skipped.', '本地 Codex 改动已尝试同步回 Overleaf，但有部分项目被跳过。');
-    appendCompletionReport({
-      conclusion: applied.skipped?.length
+    const unconfirmedSyncConclusion = assistantMessage
+      ? `${assistantMessage}\n\n${tx('Writeback note: Codex could not confirm any Overleaf write result entries, so local mirror refresh and auto compile were skipped.', '写入提示：Codex 没能确认任何 Overleaf 写入结果条目，因此已跳过本地 mirror 刷新和自动编译。')}`
+      : tx('Codex tried to write local changes to Overleaf, but the write result did not confirm any applied or skipped entries.', 'Codex 已尝试把本地改动写入 Overleaf，但写入结果没有确认任何已写入或已跳过条目。');
+    const writebackConclusion = !hasConfirmedApplyResult
+      ? unconfirmedSyncConclusion
+      : hasSkippedApplyResult
         ? partialSyncConclusion
-        : syncedConclusion,
-      status: applied.skipped?.length ? 'failed' : 'completed',
+        : syncedConclusion;
+    const writebackNextStep = !hasConfirmedApplyResult
+      ? tx('Check Overleaf manually before running again. Local mirror refresh and auto compile were skipped.', '再次运行前请先手动检查 Overleaf。本地 mirror 刷新和自动编译已跳过。')
+      : hasSkippedApplyResult
+        ? formatWritebackSkippedNextStep(applied)
+        : tx('Review the synced file in Overleaf.', '请在 Overleaf 中查看同步后的文件。');
+    appendCompletionReport({
+      conclusion: writebackConclusion,
+      status: writebackIncomplete ? 'failed' : 'completed',
       operations,
-	      applyResults: [applied],
-	      mode: state.mode,
-	      nextStep: applied.skipped?.length
-	        ? formatWritebackSkippedNextStep(applied)
-	        : tx('Review the synced file in Overleaf.', '请在 Overleaf 中查看同步后的文件。')
-	    });
+      applyResults: [applied],
+      mode: state.mode,
+      nextStep: writebackNextStep
+    });
 
     return {
       summaryLine,
-      hasSkippedOperations: hasSkippedApplyOperations([applied])
+      hasSkippedOperations: writebackIncomplete || hasSkippedApplyOperations([applied])
     };
   }
 
@@ -2303,7 +2325,11 @@
   }
 
   function getAppliedOperationPaths(applied = {}) {
-    return writebackController.getAppliedOperationPaths(applied);
+    return writebackController.getAppliedOperationPaths(applied || {});
+  }
+
+  function hasApplyResultEntries(applied = {}) {
+    return Boolean(applied?.applied?.length || applied?.skipped?.length);
   }
 
   function mergeVerifiedAppliedFiles(freshProject = {}, originalProject = {}, applied = {}) {

@@ -166,7 +166,7 @@ test('post-write side effects wait for verified Overleaf save state', () => {
   const verifyBody = contentScript.match(/async function verifyPostWriteSaveState[\s\S]*?\n  async function refreshProjectMirrorAfterWriteback/)?.[0] || '';
 
   const applyIndex = applyBody.indexOf("await callPageBridge('applyOperations'");
-  const verifyIndex = applyBody.indexOf('const saveVerification = await verifyPostWriteSaveState()');
+  const verifyIndex = applyBody.indexOf('verifyPostWriteSaveState()');
   const refreshIndex = applyBody.indexOf('refreshProjectMirrorAfterWriteback(project, applied, saveVerification)');
   const recompileIndex = applyBody.indexOf('autoRecompileAfterWriteback(appliedPaths, saveVerification)');
 
@@ -179,6 +179,22 @@ test('post-write side effects wait for verified Overleaf save state', () => {
   assert.match(verifyBody, /state:\s*'unknown_timeout'/);
   assert.match(verifyBody, /state:\s*'unavailable'/);
   assert.match(applyBody, /appendPostWriteSaveVerificationWarning\(saveVerification\)/);
+});
+
+test('empty or malformed apply results do not trigger save verification', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
+  const helperBody = contentScript.match(/function hasApplyResultEntries\(applied = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(contentScript, /function hasApplyResultEntries\(applied = \{\}\)/);
+  assert.match(helperBody, /applied\?\.applied\?\.length/);
+  assert.match(helperBody, /applied\?\.skipped\?\.length/);
+  assert.match(applyBody, /const hasConfirmedApplyResult = hasApplyResultEntries\(applied\)/);
+  assert.match(applyBody, /const saveVerification = hasConfirmedApplyResult\s*\?[\s\S]*?verifyPostWriteSaveState\(\)[\s\S]*?:/);
+  assert.match(applyBody, /if \(hasConfirmedApplyResult\) \{[\s\S]*?appendPostWriteSaveVerificationWarning\(saveVerification\)/);
 });
 
 test('post-write mirror refresh and auto compile return unless save is verified', () => {
