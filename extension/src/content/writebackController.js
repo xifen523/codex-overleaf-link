@@ -105,16 +105,20 @@
   }
 
   function getAppliedOperationPaths(applied = {}) {
-    return Array.from(new Set((applied.applied || [])
+    return Array.from(new Set(getAppliedEntries(applied)
       .map(item => item?.operation?.path)
       .filter(Boolean)));
+  }
+
+  function getAppliedEntries(applied = {}) {
+    return Array.isArray(applied?.applied) ? applied.applied : [];
   }
 
   function mergeVerifiedAppliedFiles(freshProject = {}, originalProject = {}, applied = {}) {
     const filesByPath = new Map((freshProject.files || []).map(file => [file.path, { ...file }]));
     const originalByPath = new Map((originalProject.files || []).map(file => [file.path, file]));
 
-    for (const item of applied.applied || []) {
+    for (const item of getAppliedEntries(applied)) {
       const operation = item?.operation || {};
       const result = item?.result || {};
       if (!operation.path) {
@@ -209,7 +213,7 @@
   }
 
   function getAppliedSyncChanges(syncChanges = [], applied = {}) {
-    const appliedPaths = new Set((applied.applied || [])
+    const appliedPaths = new Set(getAppliedEntries(applied)
       .map(item => item.operation?.path || item.operation?.to || item.operation?.from)
       .filter(Boolean));
     return (syncChanges || []).filter(change => appliedPaths.has(change.path));

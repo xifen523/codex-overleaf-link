@@ -73,6 +73,44 @@ test('getAppliedSyncChanges returns only changes that were actually written', ()
   assert.deepEqual(changes, [{ path: 'main.tex' }]);
 });
 
+test('malformed applied entries do not count as written sync changes or paths', () => {
+  const syncChanges = [
+    { path: 'main.tex' },
+    { path: 'refs.bib' }
+  ];
+
+  for (const applied of [
+    { applied: 'x', skipped: [] },
+    { applied: { length: 1 }, skipped: [] }
+  ]) {
+    assert.deepEqual(WritebackController.getAppliedSyncChanges(syncChanges, applied), []);
+    assert.deepEqual(WritebackController.getAppliedOperationPaths(applied), []);
+  }
+});
+
+test('malformed applied entries do not alter verified mirror merge', () => {
+  const freshProject = {
+    files: [
+      { path: 'main.tex', kind: 'text', content: 'fresh' }
+    ]
+  };
+  const originalProject = {
+    files: [
+      { path: 'main.tex', kind: 'text', content: 'before' }
+    ]
+  };
+
+  for (const applied of [
+    { applied: 'x', skipped: [] },
+    { applied: { length: 1 }, skipped: [] }
+  ]) {
+    assert.deepEqual(
+      WritebackController.mergeVerifiedAppliedFiles(freshProject, originalProject, applied),
+      freshProject
+    );
+  }
+});
+
 test('unsupported local changes are reported with per-file user-readable reasons', () => {
   const summary = WritebackController.formatUnsupportedLocalChangeSummary([
     { path: 'main.pdf', reason: 'generated_artifact' },
