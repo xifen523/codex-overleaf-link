@@ -139,8 +139,8 @@ test('fresh warm mirror can carry a run when Overleaf only returns a partial sna
 
   assert.match(contentScript, /async function resolveWarmMirrorReuse/);
   assert.match(contentScript, /Full project snapshot was not captured/);
-  assert.match(contentScript, /const WARM_MIRROR_MAX_AGE_MS\s*=\s*5 \* 60 \* 1000/);
-  assert.match(contentScript, /mirrorStatus\.ageMs >= WARM_MIRROR_MAX_AGE_MS/);
+  assert.match(contentScript, /classifyMirrorHealth\(mirrorStatus\)/);
+  assert.match(contentScript, /mirrorHealth\.reusable/);
   assert.match(contentScript, /没有读到完整 Overleaf 项目，但本地 workspace 刚同步过/);
   assert.match(contentScript, /mergeProjectWithSyncChangeBaseFiles\(project,\s*syncChanges\)/);
 });
@@ -301,22 +301,31 @@ test('idle background sync does not poll or touch the Overleaf editor', () => {
   assert.doesNotMatch(initBody, /mirror\.sync/);
   assert.doesNotMatch(contentScript, /setInterval\(\(\) => \{[\s\S]*syncMirrorBackground/);
   assert.doesNotMatch(contentScript, /function scheduleProjectSync/);
-  assert.doesNotMatch(contentScript, /addEventListener\('input', scheduleMirrorPrefetch\)/);
   assert.doesNotMatch(initBody, /scheduleProbeRefresh/);
   assert.doesNotMatch(initBody, /installInteractionRefresh/);
 });
 
-test('status probing and mirror prefetch have no automatic refresh helpers left behind', () => {
+test('mirror prefetch is non-invasive and never enables editor navigation', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const prefetchBody = contentScript.match(/async function syncMirrorPrefetch[\s\S]*?\n  function/)?.[0] || '';
 
-  assert.doesNotMatch(contentScript, /function installInteractionRefresh/);
-  assert.doesNotMatch(contentScript, /function scheduleProbeRefresh/);
-  assert.doesNotMatch(contentScript, /function scheduleDebouncedProbeRefresh/);
-  assert.doesNotMatch(contentScript, /function scheduleMirrorPrefetch/);
-  assert.doesNotMatch(contentScript, /function syncMirrorBackground/);
+  assert.match(prefetchBody, /allowEditorNavigation:\s*false/);
+  assert.match(prefetchBody, /requireFullProject:\s*true/);
+  assert.doesNotMatch(prefetchBody, /openFileByPath/);
+});
+
+test('warm send checks mirror status before full project snapshot fallback', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
+
+  assert.match(runTaskBody, /resolveWarmRunStart/);
+  assert.ok(runTaskBody.indexOf('resolveWarmRunStart') < runTaskBody.indexOf('getRunProjectSnapshot'));
 });
 
 test('ask mode is not blocked by write-safety preconditions', () => {

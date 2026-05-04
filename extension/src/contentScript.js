@@ -9,7 +9,6 @@
   const COMPILE_PAGE_BRIDGE_TIMEOUT_MS = 75000;
   const CONTEXT_FILE_LIST_ZIP_TIMEOUT_MS = 12000;
   const CONTEXT_FILE_LIST_PAGE_BRIDGE_TIMEOUT_MS = 20000;
-  const WARM_MIRROR_MAX_AGE_MS = 5 * 60 * 1000;
   const STREAM_RENDER_FLUSH_MS = 80;
   const STREAM_SAVE_DELAY_MS = 1000;
   const MAX_RUN_EVENTS = 300;
@@ -52,6 +51,7 @@
   });
   const writebackController = window.CodexOverleafWritebackController;
   const runController = window.CodexOverleafRunController;
+  const mirrorHealth = window.CodexOverleafMirrorHealth;
 
   let panel = null;
   let state = null;
@@ -69,6 +69,14 @@
   let runCancellationRequested = false;
   let activePluginConfirmResolve = null;
   let modelDiscovery = { status: 'fallback', source: 'fallback', fetchedAt: '' };
+  let mirrorPrefetchState = {
+    inFlight: null,
+    lastSuccessAt: 0,
+    lastErrorAt: 0,
+    lastError: null,
+    timer: null,
+    projectId: ''
+  };
 
   chrome.runtime.onMessage.addListener(message => {
     if (message?.type === 'codex-overleaf/open-panel') {
@@ -252,6 +260,12 @@
         panel.querySelector('[data-composer-form]')?.requestSubmit();
       });
       panel.querySelector('[data-task]').addEventListener('keydown', handleTaskInputKeydown);
+      panel.querySelector('[data-task]').addEventListener('input', () => {
+        scheduleMirrorPrefetch({
+          reason: 'composer-input',
+          delayMs: mirrorHealth?.PREFETCH_DEBOUNCE_MS || 1200
+        });
+      });
       panel.addEventListener('click', event => event.stopPropagation());
       panel.addEventListener('mousedown', event => event.stopPropagation());
       panel.querySelector('[data-refresh]').addEventListener('click', () => refreshProbe({ userInitiated: true }));
@@ -289,6 +303,7 @@
       renderSessionList();
       renderRunHistory();
       renderContextSelection();
+      scheduleMirrorPrefetch({ reason: 'cold-start', delayMs: 2500 });
     }
 
     panel.classList.add('is-open');
@@ -1231,21 +1246,29 @@
         return;
       }
 
-      appendRunEvent({
-        title: tx('Syncing the Overleaf project to the local Codex workspace.', '正在同步 Overleaf 项目到本地 Codex workspace。'),
-        status: 'running'
-      });
-      const project = await getRunProjectSnapshot();
+      const focusFiles = getActiveFocusFiles();
+      const warmStart = await resolveWarmRunStart({ focusFiles: getActiveFocusFiles(), mode: state.mode });
+      let project = warmStart.project || null;
+      let useExistingMirror = warmStart.useExistingMirror;
+      let fileOverlays = warmStart.fileOverlays || null;
+      if (!useExistingMirror) {
+        appendRunEvent({
+          title: tx('Syncing the Overleaf project to the local Codex workspace.', '正在同步 Overleaf 项目到本地 Codex workspace。'),
+          status: 'running'
+        });
+        project = await getRunProjectSnapshot();
+      }
       throwIfRunCancellationRequested();
       appendLog(formatProjectSnapshotUserLog(project));
-      const snapshotWarnings = getProjectSnapshotWarnings(project);
-      const focusFiles = getActiveFocusFiles();
-      let useExistingMirror = false;
-      let fileOverlays = null;
-      const warmMirrorReuse = await resolveWarmMirrorReuse(project, {
-        snapshotWarnings,
-        focusFiles
-      });
+      const snapshotWarnings = useExistingMirror
+        ? { blocking: [], nonBlocking: [] }
+        : getProjectSnapshotWarnings(project);
+      const warmMirrorReuse = useExistingMirror
+        ? warmStart
+        : await resolveWarmMirrorReuse(project, {
+          snapshotWarnings,
+          focusFiles
+        });
       const focusedPartialSnapshot = runController.canUseFocusedPartialSnapshot({
         project,
         snapshotWarnings,
@@ -1272,7 +1295,9 @@
         useExistingMirror = true;
         fileOverlays = warmMirrorReuse.fileOverlays;
         appendRunEvent({
-          title: warmMirrorReuse.partialSnapshot
+          title: warmMirrorReuse.warmStart
+            ? tx('Using the warmed local workspace. No Overleaf editor navigation was needed before this run.', '使用已预热的本地 workspace；本轮开始前没有导航 Overleaf 编辑器。')
+            : warmMirrorReuse.partialSnapshot
             ? tx('The full Overleaf project was not read, but the local workspace was synced recently. Continuing with the latest full workspace plus current-file overlay.', '没有读到完整 Overleaf 项目，但本地 workspace 刚同步过；继续使用最近的完整 workspace，并叠加当前文件内容。')
             : tx('Using the warmed local workspace and syncing only focus-file deltas.', '使用已预热的本地 workspace（仅同步焦点文件差异）。'),
           status: 'completed'
@@ -2456,6 +2481,146 @@
     return window.location.pathname.match(/\/project\/([^/?#]+)/)?.[1] || window.location.href;
   }
 
+  function scheduleMirrorPrefetch(options = {}) {
+    syncMirrorPrefetchStateForProject();
+    if (!mirrorHealth?.shouldStartPrefetch) {
+      return;
+    }
+    const delayMs = Math.max(0, Number(options.delayMs) || 0);
+    if (mirrorPrefetchState.timer) {
+      window.clearTimeout(mirrorPrefetchState.timer);
+      mirrorPrefetchState.timer = null;
+    }
+    mirrorPrefetchState.timer = window.setTimeout(() => {
+      mirrorPrefetchState.timer = null;
+      syncMirrorPrefetch({ reason: options.reason || 'deferred' }).catch(error => {
+        mirrorPrefetchState.lastErrorAt = Date.now();
+        mirrorPrefetchState.lastError = error?.message || String(error);
+      });
+    }, delayMs);
+  }
+
+  async function syncMirrorPrefetch(options = {}) {
+    syncMirrorPrefetchStateForProject();
+    const projectId = getCurrentProjectId();
+    const now = Date.now();
+    const readiness = mirrorHealth?.shouldStartPrefetch?.({
+      ...mirrorPrefetchState,
+      busy: Boolean(currentRunView),
+      now
+    }) || { ok: false, reason: 'unavailable' };
+    if (!readiness.ok) {
+      return { ok: false, skipped: true, reason: readiness.reason };
+    }
+
+    mirrorPrefetchState.projectId = projectId;
+    mirrorPrefetchState.lastAttemptAt = now;
+    const inFlight = (async () => {
+      const project = await callPageBridge('getProjectSnapshot', {
+        force: false,
+        maxAgeMs: 30000,
+        preferLightweight: false,
+        allowZipFallback: true,
+        allowEditorNavigation: false,
+        requireFullProject: true,
+        includeBinaryFiles: true,
+        zipOnly: true,
+        zipTimeoutMs: RUN_SNAPSHOT_ZIP_TIMEOUT_MS
+      });
+      if (getCurrentProjectId() !== projectId) {
+        return { ok: false, skipped: true, reason: 'project_changed' };
+      }
+      if (project?.capabilities?.fullProjectSnapshot !== true) {
+        return { ok: false, skipped: true, reason: 'not_full_project' };
+      }
+      const response = await sendBackgroundNative({
+        method: 'mirror.sync',
+        params: {
+          projectId,
+          project,
+          reason: options.reason || 'prefetch'
+        }
+      });
+      if (!response?.ok) {
+        throw new Error(response?.error?.message || 'mirror.sync failed');
+      }
+      if (getCurrentProjectId() !== projectId) {
+        return { ok: false, skipped: true, reason: 'project_changed' };
+      }
+      mirrorPrefetchState.lastSuccessAt = Date.now();
+      mirrorPrefetchState.lastError = null;
+      return { ok: true };
+    })();
+
+    mirrorPrefetchState.inFlight = inFlight;
+    try {
+      return await inFlight;
+    } catch (error) {
+      mirrorPrefetchState.lastErrorAt = Date.now();
+      mirrorPrefetchState.lastError = error?.message || String(error);
+      return { ok: false, error };
+    } finally {
+      if (mirrorPrefetchState.inFlight === inFlight) {
+        mirrorPrefetchState.inFlight = null;
+      }
+    }
+  }
+
+  function isMirrorReusable(mirrorStatus) {
+    const health = mirrorHealth?.classifyMirrorHealth?.(mirrorStatus) || { reusable: false };
+    return health.reusable === true;
+  }
+
+  async function resolveWarmRunStart(taskContext = {}) {
+    const focusFiles = taskContext.focusFiles || [];
+    const mode = taskContext.mode || state?.mode;
+    const mirrorStatus = await getMirrorFreshness();
+    if (!mirrorStatus?.exists || !isMirrorReusable(mirrorStatus)) {
+      return { useExistingMirror: false, reason: 'mirror_not_fresh', mirrorStatus };
+    }
+    if (focusFiles.length) {
+      return { useExistingMirror: false, reason: 'focus_requires_snapshot', mirrorStatus };
+    }
+
+    return {
+      useExistingMirror: true,
+      warmStart: true,
+      reason: mode === 'ask' ? 'warm_whole_project_ask' : 'warm_whole_project',
+      mirrorStatus,
+      fileOverlays: [],
+      project: {
+        projectId: getCurrentProjectId(),
+        files: [],
+        activePath: '',
+        source: 'warm-mirror',
+        warmMirror: true,
+        capabilities: {
+          fullProjectSnapshot: true,
+          method: 'warm-mirror',
+          source: 'warm-mirror'
+        }
+      }
+    };
+  }
+
+  function syncMirrorPrefetchStateForProject() {
+    const projectId = getCurrentProjectId();
+    if (!mirrorPrefetchState.projectId || mirrorPrefetchState.projectId === projectId) {
+      return;
+    }
+    if (mirrorPrefetchState.timer) {
+      window.clearTimeout(mirrorPrefetchState.timer);
+    }
+    mirrorPrefetchState = {
+      inFlight: mirrorPrefetchState.inFlight,
+      lastSuccessAt: 0,
+      lastErrorAt: 0,
+      lastError: null,
+      timer: null,
+      projectId
+    };
+  }
+
   async function handleTaskResult(mode, result, project) {
     const notes = result.notes?.trim() || '';
     if (notes) {
@@ -3068,7 +3233,8 @@
     }
 
     const mirrorStatus = await getMirrorFreshness();
-    if (!mirrorStatus?.exists || mirrorStatus.ageMs >= WARM_MIRROR_MAX_AGE_MS) {
+    const mirrorHealth = window.CodexOverleafMirrorHealth.classifyMirrorHealth(mirrorStatus);
+    if (!mirrorStatus?.exists || !mirrorHealth.reusable) {
       return { useExistingMirror: false, reason: 'mirror_not_fresh', mirrorStatus };
     }
 
@@ -3076,6 +3242,7 @@
       useExistingMirror: true,
       fileOverlays,
       mirrorStatus,
+      mirrorHealth,
       partialSnapshot
     };
   }
