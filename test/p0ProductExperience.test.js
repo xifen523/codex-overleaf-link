@@ -152,9 +152,78 @@ test('successful Overleaf writeback refreshes page snapshot cache and native mir
   );
   const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
 
-  assert.match(applyBody, /refreshProjectMirrorAfterWriteback/);
+  assert.match(applyBody, /refreshProjectMirrorAfterWriteback\(project, applied, saveVerification\)/);
   assert.match(contentScript, /invalidateProjectSnapshot/);
   assert.match(contentScript, /method:\s*'mirror\.sync'/);
+});
+
+test('post-write side effects wait for verified Overleaf save state', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
+  const verifyBody = contentScript.match(/async function verifyPostWriteSaveState[\s\S]*?\n  async function refreshProjectMirrorAfterWriteback/)?.[0] || '';
+
+  const applyIndex = applyBody.indexOf("await callPageBridge('applyOperations'");
+  const verifyIndex = applyBody.indexOf('const saveVerification = await verifyPostWriteSaveState()');
+  const refreshIndex = applyBody.indexOf('refreshProjectMirrorAfterWriteback(project, applied, saveVerification)');
+  const recompileIndex = applyBody.indexOf('autoRecompileAfterWriteback(appliedPaths, saveVerification)');
+
+  assert.ok(applyIndex >= 0, 'applyOperations call is present');
+  assert.ok(verifyIndex > applyIndex, 'save verification happens after applyOperations');
+  assert.ok(refreshIndex > verifyIndex, 'mirror refresh happens after save verification');
+  assert.ok(recompileIndex > verifyIndex, 'auto compile happens after save verification');
+  assert.match(verifyBody, /callPageBridge\('waitForSaveState', \{\s*deadlineMs:\s*5000,\s*requirePositiveSignal:\s*true\s*\}\)/);
+  assert.match(verifyBody, /state:\s*'verified_saved'/);
+  assert.match(verifyBody, /state:\s*'unknown_timeout'/);
+  assert.match(verifyBody, /state:\s*'unavailable'/);
+  assert.match(applyBody, /appendPostWriteSaveVerificationWarning\(saveVerification\)/);
+});
+
+test('post-write mirror refresh and auto compile return unless save is verified', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const refreshBody = contentScript.match(/async function refreshProjectMirrorAfterWriteback[\s\S]*?\n  function getAppliedOperationPaths/)?.[0] || '';
+  const autoCompileBody = contentScript.match(/async function autoRecompileAfterWriteback[\s\S]*?\n  async function resolveCompileLogContext/)?.[0] || '';
+
+  assert.match(refreshBody, /async function refreshProjectMirrorAfterWriteback\(project = \{\}, applied = \{\}, saveVerification = \{\}\)/);
+  assert.match(autoCompileBody, /async function autoRecompileAfterWriteback\(writtenPaths = \[\], saveVerification = \{\}\)/);
+  assert.match(refreshBody, /saveVerification\?\.state !== 'verified_saved'[\s\S]*?return;/);
+  assert.match(autoCompileBody, /saveVerification\?\.state !== 'verified_saved'[\s\S]*?return;/);
+  assert.ok(
+    refreshBody.indexOf("saveVerification?.state !== 'verified_saved'") < refreshBody.indexOf("callPageBridge('invalidateProjectSnapshot'"),
+    'mirror refresh checks verified save before invalidating snapshot cache'
+  );
+  assert.ok(
+    refreshBody.indexOf("saveVerification?.state !== 'verified_saved'") < refreshBody.indexOf("callPageBridge('getProjectSnapshot'"),
+    'mirror refresh checks verified save before fetching a fresh snapshot'
+  );
+  assert.ok(
+    refreshBody.indexOf("saveVerification?.state !== 'verified_saved'") < refreshBody.indexOf("method: 'mirror.sync'"),
+    'mirror refresh checks verified save before syncing native mirror'
+  );
+  assert.ok(
+    autoCompileBody.indexOf("saveVerification?.state !== 'verified_saved'") < autoCompileBody.indexOf("callPageBridge('triggerCompile'"),
+    'auto compile checks verified save before triggering compile'
+  );
+});
+
+test('no-change writeback path does not wait for Overleaf save verification', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
+  const noChangeBlock = applyBody.match(/if \(!operations\.length\) \{[\s\S]*?return \{[\s\S]*?\n      \};\n    \}/)?.[0] || '';
+
+  assert.doesNotMatch(noChangeBlock, /verifyPostWriteSaveState/);
+  assert.ok(
+    noChangeBlock.length && applyBody.indexOf(noChangeBlock) < applyBody.indexOf('verifyPostWriteSaveState'),
+    'no-change path returns before save verification'
+  );
 });
 
 test('post-write mirror refresh refuses partial snapshots before touching native baseline', () => {
@@ -795,7 +864,7 @@ test('auto recompile is based on successfully applied Overleaf writes', () => {
 
   assert.doesNotMatch(runTaskBody, /response\.result\.syncChanges[\s\S]*autoRecompileAfterWriteback/);
   assert.match(applySyncBody, /const appliedPaths = getAppliedOperationPaths\(applied\)/);
-  assert.match(applySyncBody, /autoRecompileAfterWriteback\(appliedPaths\)/);
+  assert.match(applySyncBody, /autoRecompileAfterWriteback\(appliedPaths, saveVerification\)/);
   assert.match(contentScript, /preferUiClick:\s*true/);
 });
 

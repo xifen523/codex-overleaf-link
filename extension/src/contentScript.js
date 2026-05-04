@@ -2082,6 +2082,26 @@
       }
     }
 
+    if (!operations.length) {
+      appendRunEvent({
+        title: tx('No approved file changes remain to sync back to Overleaf.', '没有剩余已确认的文件改动需要同步回 Overleaf。'),
+        status: 'completed'
+      });
+      appendCompletionReport({
+        conclusion: assistantMessage || tx('No approved changes were written back to Overleaf.', '没有已确认的改动写回 Overleaf。'),
+        status: state.mode === 'ask' ? tr('modeAsk') : 'completed',
+        operations: [],
+        applyResults: [],
+        unchangedReason: tx('No approved file changes remain to sync back to Overleaf.', '没有剩余已确认的文件改动需要同步回 Overleaf。'),
+        mode: state.mode,
+        nextStep: tx('You can continue the conversation, or adjust @context and run again.', '可以继续追问，或调整 @context 后重新运行。')
+      });
+      return {
+        summaryLine: tx('No changes applied', '没有应用改动'),
+        hasSkippedOperations: false
+      };
+    }
+
     appendOperationsPreview(operations, tx('Sync local Codex changes to Overleaf', '同步本地 Codex 改动到 Overleaf'));
     const reviewing = await ensureReviewingBeforeWrite(operations);
     if (!reviewing.ok) {
@@ -2116,7 +2136,9 @@
         requireReviewing: state.requireReviewing === true
       })
       : { ok: true, applied: [], skipped: [] };
-    await refreshProjectMirrorAfterWriteback(project, applied);
+    const saveVerification = await verifyPostWriteSaveState();
+    appendPostWriteSaveVerificationWarning(saveVerification);
+    await refreshProjectMirrorAfterWriteback(project, applied, saveVerification);
     if (state.mode === 'auto') {
       renderReadOnlyDiffReview(getAppliedSyncChanges(syncChanges, applied));
     }
@@ -2127,7 +2149,7 @@
     }
     const appliedPaths = getAppliedOperationPaths(applied);
     if (appliedPaths.length) {
-      await autoRecompileAfterWriteback(appliedPaths).catch(error => {
+      await autoRecompileAfterWriteback(appliedPaths, saveVerification).catch(error => {
         appendRunEvent({
           title: tx(`Post-write compile failed: ${error.message}`, `写后编译出错：${error.message}`),
           status: 'failed'
@@ -2163,7 +2185,63 @@
     };
   }
 
-  async function refreshProjectMirrorAfterWriteback(project = {}, applied = {}) {
+  async function verifyPostWriteSaveState() {
+    try {
+      const result = await callPageBridge('waitForSaveState', {
+        deadlineMs: 5000,
+        requirePositiveSignal: true
+      });
+      if (result?.state === 'verified_saved') {
+        return {
+          ...result,
+          ok: true,
+          state: 'verified_saved'
+        };
+      }
+      if (result?.ok === true && !result?.state) {
+        return {
+          ...result,
+          ok: true,
+          state: 'verified_saved'
+        };
+      }
+      if (result?.state === 'unknown_timeout' || result?.state === 'unavailable') {
+        return {
+          ...result,
+          ok: false
+        };
+      }
+      return {
+        ...result,
+        ok: false,
+        state: 'unknown_timeout'
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        state: 'unavailable',
+        reason: error.message
+      };
+    }
+  }
+
+  function appendPostWriteSaveVerificationWarning(saveVerification = {}) {
+    if (saveVerification?.state === 'verified_saved') {
+      return;
+    }
+    appendRunEvent({
+      title: tx(
+        'Files were written or attempted in Overleaf, but Codex could not verify that Overleaf saved them. Local mirror refresh and auto compile were skipped.',
+        '文件已写入或尝试写入 Overleaf，但 Codex 未能确认 Overleaf 已保存；已跳过本地 mirror 刷新和自动编译。'
+      ),
+      status: 'warning'
+    });
+  }
+
+  async function refreshProjectMirrorAfterWriteback(project = {}, applied = {}, saveVerification = {}) {
+    if (saveVerification?.state !== 'verified_saved') {
+      return;
+    }
     if (!applied?.applied?.length) {
       return;
     }
@@ -2246,7 +2324,8 @@
     return writebackController.formatUnsupportedLocalChangeSummary(changes, getLocale());
   }
 
-  async function autoRecompileAfterWriteback(writtenPaths = []) {
+  async function autoRecompileAfterWriteback(writtenPaths = [], saveVerification = {}) {
+    if (saveVerification?.state !== 'verified_saved') return;
     if (state.autoRecompile === false) return;
     if (state.mode === 'ask') return;
 
