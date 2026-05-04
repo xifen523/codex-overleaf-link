@@ -350,6 +350,19 @@ test('warm send verifies a non-invasive current or focus overlay before reusing 
   assert.doesNotMatch(warmStartBody, /fullProjectSnapshot:\s*true[\s\S]*method:\s*'warm-mirror'/);
 });
 
+test('warm mirror overlays preserve active file alongside focused files', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const helperBody = contentScript.match(/function buildSnapshotFileOverlays\(project = \{\}, focusFiles = \[\], options = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(helperBody, /activePath/);
+  assert.match(helperBody, /focusSet\.has/);
+  assert.match(helperBody, /normalizedPath === activePath/);
+  assert.doesNotMatch(helperBody, /focusFiles\.length\s*\?\s*textFiles\.filter\(file => focusSet\.has/);
+});
+
 test('ask mode is not blocked by write-safety preconditions', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),

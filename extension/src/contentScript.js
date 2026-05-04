@@ -3314,10 +3314,14 @@
   function buildSnapshotFileOverlays(project = {}, focusFiles = [], options = {}) {
     const textFiles = (project.files || []).filter(isTextSnapshotFile);
     const focusSet = new Set((focusFiles || []).map(normalizeSnapshotPath).filter(Boolean));
-    const activePath = project.activePath || '';
-    const candidates = focusFiles.length
-      ? textFiles.filter(file => focusSet.has(normalizeSnapshotPath(file.path)))
-      : textFiles.filter(file => file.path === activePath || file.active || options.partialSnapshot);
+    const activePath = normalizeSnapshotPath(project.activePath || '');
+    const candidates = textFiles.filter(file => {
+      const normalizedPath = normalizeSnapshotPath(file.path);
+      if (focusFiles.length) {
+        return focusSet.has(normalizedPath) || normalizedPath === activePath || file.active;
+      }
+      return normalizedPath === activePath || file.active || options.partialSnapshot;
+    });
     const seen = new Set();
     return candidates
       .filter(file =>

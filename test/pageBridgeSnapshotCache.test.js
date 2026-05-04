@@ -321,6 +321,8 @@ test('requested-only lightweight snapshots do not expand to unrelated project do
   });
 
   assert.deepEqual(Array.from(result.files, file => file.path), ['main.tex', 'refs.bib']);
+  assert.equal(result.capabilities.fullProjectSnapshot, false);
+  assert.equal(result.capabilities.requestedPathsComplete, true);
   assert.equal(bridge.getFetchCount(), 1);
   assert.equal(bridge.getOpenClickCount(), 0);
 });

@@ -1160,13 +1160,15 @@
       });
     }
 
+    const requestedPathsComplete = isCompleteProjectSnapshot(files, projectPaths);
     return {
       id: getProjectId(),
       url: window.location.href,
       activePath: snapshotActivePath,
       files,
       capabilities: {
-        fullProjectSnapshot: isCompleteProjectSnapshot(files, projectPaths),
+        fullProjectSnapshot: params.restrictToRequestedPathsOnly === true ? false : requestedPathsComplete,
+        requestedPathsComplete,
         method: resolvePageSnapshotMethod(files, lightweightOnly),
         skipped,
         diagnostics: {
