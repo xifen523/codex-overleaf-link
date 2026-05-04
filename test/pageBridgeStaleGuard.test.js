@@ -91,6 +91,61 @@ test('page bridge verifies visible saved text with generic save accessibility la
   assert.equal(result.state, 'verified_saved');
 });
 
+test('page bridge ignores hidden saved indicators when visible save state is not verified', async () => {
+  const hiddenSavedIndicators = [
+    { label: 'hidden attribute', node: { text: 'All changes saved', hidden: true } },
+    { label: 'aria-hidden', node: { text: 'All changes saved', ariaHidden: true } },
+    { label: 'display none', node: { text: 'All changes saved', display: 'none' } },
+    { label: 'visibility hidden', node: { text: 'All changes saved', visibility: 'hidden' } },
+    { label: 'inert', node: { text: 'All changes saved', inert: true } }
+  ];
+  const visibleIndicators = [
+    'Saving...',
+    'Not saved'
+  ];
+
+  for (const { label, node } of hiddenSavedIndicators) {
+    for (const visibleText of visibleIndicators) {
+      const message = `${label}: ${visibleText}`;
+      const bridge = createPageBridgeHarness({
+        activePath: 'main.tex',
+        saveIndicatorNodes: [
+          node,
+          { text: visibleText }
+        ],
+        files: {
+          'main.tex': 'alpha'
+        }
+      });
+
+      const result = await bridge.call('waitForSaveState', { deadlineMs: 1, pollIntervalMs: 1 });
+
+      assert.equal(result.ok, false, message);
+      assert.equal(result.state, 'unknown_timeout', message);
+    }
+  }
+});
+
+test('page bridge prefers visible unverified save state over hidden stale saved state', async () => {
+  for (const visibleText of ['Saving...', 'Not saved']) {
+    const bridge = createPageBridgeHarness({
+      activePath: 'main.tex',
+      saveIndicatorNodes: [
+        { text: 'All changes saved', hidden: true },
+        { text: visibleText }
+      ],
+      files: {
+        'main.tex': 'alpha'
+      }
+    });
+
+    const result = await bridge.call('waitForSaveState', { deadlineMs: 1, pollIntervalMs: 1 });
+
+    assert.equal(result.ok, false, visibleText);
+    assert.equal(result.state, 'unknown_timeout', visibleText);
+  }
+});
+
 test('page bridge does not verify negative save indicators', async () => {
   const negativeIndicators = [
     'Not saved',
@@ -1200,6 +1255,7 @@ function createPageBridgeHarness({
   saveIndicatorText = null,
   saveIndicatorAriaLabel = saveIndicatorText,
   saveIndicatorTitle = saveIndicatorAriaLabel,
+  saveIndicatorNodes = null,
   dispatchApplies = true,
   trackChangesOnDispatch = false,
   rerenderTrackedChangeIdsOnReject = false,
@@ -1237,9 +1293,16 @@ function createPageBridgeHarness({
     },
     querySelectorAll(selector) {
       if (/save|saving-status|save-status/i.test(selector)) {
+        if (saveIndicatorNodes) {
+          return saveIndicatorNodes.map(makeSaveIndicatorNode);
+        }
         return saveIndicatorText == null
           ? []
-          : [makeSaveIndicatorNode(saveIndicatorText, saveIndicatorAriaLabel, saveIndicatorTitle)];
+          : [makeSaveIndicatorNode({
+            text: saveIndicatorText,
+            ariaLabel: saveIndicatorAriaLabel,
+            title: saveIndicatorTitle
+          })];
       }
       if (/treeitem|role="row"|file-tree|project-tree|data-entity-id|data-doc-id|data-id|data-file-id/.test(selector)) {
         return Array.from(fileMap.keys(), makeTreeNode);
@@ -1568,21 +1631,52 @@ function createPageBridgeHarness({
     };
   }
 
-  function makeSaveIndicatorNode(text, ariaLabel = text, title = ariaLabel) {
+  function makeSaveIndicatorNode(options) {
+    const {
+      text,
+      ariaLabel = text,
+      title = ariaLabel,
+      hidden = false,
+      ariaHidden = false,
+      inert = false,
+      display = '',
+      visibility = ''
+    } = typeof options === 'string' ? { text: options } : options;
     return {
       tagName: 'DIV',
       textContent: text,
       innerText: text,
       id: 'save-status',
       className: 'save-status',
+      hidden,
+      inert,
+      style: { display, visibility },
       disabled: false,
       parentElement: null,
+      hasAttribute(attribute) {
+        if (attribute === 'hidden') {
+          return hidden;
+        }
+        if (attribute === 'inert') {
+          return inert;
+        }
+        return false;
+      },
       getAttribute(attribute) {
         if (attribute === 'aria-label') {
           return ariaLabel;
         }
         if (attribute === 'title') {
           return title;
+        }
+        if (attribute === 'aria-hidden') {
+          return ariaHidden ? 'true' : '';
+        }
+        if (attribute === 'hidden') {
+          return hidden ? '' : null;
+        }
+        if (attribute === 'inert') {
+          return inert ? '' : null;
         }
         if (attribute === 'data-testid') {
           return 'save-status';

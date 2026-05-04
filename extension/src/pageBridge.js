@@ -676,6 +676,9 @@
     for (const selector of selectors) {
       const elements = document.querySelectorAll(selector);
       for (const el of elements) {
+        if (isHiddenSaveIndicatorNode(el)) {
+          continue;
+        }
         const texts = readSaveIndicatorTexts(el);
         if (!texts.length) {
           continue;
@@ -707,6 +710,103 @@
         ? 'Overleaf save indicator was present, but did not verify that all changes are saved.'
         : 'Overleaf save indicator was not found.'
     };
+  }
+
+  function isHiddenSaveIndicatorNode(node) {
+    if (!node) {
+      return true;
+    }
+    if (node.hidden === true || node.inert === true) {
+      return true;
+    }
+    if (hasSaveIndicatorAttribute(node, 'hidden') || hasSaveIndicatorAttribute(node, 'inert')) {
+      return true;
+    }
+    if (/^true$/i.test(String(node.getAttribute?.('aria-hidden') || ''))) {
+      return true;
+    }
+    if (hasHiddenSaveIndicatorAncestor(node)) {
+      return true;
+    }
+    if (isHiddenStyle(node.style)) {
+      return true;
+    }
+    if (isHiddenStyle(getComputedStyleForSaveIndicator(node))) {
+      return true;
+    }
+    return hasZeroSaveIndicatorLayout(node);
+  }
+
+  function hasHiddenSaveIndicatorAncestor(node) {
+    if (typeof node.closest === 'function') {
+      try {
+        if (node.closest('[hidden],[inert],[aria-hidden="true"]')) {
+          return true;
+        }
+      } catch (_error) {
+        // Fall back to walking parentElement below.
+      }
+    }
+    let current = node.parentElement;
+    while (current) {
+      if (current.hidden === true || current.inert === true) {
+        return true;
+      }
+      if (hasSaveIndicatorAttribute(current, 'hidden') || hasSaveIndicatorAttribute(current, 'inert')) {
+        return true;
+      }
+      if (/^true$/i.test(String(current.getAttribute?.('aria-hidden') || ''))) {
+        return true;
+      }
+      current = current.parentElement;
+    }
+    return false;
+  }
+
+  function hasSaveIndicatorAttribute(node, attribute) {
+    if (typeof node.hasAttribute === 'function') {
+      try {
+        return node.hasAttribute(attribute);
+      } catch (_error) {
+        return false;
+      }
+    }
+    const value = node.getAttribute?.(attribute);
+    return value != null && value !== '';
+  }
+
+  function isHiddenStyle(style) {
+    if (!style) {
+      return false;
+    }
+    return /^none$/i.test(String(style.display || ''))
+      || /^(hidden|collapse)$/i.test(String(style.visibility || ''));
+  }
+
+  function getComputedStyleForSaveIndicator(node) {
+    try {
+      const ownerWindow = node.ownerDocument?.defaultView || null;
+      const fallbackWindow = typeof window !== 'undefined' ? window : null;
+      const styleWindow = ownerWindow || fallbackWindow;
+      return styleWindow?.getComputedStyle?.(node) || null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function hasZeroSaveIndicatorLayout(node) {
+    if (typeof node.getClientRects !== 'function') {
+      return false;
+    }
+    try {
+      const rects = node.getClientRects();
+      if (rects && rects.length > 0) {
+        return false;
+      }
+      return node.offsetWidth === 0 && node.offsetHeight === 0;
+    } catch (_error) {
+      return false;
+    }
   }
 
   function readSaveIndicatorTexts(node) {

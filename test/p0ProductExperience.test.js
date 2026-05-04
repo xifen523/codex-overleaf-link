@@ -819,8 +819,9 @@ test('compile page bridge calls use long-running timeouts', () => {
   );
 
   assert.match(contentScript, /function getPageBridgeTimeoutMs\(method\)/);
+  assert.match(contentScript, /const COMPILE_PAGE_BRIDGE_TIMEOUT_MS\s*=\s*75000/);
   assert.match(contentScript, /method === 'triggerCompile' \|\| method === 'getCompileLog'/);
-  assert.match(contentScript, /return 60000/);
+  assert.match(contentScript, /return COMPILE_PAGE_BRIDGE_TIMEOUT_MS/);
   assert.match(contentScript, /const timeoutMs = getPageBridgeTimeoutMs\(method\)/);
 });
 

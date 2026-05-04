@@ -6,6 +6,7 @@
   const RUN_PROJECT_SYNC_MAX_AGE_MS = 30000;
   const RUN_SNAPSHOT_ZIP_TIMEOUT_MS = 30000;
   const SNAPSHOT_PAGE_BRIDGE_TIMEOUT_MS = 70000;
+  const COMPILE_PAGE_BRIDGE_TIMEOUT_MS = 75000;
   const CONTEXT_FILE_LIST_ZIP_TIMEOUT_MS = 12000;
   const CONTEXT_FILE_LIST_PAGE_BRIDGE_TIMEOUT_MS = 20000;
   const WARM_MIRROR_MAX_AGE_MS = 5 * 60 * 1000;
@@ -3267,7 +3268,7 @@
       return CONTEXT_FILE_LIST_PAGE_BRIDGE_TIMEOUT_MS;
     }
     if (method === 'triggerCompile' || method === 'getCompileLog') {
-      return 60000;
+      return COMPILE_PAGE_BRIDGE_TIMEOUT_MS;
     }
     if (method === 'rejectTrackedChanges') {
       return 120000;
