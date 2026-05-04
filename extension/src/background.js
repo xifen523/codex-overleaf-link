@@ -107,7 +107,15 @@
   function sendNativeCancel(payload) {
     const nativePort = ensurePort();
     const id = payload.id || crypto.randomUUID();
-    nativePort.postMessage({ ...payload, id });
+    try {
+      nativePort.postMessage({ ...payload, id });
+    } catch (error) {
+      handleNativeConnectionFailure(
+        nativePort,
+        getErrorMessage(error, 'Native host connection failed.')
+      );
+      throw error;
+    }
     return id;
   }
 

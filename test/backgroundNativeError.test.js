@@ -347,6 +347,97 @@ test('background fails older execution request when later safe postMessage throw
   assert.equal(retriedStatus.result.status, 'ready');
 });
 
+test('background fails pending codex.run when cancel postMessage throws on the same stale port', async () => {
+  const harness = loadBackgroundHarness({
+    configurePort(port, index) {
+      if (index === 0) {
+        port.failPostMessageWhen(message => message.method === 'codex.cancel');
+      }
+    }
+  });
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const runResponse = harness.sendNative(
+    { id: 'run-cancel-target', method: 'codex.run', params: { task: 'write' } },
+    sender
+  );
+  const cancelResponse = await harness.sendNative(
+    { id: 'cancel-stale', method: 'codex.cancel', params: { requestId: 'run-cancel-target' } },
+    sender
+  );
+
+  assert.equal(cancelResponse.ok, false);
+  assert.equal(cancelResponse.error.code, 'native_connection_failed');
+  assert.equal(harness.ports.length, 1);
+  assert.deepEqual(
+    harness.ports[0].messages.map(message => `${message.id}:${message.method}`),
+    ['run-cancel-target:codex.run']
+  );
+
+  const interruptedRun = await settleWithin(runResponse);
+  assert.equal(interruptedRun.ok, false);
+  assert.equal(interruptedRun.error.code, 'native_execution_interrupted');
+
+  const postedRunCount = harness.ports
+    .flatMap(port => port.messages)
+    .filter(message => message.method === 'codex.run').length;
+  assert.equal(postedRunCount, 1);
+});
+
+test('background retries pending safe request when cancel postMessage throws on the same stale port', async () => {
+  const harness = loadBackgroundHarness({
+    configurePort(port, index) {
+      if (index === 0) {
+        port.failPostMessageWhen(message => message.method === 'codex.cancel');
+      }
+    }
+  });
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const statusResponse = harness.sendNative(
+    { id: 'status-before-cancel', method: 'mirror.status', params: { projectId: 'abc123' } },
+    sender
+  );
+  const cancelResponse = await harness.sendNative(
+    { id: 'cancel-stale-safe', method: 'codex.cancel', params: { requestId: 'run-id' } },
+    sender
+  );
+
+  assert.equal(cancelResponse.ok, false);
+  assert.equal(cancelResponse.error.code, 'native_connection_failed');
+  assert.equal(harness.ports.length, 2);
+  assert.deepEqual(
+    harness.ports[0].messages.map(message => `${message.id}:${message.method}`),
+    ['status-before-cancel:mirror.status']
+  );
+  assert.deepEqual(
+    harness.ports[1].messages.map(message => `${message.id}:${message.method}`),
+    ['status-before-cancel:mirror.status']
+  );
+
+  harness.ports[1].emitMessage({
+    id: 'status-before-cancel',
+    ok: true,
+    result: {
+      status: 'ready'
+    }
+  });
+
+  const retriedStatus = await statusResponse;
+  assert.equal(retriedStatus.ok, true);
+  assert.equal(retriedStatus.result.status, 'ready');
+});
+
 function loadBackgroundHarness(options = {}) {
   const ports = [];
   let onMessageListener = null;
