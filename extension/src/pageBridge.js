@@ -720,7 +720,7 @@
   }
 
   function isNegativeSaveStateText(text) {
-    return /\b(?:not saved|changes not saved|unsaved|save failed|failed to save|could not save|unable to save)\b|未保存|保存失败/i.test(text);
+    return /\bnot\b[\s\S]{0,40}\bsaved\b|\b(?:unsaved|save failed|failed to save|could not save|unable to save)\b|未保存|保存失败/i.test(text);
   }
 
   function isSavingStateText(text) {
@@ -731,7 +731,8 @@
     if (isNegativeSaveStateText(text)) {
       return false;
     }
-    return /\ball changes saved\b|\bchanges saved\b|^\s*saved[\s.!]*$|已保存/i.test(text);
+    return /^\s*(?:all changes saved|changes saved|saved)[\s.!]*$/i.test(text)
+      || /已保存/i.test(text);
   }
 
   function isSaveIndicatorCandidateText(text) {

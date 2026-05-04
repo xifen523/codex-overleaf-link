@@ -112,11 +112,18 @@
       if (!template) {
         const clicked = clickOverleafCompileButton();
         if (!clicked) {
-          return { ok: false, reason: 'No Overleaf Recompile button or compile request template is available.' };
+          return {
+            ok: false,
+            reason: 'No Overleaf Recompile button or compile request template is available.',
+            ...saveMetadata
+          };
         }
         const captured = await waitForCapturedCompile(params.captureTimeoutMs || 60000);
         if (!captured.ok) {
-          return captured;
+          return {
+            ...captured,
+            ...saveMetadata
+          };
         }
         return {
           ok: true,
@@ -128,11 +135,18 @@
       if (!isFreshCapturedRequestTemplate(template)) {
         const clicked = clickOverleafCompileButton();
         if (!clicked) {
-          return { ok: false, reason: 'Stored compile request template expired. Please click Overleaf Recompile once, then retry.' };
+          return {
+            ok: false,
+            reason: 'Stored compile request template expired. Please click Overleaf Recompile once, then retry.',
+            ...saveMetadata
+          };
         }
         const captured = await waitForCapturedCompile(params.captureTimeoutMs || 60000);
         if (!captured.ok) {
-          return captured;
+          return {
+            ...captured,
+            ...saveMetadata
+          };
         }
         return {
           ok: true,
@@ -150,7 +164,11 @@
           credentials: 'same-origin'
         });
         if (!response.ok) {
-          return { ok: false, reason: `Compile request failed with status ${response.status}` };
+          return {
+            ok: false,
+            reason: `Compile request failed with status ${response.status}`,
+            ...saveMetadata
+          };
         }
         const json = await response.json();
         const CompileAdapter = pageWindow.CodexOverleafCompileAdapter;
@@ -166,7 +184,11 @@
           ...saveMetadata
         };
       } catch (error) {
-        return { ok: false, reason: `Compile request error: ${error.message}` };
+        return {
+          ok: false,
+          reason: `Compile request error: ${error.message}`,
+          ...saveMetadata
+        };
       }
     }
 
@@ -180,7 +202,7 @@
       }
       try {
         return normalizeSaveStateResult(
-          await deps.waitForSaveState({ deadlineMs: params.waitForSaveMs || 5000 })
+          await deps.waitForSaveState({ deadlineMs: resolveWaitForSaveMs(params.waitForSaveMs) })
         );
       } catch (error) {
         return {
@@ -189,6 +211,14 @@
           reason: `Overleaf save-state checker failed: ${error.message}`
         };
       }
+    }
+
+    function resolveWaitForSaveMs(value) {
+      if (value == null) {
+        return 5000;
+      }
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : 5000;
     }
 
     function normalizeSaveStateResult(result = {}) {

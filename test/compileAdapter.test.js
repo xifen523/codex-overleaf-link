@@ -501,6 +501,70 @@ test('compile bridge blocks compile by default when save state times out unknown
   assert.equal(fetchCount, 0);
 });
 
+test('compile bridge preserves zero waitForSaveMs deadline', async () => {
+  const CompileBridge = require('../extension/src/page/compileBridge');
+  let observedDeadlineMs = null;
+  const pageWindow = {
+    location: { origin: 'https://www.overleaf.com' },
+    fetch: async () => {
+      throw new Error('fetch should not run');
+    }
+  };
+  const pageDocument = {
+    addEventListener() {},
+    querySelectorAll() {
+      return [];
+    }
+  };
+  const bridge = CompileBridge.create({
+    document: pageDocument,
+    getActiveFilePath: () => 'main.tex',
+    waitForSaveState: async params => {
+      observedDeadlineMs = params.deadlineMs;
+      return {
+        ok: false,
+        state: 'unknown_timeout',
+        reason: 'Timed out immediately.'
+      };
+    },
+    window: pageWindow
+  });
+
+  const result = await bridge.triggerCompile({ waitForSaveMs: 0 });
+
+  assert.equal(result.ok, false);
+  assert.equal(observedDeadlineMs, 0);
+});
+
+test('compile bridge includes save metadata on post-save failure returns', async () => {
+  const CompileBridge = require('../extension/src/page/compileBridge');
+  const pageWindow = {
+    location: { origin: 'https://www.overleaf.com' },
+    fetch: async () => {
+      throw new Error('fetch should not run');
+    }
+  };
+  const pageDocument = {
+    addEventListener() {},
+    querySelectorAll() {
+      return [];
+    }
+  };
+  const bridge = CompileBridge.create({
+    document: pageDocument,
+    getActiveFilePath: () => 'main.tex',
+    waitForSaveState: async () => ({ ok: true, state: 'verified_saved' }),
+    window: pageWindow
+  });
+
+  const result = await bridge.triggerCompile({ waitForSaveMs: 10, captureTimeoutMs: 10 });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /No Overleaf Recompile button/i);
+  assert.equal(result.saveStateVerified, true);
+  assert.equal(result.saveState, 'verified_saved');
+});
+
 test('compile bridge can explicitly opt out of verified save before compile', async () => {
   const CompileBridge = require('../extension/src/page/compileBridge');
   let fetchCount = 0;

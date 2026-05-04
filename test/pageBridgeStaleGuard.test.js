@@ -77,6 +77,7 @@ test('page bridge only returns ok true for a verified saved indicator', async ()
 test('page bridge does not verify negative save indicators', async () => {
   const negativeIndicators = [
     'Not saved',
+    'Not all changes saved',
     'Changes not saved',
     'Save failed',
     '未保存',
