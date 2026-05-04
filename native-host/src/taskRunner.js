@@ -189,6 +189,13 @@ async function handleMirrorSync(request, env) {
   if (isProjectLocked(projectKey)) {
     return errorResponse(request.id, 'project_locked', `Project ${projectKey} is currently in use by codex.run`);
   }
+  if (params.project?.capabilities?.fullProjectSnapshot !== true) {
+    return errorResponse(
+      request.id,
+      'mirror_sync_requires_full_project',
+      'mirror.sync requires an explicit full project snapshot'
+    );
+  }
 
   try {
     const result = await syncOverleafToMirror({

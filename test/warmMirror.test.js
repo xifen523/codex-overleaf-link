@@ -82,6 +82,7 @@ test('mirror.sync method syncs project files without running Codex', async () =>
       params: {
         projectId: 'bg-sync-test',
         project: {
+          capabilities: { fullProjectSnapshot: true },
           files: [
             { path: 'main.tex', content: 'synced content' },
             { path: 'ch1.tex', content: 'chapter 1' }
@@ -104,6 +105,27 @@ test('mirror.sync method syncs project files without running Codex', async () =>
   }
 });
 
+test('mirror.sync rejects snapshots without explicit full-project evidence', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bg-sync-'));
+  try {
+    const response = await handleRequest({
+      id: 'sync-not-full',
+      method: 'mirror.sync',
+      params: {
+        projectId: 'bg-sync-test',
+        project: {
+          files: [{ path: 'main.tex', content: 'partial content' }]
+        }
+      }
+    }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
+
+    assert.equal(response.ok, false);
+    assert.equal(response.error.code, 'mirror_sync_requires_full_project');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('mirror.sync skips unchanged files on second call', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-bg-sync-'));
   try {
@@ -115,13 +137,13 @@ test('mirror.sync skips unchanged files on second call', async () => {
     await handleRequest({
       id: 'sync-first',
       method: 'mirror.sync',
-      params: { projectId: 'bg-skip-test', project: { files } }
+      params: { projectId: 'bg-skip-test', project: { capabilities: { fullProjectSnapshot: true }, files } }
     }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
 
     const response = await handleRequest({
       id: 'sync-second',
       method: 'mirror.sync',
-      params: { projectId: 'bg-skip-test', project: { files } }
+      params: { projectId: 'bg-skip-test', project: { capabilities: { fullProjectSnapshot: true }, files } }
     }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
 
     assert.equal(response.ok, true);

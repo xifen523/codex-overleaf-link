@@ -130,7 +130,8 @@ async function collectMirrorChangesDetailed({ projectId, rootDir }) {
         type: 'write',
         path: filePath,
         content,
-        previousContent: previous?.content || ''
+        previousContent: previous?.content || '',
+        previousExists: Boolean(previous)
       });
     }
   }

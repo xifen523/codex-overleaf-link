@@ -968,10 +968,11 @@ test('warm mirror writeback does not seed new empty files as existing base files
   const merged = helper({ files: [] }, [
     { type: 'write', path: 'new-empty.tex', previousContent: '', content: 'new' },
     { type: 'write', path: 'existing.tex', previousExists: true, previousContent: '', content: 'changed' },
+    { type: 'write', path: 'empty-existing.tex', previousExists: true, previousContent: '', content: 'now not empty' },
     { type: 'write', path: 'legacy-existing.tex', previousContent: 'before', content: 'after' }
   ]);
 
-  assert.deepEqual(merged.files.map(file => file.path), ['existing.tex', 'legacy-existing.tex']);
+  assert.deepEqual(merged.files.map(file => file.path), ['existing.tex', 'empty-existing.tex', 'legacy-existing.tex']);
   assert.doesNotMatch(helperBody, /typeof change\.previousContent !== 'string'/);
   assert.match(existsHelperBody, /change\.previousExists === true|change\.baselineExists === true/);
 });

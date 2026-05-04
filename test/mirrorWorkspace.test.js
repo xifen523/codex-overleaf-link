@@ -159,6 +159,8 @@ test('collects local mirror writes and deletes as sync changes, not Codex operat
     ]);
     assert.equal(changes[0].content, 'after');
     assert.equal(changes[0].previousContent, 'before');
+    assert.equal(changes[0].previousExists, true);
+    assert.equal(changes[1].previousExists, false);
     assert.equal(Object.hasOwn(changes[0], 'find'), false);
     assert.equal(Object.hasOwn(changes[0], 'replace'), false);
   } finally {

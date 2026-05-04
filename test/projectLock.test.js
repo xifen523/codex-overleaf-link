@@ -104,7 +104,7 @@ test('mirror.sync is rejected while codex.run holds the project lock', async () 
       method: 'mirror.sync',
       params: {
         projectId: 'lock-test',
-        project: { files: [{ path: 'main.tex', content: 'overwrite attempt' }] }
+        project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'overwrite attempt' }] }
       }
     }, env);
 
@@ -120,7 +120,7 @@ test('mirror.sync is rejected while codex.run holds the project lock', async () 
       method: 'mirror.sync',
       params: {
         projectId: 'lock-test',
-        project: { files: [{ path: 'main.tex', content: 'safe now' }] }
+        project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'safe now' }] }
       }
     }, env);
 
@@ -157,7 +157,7 @@ test('mirror.sync works for a different project while codex.run is active', asyn
       method: 'mirror.sync',
       params: {
         projectId: 'project-b',
-        project: { files: [{ path: 'main.tex', content: 'b content' }] }
+        project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'b content' }] }
       }
     }, env);
 
@@ -255,7 +255,7 @@ test('codex.cancel aborts an active codex.run and releases the project lock', as
       method: 'mirror.sync',
       params: {
         projectId: 'cancel-project',
-        project: { files: [{ path: 'main.tex', content: 'safe now' }] }
+        project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'safe now' }] }
       }
     }, env);
 
