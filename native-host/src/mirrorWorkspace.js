@@ -71,6 +71,8 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
     capturedAt: fullProjectSnapshot ? now : (previous.capturedAt || ''),
     lastFullSyncAt: fullProjectSnapshot ? now : previous.lastFullSyncAt,
     lastPartialSyncAt: fullProjectSnapshot ? previous.lastPartialSyncAt : now,
+    lastSyncSource: fullProjectSnapshot ? (project?.capabilities?.method || 'snapshot') : previous.lastSyncSource,
+    lastFileCount: files.length,
     files: nextBaselineFiles
   });
 
@@ -387,9 +389,14 @@ function getMirrorStatus(projectId, options = {}) {
   const ageMs = Date.now() - new Date(lastFullSyncAt).getTime();
   return {
     exists: true,
+    projectKey: mirror.projectKey,
     fileCount: (baseline.files || []).length,
     ageMs: Math.max(0, ageMs),
-    baselineCapturedAt: lastFullSyncAt
+    baselineCapturedAt: lastFullSyncAt,
+    lastFullSyncAt,
+    lastPartialSyncAt: baseline.lastPartialSyncAt || '',
+    lastSyncSource: baseline.lastSyncSource || '',
+    workspacePath: mirror.workspacePath
   };
 }
 

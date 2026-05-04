@@ -42,6 +42,36 @@ test('getMirrorStatus returns exists:true with correct age after sync', async ()
   assert.ok(status.baselineCapturedAt);
 });
 
+test('getMirrorStatus reports project key and full/partial sync timestamps', async () => {
+  await syncOverleafToMirror({
+    projectId: 'test-proj',
+    project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'hello' }] },
+    rootDir: tempRoot
+  });
+  const status = getMirrorStatus('test-proj', { rootDir: tempRoot });
+  assert.equal(status.projectKey, 'test-proj');
+  assert.equal(status.exists, true);
+  assert.ok(status.lastFullSyncAt);
+  assert.equal(status.lastPartialSyncAt || '', '');
+});
+
+test('partial sync does not update project-level freshness', async () => {
+  await syncOverleafToMirror({
+    projectId: 'test-proj',
+    project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'full' }] },
+    rootDir: tempRoot
+  });
+  const fullStatus = getMirrorStatus('test-proj', { rootDir: tempRoot });
+  await syncOverleafToMirror({
+    projectId: 'test-proj',
+    project: { capabilities: { fullProjectSnapshot: false }, files: [{ path: 'main.tex', content: 'partial' }] },
+    rootDir: tempRoot
+  });
+  const partialStatus = getMirrorStatus('test-proj', { rootDir: tempRoot });
+  assert.equal(partialStatus.lastFullSyncAt, fullStatus.lastFullSyncAt);
+  assert.ok(partialStatus.lastPartialSyncAt);
+});
+
 test('getMirrorStatus returns exists:false for unknown project', () => {
   const status = getMirrorStatus('nonexistent', { rootDir: tempRoot });
   assert.strictEqual(status.exists, false);
