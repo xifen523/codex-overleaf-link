@@ -3500,19 +3500,21 @@
 
   async function loadModelOptions() {
     const selectedModel = resolveSelectedModel();
-    const fallbackModels = window.CodexOverleafModels.FALLBACK_MODELS;
+    const modelCatalog = getModelCatalog();
+    const fallbackModels = modelCatalog.FALLBACK_MODELS;
 
     try {
       const response = await sendBackgroundNative({
         method: 'codex.models',
         params: {}
       });
+      const currentSelectedModel = resolveSelectedModel() || selectedModel;
       const hasDiscoveredModels = response?.ok
         && Array.isArray(response.result?.models)
         && response.result.models.length > 0;
       const sourceModels = hasDiscoveredModels ? response.result.models : fallbackModels;
-      const normalized = window.CodexOverleafModels.normalizeDiscoveredModels({ models: sourceModels, selectedModel });
-      renderModelOptions(normalized.models, selectedModel);
+      const normalized = modelCatalog.normalizeDiscoveredModels({ models: sourceModels, selectedModel: currentSelectedModel });
+      renderModelOptions(normalized.models, currentSelectedModel);
       modelDiscovery = {
         status: hasDiscoveredModels && !normalized.usedFallback ? 'discovered' : 'fallback',
         source: hasDiscoveredModels ? response.result?.source || 'unknown' : 'fallback',
@@ -3522,14 +3524,15 @@
       };
       updateModelDisplay();
     } catch (error) {
-      applyFallbackModelOptions(selectedModel, error);
+      applyFallbackModelOptions(resolveSelectedModel() || selectedModel, error);
     }
   }
 
   function applyFallbackModelOptions(selectedModel, error) {
-    const fallbackModels = window.CodexOverleafModels.FALLBACK_MODELS;
+    const modelCatalog = getModelCatalog();
+    const fallbackModels = modelCatalog.FALLBACK_MODELS;
     const sourceModels = fallbackModels;
-    const normalized = window.CodexOverleafModels.normalizeDiscoveredModels({ models: sourceModels, selectedModel });
+    const normalized = modelCatalog.normalizeDiscoveredModels({ models: sourceModels, selectedModel });
     renderModelOptions(normalized.models, selectedModel);
     modelDiscovery = {
       status: 'fallback',
@@ -3539,6 +3542,85 @@
       errorMessage: error?.message || (error ? String(error) : '')
     };
     updateModelDisplay();
+  }
+
+  function getModelCatalog() {
+    const shared = window.CodexOverleafModels;
+    if (Array.isArray(shared?.FALLBACK_MODELS) && typeof shared?.normalizeDiscoveredModels === 'function') {
+      return shared;
+    }
+
+    return {
+      FALLBACK_MODELS: buildDomModelCatalogFallback(),
+      normalizeDiscoveredModels: normalizeDiscoveredModelsFallback
+    };
+  }
+
+  function buildDomModelCatalogFallback() {
+    const modelSelect = panel?.querySelector('[data-model]');
+    const domModels = Array.from(modelSelect?.options || [])
+      .map(option => ({
+        id: normalizeModelOptionId(option.value),
+        label: option.textContent || option.value
+      }))
+      .filter(model => model.id);
+
+    return domModels.length ? domModels : [
+      { id: 'gpt-5.5', label: 'GPT-5.5' },
+      { id: 'gpt-5.4', label: 'GPT-5.4' },
+      { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+      { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
+      { id: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
+      { id: 'gpt-5.2', label: 'GPT-5.2' }
+    ];
+  }
+
+  function normalizeDiscoveredModelsFallback({ models, selectedModel } = {}) {
+    const normalized = normalizeModelCatalogEntries(models);
+    const usedFallback = normalized.length === 0;
+    const resultModels = usedFallback ? buildDomModelCatalogFallback().map(model => ({ ...model })) : normalized;
+    const selectedId = normalizeModelOptionId(selectedModel);
+
+    if (selectedId && !resultModels.some(model => model.id === selectedId)) {
+      resultModels.push({
+        id: selectedId,
+        label: `${selectedId} (custom)`,
+        unverified: true
+      });
+    }
+
+    return {
+      models: resultModels,
+      usedFallback
+    };
+  }
+
+  function normalizeModelCatalogEntries(models) {
+    if (!Array.isArray(models)) {
+      return [];
+    }
+
+    const seen = new Set();
+    const result = [];
+
+    for (const model of models) {
+      const id = normalizeModelOptionId(typeof model === 'string' ? model : model?.id);
+      if (!id || seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      const normalized = {
+        id,
+        label: typeof model?.label === 'string' && model.label.length > 0 ? model.label : id,
+        reasoningEfforts: Array.isArray(model?.reasoningEfforts) ? model.reasoningEfforts.slice() : []
+      };
+      if (Object.prototype.hasOwnProperty.call(Object(model), 'defaultReasoningEffort')) {
+        normalized.defaultReasoningEffort = model.defaultReasoningEffort;
+      }
+      result.push(normalized);
+    }
+
+    return result;
   }
 
   function renderModelOptions(models, selectedModel) {
@@ -3634,7 +3716,7 @@
 
   function applyStateToPanel() {
     if (!modelSelectHasOption(state.model)) {
-      renderModelOptions(window.CodexOverleafModels.FALLBACK_MODELS, state.model);
+      renderModelOptions(getModelCatalog().FALLBACK_MODELS, state.model);
     }
     panel.querySelector('[data-model]').value = state.model;
     panel.querySelector('[data-reasoning]').value = state.reasoningEffort;

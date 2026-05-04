@@ -4,8 +4,11 @@ const path = require('node:path');
 const test = require('node:test');
 
 function extractFunction(source, name) {
-  const marker = `function ${name}(`;
-  const start = source.indexOf(marker);
+  const markers = [`function ${name}(`, `async function ${name}(`];
+  const start = markers
+    .map(marker => source.indexOf(marker))
+    .filter(index => index !== -1)
+    .sort((a, b) => a - b)[0] ?? -1;
   assert.notEqual(start, -1, `${name} should exist`);
   const openBrace = source.indexOf('{', start);
   assert.notEqual(openBrace, -1, `${name} should have a body`);
@@ -95,8 +98,9 @@ test('composer discovers model options through the native codex.models endpoint'
   assert.match(contentScript, /loadModelOptions\(\)\.catch/);
   assert.match(contentScript, /async function loadModelOptions\(\)/);
   assert.match(contentScript, /method:\s*'codex\.models'/);
-  assert.match(contentScript, /window\.CodexOverleafModels\.FALLBACK_MODELS/);
-  assert.match(contentScript, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel/);
+  assert.match(contentScript, /const modelCatalog = getModelCatalog\(\)/);
+  assert.match(contentScript, /modelCatalog\.FALLBACK_MODELS/);
+  assert.match(contentScript, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel:\s*currentSelectedModel\s*\}\)/);
   assert.match(contentScript, /function renderModelOptions\(models,\s*selectedModel\)/);
   assert.match(contentScript, /document\.createElement\('option'\)/);
   assert.match(contentScript, /option\.textContent\s*=\s*model\.label/);
@@ -104,6 +108,40 @@ test('composer discovers model options through the native codex.models endpoint'
   assert.match(i18n, /modelSourceFallback:\s*'fallback'/);
   assert.match(i18n, /modelSourceDiscovered:\s*'discovered'/);
   assert.match(i18n, /modelDisplayTitle:\s*'\{label\} - Model list: \{source\}'/);
+});
+
+test('composer preserves user model changes made while native discovery is pending', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const loadModelOptions = extractFunction(contentScript, 'loadModelOptions');
+  const awaitIndex = loadModelOptions.indexOf('await sendBackgroundNative');
+  const currentSelectionIndex = loadModelOptions.indexOf('const currentSelectedModel = resolveSelectedModel() || selectedModel');
+
+  assert.notEqual(awaitIndex, -1, 'loadModelOptions should await native discovery');
+  assert.notEqual(currentSelectionIndex, -1, 'loadModelOptions should re-read selection after discovery returns');
+  assert.equal(awaitIndex < currentSelectionIndex, true, 'selection must be re-read after await');
+  assert.match(loadModelOptions, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel:\s*currentSelectedModel\s*\}\)/);
+  assert.match(loadModelOptions, /renderModelOptions\(normalized\.models,\s*currentSelectedModel\)/);
+});
+
+test('composer model discovery uses a defensive model catalog helper', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const loadModelOptions = extractFunction(contentScript, 'loadModelOptions');
+  const applyFallbackModelOptions = extractFunction(contentScript, 'applyFallbackModelOptions');
+  const applyStateToPanel = extractFunction(contentScript, 'applyStateToPanel');
+  const getModelCatalog = extractFunction(contentScript, 'getModelCatalog');
+
+  assert.match(getModelCatalog, /window\.CodexOverleafModels/);
+  assert.match(getModelCatalog, /buildDomModelCatalogFallback\(\)/);
+  assert.match(getModelCatalog, /normalizeDiscoveredModels:\s*normalizeDiscoveredModelsFallback/);
+  assert.match(loadModelOptions, /const modelCatalog = getModelCatalog\(\)/);
+  assert.match(applyFallbackModelOptions, /const modelCatalog = getModelCatalog\(\)/);
+  assert.match(applyStateToPanel, /getModelCatalog\(\)\.FALLBACK_MODELS/);
 });
 
 test('composer preserves a custom selected model before async discovery finishes', () => {
@@ -114,7 +152,7 @@ test('composer preserves a custom selected model before async discovery finishes
   const applyStateToPanel = extractFunction(contentScript, 'applyStateToPanel');
   const readPanelInputs = extractFunction(contentScript, 'readPanelInputs');
   const readSelectedModelInput = extractFunction(contentScript, 'readSelectedModelInput');
-  const renderIndex = applyStateToPanel.indexOf('renderModelOptions(window.CodexOverleafModels.FALLBACK_MODELS, state.model)');
+  const renderIndex = applyStateToPanel.indexOf('renderModelOptions(getModelCatalog().FALLBACK_MODELS, state.model)');
   const assignIndex = applyStateToPanel.indexOf("panel.querySelector('[data-model]').value = state.model");
 
   assert.notEqual(renderIndex, -1, 'applyStateToPanel should render fallback/custom model options synchronously');
