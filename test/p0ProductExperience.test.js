@@ -738,10 +738,13 @@ test('write paths enforce Overleaf Reviewing before applying changes when reques
   const applyTaskBody = contentScript.match(/async function applyTaskOperations[\s\S]*?\n  function partitionOperationsForApply/)?.[0] || '';
 
   assert.match(contentScript, /async function ensureReviewingBeforeWrite/);
-  assert.match(applySyncBody, /await ensureReviewingBeforeWrite\(operations\)/);
-  assert.match(applySyncBody, /requireReviewing:\s*state\.requireReviewing === true/);
-  assert.match(applyTaskBody, /await ensureReviewingBeforeWrite\(partitioned\.safe\)/);
-  assert.match(applyTaskBody, /requireReviewing:\s*state\.requireReviewing === true/);
+  assert.match(applySyncBody, /const runRequireReviewing = typeof options\.requireReviewing === 'boolean'/);
+  assert.match(applySyncBody, /await ensureReviewingBeforeWrite\(operations,\s*\{\s*requireReviewing:\s*runRequireReviewing\s*\}\)/);
+  assert.match(applySyncBody, /requireReviewing:\s*runRequireReviewing/);
+  assert.doesNotMatch(applySyncBody, /requireReviewing:\s*state\.requireReviewing === true/);
+  assert.match(applyTaskBody, /await ensureReviewingBeforeWrite\(partitioned\.safe,\s*\{\s*requireReviewing:\s*runRequireReviewing\s*\}\)/);
+  assert.match(applyTaskBody, /requireReviewing:\s*runRequireReviewing/);
+  assert.doesNotMatch(applyTaskBody, /requireReviewing:\s*state\.requireReviewing === true/);
   assert.match(pageBridge, /method === 'ensureReviewing'/);
   assert.match(pageBridge, /function ensureReviewing\(/);
   assert.match(pageBridge, /requireReviewing:\s*params\.requireReviewing === true/);
@@ -754,10 +757,10 @@ test('write tasks preflight Reviewing before syncing or starting local Codex', (
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
-  const preflightIndex = runTaskBody.indexOf('preflightWriteSafety()');
+  const preflightIndex = runTaskBody.indexOf('preflightWriteSafety({');
   const snapshotIndex = runTaskBody.indexOf('getRunProjectSnapshot()');
   const codexRunIndex = runTaskBody.indexOf("method: 'codex.run'");
-  const preflightBody = contentScript.match(/async function preflightWriteSafety\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
+  const preflightBody = contentScript.match(/async function preflightWriteSafety\([^)]*\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
 
   assert.match(contentScript, /async function preflightWriteSafety\(/);
   assert.ok(preflightIndex > -1);
@@ -765,8 +768,12 @@ test('write tasks preflight Reviewing before syncing or starting local Codex', (
   assert.ok(codexRunIndex > -1);
   assert.ok(preflightIndex < snapshotIndex);
   assert.ok(preflightIndex < codexRunIndex);
-  assert.match(preflightBody, /state\.mode === 'ask'/);
-  assert.match(preflightBody, /state\?\.requireReviewing/);
+  assert.match(runTaskBody, /const submittedRequireReviewing = state\.requireReviewing === true/);
+  assert.match(runTaskBody, /preflightWriteSafety\(\{\s*mode:\s*submittedMode,\s*requireReviewing:\s*submittedRequireReviewing\s*\}\)/);
+  assert.match(preflightBody, /const mode = options\.mode \|\| state\.mode/);
+  assert.match(preflightBody, /const requireReviewing = typeof options\.requireReviewing === 'boolean'/);
+  assert.match(preflightBody, /mode === 'ask'/);
+  assert.match(preflightBody, /!requireReviewing/);
   assert.match(preflightBody, /callPageBridge\('ensureReviewing'/);
   assert.match(preflightBody, /任务未开始：无法开启 Overleaf 留痕/);
   assert.match(preflightBody, /finishRunView\(tx\('Not started: could not enable Track Changes', '未开始：无法开启留痕'\), 'failed'\)/);
@@ -777,7 +784,7 @@ test('write preflight gives natural feedback for automatic Reviewing activation'
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
-  const preflightBody = contentScript.match(/async function preflightWriteSafety\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
+  const preflightBody = contentScript.match(/async function preflightWriteSafety\([^)]*\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
 
   assert.match(preflightBody, /正在确认 Overleaf 留痕状态/);
   assert.match(preflightBody, /已开启 Overleaf 留痕，开始处理任务/);

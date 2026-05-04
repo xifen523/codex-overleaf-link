@@ -1204,8 +1204,9 @@
 
   async function runTask() {
     readPanelInputs();
-    // Freeze the submitted mode before the panel can change during the run.
+    // Freeze submitted run identity before the panel can change during the run.
     const submittedMode = state.mode;
+    const submittedRequireReviewing = state.requireReviewing === true;
 
     const task = state.task.trim();
     if (!task) {
@@ -1230,7 +1231,7 @@
         [tr('mode')]: formatModeLabel(submittedMode),
         [tx('Model', '模型')]: state.model,
         [tx('Reasoning effort', '推理强度')]: state.reasoningEffort,
-        [tx('Track required', '要求留痕')]: state.requireReviewing ? tx('yes', '是') : tx('no', '否'),
+        [tx('Track required', '要求留痕')]: submittedRequireReviewing ? tx('yes', '是') : tx('no', '否'),
         '@context': formatContextItems(getActiveFocusFiles())
       }
     });
@@ -1243,7 +1244,10 @@
     });
 
     try {
-      const writeSafety = await preflightWriteSafety();
+      const writeSafety = await preflightWriteSafety({
+        mode: submittedMode,
+        requireReviewing: submittedRequireReviewing
+      });
       if (!writeSafety.ok) {
         return;
       }
@@ -1463,7 +1467,8 @@
       const syncOutcome = await applySyncChangesToOverleaf(syncChanges, writebackProject, {
         assistantMessage,
         unsupportedChanges: response.result.unsupportedChanges || [],
-        mode: submittedMode
+        mode: submittedMode,
+        requireReviewing: submittedRequireReviewing
       });
 
       finishRunView(
@@ -1551,8 +1556,12 @@
     }
   }
 
-  async function preflightWriteSafety() {
-    if (state.mode === 'ask' || !state?.requireReviewing) {
+  async function preflightWriteSafety(options = {}) {
+    const mode = options.mode || state.mode;
+    const requireReviewing = typeof options.requireReviewing === 'boolean'
+      ? options.requireReviewing
+      : state?.requireReviewing === true;
+    if (mode === 'ask' || !requireReviewing) {
       return { ok: true, skipped: true };
     }
 
@@ -2045,6 +2054,9 @@
 
   async function applySyncChangesToOverleaf(syncChanges = [], project = {}, options = {}) {
     const runMode = options.mode || state.mode;
+    const runRequireReviewing = typeof options.requireReviewing === 'boolean'
+      ? options.requireReviewing
+      : state.requireReviewing === true;
     const assistantMessage = cleanFinalAnswer(options.assistantMessage || getAssistantAnswerForCurrentRun());
     const unsupportedChanges = Array.isArray(options.unsupportedChanges) ? options.unsupportedChanges : [];
     appendUnsupportedLocalChanges(unsupportedChanges);
@@ -2164,7 +2176,7 @@
     }
 
     appendOperationsPreview(operations, tx('Sync local Codex changes to Overleaf', '同步本地 Codex 改动到 Overleaf'));
-    const reviewing = await ensureReviewingBeforeWrite(operations);
+    const reviewing = await ensureReviewingBeforeWrite(operations, { requireReviewing: runRequireReviewing });
     if (!reviewing.ok) {
       const blocked = buildReviewingBlockedApplyResult(operations, reviewing);
       appendApplyResult(blocked);
@@ -2194,7 +2206,7 @@
       ? await callPageBridge('applyOperations', {
         operations,
         baseFiles: project?.files || [],
-        requireReviewing: state.requireReviewing === true
+        requireReviewing: runRequireReviewing
       })
       : { ok: true, applied: [], skipped: [] };
     const hasConfirmedApplyResult = hasApplyResultEntries(applied);
@@ -2945,6 +2957,9 @@
   }
 
   async function applyTaskOperations(project, operations, options = {}) {
+    const runRequireReviewing = typeof options.requireReviewing === 'boolean'
+      ? options.requireReviewing
+      : state.requireReviewing === true;
     const partitioned = partitionOperationsForApply(operations, options);
     if (!partitioned.safe.length) {
       appendRunEvent({
@@ -2960,7 +2975,7 @@
         }
       });
     }
-    const reviewing = await ensureReviewingBeforeWrite(partitioned.safe);
+    const reviewing = await ensureReviewingBeforeWrite(partitioned.safe, { requireReviewing: runRequireReviewing });
     if (!reviewing.ok) {
       return buildReviewingBlockedApplyResult(partitioned.safe, reviewing, partitioned.skipped);
     }
@@ -2968,7 +2983,7 @@
       ? await callPageBridge('applyOperations', {
         operations: partitioned.safe,
         baseFiles: project?.files || [],
-        requireReviewing: state.requireReviewing === true
+        requireReviewing: runRequireReviewing
       })
       : { ok: true, applied: [], skipped: [] };
 
@@ -2982,8 +2997,11 @@
     };
   }
 
-  async function ensureReviewingBeforeWrite(operations = []) {
-    if (!state?.requireReviewing || !operations.length) {
+  async function ensureReviewingBeforeWrite(operations = [], options = {}) {
+    const requireReviewing = typeof options.requireReviewing === 'boolean'
+      ? options.requireReviewing
+      : state?.requireReviewing === true;
+    if (!requireReviewing || !operations.length) {
       return { ok: true, skipped: true };
     }
 
