@@ -90,6 +90,7 @@
         method: request.method,
         retryClass: getNativeRetryClass(request.method),
         retryCount: 0,
+        nativePort: null,
         finalResponseReceived: false,
         eventForwarded: false
       };
@@ -112,6 +113,7 @@
 
   function postNativeRequest(pendingRequest) {
     const nativePort = ensurePort();
+    pendingRequest.nativePort = nativePort;
     nativePort.postMessage(pendingRequest.request);
   }
 
@@ -159,9 +161,17 @@
   }
 
   function handlePortDisconnect(errorMessage) {
-    port = null;
+    handleNativeConnectionFailure(port, errorMessage);
+  }
 
-    const interruptedRequests = Array.from(pending.entries());
+  function handleNativeConnectionFailure(failedPort, errorMessage) {
+    if (!failedPort || port === failedPort) {
+      port = null;
+    }
+
+    const interruptedRequests = Array.from(pending.entries()).filter(([_pendingId, pendingRequest]) => {
+      return !failedPort || pendingRequest.nativePort === failedPort;
+    });
     for (const [pendingId, pendingRequest] of interruptedRequests) {
       if (!pending.has(pendingId)) {
         continue;
@@ -186,16 +196,8 @@
   }
 
   function handleNativePostFailure(pendingId, pendingRequest, error) {
-    port = null;
-
-    if (canRetryNativeRequest(pendingRequest)) {
-      retryNativeRequest(pendingId, pendingRequest);
-      return;
-    }
-
-    rejectInterruptedNativeRequest(
-      pendingId,
-      pendingRequest,
+    handleNativeConnectionFailure(
+      pendingRequest.nativePort || port,
       getErrorMessage(error, 'Native host connection failed.')
     );
   }

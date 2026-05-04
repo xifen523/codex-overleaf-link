@@ -241,6 +241,112 @@ test('background scopes no-id native errors through per-request retry policy', a
   assert.equal(retriedStatus.result.status, 'ready');
 });
 
+test('background retries all safe requests attached to a port when a later postMessage throws', async () => {
+  const harness = loadBackgroundHarness({
+    configurePort(port, index) {
+      if (index === 0) {
+        port.failPostMessageWhen(message => message.id === 'status-new');
+      }
+    }
+  });
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const oldStatusResponse = harness.sendNative(
+    { id: 'status-old', method: 'mirror.status', params: { projectId: 'abc123' } },
+    sender
+  );
+  const newStatusResponse = harness.sendNative(
+    { id: 'status-new', method: 'mirror.status', params: { projectId: 'abc123' } },
+    sender
+  );
+
+  assert.equal(harness.ports.length, 2);
+  assert.deepEqual(
+    harness.ports[0].messages.map(message => `${message.id}:${message.method}`),
+    ['status-old:mirror.status']
+  );
+  assert.deepEqual(
+    harness.ports[1].messages.map(message => `${message.id}:${message.method}`),
+    ['status-old:mirror.status', 'status-new:mirror.status']
+  );
+
+  harness.ports[1].emitMessage({
+    id: 'status-old',
+    ok: true,
+    result: {
+      status: 'old-ready'
+    }
+  });
+  harness.ports[1].emitMessage({
+    id: 'status-new',
+    ok: true,
+    result: {
+      status: 'new-ready'
+    }
+  });
+
+  const oldStatus = await oldStatusResponse;
+  const newStatus = await newStatusResponse;
+  assert.equal(oldStatus.result.status, 'old-ready');
+  assert.equal(newStatus.result.status, 'new-ready');
+});
+
+test('background fails older execution request when later safe postMessage throws on same port', async () => {
+  const harness = loadBackgroundHarness({
+    configurePort(port, index) {
+      if (index === 0) {
+        port.failPostMessageWhen(message => message.id === 'status-after-run');
+      }
+    }
+  });
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const runResponse = harness.sendNative(
+    { id: 'run-old', method: 'codex.run', params: { task: 'write' } },
+    sender
+  );
+  const statusResponse = harness.sendNative(
+    { id: 'status-after-run', method: 'mirror.status', params: { projectId: 'abc123' } },
+    sender
+  );
+
+  assert.equal(harness.ports.length, 2);
+  assert.deepEqual(
+    harness.ports[0].messages.map(message => `${message.id}:${message.method}`),
+    ['run-old:codex.run']
+  );
+  assert.deepEqual(
+    harness.ports[1].messages.map(message => `${message.id}:${message.method}`),
+    ['status-after-run:mirror.status']
+  );
+
+  const interruptedRun = await settleWithin(runResponse);
+  assert.equal(interruptedRun.ok, false);
+  assert.equal(interruptedRun.error.code, 'native_execution_interrupted');
+
+  harness.ports[1].emitMessage({
+    id: 'status-after-run',
+    ok: true,
+    result: {
+      status: 'ready'
+    }
+  });
+
+  const retriedStatus = await statusResponse;
+  assert.equal(retriedStatus.ok, true);
+  assert.equal(retriedStatus.result.status, 'ready');
+});
+
 function loadBackgroundHarness(options = {}) {
   const ports = [];
   let onMessageListener = null;
@@ -306,6 +412,7 @@ function createNativePort(chrome) {
   const messageListeners = [];
   const disconnectListeners = [];
   const postMessageFailures = [];
+  const postMessageFailurePredicates = [];
 
   return {
     messages: [],
@@ -323,10 +430,18 @@ function createNativePort(chrome) {
       if (postMessageFailures.length > 0) {
         throw postMessageFailures.shift();
       }
+      const failureIndex = postMessageFailurePredicates.findIndex(predicate => predicate(message));
+      if (failureIndex !== -1) {
+        postMessageFailurePredicates.splice(failureIndex, 1);
+        throw new Error('Native postMessage failed');
+      }
       this.messages.push(message);
     },
     failNextPostMessage(message = 'Native postMessage failed') {
       postMessageFailures.push(new Error(message));
+    },
+    failPostMessageWhen(predicate) {
+      postMessageFailurePredicates.push(predicate);
     },
     emitMessage(message) {
       for (const listener of messageListeners) {
@@ -341,4 +456,13 @@ function createNativePort(chrome) {
       chrome.runtime.lastError = null;
     }
   };
+}
+
+function settleWithin(promise) {
+  return Promise.race([
+    promise,
+    new Promise((resolve, reject) => {
+      setTimeout(() => reject(new Error('Timed out waiting for native response to settle.')), 20);
+    })
+  ]);
 }
