@@ -2153,7 +2153,8 @@
     }
     appendApplyResult(applied);
     recordUndoFromApply(project, applied);
-    if (applied?.skipped?.length) {
+    const skippedEntries = getSkippedEntries(applied);
+    if (skippedEntries.length) {
       appendPartialWritebackWarning(applied);
     }
     const appliedPaths = getAppliedOperationPaths(applied);
@@ -2165,7 +2166,7 @@
         });
       });
     }
-    const hasSkippedApplyResult = Boolean(applied?.skipped?.length);
+    const hasSkippedApplyResult = skippedEntries.length > 0;
     const writebackIncomplete = !hasConfirmedApplyResult || hasSkippedApplyResult;
     const summaryLine = appendChangeSummary({
       notes: hasConfirmedApplyResult
@@ -2332,9 +2333,17 @@
   }
 
   function hasApplyResultEntries(applied = {}) {
-    const appliedEntries = Array.isArray(applied?.applied) ? applied.applied : [];
-    const skippedEntries = Array.isArray(applied?.skipped) ? applied.skipped : [];
+    const appliedEntries = getAppliedEntries(applied);
+    const skippedEntries = getSkippedEntries(applied);
     return Boolean(appliedEntries.length || skippedEntries.length);
+  }
+
+  function getAppliedEntries(applied = {}) {
+    return Array.isArray(applied?.applied) ? applied.applied : [];
+  }
+
+  function getSkippedEntries(applied = {}) {
+    return Array.isArray(applied?.skipped) ? applied.skipped : [];
   }
 
   function mergeVerifiedAppliedFiles(freshProject = {}, originalProject = {}, applied = {}) {
@@ -2680,7 +2689,7 @@
       ...applied,
       ok: applied.ok && partitioned.skipped.length === 0,
       skipped: [
-        ...(applied.skipped || []),
+        ...getSkippedEntries(applied),
         ...partitioned.skipped
       ]
     };
@@ -5178,12 +5187,14 @@
   }
 
   function recordUndoFromApply(project, applyResult) {
-    if (!currentRunView?.recordId || !Array.isArray(applyResult?.applied) || !applyResult.applied.length) {
+    const appliedEntries = getAppliedEntries(applyResult);
+    if (!currentRunView?.recordId || !appliedEntries.length) {
       return;
     }
-    const appliedOperations = applyResult.applied
+    const appliedOperations = appliedEntries
       .map(item => item.operation)
       .filter(Boolean);
+    const skippedEntries = getSkippedEntries(applyResult);
     const trackedChanges = normalizeApplyTrackedChanges(applyResult?.trackedChanges || []);
     const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
     if (!record) {
@@ -5206,7 +5217,7 @@
       record.undoTrackedChanges = combinedTrackedChanges;
       record.undoExpectedFiles = selectExpectedFilesForTrackedUndo(project, combinedAppliedOperations, combinedTrackedChanges);
       record.undoStatus = '';
-      record.partialWriteback = Boolean(applyResult.skipped?.length);
+      record.partialWriteback = skippedEntries.length > 0;
       refreshRunCardControls(record.id);
       if (combinedTrackedChanges.length) {
         appendRunEvent({
@@ -5248,7 +5259,7 @@
     record.undoTrackedChanges = [];
     record.undoExpectedFiles = selectExpectedFilesForTrackedUndo(project, combinedAppliedOperations, []);
     record.undoStatus = '';
-    record.partialWriteback = Boolean(applyResult.skipped?.length);
+    record.partialWriteback = skippedEntries.length > 0;
     refreshRunCardControls(record.id);
     appendRunEvent({
       title: tr('undoCheckpointPlain', { count: record.undoOperations.length }),
@@ -5602,7 +5613,7 @@
       add(operation?.path || operation?.from || operation?.to);
     }
     for (const result of applyResults || []) {
-      for (const item of [...(result?.applied || []), ...(result?.skipped || [])]) {
+      for (const item of [...getAppliedEntries(result), ...getSkippedEntries(result)]) {
         add(item?.operation?.path || item?.operation?.from || item?.operation?.to);
       }
     }
@@ -5689,8 +5700,8 @@
   }
 
   function appendPartialWritebackWarning(result) {
-    const applied = Array.isArray(result?.applied) ? result.applied : [];
-    const skipped = Array.isArray(result?.skipped) ? result.skipped : [];
+    const applied = getAppliedEntries(result);
+    const skipped = getSkippedEntries(result);
     if (!applied.length && !skipped.length) {
       return;
     }
@@ -5726,7 +5737,7 @@
   }
 
   function formatWritebackSkippedNextStep(result = {}) {
-    const appliedCount = Array.isArray(result?.applied) ? result.applied.length : 0;
+    const appliedCount = getAppliedEntries(result).length;
     if (appliedCount > 0) {
       return tx('Review the skipped reasons. You can use "Undo written parts" to roll back what already reached Overleaf, then fix conflicts and retry.', '请查看跳过原因。已写入的部分可以点击“撤销已写入部分”回退，处理冲突后再重试。');
     }
@@ -5737,8 +5748,8 @@
     if (!result) {
       return;
     }
-    const appliedEntries = Array.isArray(result?.applied) ? result.applied : [];
-    const skippedEntries = Array.isArray(result?.skipped) ? result.skipped : [];
+    const appliedEntries = getAppliedEntries(result);
+    const skippedEntries = getSkippedEntries(result);
     const applied = appliedEntries.length;
     const skipped = skippedEntries.length;
     appendRunEvent({

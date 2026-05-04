@@ -188,11 +188,16 @@ test('empty or malformed apply results do not trigger save verification', () => 
   );
   const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
   const helperBody = contentScript.match(/function hasApplyResultEntries\(applied = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
-  const hasApplyResultEntries = Function(`return (${helperBody});`)();
+  const appliedHelperBody = contentScript.match(/function getAppliedEntries\(applied = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const skippedHelperBody = contentScript.match(/function getSkippedEntries\(applied = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const hasApplyResultEntries = Function(`${appliedHelperBody}\n${skippedHelperBody}\nreturn (${helperBody});`)();
 
   assert.match(contentScript, /function hasApplyResultEntries\(applied = \{\}\)/);
-  assert.match(helperBody, /Array\.isArray\(applied\?\.applied\)/);
-  assert.match(helperBody, /Array\.isArray\(applied\?\.skipped\)/);
+  assert.match(contentScript, /function getAppliedEntries\(applied = \{\}\)/);
+  assert.match(helperBody, /getAppliedEntries\(applied\)/);
+  assert.match(helperBody, /getSkippedEntries\(applied\)/);
+  assert.match(appliedHelperBody, /Array\.isArray\(applied\?\.applied\)/);
+  assert.match(skippedHelperBody, /Array\.isArray\(applied\?\.skipped\)/);
   assert.equal(hasApplyResultEntries({ applied: 'x' }), false);
   assert.equal(hasApplyResultEntries({ skipped: { length: 1 } }), false);
   assert.equal(hasApplyResultEntries({ applied: [], skipped: [] }), false);
@@ -201,6 +206,30 @@ test('empty or malformed apply results do not trigger save verification', () => 
   assert.match(applyBody, /const hasConfirmedApplyResult = hasApplyResultEntries\(applied\)/);
   assert.match(applyBody, /const saveVerification = hasConfirmedApplyResult\s*\?[\s\S]*?verifyPostWriteSaveState\(\)[\s\S]*?:/);
   assert.match(applyBody, /if \(hasConfirmedApplyResult\) \{[\s\S]*?appendPostWriteSaveVerificationWarning\(saveVerification\)/);
+});
+
+test('malformed skipped apply result entries are not treated as partial writeback', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  async function verifyPostWriteSaveState/)?.[0] || '';
+  const applyTaskBody = contentScript.match(/async function applyTaskOperations[\s\S]*?\n  async function ensureReviewingBeforeWrite/)?.[0] || '';
+  const recordUndoBody = contentScript.match(/function recordUndoFromApply\(project, applyResult\) \{[\s\S]*?\n  function normalizeApplyTrackedChanges/)?.[0] || '';
+  const helperBody = contentScript.match(/function getSkippedEntries\(applied = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(contentScript, /function getSkippedEntries\(applied = \{\}\)/);
+  const getSkippedEntries = Function(`return (${helperBody});`)();
+  assert.match(helperBody, /Array\.isArray\(applied\?\.skipped\)/);
+  assert.deepEqual(getSkippedEntries({ skipped: 'x' }), []);
+  assert.deepEqual(getSkippedEntries({ skipped: { length: 1 } }), []);
+  assert.deepEqual(getSkippedEntries({ skipped: [{}] }), [{}]);
+  assert.match(applyBody, /const skippedEntries = getSkippedEntries\(applied\)/);
+  assert.doesNotMatch(applyBody, /applied\?\.skipped\?\.length|applied\.skipped\?\.length/);
+  assert.match(recordUndoBody, /const skippedEntries = getSkippedEntries\(applyResult\)/);
+  assert.doesNotMatch(recordUndoBody, /applyResult\.skipped\?\.length/);
+  assert.match(applyTaskBody, /\.\.\.getSkippedEntries\(applied\)/);
+  assert.doesNotMatch(applyTaskBody, /\.\.\.\(applied\.skipped \|\| \[\]\)/);
 });
 
 test('post-write mirror refresh and auto compile return unless save is verified', () => {
