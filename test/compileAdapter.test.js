@@ -237,7 +237,7 @@ test('compile bridge install is idempotent for fetch interception and source lis
   const bridge = CompileBridge.create({
     document: pageDocument,
     getActiveFilePath: () => 'main.tex',
-    waitForSaveState: async () => ({ ok: true }),
+    waitForSaveState: async () => ({ ok: true, state: 'verified_saved' }),
     window: pageWindow
   });
   bridge.install();
@@ -299,7 +299,7 @@ test('compile bridge can click Overleaf Recompile before a request template is c
   const bridge = CompileBridge.create({
     document: pageDocument,
     getActiveFilePath: () => 'main.tex',
-    waitForSaveState: async () => ({ ok: true }),
+    waitForSaveState: async () => ({ ok: true, state: 'verified_saved' }),
     window: pageWindow
   });
   bridge.install();
@@ -364,7 +364,7 @@ test('compile bridge prefers the Overleaf Recompile button for visible auto comp
   const bridge = CompileBridge.create({
     document: pageDocument,
     getActiveFilePath: () => 'main.tex',
-    waitForSaveState: async () => ({ ok: true }),
+    waitForSaveState: async () => ({ ok: true, state: 'verified_saved' }),
     window: pageWindow
   });
   bridge.install();
@@ -419,7 +419,7 @@ test('compile bridge does not replay expired compile request templates', async (
     const bridge = CompileBridge.create({
       document: pageDocument,
       getActiveFilePath: () => 'main.tex',
-      waitForSaveState: async () => ({ ok: true }),
+      waitForSaveState: async () => ({ ok: true, state: 'verified_saved' }),
       window: pageWindow
     });
     bridge.install();
@@ -434,4 +434,123 @@ test('compile bridge does not replay expired compile request templates', async (
   } finally {
     Date.now = originalNow;
   }
+});
+
+test('compile bridge blocks compile by default when save state times out unknown', async () => {
+  const CompileBridge = require('../extension/src/page/compileBridge');
+  let clicked = 0;
+  let fetchCount = 0;
+  const pageWindow = {
+    location: { origin: 'https://www.overleaf.com' },
+    CodexOverleafCompileAdapter: {
+      parseCompileResponse() {
+        return { ok: true, status: 'success', logUrl: '/output.log' };
+      }
+    },
+    fetch: async () => {
+      fetchCount += 1;
+      return {
+        ok: true,
+        async json() {
+          return { status: 'success', outputFiles: [{ path: 'output.log', url: '/output.log' }] };
+        }
+      };
+    }
+  };
+  const recompileButton = {
+    textContent: 'Recompile',
+    disabled: false,
+    getAttribute(name) {
+      return name === 'aria-label' ? 'Recompile' : null;
+    },
+    click() {
+      clicked += 1;
+    }
+  };
+  const pageDocument = {
+    addEventListener() {},
+    querySelectorAll(selector) {
+      return /button|\[role="button"\]/.test(selector) ? [recompileButton] : [];
+    }
+  };
+  const bridge = CompileBridge.create({
+    document: pageDocument,
+    getActiveFilePath: () => 'main.tex',
+    waitForSaveState: async () => ({
+      ok: false,
+      state: 'unknown_timeout',
+      reason: 'Timed out waiting for a verified Overleaf save state.'
+    }),
+    window: pageWindow
+  });
+  bridge.state.capturedRequestTemplate = {
+    url: '/project/abc/compile',
+    method: 'POST',
+    capturedAt: Date.now(),
+    headers: {},
+    body: 'captured-template'
+  };
+
+  const result = await bridge.triggerCompile({ waitForSaveMs: 10, captureTimeoutMs: 10 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.saveStateVerified, false);
+  assert.equal(result.saveState, 'unknown_timeout');
+  assert.match(result.reason, /verified Overleaf save state/i);
+  assert.equal(clicked, 0);
+  assert.equal(fetchCount, 0);
+});
+
+test('compile bridge can explicitly opt out of verified save before compile', async () => {
+  const CompileBridge = require('../extension/src/page/compileBridge');
+  let fetchCount = 0;
+  const compileJson = { status: 'success', outputFiles: [{ path: 'output.log', url: '/output.log' }] };
+  const pageWindow = {
+    location: { origin: 'https://www.overleaf.com' },
+    CodexOverleafCompileAdapter: {
+      parseCompileResponse(json) {
+        return { ok: true, status: json.status, logUrl: json.outputFiles[0].url };
+      }
+    },
+    fetch: async () => {
+      fetchCount += 1;
+      return {
+        ok: true,
+        async json() {
+          return compileJson;
+        }
+      };
+    }
+  };
+  const pageDocument = {
+    addEventListener() {},
+    querySelectorAll() {
+      return [];
+    }
+  };
+  const bridge = CompileBridge.create({
+    document: pageDocument,
+    getActiveFilePath: () => 'main.tex',
+    waitForSaveState: async () => ({
+      ok: false,
+      state: 'unknown_timeout',
+      reason: 'Timed out waiting for a verified Overleaf save state.'
+    }),
+    window: pageWindow
+  });
+  bridge.state.capturedRequestTemplate = {
+    url: '/project/abc/compile',
+    method: 'POST',
+    capturedAt: Date.now(),
+    headers: {},
+    body: 'captured-template'
+  };
+
+  const result = await bridge.triggerCompile({ requireVerifiedSave: false, waitForSaveMs: 10 });
+
+  assert.equal(result.ok, true, result.reason || JSON.stringify(result));
+  assert.equal(fetchCount, 1);
+  assert.equal(result.compile.status, 'success');
+  assert.equal(result.saveStateVerified, false);
+  assert.equal(result.saveState, 'unknown_timeout');
 });

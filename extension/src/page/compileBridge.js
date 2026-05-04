@@ -75,7 +75,16 @@
     }
 
     async function triggerCompile(params = {}) {
-      const saveResult = await deps.waitForSaveState({ deadlineMs: params.waitForSaveMs || 5000 });
+      const saveResult = await waitForCompileSaveState(params);
+      if (params.requireVerifiedSave !== false && saveResult.state !== 'verified_saved') {
+        return {
+          ok: false,
+          reason: saveResult.reason || 'Overleaf save state was not verified.',
+          saveStateVerified: false,
+          saveState: saveResult.state || 'unknown_timeout'
+        };
+      }
+      const saveMetadata = buildSaveStateMetadata(saveResult);
       const sourceChangeTimestamp = state.lastKnownSourceEditTimestamp;
       if (params.preferUiClick === true) {
         const clicked = clickOverleafCompileButton();
@@ -85,7 +94,7 @@
             return {
               ok: true,
               compile: state.lastCompileResponse,
-              saveStateVerified: saveResult.ok,
+              ...saveMetadata,
               triggeredBy: 'overleaf-button'
             };
           }
@@ -94,7 +103,7 @@
             compile: { ok: true, status: 'triggered' },
             resultCaptured: false,
             reason: captured.reason,
-            saveStateVerified: saveResult.ok,
+            ...saveMetadata,
             triggeredBy: 'overleaf-button'
           };
         }
@@ -112,7 +121,7 @@
         return {
           ok: true,
           compile: state.lastCompileResponse,
-          saveStateVerified: saveResult.ok,
+          ...saveMetadata,
           triggeredBy: 'overleaf-button'
         };
       }
@@ -128,7 +137,7 @@
         return {
           ok: true,
           compile: state.lastCompileResponse,
-          saveStateVerified: saveResult.ok,
+          ...saveMetadata,
           triggeredBy: 'overleaf-button'
         };
       }
@@ -154,11 +163,61 @@
         return {
           ok: true,
           compile: parsed,
-          saveStateVerified: saveResult.ok
+          ...saveMetadata
         };
       } catch (error) {
         return { ok: false, reason: `Compile request error: ${error.message}` };
       }
+    }
+
+    async function waitForCompileSaveState(params = {}) {
+      if (typeof deps.waitForSaveState !== 'function') {
+        return {
+          ok: false,
+          state: 'unavailable',
+          reason: 'Overleaf save-state checker is unavailable.'
+        };
+      }
+      try {
+        return normalizeSaveStateResult(
+          await deps.waitForSaveState({ deadlineMs: params.waitForSaveMs || 5000 })
+        );
+      } catch (error) {
+        return {
+          ok: false,
+          state: 'unavailable',
+          reason: `Overleaf save-state checker failed: ${error.message}`
+        };
+      }
+    }
+
+    function normalizeSaveStateResult(result = {}) {
+      if (result.ok === true && !result.state) {
+        return {
+          ...result,
+          state: 'verified_saved'
+        };
+      }
+      if (result.state === 'verified_saved') {
+        return {
+          ...result,
+          ok: true,
+          state: 'verified_saved'
+        };
+      }
+      return {
+        ...result,
+        ok: false,
+        state: result.state || 'unknown_timeout'
+      };
+    }
+
+    function buildSaveStateMetadata(saveResult = {}) {
+      const saveState = saveResult.state || 'unknown_timeout';
+      return {
+        saveStateVerified: saveState === 'verified_saved',
+        saveState
+      };
     }
 
     async function getCompileLog(params = {}) {

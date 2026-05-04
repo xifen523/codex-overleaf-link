@@ -29,6 +29,43 @@ const overleafProjectSnapshotSource = fs.readFileSync(
   'utf8'
 );
 
+test('page bridge save-state source requires tri-state positive verification', () => {
+  assert.doesNotMatch(pageBridgeSource, /assume saved/i);
+  assert.match(pageBridgeSource, /verified_saved/);
+  assert.match(pageBridgeSource, /unknown_timeout/);
+  assert.match(pageBridgeSource, /unavailable/);
+});
+
+test('page bridge maps a missing save indicator to unknown timeout', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'alpha'
+    }
+  });
+
+  const result = await bridge.call('waitForSaveState', { deadlineMs: 1, pollIntervalMs: 1 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.state, 'unknown_timeout');
+  assert.match(result.reason, /save/i);
+});
+
+test('page bridge only returns ok true for a verified saved indicator', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    saveIndicatorText: 'All changes saved',
+    files: {
+      'main.tex': 'alpha'
+    }
+  });
+
+  const result = await bridge.call('waitForSaveState', { deadlineMs: 1, pollIntervalMs: 1 });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'verified_saved');
+});
+
 test('page bridge allows multiple successful edits to the same fresh file', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -1109,6 +1146,7 @@ function createPageBridgeHarness({
   modeOptionRole = 'menuitem',
   modeOptionClassName = 'mode-option',
   internalReviewingState = undefined,
+  saveIndicatorText = null,
   dispatchApplies = true,
   trackChangesOnDispatch = false,
   rerenderTrackedChangeIdsOnReject = false,
@@ -1145,6 +1183,9 @@ function createPageBridgeHarness({
       return null;
     },
     querySelectorAll(selector) {
+      if (/save|saving-status|save-status/i.test(selector)) {
+        return saveIndicatorText == null ? [] : [makeSaveIndicatorNode(saveIndicatorText)];
+      }
       if (/treeitem|role="row"|file-tree|project-tree|data-entity-id|data-doc-id|data-id|data-file-id/.test(selector)) {
         return Array.from(fileMap.keys(), makeTreeNode);
       }
@@ -1468,6 +1509,27 @@ function createPageBridgeHarness({
       dispatchEvent() {
         this.click();
         return true;
+      }
+    };
+  }
+
+  function makeSaveIndicatorNode(text) {
+    return {
+      tagName: 'DIV',
+      textContent: text,
+      innerText: text,
+      id: 'save-status',
+      className: 'save-status',
+      disabled: false,
+      parentElement: null,
+      getAttribute(attribute) {
+        if (attribute === 'aria-label' || attribute === 'title') {
+          return text;
+        }
+        if (attribute === 'data-testid') {
+          return 'save-status';
+        }
+        return '';
       }
     };
   }

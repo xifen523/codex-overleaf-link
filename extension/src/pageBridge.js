@@ -618,20 +618,53 @@
   }
 
   async function waitForSaveState(params = {}) {
-    const deadlineMs = params.deadlineMs || 5000;
-    const deadline = Date.now() + deadlineMs;
-    const pollInterval = 100;
+    const deadlineMs = Number.isFinite(Number(params.deadlineMs)) ? Number(params.deadlineMs) : 5000;
+    const pollInterval = Number.isFinite(Number(params.pollIntervalMs)) ? Number(params.pollIntervalMs) : 100;
+    const deadline = Date.now() + Math.max(0, deadlineMs);
+    let lastState = { state: 'unknown', reason: 'Overleaf save state has not been checked yet.' };
 
-    while (Date.now() < deadline) {
-      if (isOverleafSaved()) {
-        return { ok: true };
+    do {
+      let current;
+      try {
+        current = getOverleafSaveState();
+      } catch (error) {
+        return {
+          ok: false,
+          state: 'unavailable',
+          reason: `Could not check Overleaf save state: ${error.message}`
+        };
       }
-      await delay(pollInterval);
-    }
-    return { ok: false, reason: 'Timed out waiting for Overleaf save state' };
+      if (current.state === 'verified_saved') {
+        return { ok: true, state: 'verified_saved' };
+      }
+      if (current.state === 'unavailable') {
+        return {
+          ok: false,
+          state: 'unavailable',
+          reason: current.reason || 'Overleaf save state is unavailable.'
+        };
+      }
+      lastState = current;
+      if (Date.now() >= deadline) {
+        break;
+      }
+      await delay(Math.min(Math.max(1, pollInterval), Math.max(1, deadline - Date.now())));
+    } while (Date.now() < deadline);
+
+    return {
+      ok: false,
+      state: 'unknown_timeout',
+      reason: buildSaveStateTimeoutReason(lastState)
+    };
   }
 
-  function isOverleafSaved() {
+  function getOverleafSaveState() {
+    if (!document || typeof document.querySelectorAll !== 'function') {
+      return {
+        state: 'unavailable',
+        reason: 'Overleaf document is unavailable for save-state detection.'
+      };
+    }
     const selectors = [
       '.toolbar-header [class*="save" i]',
       '[class*="saving-status" i]',
@@ -639,20 +672,63 @@
       '[data-testid*="save" i]',
       '[aria-label*="save" i]'
     ];
+    let sawSaveCandidate = false;
     for (const selector of selectors) {
       const elements = document.querySelectorAll(selector);
       for (const el of elements) {
-        const text = (el.textContent || el.innerText || '').trim().toLowerCase();
-        if (/saving|compiling|syncing|未保存/i.test(text)) {
-          return false;
+        const text = readSaveIndicatorText(el);
+        if (!text) {
+          continue;
         }
-        if (/all changes saved|saved|已保存/i.test(text)) {
-          return true;
+        if (isSavingStateText(text)) {
+          return {
+            state: 'saving',
+            reason: 'Overleaf is still saving or syncing changes.'
+          };
+        }
+        if (isVerifiedSavedText(text)) {
+          return { state: 'verified_saved' };
+        }
+        if (isSaveIndicatorCandidateText(text)) {
+          sawSaveCandidate = true;
         }
       }
     }
-    // If no save indicator found at all, assume saved (Overleaf hides it when saved)
-    return true;
+    return {
+      state: 'unknown',
+      reason: sawSaveCandidate
+        ? 'Overleaf save indicator was present, but did not verify that all changes are saved.'
+        : 'Overleaf save indicator was not found.'
+    };
+  }
+
+  function readSaveIndicatorText(node) {
+    return [
+      node.textContent,
+      node.innerText,
+      node.getAttribute?.('aria-label'),
+      node.getAttribute?.('title'),
+      node.getAttribute?.('value')
+    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function isSavingStateText(text) {
+    return /\b(saving|unsaved|syncing|compiling)\b|未保存|保存中|正在保存|同步中/i.test(text);
+  }
+
+  function isVerifiedSavedText(text) {
+    return /\ball changes saved\b|\bchanges saved\b|\bsaved\b|已保存/i.test(text);
+  }
+
+  function isSaveIndicatorCandidateText(text) {
+    return /\bsave\b|\bsaved\b|\bsaving\b|保存/i.test(text);
+  }
+
+  function buildSaveStateTimeoutReason(lastState = {}) {
+    if (lastState.state === 'saving') {
+      return `Timed out waiting for Overleaf to finish saving changes. ${lastState.reason || ''}`.trim();
+    }
+    return `Timed out waiting for a verified Overleaf save state. ${lastState.reason || ''}`.trim();
   }
 
   async function buildProjectFileList(params = {}) {
