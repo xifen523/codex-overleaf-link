@@ -1259,7 +1259,9 @@
         project = await getRunProjectSnapshot();
       }
       throwIfRunCancellationRequested();
-      appendLog(formatProjectSnapshotUserLog(project));
+      if (!useExistingMirror) {
+        appendLog(formatProjectSnapshotUserLog(project));
+      }
       const snapshotWarnings = useExistingMirror
         ? { blocking: [], nonBlocking: [] }
         : getProjectSnapshotWarnings(project);
@@ -1275,7 +1277,7 @@
         focusFiles,
         isUsableProjectFileContent: window.CodexOverleafProjectFiles.isUsableProjectFileContent
       });
-      const restrictToFocusFiles = runController.shouldRestrictWritebackToFocus({ focusFiles });
+      let restrictToFocusFiles = runController.shouldRestrictWritebackToFocus({ focusFiles });
       if (snapshotWarnings.blocking.length && !warmMirrorReuse.useExistingMirror && !focusedPartialSnapshot) {
         for (const warning of snapshotWarnings.blocking) {
           appendLog(tx(`Cannot continue: ${formatProjectSnapshotWarning(warning)}`, `无法继续：${formatProjectSnapshotWarning(warning)}`));
@@ -1354,23 +1356,18 @@
 
       // Handle mirror_stale error by retrying with full sync
       if (!response.ok && response.error?.code === 'mirror_stale' && useExistingMirror) {
-        if (project?.capabilities?.fullProjectSnapshot === false) {
-          appendRunEvent({
-            title: tx('The recent local workspace is stale, and this run did not read the full Overleaf project. Codex did not continue.', '最近的本地 workspace 已过期，而且这次没有读到完整 Overleaf 项目；Codex 没有继续。'),
-            status: 'failed'
-          });
-          appendCompletionReport({
-            conclusion: tx('This run did not continue: Overleaf did not provide the full project, and the local workspace is not fresh enough.', '这轮没有继续：Overleaf 没有提供完整项目内容，本地 workspace 也不够新。'),
-            status: 'blocked',
-            operations: [],
-            applyResults: [],
-            nextStep: tx('Reload the Overleaf project and wait for the file list to load, then retry. You can also select a specific .tex file as @context first.', '请刷新 Overleaf 项目，等文件列表加载完成后重试；也可以先选中一个具体 .tex 文件作为 @context。')
-          });
-          finishRunView(tx('Blocked: local workspace is stale', '已阻止：本地 workspace 过期'), 'failed');
+        appendRunEvent({ title: tx('Warmed workspace is stale. Running a fresh full sync.', '预热 workspace 已过期，正在重新完整同步。'), status: 'running' });
+        const staleRetry = await prepareMirrorStaleRetry({
+          project: await getRunProjectSnapshot(),
+          focusFiles
+        });
+        if (!staleRetry.ok) {
           return;
         }
-        appendRunEvent({ title: tx('Warmed workspace is stale. Running a fresh full sync.', '预热 workspace 已过期，正在重新完整同步。'), status: 'running' });
+        project = staleRetry.project;
         useExistingMirror = false;
+        fileOverlays = null;
+        restrictToFocusFiles = staleRetry.restrictToFocusFiles;
         response = await sendNative({
           method: 'codex.run',
           params: buildCodexRunParams({
@@ -1379,7 +1376,7 @@
             useExistingMirror: false,
             fileOverlays: null,
             focusFiles,
-            restrictToFocusFiles: false,
+            restrictToFocusFiles,
             codexThreadId,
             compileLogContext
           })
@@ -2500,6 +2497,14 @@
     }, delayMs);
   }
 
+  function isExpectedPrefetchSkip(errorOrResponse) {
+    const code = errorOrResponse?.error?.code || errorOrResponse?.code || '';
+    const message = errorOrResponse?.error?.message || errorOrResponse?.message || String(errorOrResponse || '');
+    return code === 'project_locked'
+      || code === 'project_changed'
+      || /project_locked|project changed|project_changed|navigation/i.test(message);
+  }
+
   async function syncMirrorPrefetch(options = {}) {
     syncMirrorPrefetchStateForProject();
     const projectId = getCurrentProjectId();
@@ -2542,6 +2547,9 @@
         }
       });
       if (!response?.ok) {
+        if (isExpectedPrefetchSkip(response)) {
+          return { ok: false, skipped: true, reason: response?.error?.code || 'expected_busy' };
+        }
         throw new Error(response?.error?.message || 'mirror.sync failed');
       }
       if (getCurrentProjectId() !== projectId) {
@@ -2556,6 +2564,9 @@
     try {
       return await inFlight;
     } catch (error) {
+      if (isExpectedPrefetchSkip(error)) {
+        return { ok: false, skipped: true, reason: error?.code || error?.message || 'expected_busy' };
+      }
       mirrorPrefetchState.lastErrorAt = Date.now();
       mirrorPrefetchState.lastError = error?.message || String(error);
       return { ok: false, error };
@@ -2600,6 +2611,46 @@
           source: 'warm-mirror'
         }
       }
+    };
+  }
+
+  async function prepareMirrorStaleRetry({ project = {}, focusFiles = [] } = {}) {
+    throwIfRunCancellationRequested();
+    appendLog(formatProjectSnapshotUserLog(project));
+    const snapshotWarnings = getProjectSnapshotWarnings(project);
+    const focusedPartialSnapshot = runController.canUseFocusedPartialSnapshot({
+      project,
+      snapshotWarnings,
+      focusFiles,
+      isUsableProjectFileContent: window.CodexOverleafProjectFiles.isUsableProjectFileContent
+    });
+    if (snapshotWarnings.blocking.length && !focusedPartialSnapshot) {
+      for (const warning of snapshotWarnings.blocking) {
+        appendLog(tx(`Cannot continue: ${formatProjectSnapshotWarning(warning)}`, `无法继续：${formatProjectSnapshotWarning(warning)}`));
+      }
+      appendCompletionReport({
+        conclusion: tx('This run did not continue: Overleaf did not provide the full project, and the local workspace is not fresh enough.', '这轮没有继续：Overleaf 没有提供完整项目内容，本地 workspace 也不够新。'),
+        status: 'blocked',
+        operations: [],
+        applyResults: [],
+        nextStep: tx('Reload the Overleaf project and wait for the file list to load, then retry. You can also select a specific .tex file as @context first.', '请刷新 Overleaf 项目，等文件列表加载完成后重试；也可以先选中一个具体 .tex 文件作为 @context。')
+      });
+      finishRunView(tx('Blocked: local workspace is stale', '已阻止：本地 workspace 过期'), 'failed');
+      return { ok: false };
+    }
+    if (focusedPartialSnapshot) {
+      appendRunEvent({
+        title: tx(
+          `Only selected context files were read: ${focusFiles.join(', ')}. This retry will read and write only these files.`,
+          `只读到你选择的上下文文件：${focusFiles.join(', ')}；本次重试将只基于这些文件运行和写回。`
+        ),
+        status: 'completed'
+      });
+    }
+    return {
+      ok: true,
+      project,
+      restrictToFocusFiles: runController.shouldRestrictWritebackToFocus({ focusFiles })
     };
   }
 
@@ -3280,7 +3331,7 @@
   function mergeProjectWithSyncChangeBaseFiles(project = {}, syncChanges = []) {
     const filesByPath = new Map((project.files || []).map(file => [file.path, { ...file }]));
     for (const change of syncChanges || []) {
-      if (!change?.path || filesByPath.has(change.path) || typeof change.previousContent !== 'string') {
+      if (!change?.path || filesByPath.has(change.path) || !syncChangeHasPreviousFile(change)) {
         continue;
       }
       filesByPath.set(change.path, {
@@ -3295,6 +3346,16 @@
       ...project,
       files: Array.from(filesByPath.values())
     };
+  }
+
+  function syncChangeHasPreviousFile(change = {}) {
+    if (change.previousExists === true || change.baselineExists === true) {
+      return true;
+    }
+    if (change.previousExists === false || change.baselineExists === false) {
+      return false;
+    }
+    return typeof change.previousContent === 'string' && change.previousContent.length > 0;
   }
 
   // --- End Warm Mirror Controller ---

@@ -941,6 +941,70 @@ test('@compile-log context is preserved across Codex run retries', () => {
   assert.match(runTaskBody, /thread_resume_failed[\s\S]*buildCodexRunParams\([\s\S]*compileLogContext/);
 });
 
+test('warm mirror stale retry fetches a real snapshot before full-sync retry', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const staleRetryBody = contentScript.match(/if \(!response\.ok && response\.error\?\.code === 'mirror_stale' && useExistingMirror\) \{[\s\S]*?\n      \}/)?.[0] || '';
+
+  assert.match(staleRetryBody, /const staleRetry = await prepareMirrorStaleRetry/);
+  assert.match(staleRetryBody, /project = staleRetry\.project/);
+  assert.match(staleRetryBody, /getRunProjectSnapshot\(\)/);
+  assert.ok(
+    staleRetryBody.indexOf('getRunProjectSnapshot()') < staleRetryBody.indexOf('useExistingMirror: false'),
+    'mirror_stale retry must fetch a real snapshot before disabling mirror reuse'
+  );
+});
+
+test('warm mirror writeback does not seed new empty files as existing base files', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const helperBody = contentScript.match(/function mergeProjectWithSyncChangeBaseFiles\(project = \{\}, syncChanges = \[\]\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const existsHelperBody = contentScript.match(/function syncChangeHasPreviousFile\(change = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const helper = Function(`${existsHelperBody}\nreturn (${helperBody});`)();
+  const merged = helper({ files: [] }, [
+    { type: 'write', path: 'new-empty.tex', previousContent: '', content: 'new' },
+    { type: 'write', path: 'existing.tex', previousExists: true, previousContent: '', content: 'changed' },
+    { type: 'write', path: 'legacy-existing.tex', previousContent: 'before', content: 'after' }
+  ]);
+
+  assert.deepEqual(merged.files.map(file => file.path), ['existing.tex', 'legacy-existing.tex']);
+  assert.doesNotMatch(helperBody, /typeof change\.previousContent !== 'string'/);
+  assert.match(existsHelperBody, /change\.previousExists === true|change\.baselineExists === true/);
+});
+
+test('mirror prefetch treats expected busy failures as non-retained skips', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const prefetchBody = contentScript.match(/async function syncMirrorPrefetch[\s\S]*?\n  function/)?.[0] || '';
+  const skipHelperBody = contentScript.match(/function isExpectedPrefetchSkip[\s\S]*?\n  async function syncMirrorPrefetch/)?.[0] || '';
+
+  assert.match(prefetchBody, /isExpectedPrefetchSkip/);
+  assert.match(prefetchBody, /return \{ ok: false, skipped: true/);
+  assert.match(skipHelperBody, /project_locked/);
+  assert.match(skipHelperBody, /project_changed/);
+});
+
+test('warm synthetic runs announce mirror reuse without logging empty snapshot copy', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
+  const initialRunBody = runTaskBody.split(/\/\/ Handle mirror_stale error by retrying with full sync/)[0] || '';
+  const initialRunLines = initialRunBody.split('\n');
+  const snapshotLogLineIndex = initialRunLines.findIndex(line => line.includes('appendLog(formatProjectSnapshotUserLog(project))'));
+
+  assert.match(initialRunBody, /if \(!useExistingMirror\) \{[\s\S]*formatProjectSnapshotUserLog\(project\)/);
+  assert.ok(snapshotLogLineIndex > 0);
+  assert.match(initialRunLines[snapshotLogLineIndex - 1], /if \(!useExistingMirror\) \{/);
+});
+
 test('compile page bridge calls use long-running timeouts', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
