@@ -36,7 +36,7 @@
           ok: false,
           error: {
             code: 'native_connection_failed',
-            message: error.message
+            message: getErrorMessage(error, 'Native host request failed.')
           }
         });
       }
@@ -46,30 +46,64 @@
     sendNativeRequest(message.payload, sender)
       .then(result => sendResponse(result))
       .catch(error => {
+        const userFacingError = toUserFacingNativeError(error);
         sendResponse({
           ok: false,
-          error: {
-            code: 'native_connection_failed',
-            message: error.message
-          }
+          error: userFacingError
         });
       });
 
     return true;
   });
 
+  function getNativeRetryClass(method) {
+    switch (method) {
+      case 'bridge.ping':
+        return 'safe_read_retry';
+      case 'mirror.status':
+        return 'safe_read_retry';
+      case 'mirror.sync':
+        return 'safe_sync_retry';
+      case 'codex.cancel':
+        return 'best_effort';
+      case 'codex.run':
+        return 'no_silent_retry';
+      case 'task.run':
+        return 'no_silent_retry';
+      case 'task.confirm':
+        return 'no_silent_retry';
+      default:
+        return 'no_silent_retry';
+    }
+  }
+
   function sendNativeRequest(payload, sender) {
-    const nativePort = ensurePort();
     const id = payload.id || crypto.randomUUID();
     const request = { ...payload, id };
 
     return new Promise((resolve, reject) => {
-      pending.set(id, {
+      const pendingRequest = {
         resolve,
         reject,
-        tabId: sender?.tab?.id
-      });
-      nativePort.postMessage(request);
+        tabId: sender?.tab?.id,
+        request,
+        method: request.method,
+        retryClass: getNativeRetryClass(request.method),
+        retryCount: 0,
+        finalResponseReceived: false,
+        eventForwarded: false
+      };
+      pending.set(id, pendingRequest);
+
+      try {
+        postNativeRequest(pendingRequest);
+      } catch (error) {
+        pending.delete(id);
+        reject(createNativeRequestError(
+          'native_connection_failed',
+          getErrorMessage(error, 'Native host connection failed.')
+        ));
+      }
     });
   }
 
@@ -78,6 +112,11 @@
     const id = payload.id || crypto.randomUUID();
     nativePort.postMessage({ ...payload, id });
     return id;
+  }
+
+  function postNativeRequest(pendingRequest) {
+    const nativePort = ensurePort();
+    nativePort.postMessage(pendingRequest.request);
   }
 
   function ensurePort() {
@@ -96,27 +135,78 @@
       }
       const pendingRequest = pending.get(id);
       if (message?.event) {
-        forwardNativeEvent(pendingRequest.tabId, id, message.event);
+        pendingRequest.eventForwarded = (
+          forwardNativeEvent(pendingRequest.tabId, id, message.event) ||
+          pendingRequest.eventForwarded
+        );
         return;
       }
-      pendingRequest.resolve(message);
+      pendingRequest.finalResponseReceived = true;
       pending.delete(id);
+      pendingRequest.resolve(message);
     });
     port.onDisconnect.addListener(() => {
       const error = chrome.runtime.lastError?.message || 'Native host disconnected';
-      for (const pendingRequest of pending.values()) {
-        pendingRequest.reject(new Error(error));
-      }
-      pending.clear();
-      port = null;
+      handlePortDisconnect(error);
     });
 
     return port;
   }
 
+  function handlePortDisconnect(errorMessage) {
+    port = null;
+
+    const interruptedRequests = Array.from(pending.entries());
+    for (const [pendingId, pendingRequest] of interruptedRequests) {
+      if (!pending.has(pendingId)) {
+        continue;
+      }
+
+      if (canRetryNativeRequest(pendingRequest)) {
+        pendingRequest.retryCount += 1;
+        try {
+          postNativeRequest(pendingRequest);
+        } catch (error) {
+          pending.delete(pendingId);
+          pendingRequest.reject(createNativeRequestError(
+            'native_connection_failed',
+            getErrorMessage(error, 'Native host connection failed during retry.')
+          ));
+        }
+        continue;
+      }
+
+      pending.delete(pendingId);
+      if (pendingRequest.retryClass === 'no_silent_retry') {
+        pendingRequest.reject(createNativeRequestError(
+          'native_execution_interrupted',
+          'Native host disconnected while an execution request was running. The request was not retried to avoid repeating side effects.'
+        ));
+        continue;
+      }
+
+      pendingRequest.reject(createNativeRequestError(
+        'native_connection_failed',
+        errorMessage || 'Native host disconnected'
+      ));
+    }
+  }
+
+  function canRetryNativeRequest(pendingRequest) {
+    if (pendingRequest.retryCount >= 1 || pendingRequest.finalResponseReceived) {
+      return false;
+    }
+
+    return (
+      pendingRequest.retryClass === 'safe_read_retry' ||
+      pendingRequest.retryClass === 'safe_sync_retry'
+    );
+  }
+
   function resolveUnmatchedNativeError(message) {
     if (pending.size === 1) {
       const [pendingId, pendingRequest] = pending.entries().next().value;
+      pendingRequest.finalResponseReceived = true;
       pendingRequest.resolve({
         ...message,
         id: pendingId
@@ -126,8 +216,9 @@
     }
 
     const ambiguousRequests = Array.from(pending.entries());
-    pending.clear();
     for (const [pendingId, pendingRequest] of ambiguousRequests) {
+      pendingRequest.finalResponseReceived = true;
+      pending.delete(pendingId);
       pendingRequest.resolve({
         id: pendingId,
         ok: false,
@@ -138,6 +229,24 @@
         }
       });
     }
+  }
+
+  function createNativeRequestError(code, message) {
+    const error = new Error(message);
+    error.code = code;
+    return error;
+  }
+
+  function toUserFacingNativeError(error) {
+    return {
+      code: error?.code || 'native_connection_failed',
+      message: getErrorMessage(error, 'Native host request failed.')
+    };
+  }
+
+  function getErrorMessage(error, fallback) {
+    const message = String(error?.message || fallback);
+    return message.split('\n')[0] || fallback;
   }
 
   function isAllowedOverleafSender(sender) {
@@ -160,7 +269,7 @@
 
   function forwardNativeEvent(tabId, id, event) {
     if (typeof tabId !== 'number') {
-      return;
+      return false;
     }
 
     chrome.tabs.sendMessage(tabId, {
@@ -170,5 +279,6 @@
     }, () => {
       void chrome.runtime.lastError;
     });
+    return true;
   }
 })();
