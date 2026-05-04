@@ -328,6 +328,37 @@ test('requested-only lightweight snapshots do not expand to unrelated project do
   assert.equal(bridge.getOpenClickCount(), 0);
 });
 
+test('requested-only snapshots filter successful ZIP fallback to active and focus paths', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': 'Main',
+      'refs.bib': '@article{x}',
+      'sections/extra.tex': 'Extra'
+    },
+    zipFiles: {
+      'main.tex': 'Main from zip',
+      'refs.bib': '@article{x}',
+      'sections/extra.tex': 'Extra'
+    }
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    preferLightweight: true,
+    allowZipFallback: true,
+    allowEditorNavigation: false,
+    requireFullProject: true,
+    restrictToRequestedPathsOnly: true,
+    focusFiles: ['refs.bib'],
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.capabilities.method, 'overleaf-zip');
+  assert.equal(result.capabilities.fullProjectSnapshot, false);
+  assert.equal(result.capabilities.requestedPathsComplete, true);
+  assert.deepEqual(Array.from(result.files, file => file.path), ['main.tex', 'refs.bib']);
+  assert.equal(result.files.find(file => file.path === 'sections/extra.tex'), undefined);
+});
+
 test('run snapshots can require full project and fall back to ZIP without editor navigation', async () => {
   const bridge = createSnapshotHarness({
     files: {
@@ -670,6 +701,37 @@ test('zip-only full snapshots do not add synthetic active.tex when active path i
   assert.equal(result.files.find(file => file.path === 'main.tex')?.content, 'zip main text');
   assert.equal(result.files.some(file => file.path === 'active.tex'), false);
   assert.equal(bridge.getTreeQueryCount(), 0);
+});
+
+test('requested-only zip-only snapshots filter ZIP files and stay partial', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': 'Main',
+      'refs.bib': '@article{x}',
+      'sections/extra.tex': 'Extra'
+    },
+    zipFiles: {
+      'main.tex': 'Main from zip',
+      'refs.bib': '@article{x}',
+      'sections/extra.tex': 'Extra'
+    }
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    zipOnly: true,
+    allowZipFallback: true,
+    allowEditorNavigation: false,
+    requireFullProject: true,
+    restrictToRequestedPathsOnly: true,
+    focusFiles: ['refs.bib'],
+    includeBinaryFiles: true,
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.capabilities.method, 'overleaf-zip');
+  assert.equal(result.capabilities.fullProjectSnapshot, false);
+  assert.equal(result.capabilities.requestedPathsComplete, true);
+  assert.deepEqual(Array.from(result.files, file => file.path), ['main.tex', 'refs.bib']);
 });
 
 test('lightweight snapshots do not poison the full-project ZIP cache', async () => {

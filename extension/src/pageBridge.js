@@ -998,17 +998,22 @@
 
     const zipSnapshot = await fetchProjectZipSnapshot(params);
     if (zipSnapshot.ok && zipSnapshot.files.length) {
-      const files = mergeSnapshotFiles(
+      const mergedFiles = mergeSnapshotFiles(
         zipSnapshot.files,
         filterZipSnapshotOverlayFiles(zipSnapshot.files, lightweightSnapshot?.files || [])
       );
+      const files = filterRequestedSnapshotFiles(mergedFiles, params, activePath);
+      const requestedPathsComplete = params.restrictToRequestedPathsOnly === true
+        ? isCompleteProjectSnapshot(files, getRequestedSnapshotPaths(params, activePath))
+        : true;
       return {
         id: getProjectId(),
         url: window.location.href,
         activePath,
         files,
         capabilities: {
-          fullProjectSnapshot: true,
+          fullProjectSnapshot: params.restrictToRequestedPathsOnly === true ? false : true,
+          requestedPathsComplete,
           method: 'overleaf-zip',
           skipped: zipSnapshot.skipped || [],
           diagnostics: {
@@ -1196,13 +1201,22 @@
       const activeOverlay = buildActiveEditorOverlay(activePath, activeText, {
         allowedPaths: zipSnapshot.files.map(file => file.path)
       });
+      const files = filterRequestedSnapshotFiles(
+        mergeSnapshotFiles(zipSnapshot.files, activeOverlay),
+        params,
+        activePath
+      );
+      const requestedPathsComplete = params.restrictToRequestedPathsOnly === true
+        ? isCompleteProjectSnapshot(files, getRequestedSnapshotPaths(params, activePath))
+        : true;
       return {
         id: getProjectId(),
         url: window.location.href,
         activePath,
-        files: mergeSnapshotFiles(zipSnapshot.files, activeOverlay),
+        files,
         capabilities: {
-          fullProjectSnapshot: true,
+          fullProjectSnapshot: params.restrictToRequestedPathsOnly === true ? false : true,
+          requestedPathsComplete,
           method: 'overleaf-zip',
           skipped: zipSnapshot.skipped || [],
           diagnostics: {
@@ -1241,6 +1255,21 @@
   function filterZipSnapshotOverlayFiles(zipFiles = [], overlayFiles = []) {
     const zipPaths = new Set((zipFiles || []).map(file => file.path).filter(Boolean));
     return (overlayFiles || []).filter(file => file?.source !== 'active-editor' || zipPaths.has(file.path));
+  }
+
+  function getRequestedSnapshotPaths(params = {}, activePath = '') {
+    return window.CodexOverleafProjectFiles.collectUniqueTextPaths([
+      activePath,
+      ...(Array.isArray(params.focusFiles) ? params.focusFiles : [])
+    ], 80);
+  }
+
+  function filterRequestedSnapshotFiles(files = [], params = {}, activePath = '') {
+    if (params.restrictToRequestedPathsOnly !== true) {
+      return files;
+    }
+    const requestedSet = new Set(getRequestedSnapshotPaths(params, activePath));
+    return (files || []).filter(file => requestedSet.has(file?.path));
   }
 
   function buildActiveEditorOverlay(activePath, activeText, options = {}) {

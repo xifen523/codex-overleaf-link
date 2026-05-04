@@ -392,7 +392,8 @@ test('ask mode is not blocked by write-safety preconditions', () => {
   );
 
   assert.doesNotMatch(runTaskBody, /state\.mode !== 'ask' && state\.requireReviewing/);
-  assert.match(runTaskBody, /mode: state\.mode/);
+  assert.match(runTaskBody, /const submittedMode = state\.mode/);
+  assert.match(runTaskBody, /mode:\s*submittedMode/);
   assert.match(codexSessionRunner, /params\.mode === 'ask'/);
   assert.match(codexSessionRunner, /sandboxMode: 'read-only'/);
   assert.match(codexSessionRunner, /approvalPolicy: 'never'/);
@@ -407,9 +408,12 @@ test('ask mode hard-blocks unexpected local Codex writeback changes', () => {
   const guardEnd = applySyncBody.indexOf('let operations = buildSyncApplyOperations');
   const guardBody = guardEnd > -1 ? applySyncBody.slice(0, guardEnd) : applySyncBody;
 
-  assert.match(applySyncBody, /state\.mode === 'ask'/);
+  assert.match(applySyncBody, /const runMode = options\.mode \|\| state\.mode/);
+  assert.match(applySyncBody, /options\.mode === 'ask'/);
   assert.match(applySyncBody, /Local Codex returned file changes during Ask mode/);
-  assert.ok(applySyncBody.indexOf("state.mode === 'ask'") < applySyncBody.indexOf('buildSyncApplyOperations'));
+  assert.match(contentScript, /mode:\s*submittedMode/);
+  assert.doesNotMatch(contentScript, /mode:\s*state\.mode,[\s\S]*unsupportedChanges: response\.result\.unsupportedChanges/);
+  assert.ok(applySyncBody.indexOf("options.mode === 'ask'") < applySyncBody.indexOf('buildSyncApplyOperations'));
   assert.match(guardBody, /return \{/);
   assert.doesNotMatch(guardBody, /callPageBridge\('applyOperations'/);
 });

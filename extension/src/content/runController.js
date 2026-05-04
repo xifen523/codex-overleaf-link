@@ -19,11 +19,12 @@
     focusFiles,
     codexThreadId,
     compileLogContext,
+    submittedMode,
     restrictToFocusFiles
   } = {}) {
     const params = {
       projectId: currentProjectId,
-      mode: state.mode,
+      mode: submittedMode || state.mode,
       task,
       project: useExistingMirror ? undefined : project,
       useExistingMirror: useExistingMirror || undefined,

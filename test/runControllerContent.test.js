@@ -38,6 +38,24 @@ test('run controller builds codex.run params without embedding project when mirr
   assert.deepEqual(params.compileErrors, ['error']);
 });
 
+test('run controller uses the submitted mode instead of mutable panel state when provided', () => {
+  const params = RunController.buildCodexRunParams({
+    currentProjectId: 'project-123',
+    state: {
+      mode: 'auto',
+      model: 'gpt-5.5',
+      reasoningEffort: 'xhigh',
+      session: { id: 'session-1' }
+    },
+    submittedMode: 'ask',
+    task: 'explain only',
+    project: { files: [{ path: 'main.tex', content: 'hello' }] },
+    useExistingMirror: false
+  });
+
+  assert.equal(params.mode, 'ask');
+});
+
 test('run controller allows focused partial snapshots when every focused file is present', () => {
   assert.equal(
     RunController.canUseFocusedPartialSnapshot({

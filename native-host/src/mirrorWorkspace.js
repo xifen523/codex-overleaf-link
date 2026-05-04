@@ -525,10 +525,12 @@ function markMirrorDirty({ projectId, rootDir, reason = 'dirty_mirror' }) {
 }
 
 function verifyWorkspaceMatchesBaseline(workspacePath, baselineFiles = []) {
+  const baselinePaths = new Set();
   for (const file of baselineFiles || []) {
     if (!file?.path) {
       continue;
     }
+    baselinePaths.add(file.path);
     const target = resolveWorkspacePath(workspacePath, file.path);
     if (!fs.existsSync(target)) {
       return { ok: false, reason: 'workspace_mismatch', path: file.path };
@@ -542,6 +544,14 @@ function verifyWorkspaceMatchesBaseline(workspacePath, baselineFiles = []) {
     const content = fs.readFileSync(target, 'utf8');
     if (hashText(content) !== file.hash) {
       return { ok: false, reason: 'workspace_mismatch', path: file.path };
+    }
+  }
+  for (const filePath of listWorkspaceFiles(workspacePath)) {
+    if (baselinePaths.has(filePath)) {
+      continue;
+    }
+    if (isTextMirrorPath(filePath) && !isGeneratedArtifactPath(filePath)) {
+      return { ok: false, reason: 'workspace_extra_file', path: filePath };
     }
   }
   return { ok: true };

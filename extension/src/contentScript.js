@@ -1204,6 +1204,8 @@
 
   async function runTask() {
     readPanelInputs();
+    // Freeze the submitted mode before the panel can change during the run.
+    const submittedMode = state.mode;
 
     const task = state.task.trim();
     if (!task) {
@@ -1215,7 +1217,7 @@
     setRunning(true);
     currentRunView = startRunView({
       task,
-      mode: state.mode,
+      mode: submittedMode,
       model: state.model,
       reasoningEffort: state.reasoningEffort
     });
@@ -1225,7 +1227,7 @@
       title: tx('I will first understand your request, then inspect the relevant Overleaf files.', '我会先理解你的请求，再检查相关 Overleaf 文件。'),
       status: 'running',
       detail: {
-        [tr('mode')]: formatModeLabel(state.mode),
+        [tr('mode')]: formatModeLabel(submittedMode),
         [tx('Model', '模型')]: state.model,
         [tx('Reasoning effort', '推理强度')]: state.reasoningEffort,
         [tx('Track required', '要求留痕')]: state.requireReviewing ? tx('yes', '是') : tx('no', '否'),
@@ -1247,7 +1249,7 @@
       }
 
       const focusFiles = getActiveFocusFiles();
-      const warmStart = await resolveWarmRunStart({ focusFiles: getActiveFocusFiles(), mode: state.mode });
+      const warmStart = await resolveWarmRunStart({ focusFiles: getActiveFocusFiles(), mode: submittedMode });
       let project = warmStart.project || null;
       let useExistingMirror = warmStart.useExistingMirror;
       let fileOverlays = warmStart.fileOverlays || null;
@@ -1351,7 +1353,8 @@
           focusFiles,
           restrictToFocusFiles,
           codexThreadId,
-          compileLogContext
+          compileLogContext,
+          submittedMode
         })
       });
 
@@ -1379,7 +1382,8 @@
             focusFiles,
             restrictToFocusFiles,
             codexThreadId,
-            compileLogContext
+            compileLogContext,
+            submittedMode
           })
         });
       }
@@ -1407,7 +1411,8 @@
               focusFiles,
               restrictToFocusFiles,
               codexThreadId: '',
-              compileLogContext
+              compileLogContext,
+              submittedMode
             })
           });
         } else {
@@ -1423,7 +1428,7 @@
           finishRunView(tx('Cancelled', '已中断'), 'rejected');
           return;
         }
-        const translated = translateRawError(response.error.message, { mode: state.mode, locale: getLocale() });
+        const translated = translateRawError(response.error.message, { mode: submittedMode, locale: getLocale() });
         appendRunEvent({
           title: translated.conclusion,
           status: 'failed',
@@ -1442,7 +1447,7 @@
           applyResults: [],
           nextStep: translated.nextStep,
           errorMessage: response.error.message,
-          mode: state.mode
+          mode: submittedMode
         });
         finishRunView(tx('Local Codex error', '本地 Codex 错误'), 'failed');
         return;
@@ -1456,7 +1461,8 @@
         : project;
       const syncOutcome = await applySyncChangesToOverleaf(syncChanges, writebackProject, {
         assistantMessage,
-        unsupportedChanges: response.result.unsupportedChanges || []
+        unsupportedChanges: response.result.unsupportedChanges || [],
+        mode: submittedMode
       });
 
       finishRunView(
@@ -1509,7 +1515,7 @@
         finishRunView(tx('Cancelled', '已中断'), 'rejected');
         return;
       }
-      const translated = translateRawError(error.message, { mode: state?.mode, locale: getLocale() });
+      const translated = translateRawError(error.message, { mode: submittedMode, locale: getLocale() });
       appendRunEvent({
         title: translated.conclusion,
         status: 'failed',
@@ -1532,7 +1538,7 @@
         applyResults: [],
         nextStep: translated.nextStep,
         errorMessage: error.message,
-        mode: state?.mode
+        mode: submittedMode
       });
       finishRunView(tx('Task failed', '任务失败'), 'failed');
     } finally {
@@ -1791,7 +1797,8 @@
     focusFiles,
     restrictToFocusFiles,
     codexThreadId,
-    compileLogContext
+    compileLogContext,
+    submittedMode
   } = {}) {
     return runController.buildCodexRunParams({
       currentProjectId: getCurrentProjectId(),
@@ -1803,7 +1810,8 @@
       focusFiles,
       restrictToFocusFiles,
       codexThreadId,
-      compileLogContext
+      compileLogContext,
+      submittedMode
     });
   }
 
@@ -2035,10 +2043,12 @@
   }
 
   async function applySyncChangesToOverleaf(syncChanges = [], project = {}, options = {}) {
+    const runMode = options.mode || state.mode;
     const assistantMessage = cleanFinalAnswer(options.assistantMessage || getAssistantAnswerForCurrentRun());
     const unsupportedChanges = Array.isArray(options.unsupportedChanges) ? options.unsupportedChanges : [];
     appendUnsupportedLocalChanges(unsupportedChanges);
-    if (state.mode === 'ask' && ((syncChanges || []).length || unsupportedChanges.length)) {
+    // Guard on the immutable submitted mode, not the mutable panel state.
+    if (options.mode === 'ask' && ((syncChanges || []).length || unsupportedChanges.length)) {
       appendRunEvent({
         title: tx(
           'Local Codex returned file changes during Ask mode. Overleaf was not modified.',
@@ -2054,7 +2064,7 @@
         status: 'failed',
         operations: [],
         applyResults: [],
-        mode: state.mode,
+        mode: runMode,
         nextStep: tx(
           'Run again in Suggest or Auto if you want Codex to edit files.',
           '如果希望 Codex 修改文件，请切换到建议修改或自动写入后重新运行。'
@@ -2073,13 +2083,13 @@
       });
       appendCompletionReport({
         conclusion: assistantMessage || tx('Codex finished locally. There are no changes to sync back to Overleaf.', 'Codex 已完成本地处理，没有需要同步回 Overleaf 的改动。'),
-        status: state.mode === 'ask' ? tr('modeAsk') : 'completed',
+        status: runMode === 'ask' ? tr('modeAsk') : 'completed',
         operations: [],
         applyResults: [],
         unchangedReason: assistantMessage
           ? tx('No file changes need to sync back to Overleaf.', '没有产生需要同步回 Overleaf 的文件改动。')
           : formatUnsupportedLocalChangeSummary(unsupportedChanges),
-        mode: state.mode,
+        mode: runMode,
         nextStep: tx('You can continue the conversation, or adjust @context and run again.', '可以继续追问，或调整 @context 后重新运行。')
       });
       return {
@@ -2088,7 +2098,7 @@
       };
     }
 
-    if (state.mode === 'confirm') {
+    if (runMode === 'confirm') {
       appendRunEvent({
         title: tx(
           `Local Codex produced ${operations.length} change(s). Review the diff before applying.`,
@@ -2107,7 +2117,7 @@
           status: 'rejected',
           operations: [],
           applyResults: [],
-          mode: state.mode,
+          mode: runMode,
           nextStep: tx('Run the task again, or switch to Auto if you want changes synced directly.', '可以重新运行任务，或切换到自动写入后再同步。')
         });
         return {
@@ -2139,11 +2149,11 @@
       });
       appendCompletionReport({
         conclusion: assistantMessage || tx('No approved changes were written back to Overleaf.', '没有已确认的改动写回 Overleaf。'),
-        status: state.mode === 'ask' ? tr('modeAsk') : 'completed',
+        status: runMode === 'ask' ? tr('modeAsk') : 'completed',
         operations: [],
         applyResults: [],
         unchangedReason: tx('No approved file changes remain to sync back to Overleaf.', '没有剩余已确认的文件改动需要同步回 Overleaf。'),
-        mode: state.mode,
+        mode: runMode,
         nextStep: tx('You can continue the conversation, or adjust @context and run again.', '可以继续追问，或调整 @context 后重新运行。')
       });
       return {
@@ -2165,7 +2175,7 @@
         status: 'failed',
         operations,
         applyResults: [blocked],
-        mode: state.mode,
+        mode: runMode,
         nextStep: tx(
           'Switch Overleaf to Reviewing/Track Changes manually and rerun, or turn off Track before writing.',
           '请在 Overleaf 手动切到 Reviewing/Track Changes 后重新运行，或关闭“留痕”再写入。'
@@ -2198,7 +2208,7 @@
       appendPostWriteSaveVerificationWarning(saveVerification);
     }
     await refreshProjectMirrorAfterWriteback(project, applied, saveVerification);
-    if (state.mode === 'auto') {
+    if (runMode === 'auto') {
       renderReadOnlyDiffReview(getAppliedSyncChanges(syncChanges, applied));
     }
     appendApplyResult(applied);
@@ -2248,7 +2258,7 @@
       status: writebackIncomplete ? 'failed' : 'completed',
       operations,
       applyResults: [applied],
-      mode: state.mode,
+      mode: runMode,
       nextStep: writebackNextStep
     });
 

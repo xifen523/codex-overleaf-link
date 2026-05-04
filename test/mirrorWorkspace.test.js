@@ -257,6 +257,30 @@ test('mirror status is not reusable when workspace content differs from baseline
   }
 });
 
+test('mirror status is not reusable when workspace contains extra managed text files', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-extra-file-status',
+      rootDir,
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'overleaf' }]
+      }
+    });
+    fs.writeFileSync(path.join(mirror.workspacePath, 'new.tex'), 'local only', 'utf8');
+
+    const status = getMirrorStatus('project-extra-file-status', { rootDir });
+
+    assert.equal(status.exists, false);
+    assert.equal(status.dirty, true);
+    assert.equal(status.dirtyReason, 'workspace_extra_file');
+    assert.equal(status.dirtyPath, 'new.tex');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('full mirror sync rewrites files whose workspace content was dirtied despite matching baseline hash', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
   try {
