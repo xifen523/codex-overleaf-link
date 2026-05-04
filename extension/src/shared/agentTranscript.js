@@ -559,8 +559,8 @@
   function buildHumanCompletionReport(input = {}) {
     const locale = normalizeLocale(input);
     const applyResults = normalizeApplyResults(input.applyResults);
-    const appliedCount = applyResults.reduce((sum, result) => sum + (result.applied?.length || 0), 0);
-    const skippedCount = applyResults.reduce((sum, result) => sum + (result.skipped?.length || 0), 0);
+    const appliedCount = countApplyResultEntries(applyResults, 'applied');
+    const skippedCount = countApplyResultEntries(applyResults, 'skipped');
     const translatedError = input.errorMessage ? translateRawError(input.errorMessage, { mode: input.mode, locale }) : null;
     const userReport = normalizeUserReport(input.userReport);
     const report = userReport || buildFallbackReport(input, {
@@ -933,10 +933,20 @@
     return Array.isArray(applyResults) ? applyResults.filter(Boolean) : [applyResults];
   }
 
+  function getApplyResultEntries(result, key) {
+    const entries = result?.[key];
+    return Array.isArray(entries) ? entries : [];
+  }
+
+  function countApplyResultEntries(applyResults, key) {
+    return normalizeApplyResults(applyResults)
+      .reduce((sum, result) => sum + getApplyResultEntries(result, key).length, 0);
+  }
+
   function collectAppliedOperations(applyResults) {
     const operations = [];
     for (const result of normalizeApplyResults(applyResults)) {
-      for (const item of result.applied || []) {
+      for (const item of getApplyResultEntries(result, 'applied')) {
         if (item?.operation) {
           operations.push(item.operation);
         }
@@ -948,7 +958,7 @@
   function collectSkippedOperations(applyResults) {
     const operations = [];
     for (const result of normalizeApplyResults(applyResults)) {
-      for (const item of result.skipped || []) {
+      for (const item of getApplyResultEntries(result, 'skipped')) {
         if (item?.operation) {
           operations.push({
             operation: item.operation,
@@ -977,7 +987,11 @@
       add(operation?.path || operation?.from || operation?.to);
     }
     for (const result of normalizeApplyResults(applyResults)) {
-      for (const item of [...(result?.applied || []), ...(result?.skipped || [])]) {
+      const entries = [
+        ...getApplyResultEntries(result, 'applied'),
+        ...getApplyResultEntries(result, 'skipped')
+      ];
+      for (const item of entries) {
         add(item?.operation?.path || item?.operation?.from || item?.operation?.to);
       }
     }

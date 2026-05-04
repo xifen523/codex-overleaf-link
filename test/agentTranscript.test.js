@@ -379,6 +379,24 @@ test('builds fallback final reports in English when requested', () => {
   assert.doesNotMatch(report.text, /结论|写入结果|可撤销/);
 });
 
+test('fallback final reports ignore malformed apply result containers', () => {
+  const report = buildHumanCompletionReport({
+    locale: 'en',
+    status: 'failed',
+    operations: [],
+    applyResults: [
+      { applied: 'x', skipped: { length: 1 } },
+      { applied: { length: 1 }, skipped: 'x' }
+    ],
+    includeWriteResult: true
+  });
+
+  assert.match(report.text, /Write result: wrote 0 items, skipped 0 items/);
+  assert.doesNotMatch(report.text, /wrote 1 item|skipped 1 item/);
+  assert.doesNotMatch(report.text, /Changes:\n- /);
+  assert.doesNotMatch(report.text, /Skipped:\n- /);
+});
+
 test('local workspace sync reasons are localized in English reports', () => {
   const report = buildHumanCompletionReport({
     locale: 'en',

@@ -134,6 +134,21 @@ test('detects skipped apply operations for run-level failure status', () => {
   ]), false);
 });
 
+test('ignores malformed apply result entry containers', () => {
+  const line = buildChangeSummaryLine({
+    applyResults: [
+      { applied: 'x', skipped: { length: 1 } },
+      { applied: { length: 1 }, skipped: 'x' }
+    ]
+  });
+
+  assert.equal(line, 'Summary: no project files changed.');
+  assert.equal(hasSkippedApplyOperations([
+    { skipped: { length: 1 } },
+    { skipped: 'x' }
+  ]), false);
+});
+
 test('preserves Chinese sentence punctuation in notes summaries', () => {
   const line = buildChangeSummaryLine({
     notes: 'summary 功能已检查，未修改任何内容。',

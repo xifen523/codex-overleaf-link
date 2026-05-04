@@ -137,7 +137,7 @@
   function collectAppliedOperations(applyResults) {
     const operations = [];
     for (const result of applyResults) {
-      for (const item of result.applied || []) {
+      for (const item of getApplyResultEntries(result, 'applied')) {
         if (item?.operation) {
           operations.push(item.operation);
         }
@@ -147,11 +147,16 @@
   }
 
   function countSkippedOperations(applyResults) {
-    return applyResults.reduce((count, result) => count + (result.skipped?.length || 0), 0);
+    return applyResults.reduce((count, result) => count + getApplyResultEntries(result, 'skipped').length, 0);
   }
 
   function hasSkippedApplyOperations(applyResults) {
     return countSkippedOperations(normalizeApplyResults(applyResults)) > 0;
+  }
+
+  function getApplyResultEntries(result, key) {
+    const entries = result?.[key];
+    return Array.isArray(entries) ? entries : [];
   }
 
   function normalizeSummary(summary) {
