@@ -372,6 +372,9 @@ function compareSyncChanges(left, right) {
 function isGeneratedArtifactPath(filePath) {
   const normalized = normalizeRelativePath(filePath).toLowerCase();
   const basename = path.posix.basename(normalized);
+  if (basename === '.latexmkrc') {
+    return false;
+  }
   if (/^(?:\.|__latexindent_temp)/.test(basename)) {
     return true;
   }

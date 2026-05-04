@@ -1271,7 +1271,8 @@
         ? warmStart
         : await resolveWarmMirrorReuse(project, {
           snapshotWarnings,
-          focusFiles
+          focusFiles,
+          mode: submittedMode
         });
       const focusedPartialSnapshot = runController.canUseFocusedPartialSnapshot({
         project,
@@ -3334,11 +3335,12 @@
   async function resolveWarmMirrorReuse(project = {}, options = {}) {
     const snapshotWarnings = options.snapshotWarnings || { blocking: [] };
     const focusFiles = options.focusFiles || [];
+    const mode = options.mode || state.mode;
     const partialSnapshot = Boolean(
       snapshotWarnings.blocking?.some(warning => /Full project snapshot was not captured/i.test(warning))
     );
 
-    if (!partialSnapshot && (state.mode === 'ask' || !focusFiles.length)) {
+    if (!partialSnapshot && (mode === 'ask' || !focusFiles.length)) {
       return { useExistingMirror: false };
     }
 

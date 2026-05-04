@@ -281,6 +281,30 @@ test('mirror status is not reusable when workspace contains extra managed text f
   }
 });
 
+test('mirror status is not reusable when workspace contains an extra latexmkrc file', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-extra-latexmkrc-status',
+      rootDir,
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'overleaf' }]
+      }
+    });
+    fs.writeFileSync(path.join(mirror.workspacePath, '.latexmkrc'), '$pdf_mode = 1;', 'utf8');
+
+    const status = getMirrorStatus('project-extra-latexmkrc-status', { rootDir });
+
+    assert.equal(status.exists, false);
+    assert.equal(status.dirty, true);
+    assert.equal(status.dirtyReason, 'workspace_extra_file');
+    assert.equal(status.dirtyPath, '.latexmkrc');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('full mirror sync rewrites files whose workspace content was dirtied despite matching baseline hash', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
   try {

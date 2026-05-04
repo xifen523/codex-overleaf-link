@@ -67,7 +67,7 @@
       return probe(params);
     }
     if (method === 'getProjectSnapshot') {
-      return projectSnapshotBridge.getProjectSnapshot(params);
+      return projectSnapshotBridge.getProjectSnapshot(withSnapshotCacheIdentity(params));
     }
     if (method === 'getProjectFileList') {
       return projectSnapshotBridge.getProjectFileList(params);
@@ -107,6 +107,17 @@
     return {
       ok: false,
       error: `Unknown page bridge method: ${method}`
+    };
+  }
+
+  function withSnapshotCacheIdentity(params = {}) {
+    if (params.restrictToRequestedPathsOnly !== true) {
+      return params;
+    }
+    const activePath = getActiveFilePath();
+    return {
+      ...params,
+      requestedPathsCacheKey: getRequestedSnapshotPaths(params, activePath).join(',')
     };
   }
 

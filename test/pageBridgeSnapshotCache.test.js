@@ -359,6 +359,40 @@ test('requested-only snapshots filter successful ZIP fallback to active and focu
   assert.equal(result.files.find(file => file.path === 'sections/extra.tex'), undefined);
 });
 
+test('requested-only snapshots do not reuse cache entries after the active file changes', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': 'Main',
+      'refs.bib': '@article{x}',
+      'sections/extra.tex': 'Extra'
+    },
+    zipFiles: {
+      'main.tex': 'Main from zip',
+      'refs.bib': '@article{x}',
+      'sections/extra.tex': 'Extra'
+    }
+  });
+
+  const params = {
+    preferLightweight: true,
+    allowZipFallback: true,
+    allowEditorNavigation: false,
+    requireFullProject: true,
+    restrictToRequestedPathsOnly: true,
+    focusFiles: ['refs.bib'],
+    maxAgeMs: 5000
+  };
+
+  const first = await bridge.call('getProjectSnapshot', params);
+  bridge.setActivePath('sections/extra.tex');
+  const second = await bridge.call('getProjectSnapshot', params);
+
+  assert.deepEqual(Array.from(first.files, file => file.path), ['main.tex', 'refs.bib']);
+  assert.deepEqual(Array.from(second.files, file => file.path), ['refs.bib', 'sections/extra.tex']);
+  assert.equal(second.capabilities.diagnostics.snapshotCache, 'fresh');
+  assert.equal(bridge.getFetchCount(), 2);
+});
+
 test('run snapshots can require full project and fall back to ZIP without editor navigation', async () => {
   const bridge = createSnapshotHarness({
     files: {
@@ -1102,6 +1136,9 @@ function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, f
     },
     getActivePath() {
       return selectedPath;
+    },
+    setActivePath(path) {
+      selectedPath = path;
     }
   };
 

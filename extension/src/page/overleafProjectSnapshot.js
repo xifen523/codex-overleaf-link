@@ -110,6 +110,7 @@
         params.includeBinaryFiles ? 'binary' : 'text',
         params.includeContent === false ? 'list' : 'content',
         `zip-timeout=${normalizeZipTimeoutKey(params.zipTimeoutMs)}`,
+        params.requestedPathsCacheKey || '',
         focusKey
       ].join(':');
     }

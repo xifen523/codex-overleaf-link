@@ -412,6 +412,7 @@ test('ask mode hard-blocks unexpected local Codex writeback changes', () => {
   assert.match(applySyncBody, /options\.mode === 'ask'/);
   assert.match(applySyncBody, /Local Codex returned file changes during Ask mode/);
   assert.match(contentScript, /mode:\s*submittedMode/);
+  assert.match(contentScript, /resolveWarmMirrorReuse\(project,[\s\S]*mode:\s*submittedMode/);
   assert.doesNotMatch(contentScript, /mode:\s*state\.mode,[\s\S]*unsupportedChanges: response\.result\.unsupportedChanges/);
   assert.ok(applySyncBody.indexOf("options.mode === 'ask'") < applySyncBody.indexOf('buildSyncApplyOperations'));
   assert.match(guardBody, /return \{/);
