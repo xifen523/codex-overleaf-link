@@ -333,6 +333,23 @@ test('warm send checks mirror status before full project snapshot fallback', () 
   assert.ok(runTaskBody.indexOf('resolveWarmRunStart') < runTaskBody.indexOf('getRunProjectSnapshot'));
 });
 
+test('send waits for in-flight mirror prefetch before starting codex run', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
+  const helperBody = contentScript.match(/async function settleMirrorPrefetchBeforeRun\(\) \{[\s\S]*?\n  function/)?.[0] || '';
+
+  assert.match(runTaskBody, /await settleMirrorPrefetchBeforeRun\(\)/);
+  assert.ok(runTaskBody.indexOf('await settleMirrorPrefetchBeforeRun()') < runTaskBody.indexOf("method: 'codex.run'"));
+  assert.match(helperBody, /mirrorPrefetchState\.timer/);
+  assert.match(helperBody, /window\.clearTimeout\(mirrorPrefetchState\.timer\)/);
+  assert.match(helperBody, /mirrorPrefetchState\.inFlight/);
+  assert.match(helperBody, /await mirrorPrefetchState\.inFlight/);
+  assert.match(helperBody, /isExpectedPrefetchSkip/);
+});
+
 test('warm send verifies a non-invasive current or focus overlay before reusing mirror', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -379,6 +396,22 @@ test('ask mode is not blocked by write-safety preconditions', () => {
   assert.match(codexSessionRunner, /params\.mode === 'ask'/);
   assert.match(codexSessionRunner, /sandboxMode: 'read-only'/);
   assert.match(codexSessionRunner, /approvalPolicy: 'never'/);
+});
+
+test('ask mode hard-blocks unexpected local Codex writeback changes', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const applySyncBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  async function verifyPostWriteSaveState/)?.[0] || '';
+  const guardEnd = applySyncBody.indexOf('let operations = buildSyncApplyOperations');
+  const guardBody = guardEnd > -1 ? applySyncBody.slice(0, guardEnd) : applySyncBody;
+
+  assert.match(applySyncBody, /state\.mode === 'ask'/);
+  assert.match(applySyncBody, /Local Codex returned file changes during Ask mode/);
+  assert.ok(applySyncBody.indexOf("state.mode === 'ask'") < applySyncBody.indexOf('buildSyncApplyOperations'));
+  assert.match(guardBody, /return \{/);
+  assert.doesNotMatch(guardBody, /callPageBridge\('applyOperations'/);
 });
 
 test('composer clears the submitted task as soon as Codex accepts the run', () => {

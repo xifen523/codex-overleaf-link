@@ -105,9 +105,17 @@
   }
 
   function getAppliedOperationPaths(applied = {}) {
-    return Array.from(new Set(getAppliedEntries(applied)
-      .map(item => item?.operation?.path)
-      .filter(Boolean)));
+    const paths = [];
+    for (const item of getAppliedEntries(applied)) {
+      const operation = item?.operation || {};
+      if (operation.path) {
+        paths.push(operation.path);
+      }
+      if ((operation.type === 'rename' || operation.type === 'move') && operation.to) {
+        paths.push(operation.to);
+      }
+    }
+    return Array.from(new Set(paths.filter(Boolean)));
   }
 
   function getAppliedEntries(applied = {}) {

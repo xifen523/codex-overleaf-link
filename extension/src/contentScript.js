@@ -1339,6 +1339,7 @@
         }
       }
 
+      await settleMirrorPrefetchBeforeRun();
       appendRunEvent({ title: tx('Local Codex session is starting.', '本地 Codex session 开始运行。'), status: 'running' });
       let response = await sendNative({
         method: 'codex.run',
@@ -2037,6 +2038,33 @@
     const assistantMessage = cleanFinalAnswer(options.assistantMessage || getAssistantAnswerForCurrentRun());
     const unsupportedChanges = Array.isArray(options.unsupportedChanges) ? options.unsupportedChanges : [];
     appendUnsupportedLocalChanges(unsupportedChanges);
+    if (state.mode === 'ask' && ((syncChanges || []).length || unsupportedChanges.length)) {
+      appendRunEvent({
+        title: tx(
+          'Local Codex returned file changes during Ask mode. Overleaf was not modified.',
+          'Ask 模式下本地 Codex 返回了文件改动；Overleaf 未被修改。'
+        ),
+        status: 'failed'
+      });
+      appendCompletionReport({
+        conclusion: assistantMessage || tx(
+          'Ask mode blocked unexpected local file changes before they could be written to Overleaf.',
+          'Ask 模式已阻止意外的本地文件改动写入 Overleaf。'
+        ),
+        status: 'failed',
+        operations: [],
+        applyResults: [],
+        mode: state.mode,
+        nextStep: tx(
+          'Run again in Suggest or Auto if you want Codex to edit files.',
+          '如果希望 Codex 修改文件，请切换到建议修改或自动写入后重新运行。'
+        )
+      });
+      return {
+        summaryLine: tx('Ask mode blocked unexpected file changes', 'Ask 模式已阻止意外文件改动'),
+        hasSkippedOperations: true
+      };
+    }
     let operations = buildSyncApplyOperations(syncChanges, project);
     if (!operations.length) {
       appendRunEvent({
@@ -2573,6 +2601,25 @@
     } finally {
       if (mirrorPrefetchState.inFlight === inFlight) {
         mirrorPrefetchState.inFlight = null;
+      }
+    }
+  }
+
+  async function settleMirrorPrefetchBeforeRun() {
+    syncMirrorPrefetchStateForProject();
+    if (mirrorPrefetchState.timer) {
+      window.clearTimeout(mirrorPrefetchState.timer);
+      mirrorPrefetchState.timer = null;
+    }
+    if (!mirrorPrefetchState.inFlight) {
+      return;
+    }
+    try {
+      await mirrorPrefetchState.inFlight;
+    } catch (error) {
+      if (!isExpectedPrefetchSkip(error)) {
+        mirrorPrefetchState.lastErrorAt = Date.now();
+        mirrorPrefetchState.lastError = error?.message || String(error);
       }
     }
   }

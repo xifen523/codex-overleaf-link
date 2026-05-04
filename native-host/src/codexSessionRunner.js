@@ -1,7 +1,7 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
-const { collectMirrorChangesDetailed, getProjectMirror, syncOverleafToMirror } = require('./mirrorWorkspace');
+const { collectMirrorChangesDetailed, getProjectMirror, markMirrorDirty, syncOverleafToMirror } = require('./mirrorWorkspace');
 const { computeLineDiff } = require('./diffEngine');
 const { computeTextPatches } = require('./textPatch');
 const { buildCodexHomeEnv } = require('./codexHome');
@@ -68,6 +68,13 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     ...(collected.unsupportedChanges || []),
     ...filteredChanges.unsupportedChanges
   ];
+  if (rawSyncChanges.length || unsupportedChanges.length) {
+    markMirrorDirty({
+      projectId,
+      rootDir,
+      reason: 'codex_run_local_changes'
+    });
+  }
   throwIfAborted(signal);
 
   const syncChanges = rawSyncChanges.map(change => {
@@ -383,9 +390,7 @@ function runCodexAppServerSession(input) {
       if (settled) {
         return;
       }
-      if (code !== 0) {
-        fail(new Error(stderr || `codex app-server exited with code ${code}`));
-      }
+      fail(new Error(stderr || `codex app-server exited before turn completed with code ${code}`));
     });
 
     start().catch(fail);

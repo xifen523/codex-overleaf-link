@@ -9,8 +9,10 @@ const {
   buildFinalAssistantMessage,
   buildThreadStartParams,
   decideCommandApproval,
+  runCodexAppServerSession,
   runCodexSession
 } = require('../native-host/src/codexSessionRunner');
+const { getMirrorStatus } = require('../native-host/src/mirrorWorkspace');
 
 const codexSessionRunnerSource = fs.readFileSync(
   path.join(__dirname, '../native-host/src/codexSessionRunner.js'),
@@ -61,6 +63,67 @@ test('runs Codex against a local mirror and returns sync changes instead of oper
     assert.equal(events.some(event => event.type === 'codex.session.event'), true);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession marks mirror dirty when local changes are collected for writeback', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  try {
+    await runCodexSession({
+      params: {
+        projectId: 'project-session-dirty',
+        task: '润色 main.tex',
+        mode: 'auto',
+        project: {
+          capabilities: { fullProjectSnapshot: true },
+          files: [
+            { path: 'main.tex', content: 'Before' }
+          ]
+        }
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async ({ workspacePath }) => {
+        fs.writeFileSync(path.join(workspacePath, 'main.tex'), 'After', 'utf8');
+      }
+    });
+
+    const status = getMirrorStatus('project-session-dirty', { rootDir });
+    assert.equal(status.exists, false);
+    assert.equal(status.dirty, true);
+    assert.equal(status.dirtyReason, 'codex_run_local_changes');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('codex app-server exit before turn completion rejects instead of hanging', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-exit-'));
+  try {
+    const fakeCodex = path.join(tempDir, 'codex');
+    fs.writeFileSync(fakeCodex, '#!/usr/bin/env node\nprocess.exit(0);\n', 'utf8');
+    fs.chmodSync(fakeCodex, 0o755);
+
+    const result = await Promise.race([
+      runCodexAppServerSession({
+        task: 'test',
+        env: {
+          CODEX_OVERLEAF_ENV_READY: '1',
+          CODEX_OVERLEAF_CODEX_PATH: fakeCodex,
+          PATH: process.env.PATH
+        },
+        emit: () => {}
+      }).then(
+        () => ({ settled: 'resolved' }),
+        error => ({ settled: 'rejected', message: error.message })
+      ),
+      new Promise(resolve => setTimeout(() => resolve({ settled: 'timeout' }), 2000))
+    ]);
+
+    assert.equal(result.settled, 'rejected');
+    assert.match(result.message, /exited before turn completed/i);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 

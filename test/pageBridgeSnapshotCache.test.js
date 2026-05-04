@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const projectFiles = require('../extension/src/shared/projectFiles');
 const staleGuard = require('../extension/src/shared/staleGuard');
+const projectSnapshotFactory = require('../extension/src/page/overleafProjectSnapshot');
 
 const pageBridgeSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/pageBridge.js'),
@@ -641,6 +642,36 @@ test('zip-only run snapshots never inspect or open the Overleaf project tree', a
 }
 );
 
+test('zip-only full snapshots do not add synthetic active.tex when active path is unknown', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': 'live unsaved editor text',
+      'refs.bib': '@article{x}'
+    },
+    zipFiles: {
+      'main.tex': 'zip main text',
+      'refs.bib': '@article{x}'
+    },
+    activePathKnown: false
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    zipOnly: true,
+    allowZipFallback: true,
+    allowEditorNavigation: false,
+    requireFullProject: true,
+    includeBinaryFiles: true,
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.capabilities.method, 'overleaf-zip');
+  assert.equal(result.capabilities.fullProjectSnapshot, true);
+  assert.deepEqual(Array.from(result.files, file => file.path), ['main.tex', 'refs.bib']);
+  assert.equal(result.files.find(file => file.path === 'main.tex')?.content, 'zip main text');
+  assert.equal(result.files.some(file => file.path === 'active.tex'), false);
+  assert.equal(bridge.getTreeQueryCount(), 0);
+});
+
 test('lightweight snapshots do not poison the full-project ZIP cache', async () => {
   const bridge = createSnapshotHarness({
     files: {
@@ -683,7 +714,132 @@ test('project snapshot falls back when the Overleaf ZIP download hangs', async (
   assert.match(result.capabilities.skipped[0].reason, /timed out/i);
 });
 
-function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, fetchMode = 'zip', treePaths = null, internalState = {}, windowExtra = {}, onFetch = null }) {
+test('force snapshot requests do not reuse in-flight non-force pending snapshots', async () => {
+  const harness = createProjectSnapshotCacheHarness();
+
+  const firstPromise = harness.bridge.getProjectSnapshot({
+    maxAgeMs: 5000
+  });
+  const forcePromise = harness.bridge.getProjectSnapshot({
+    force: true,
+    maxAgeMs: 5000
+  });
+
+  harness.resolveAll();
+  const [first, forced] = await Promise.all([firstPromise, forcePromise]);
+
+  assert.equal(harness.getCallCount(), 2);
+  assert.equal(first.callId, 1);
+  assert.equal(forced.callId, 2);
+});
+
+test('older pending snapshot requests do not overwrite a newer force snapshot cache entry', async () => {
+  const harness = createProjectSnapshotCacheHarness();
+
+  const firstPromise = harness.bridge.getProjectSnapshot({
+    maxAgeMs: 5000
+  });
+  const forcePromise = harness.bridge.getProjectSnapshot({
+    force: true,
+    maxAgeMs: 5000
+  });
+
+  harness.resolveCall(2);
+  const forced = await forcePromise;
+  harness.resolveCall(1);
+  await firstPromise;
+  const cached = await harness.bridge.getProjectSnapshot({
+    maxAgeMs: 5000
+  });
+
+  assert.equal(harness.getCallCount(), 2);
+  assert.equal(forced.callId, 2);
+  assert.equal(cached.callId, 2);
+  assert.equal(cached.capabilities.diagnostics.snapshotCache, 'memory');
+});
+
+test('semantically different in-flight snapshot requests do not share pending snapshots', async () => {
+  const harness = createProjectSnapshotCacheHarness();
+
+  const lightweightPromise = harness.bridge.getProjectSnapshot({
+    preferLightweight: true,
+    allowZipFallback: false,
+    allowEditorNavigation: false,
+    restrictToRequestedPathsOnly: true,
+    focusFiles: ['main.tex'],
+    maxAgeMs: 5000
+  });
+  const zipOnlyPromise = harness.bridge.getProjectSnapshot({
+    preferLightweight: true,
+    zipOnly: true,
+    allowZipFallback: true,
+    allowEditorNavigation: true,
+    requireFullProject: true,
+    restrictToRequestedPathsOnly: false,
+    focusFiles: ['main.tex'],
+    maxAgeMs: 5000
+  });
+
+  harness.resolveAll();
+  const [lightweight, zipOnly] = await Promise.all([lightweightPromise, zipOnlyPromise]);
+
+  assert.equal(harness.getCallCount(), 2);
+  assert.equal(lightweight.callId, 1);
+  assert.equal(zipOnly.callId, 2);
+  assert.deepEqual(harness.getCalls().map(call => call.params.zipOnly === true), [false, true]);
+});
+
+test('snapshot requests with different ZIP timeouts do not share pending snapshots', async () => {
+  const harness = createProjectSnapshotCacheHarness();
+
+  const shortTimeoutPromise = harness.bridge.getProjectSnapshot({
+    requireFullProject: true,
+    allowZipFallback: true,
+    zipTimeoutMs: 5,
+    maxAgeMs: 5000
+  });
+  const longTimeoutPromise = harness.bridge.getProjectSnapshot({
+    requireFullProject: true,
+    allowZipFallback: true,
+    zipTimeoutMs: 30000,
+    maxAgeMs: 5000
+  });
+
+  harness.resolveAll();
+  const [shortTimeout, longTimeout] = await Promise.all([shortTimeoutPromise, longTimeoutPromise]);
+
+  assert.equal(harness.getCallCount(), 2);
+  assert.equal(shortTimeout.callId, 1);
+  assert.equal(longTimeout.callId, 2);
+});
+
+test('semantically different completed snapshot requests do not evict each other from cache', async () => {
+  const harness = createProjectSnapshotCacheHarness({ autoResolve: true });
+
+  const lightweight = await harness.bridge.getProjectSnapshot({
+    preferLightweight: true,
+    allowZipFallback: false,
+    maxAgeMs: 5000
+  });
+  const zipOnly = await harness.bridge.getProjectSnapshot({
+    zipOnly: true,
+    requireFullProject: true,
+    maxAgeMs: 5000
+  });
+  const lightweightAgain = await harness.bridge.getProjectSnapshot({
+    preferLightweight: true,
+    allowZipFallback: false,
+    maxAgeMs: 5000
+  });
+
+  assert.equal(harness.getCallCount(), 2);
+  assert.equal(lightweight.callId, 1);
+  assert.equal(zipOnly.callId, 2);
+  assert.equal(lightweightAgain.callId, 1);
+  assert.equal(lightweightAgain.capabilities.diagnostics.snapshotCache, 'memory');
+});
+
+function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, fetchMode = 'zip', treePaths = null, internalState = {}, windowExtra = {}, onFetch = null, activePathKnown = true }) {
   const fileMap = new Map(Object.entries(files));
   const zipBuffer = createStoredZip(zipFiles || files);
   let listener = null;
@@ -722,6 +878,9 @@ function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, f
     body: { innerText: '', textContent: '' },
     querySelector(selector) {
       if (/\[aria-selected="true"\]|\.selected/.test(selector)) {
+        if (!activePathKnown) {
+          return null;
+        }
         return makeTreeNode(selectedPath);
       }
       return null;
@@ -932,6 +1091,74 @@ function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, f
     });
     return nodes;
   }
+}
+
+function createProjectSnapshotCacheHarness({ autoResolve = false } = {}) {
+  const calls = [];
+  const pending = [];
+  const bridge = projectSnapshotFactory.create({
+    window: {
+      location: {
+        href: 'https://www.overleaf.com/project/test-project',
+        origin: 'https://www.overleaf.com',
+        pathname: '/project/test-project'
+      }
+    },
+    getProjectId() {
+      return 'test-project';
+    },
+    normalizePath: projectFiles.normalizePath,
+    buildProjectSnapshot(params = {}) {
+      const callId = calls.length + 1;
+      calls.push({
+        callId,
+        params: { ...params }
+      });
+      const snapshot = {
+        id: 'test-project',
+        callId,
+        params: { ...params },
+        files: [{ path: `snapshot-${callId}.tex`, content: String(callId), kind: 'text' }],
+        capabilities: {
+          fullProjectSnapshot: params.requireFullProject === true,
+          method: params.zipOnly ? 'overleaf-zip' : 'active-editor'
+        }
+      };
+      if (autoResolve) {
+        return Promise.resolve(snapshot);
+      }
+      return new Promise(resolve => {
+        pending.push({
+          callId,
+          resolve: () => resolve(snapshot)
+        });
+      });
+    },
+    buildProjectFileList() {
+      throw new Error('not used by these tests');
+    }
+  });
+
+  return {
+    bridge,
+    getCallCount() {
+      return calls.length;
+    },
+    getCalls() {
+      return calls.slice();
+    },
+    resolveAll() {
+      for (const resolve of pending.splice(0)) {
+        resolve.resolve();
+      }
+    },
+    resolveCall(callId) {
+      const index = pending.findIndex(item => item.callId === callId);
+      assert.notEqual(index, -1, `Missing pending call ${callId}`);
+      const [item] = pending.splice(index, 1);
+      item.resolve();
+    }
+  };
 }
 
 function createStoredZip(entries) {

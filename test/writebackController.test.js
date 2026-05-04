@@ -73,6 +73,19 @@ test('getAppliedSyncChanges returns only changes that were actually written', ()
   assert.deepEqual(changes, [{ path: 'main.tex' }]);
 });
 
+test('getAppliedOperationPaths includes rename and move destinations', () => {
+  const paths = WritebackController.getAppliedOperationPaths({
+    applied: [
+      { operation: { type: 'rename', path: 'old.tex', to: 'new.tex' } },
+      { operation: { type: 'move', path: 'sections/a.tex', to: 'appendix/a.tex' } },
+      { operation: { type: 'edit', path: 'main.tex' } },
+      { operation: { type: 'rename', path: 'old.tex', to: 'new.tex' } }
+    ]
+  });
+
+  assert.deepEqual(paths, ['old.tex', 'new.tex', 'sections/a.tex', 'appendix/a.tex', 'main.tex']);
+});
+
 test('malformed applied entries do not count as written sync changes or paths', () => {
   const syncChanges = [
     { path: 'main.tex' },

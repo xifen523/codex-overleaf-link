@@ -998,7 +998,10 @@
 
     const zipSnapshot = await fetchProjectZipSnapshot(params);
     if (zipSnapshot.ok && zipSnapshot.files.length) {
-      const files = mergeSnapshotFiles(zipSnapshot.files, lightweightSnapshot?.files || []);
+      const files = mergeSnapshotFiles(
+        zipSnapshot.files,
+        filterZipSnapshotOverlayFiles(zipSnapshot.files, lightweightSnapshot?.files || [])
+      );
       return {
         id: getProjectId(),
         url: window.location.href,
@@ -1152,7 +1155,7 @@
       await waitForActiveEditorText(activePath, 5000);
     }
 
-    if (!files.length && (!lightweightOnly || params.allowZipFallback === false)) {
+    if (snapshotActivePath && !files.length && (!lightweightOnly || params.allowZipFallback === false)) {
       files.push({
         path: snapshotActivePath,
         content: readActiveEditorText(),
@@ -1187,17 +1190,12 @@
   async function buildZipOnlyProjectSnapshot(params = {}) {
     const activePath = getActiveFilePath();
     const activeText = readActiveEditorText();
-    const activeOverlay = activePath && window.CodexOverleafProjectFiles.isUsableProjectFileContent(activeText)
-      ? [{
-        path: activePath,
-        content: activeText,
-        source: 'active-editor',
-        kind: 'text'
-      }]
-      : [];
 
     const zipSnapshot = await fetchProjectZipSnapshot(params);
     if (zipSnapshot.ok && zipSnapshot.files.length) {
+      const activeOverlay = buildActiveEditorOverlay(activePath, activeText, {
+        allowedPaths: zipSnapshot.files.map(file => file.path)
+      });
       return {
         id: getProjectId(),
         url: window.location.href,
@@ -1221,10 +1219,12 @@
       id: getProjectId(),
       url: window.location.href,
       activePath,
-      files: activeOverlay,
+      files: buildActiveEditorOverlay(activePath, activeText),
       capabilities: {
         fullProjectSnapshot: false,
-        method: activeOverlay.length ? 'active-editor-zip-only-fallback' : 'zip-only-fallback-empty',
+        method: activePath && window.CodexOverleafProjectFiles.isUsableProjectFileContent(activeText)
+          ? 'active-editor-zip-only-fallback'
+          : 'zip-only-fallback-empty',
         skipped: [{
           path: 'project.zip',
           reason: zipSnapshot.reason
@@ -1236,6 +1236,26 @@
         note: 'Only the current editor was read because the Overleaf source ZIP was unavailable; no file tree navigation was attempted.'
       }
     };
+  }
+
+  function filterZipSnapshotOverlayFiles(zipFiles = [], overlayFiles = []) {
+    const zipPaths = new Set((zipFiles || []).map(file => file.path).filter(Boolean));
+    return (overlayFiles || []).filter(file => file?.source !== 'active-editor' || zipPaths.has(file.path));
+  }
+
+  function buildActiveEditorOverlay(activePath, activeText, options = {}) {
+    if (!activePath || !window.CodexOverleafProjectFiles.isUsableProjectFileContent(activeText)) {
+      return [];
+    }
+    if (Array.isArray(options.allowedPaths) && !options.allowedPaths.includes(activePath)) {
+      return [];
+    }
+    return [{
+      path: activePath,
+      content: activeText,
+      source: 'active-editor',
+      kind: 'text'
+    }];
   }
 
   function mergeSnapshotFiles(primaryFiles = [], overrideFiles = []) {
@@ -3021,7 +3041,7 @@
       }
     }
 
-    return 'active.tex';
+    return '';
   }
 
   async function openFileByPath(filePath) {

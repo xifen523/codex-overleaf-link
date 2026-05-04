@@ -13,38 +13,48 @@
 
   function create(deps = {}) {
     const pageWindow = deps.window || window;
-    const snapshotCache = createCache();
+    const snapshotCache = createKeyedCache();
     const fileListCache = createCache();
 
     async function getProjectSnapshot(params = {}) {
       const cacheKey = getSnapshotCacheKey(params);
       const maxAgeMs = normalizeSnapshotMaxAge(params.maxAgeMs);
       const now = Date.now();
+      const cacheEntry = snapshotCache.entries.get(cacheKey);
 
-      if (snapshotCache.key === cacheKey && snapshotCache.pending) {
-        return snapshotCache.pending;
+      if (!params.force && cacheEntry?.pending) {
+        return cacheEntry.pending;
       }
 
-      if (!params.force && snapshotCache.key === cacheKey && snapshotCache.value && now - snapshotCache.capturedAt <= maxAgeMs) {
-        return withSnapshotCacheMetadata(snapshotCache.value, 'memory', snapshotCache.capturedAt);
+      if (!params.force && cacheEntry?.value && now - cacheEntry.capturedAt <= maxAgeMs) {
+        return withSnapshotCacheMetadata(cacheEntry.value, 'memory', cacheEntry.capturedAt);
       }
 
       const pending = deps.buildProjectSnapshot(params)
         .then(snapshot => {
           const capturedAt = Date.now();
-          snapshotCache.key = cacheKey;
-          snapshotCache.value = snapshot;
-          snapshotCache.capturedAt = capturedAt;
+          const currentEntry = snapshotCache.entries.get(cacheKey);
+          if (currentEntry?.pending === pending) {
+            snapshotCache.entries.set(cacheKey, {
+              value: snapshot,
+              capturedAt,
+              pending: null
+            });
+          }
           return withSnapshotCacheMetadata(snapshot, 'fresh', capturedAt);
         })
         .finally(() => {
-          if (snapshotCache.pending === pending) {
-            snapshotCache.pending = null;
+          const currentEntry = snapshotCache.entries.get(cacheKey);
+          if (currentEntry?.pending === pending) {
+            currentEntry.pending = null;
           }
         });
 
-      snapshotCache.key = cacheKey;
-      snapshotCache.pending = pending;
+      snapshotCache.entries.set(cacheKey, {
+        value: cacheEntry?.value || null,
+        capturedAt: cacheEntry?.capturedAt || 0,
+        pending
+      });
       return pending;
     }
 
@@ -81,7 +91,7 @@
     }
 
     function invalidateProjectSnapshot() {
-      resetCache(snapshotCache);
+      resetKeyedCache(snapshotCache);
     }
 
     function getSnapshotCacheKey(params = {}) {
@@ -92,8 +102,14 @@
         pageWindow.location.origin,
         deps.getProjectId?.() || pageWindow.location.pathname || pageWindow.location.href,
         params.preferLightweight ? 'lightweight' : 'full',
+        params.zipOnly ? 'zip-only' : 'zip-or-page',
+        params.allowZipFallback === false ? 'no-zip-fallback' : 'zip-fallback',
+        params.allowEditorNavigation === false ? 'no-editor-navigation' : params.allowEditorNavigation === true ? 'editor-navigation' : 'default-editor-navigation',
+        params.requireFullProject ? 'require-full-project' : 'allow-partial-project',
+        params.restrictToRequestedPathsOnly === true ? 'requested-only' : 'allow-project-expansion',
         params.includeBinaryFiles ? 'binary' : 'text',
         params.includeContent === false ? 'list' : 'content',
+        `zip-timeout=${normalizeZipTimeoutKey(params.zipTimeoutMs)}`,
         focusKey
       ].join(':');
     }
@@ -120,6 +136,16 @@
       value: null,
       pending: null
     };
+  }
+
+  function createKeyedCache() {
+    return {
+      entries: new Map()
+    };
+  }
+
+  function resetKeyedCache(cache) {
+    cache.entries.clear();
   }
 
   function resetCache(cache) {
@@ -149,6 +175,11 @@
       return FILE_LIST_DEFAULT_MAX_AGE_MS;
     }
     return Math.max(0, Math.min(number, FILE_LIST_DEFAULT_MAX_AGE_MS));
+  }
+
+  function normalizeZipTimeoutKey(value) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? String(parsed) : 'default';
   }
 
   function withSnapshotCacheMetadata(snapshot, cacheState, capturedAt) {

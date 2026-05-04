@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  markMirrorDirty,
   collectMirrorChangesDetailed,
   collectMirrorChanges,
   getProjectMirror,
@@ -199,8 +200,124 @@ test('collects local mirror writes and deletes as sync changes, not Codex operat
     assert.equal(changes[0].previousContent, 'before');
     assert.equal(changes[0].previousExists, true);
     assert.equal(changes[1].previousExists, false);
+    assert.equal(changes[2].previousExists, true);
     assert.equal(Object.hasOwn(changes[0], 'find'), false);
     assert.equal(Object.hasOwn(changes[0], 'replace'), false);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('delete changes preserve baseline existence for empty existing files', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-empty-delete',
+      rootDir,
+      project: {
+        files: [
+          { path: 'empty.tex', content: '' }
+        ]
+      }
+    });
+
+    fs.rmSync(path.join(mirror.workspacePath, 'empty.tex'));
+    const changes = await collectMirrorChanges({ projectId: 'project-empty-delete', rootDir });
+
+    assert.deepEqual(changes.map(change => [change.type, change.path]), [
+      ['delete', 'empty.tex']
+    ]);
+    assert.equal(changes[0].previousContent, '');
+    assert.equal(changes[0].previousExists, true);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('mirror status is not reusable when workspace content differs from baseline', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-dirty-status',
+      rootDir,
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'overleaf' }]
+      }
+    });
+    fs.writeFileSync(path.join(mirror.workspacePath, 'main.tex'), 'local dirty edit', 'utf8');
+
+    const status = getMirrorStatus('project-dirty-status', { rootDir });
+
+    assert.equal(status.exists, false);
+    assert.equal(status.dirty, true);
+    assert.equal(status.dirtyReason, 'workspace_mismatch');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('full mirror sync rewrites files whose workspace content was dirtied despite matching baseline hash', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-full-clean',
+      rootDir,
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'overleaf clean' }]
+      }
+    });
+    fs.writeFileSync(path.join(mirror.workspacePath, 'main.tex'), 'local dirty edit', 'utf8');
+
+    const result = await syncOverleafToMirror({
+      projectId: 'project-full-clean',
+      rootDir,
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'overleaf clean' }]
+      }
+    });
+
+    assert.equal(fs.readFileSync(path.join(mirror.workspacePath, 'main.tex'), 'utf8'), 'overleaf clean');
+    assert.equal(result.writtenCount, 1);
+    assert.equal(getMirrorStatus('project-full-clean', { rootDir }).exists, true);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('explicit dirty marker makes mirror status non-reusable until the next full sync', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    await syncOverleafToMirror({
+      projectId: 'project-dirty-marker',
+      rootDir,
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'overleaf' }]
+      }
+    });
+
+    markMirrorDirty({ projectId: 'project-dirty-marker', rootDir, reason: 'codex_run_local_changes' });
+    const dirtyStatus = getMirrorStatus('project-dirty-marker', { rootDir });
+
+    assert.equal(dirtyStatus.exists, false);
+    assert.equal(dirtyStatus.dirty, true);
+    assert.equal(dirtyStatus.dirtyReason, 'codex_run_local_changes');
+
+    await syncOverleafToMirror({
+      projectId: 'project-dirty-marker',
+      rootDir,
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'overleaf' }]
+      }
+    });
+
+    const cleanStatus = getMirrorStatus('project-dirty-marker', { rootDir });
+    assert.equal(cleanStatus.exists, true);
+    assert.equal(cleanStatus.dirty, false);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

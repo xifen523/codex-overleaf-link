@@ -52,7 +52,8 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
   for (const file of files) {
     const target = resolveWorkspacePath(mirror.workspacePath, file.path);
     const prev = previousByPath.get(file.path);
-    if (prev && prev.hash === hashProjectFile(file)) {
+    const nextHash = hashProjectFile(file);
+    if (prev && prev.hash === nextHash && workspaceFileMatchesBaseline(target, prev)) {
       continue;
     }
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -73,6 +74,9 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
     lastPartialSyncAt: fullProjectSnapshot ? previous.lastPartialSyncAt : now,
     lastSyncSource: fullProjectSnapshot ? (project?.capabilities?.method || 'snapshot') : previous.lastSyncSource,
     lastFileCount: files.length,
+    dirty: fullProjectSnapshot ? false : previous.dirty === true,
+    dirtyReason: fullProjectSnapshot ? '' : previous.dirtyReason || '',
+    dirtyAt: fullProjectSnapshot ? '' : previous.dirtyAt || '',
     files: nextBaselineFiles
   });
 
@@ -144,7 +148,8 @@ async function collectMirrorChangesDetailed({ projectId, rootDir }) {
       changes.push({
         type: 'delete',
         path: filePath,
-        previousContent: previous.content || ''
+        previousContent: previous.content || '',
+        previousExists: true
       });
     }
   }
@@ -243,6 +248,16 @@ function buildBaselineFile(file) {
     baseline.content = file.content;
   }
   return baseline;
+}
+
+function workspaceFileMatchesBaseline(target, baselineFile = {}) {
+  if (!fs.existsSync(target)) {
+    return false;
+  }
+  if (baselineFile.kind === 'binary') {
+    return hashBytes(fs.readFileSync(target)) === baselineFile.hash;
+  }
+  return hashText(fs.readFileSync(target, 'utf8')) === baselineFile.hash;
 }
 
 function mergePartialBaselineFiles(previousFiles, overlayFiles) {
@@ -394,6 +409,24 @@ function getMirrorStatus(projectId, options = {}) {
       lastPartialSyncAt: baseline.lastPartialSyncAt || '',
       lastSyncSource: baseline.lastSyncSource || '',
       lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
+      dirty: baseline.dirty === true,
+      dirtyReason: baseline.dirtyReason || '',
+      workspacePath: mirror.workspacePath
+    };
+  }
+  if (baseline.dirty === true) {
+    return {
+      exists: false,
+      projectKey: mirror.projectKey,
+      fileCount: 0,
+      ageMs: Infinity,
+      baselineCapturedAt: baseline.capturedAt || baseline.lastFullSyncAt || '',
+      lastFullSyncAt: '',
+      lastPartialSyncAt: baseline.lastPartialSyncAt || '',
+      lastSyncSource: baseline.lastSyncSource || '',
+      lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
+      dirty: true,
+      dirtyReason: baseline.dirtyReason || 'dirty_mirror',
       workspacePath: mirror.workspacePath
     };
   }
@@ -410,6 +443,26 @@ function getMirrorStatus(projectId, options = {}) {
       lastPartialSyncAt: baseline.lastPartialSyncAt || '',
       lastSyncSource: baseline.lastSyncSource || '',
       lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
+      dirty: false,
+      dirtyReason: '',
+      workspacePath: mirror.workspacePath
+    };
+  }
+  const integrity = verifyWorkspaceMatchesBaseline(mirror.workspacePath, baseline.files || []);
+  if (!integrity.ok) {
+    return {
+      exists: false,
+      projectKey: mirror.projectKey,
+      fileCount: 0,
+      ageMs: Infinity,
+      baselineCapturedAt: lastFullSyncAt,
+      lastFullSyncAt: '',
+      lastPartialSyncAt: baseline.lastPartialSyncAt || '',
+      lastSyncSource: baseline.lastSyncSource || '',
+      lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
+      dirty: true,
+      dirtyReason: integrity.reason,
+      dirtyPath: integrity.path || '',
       workspacePath: mirror.workspacePath
     };
   }
@@ -424,6 +477,8 @@ function getMirrorStatus(projectId, options = {}) {
     lastPartialSyncAt: baseline.lastPartialSyncAt || '',
     lastSyncSource: baseline.lastSyncSource || '',
     lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
+    dirty: false,
+    dirtyReason: '',
     workspacePath: mirror.workspacePath
   };
 }
@@ -457,11 +512,47 @@ async function applyFileOverlays({ projectId, overlays, rootDir }) {
   });
 }
 
+function markMirrorDirty({ projectId, rootDir, reason = 'dirty_mirror' }) {
+  const mirror = getProjectMirror(projectId, { rootDir });
+  const baseline = readBaseline(mirror.baselinePath);
+  writeBaseline(mirror.baselinePath, {
+    ...baseline,
+    projectKey: mirror.projectKey,
+    dirty: true,
+    dirtyReason: reason,
+    dirtyAt: new Date().toISOString()
+  });
+}
+
+function verifyWorkspaceMatchesBaseline(workspacePath, baselineFiles = []) {
+  for (const file of baselineFiles || []) {
+    if (!file?.path) {
+      continue;
+    }
+    const target = resolveWorkspacePath(workspacePath, file.path);
+    if (!fs.existsSync(target)) {
+      return { ok: false, reason: 'workspace_mismatch', path: file.path };
+    }
+    if (file.kind === 'binary') {
+      if (hashBytes(fs.readFileSync(target)) !== file.hash) {
+        return { ok: false, reason: 'workspace_mismatch', path: file.path };
+      }
+      continue;
+    }
+    const content = fs.readFileSync(target, 'utf8');
+    if (hashText(content) !== file.hash) {
+      return { ok: false, reason: 'workspace_mismatch', path: file.path };
+    }
+  }
+  return { ok: true };
+}
+
 module.exports = {
   applyFileOverlays,
   collectMirrorChangesDetailed,
   collectMirrorChanges,
   getMirrorStatus,
   getProjectMirror,
+  markMirrorDirty,
   syncOverleafToMirror
 };
