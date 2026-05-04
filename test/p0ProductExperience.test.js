@@ -188,10 +188,16 @@ test('empty or malformed apply results do not trigger save verification', () => 
   );
   const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
   const helperBody = contentScript.match(/function hasApplyResultEntries\(applied = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const hasApplyResultEntries = Function(`return (${helperBody});`)();
 
   assert.match(contentScript, /function hasApplyResultEntries\(applied = \{\}\)/);
-  assert.match(helperBody, /applied\?\.applied\?\.length/);
-  assert.match(helperBody, /applied\?\.skipped\?\.length/);
+  assert.match(helperBody, /Array\.isArray\(applied\?\.applied\)/);
+  assert.match(helperBody, /Array\.isArray\(applied\?\.skipped\)/);
+  assert.equal(hasApplyResultEntries({ applied: 'x' }), false);
+  assert.equal(hasApplyResultEntries({ skipped: { length: 1 } }), false);
+  assert.equal(hasApplyResultEntries({ applied: [], skipped: [] }), false);
+  assert.equal(hasApplyResultEntries({ applied: [{}] }), true);
+  assert.equal(hasApplyResultEntries({ skipped: [{}] }), true);
   assert.match(applyBody, /const hasConfirmedApplyResult = hasApplyResultEntries\(applied\)/);
   assert.match(applyBody, /const saveVerification = hasConfirmedApplyResult\s*\?[\s\S]*?verifyPostWriteSaveState\(\)[\s\S]*?:/);
   assert.match(applyBody, /if \(hasConfirmedApplyResult\) \{[\s\S]*?appendPostWriteSaveVerificationWarning\(saveVerification\)/);

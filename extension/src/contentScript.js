@@ -2264,7 +2264,7 @@
     if (saveVerification?.state !== 'verified_saved') {
       return;
     }
-    if (!applied?.applied?.length) {
+    if (!Array.isArray(applied?.applied) || !applied.applied.length) {
       return;
     }
 
@@ -2325,11 +2325,16 @@
   }
 
   function getAppliedOperationPaths(applied = {}) {
+    if (!Array.isArray(applied?.applied)) {
+      return [];
+    }
     return writebackController.getAppliedOperationPaths(applied || {});
   }
 
   function hasApplyResultEntries(applied = {}) {
-    return Boolean(applied?.applied?.length || applied?.skipped?.length);
+    const appliedEntries = Array.isArray(applied?.applied) ? applied.applied : [];
+    const skippedEntries = Array.isArray(applied?.skipped) ? applied.skipped : [];
+    return Boolean(appliedEntries.length || skippedEntries.length);
   }
 
   function mergeVerifiedAppliedFiles(freshProject = {}, originalProject = {}, applied = {}) {
@@ -5173,7 +5178,7 @@
   }
 
   function recordUndoFromApply(project, applyResult) {
-    if (!currentRunView?.recordId || !applyResult?.applied?.length) {
+    if (!currentRunView?.recordId || !Array.isArray(applyResult?.applied) || !applyResult.applied.length) {
       return;
     }
     const appliedOperations = applyResult.applied
@@ -5684,8 +5689,8 @@
   }
 
   function appendPartialWritebackWarning(result) {
-    const applied = result?.applied || [];
-    const skipped = result?.skipped || [];
+    const applied = Array.isArray(result?.applied) ? result.applied : [];
+    const skipped = Array.isArray(result?.skipped) ? result.skipped : [];
     if (!applied.length && !skipped.length) {
       return;
     }
@@ -5721,7 +5726,7 @@
   }
 
   function formatWritebackSkippedNextStep(result = {}) {
-    const appliedCount = result.applied?.length || 0;
+    const appliedCount = Array.isArray(result?.applied) ? result.applied.length : 0;
     if (appliedCount > 0) {
       return tx('Review the skipped reasons. You can use "Undo written parts" to roll back what already reached Overleaf, then fix conflicts and retry.', '请查看跳过原因。已写入的部分可以点击“撤销已写入部分”回退，处理冲突后再重试。');
     }
@@ -5732,18 +5737,20 @@
     if (!result) {
       return;
     }
-    const applied = result.applied?.length || 0;
-    const skipped = result.skipped?.length || 0;
+    const appliedEntries = Array.isArray(result?.applied) ? result.applied : [];
+    const skippedEntries = Array.isArray(result?.skipped) ? result.skipped : [];
+    const applied = appliedEntries.length;
+    const skipped = skippedEntries.length;
     appendRunEvent({
       title: tx(`Write result: wrote ${applied} item(s), skipped ${skipped}`, `写入结果：已写入 ${applied} 项，跳过 ${skipped} 项`),
       status: skipped ? 'failed' : 'completed',
       detail: {
-        [tx('Written', '已写入')]: (result.applied || []).map(item => ({
+        [tx('Written', '已写入')]: appliedEntries.map(item => ({
           [tr('detailAction')]: formatOperationType(item.operation?.type),
           [tr('detailFile')]: item.operation?.path,
           [tx('Status', '状态')]: item.result?.status
         })),
-        [tr('detailSkipped')]: (result.skipped || []).map(item => ({
+        [tr('detailSkipped')]: skippedEntries.map(item => ({
           [tr('detailAction')]: formatOperationType(item.operation?.type),
           [tr('detailFile')]: item.operation?.path,
           [tr('detailReason')]: formatApplyResultReason(item)
