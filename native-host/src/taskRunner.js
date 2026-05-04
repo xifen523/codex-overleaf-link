@@ -173,9 +173,52 @@ function hasRunnableProjectSnapshotEvidence(params = {}) {
   if (params.project?.capabilities?.fullProjectSnapshot !== false) {
     return false;
   }
-  return params.restrictToFocusFiles === true
-    && Array.isArray(params.focusFiles)
-    && params.focusFiles.length > 0;
+  if (params.restrictToFocusFiles !== true) {
+    return false;
+  }
+  const normalizedFocusFiles = normalizeSnapshotEvidencePaths(params.focusFiles);
+  if (!normalizedFocusFiles.length || !Array.isArray(params.project?.files)) {
+    return false;
+  }
+  const evidenceFiles = new Map();
+  for (const file of params.project.files) {
+    const filePath = normalizeSnapshotEvidencePath(file?.path);
+    if (!filePath || !isUsableSnapshotEvidenceContent(file?.content)) {
+      continue;
+    }
+    evidenceFiles.set(filePath, file);
+  }
+  return normalizedFocusFiles.every(filePath => evidenceFiles.has(filePath));
+}
+
+function isUsableSnapshotEvidenceContent(content) {
+  if (typeof content !== 'string') {
+    return false;
+  }
+  const text = content.trim();
+  return Boolean(text) && !/^(loading|loading\.{3}|loading…)$/i.test(text);
+}
+
+function normalizeSnapshotEvidencePaths(value) {
+  const seen = new Set();
+  const paths = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    const filePath = normalizeSnapshotEvidencePath(item);
+    if (!filePath || seen.has(filePath)) {
+      continue;
+    }
+    seen.add(filePath);
+    paths.push(filePath);
+  }
+  return paths;
+}
+
+function normalizeSnapshotEvidencePath(value) {
+  return String(value || '')
+    .replace(/^@file:/i, '')
+    .replace(/\\/g, '/')
+    .trim()
+    .replace(/^\/+/, '');
 }
 
 function createCancellationError() {

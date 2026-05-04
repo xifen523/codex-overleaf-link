@@ -8,6 +8,7 @@ const {
   collectMirrorChangesDetailed,
   collectMirrorChanges,
   getProjectMirror,
+  getMirrorStatus,
   syncOverleafToMirror
 } = require('../native-host/src/mirrorWorkspace');
 
@@ -93,6 +94,24 @@ test('partial Overleaf snapshots update provided files without deleting the full
     assert.equal(secondBaseline.lastFullSyncAt, firstBaseline.lastFullSyncAt);
     assert.equal(typeof secondBaseline.lastPartialSyncAt, 'string');
     assert.deepEqual(secondBaseline.files.map(file => file.path).sort(), ['main.tex', 'refs.bib']);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('legacy capturedAt-only baselines are not reusable as verified full mirrors', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = getProjectMirror('legacy-captured-only', { rootDir });
+    fs.mkdirSync(mirror.metadataPath, { recursive: true });
+    fs.writeFileSync(mirror.baselinePath, JSON.stringify({
+      capturedAt: new Date().toISOString(),
+      files: [{ path: 'main.tex', kind: 'text', content: 'legacy', hash: 'legacy' }]
+    }, null, 2), 'utf8');
+
+    const status = getMirrorStatus('legacy-captured-only', { rootDir });
+
+    assert.equal(status.exists, false);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

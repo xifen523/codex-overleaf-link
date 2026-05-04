@@ -130,6 +130,62 @@ test('codex.run accepts explicit focused partial snapshots', async () => {
   assert.equal(calls, 1);
 });
 
+test('codex.run rejects focused partial snapshots missing focused files', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-focused-partial-missing-file',
+    method: 'codex.run',
+    params: {
+      projectId: 'focused-partial-missing-file-project',
+      mode: 'ask',
+      task: '检查 main.tex',
+      restrictToFocusFiles: true,
+      focusFiles: ['@file:/sections/main.tex'],
+      project: {
+        capabilities: { fullProjectSnapshot: false },
+        files: [{ path: 'main.tex', content: 'hello' }]
+      }
+    }
+  }, {});
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, 'codex_run_requires_snapshot_evidence');
+  assert.equal(calls, 0);
+});
+
+test('codex.run rejects focused partial snapshots with unusable focused file content', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-focused-partial-loading-file',
+    method: 'codex.run',
+    params: {
+      projectId: 'focused-partial-loading-file-project',
+      mode: 'ask',
+      task: '检查 main.tex',
+      restrictToFocusFiles: true,
+      focusFiles: ['@file:/main.tex'],
+      project: {
+        capabilities: { fullProjectSnapshot: false },
+        files: [{ path: 'main.tex', content: 'Loading...' }]
+      }
+    }
+  }, {});
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, 'codex_run_requires_snapshot_evidence');
+  assert.equal(calls, 0);
+});
+
 test('codex.history.clearPlugin removes only the requested plugin Codex thread history', async () => {
   const fs = require('node:fs');
   const os = require('node:os');

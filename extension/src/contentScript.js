@@ -2589,8 +2589,31 @@
     if (!mirrorStatus?.exists || !isMirrorReusable(mirrorStatus)) {
       return { useExistingMirror: false, reason: 'mirror_not_fresh', mirrorStatus };
     }
-    if (focusFiles.length) {
-      return { useExistingMirror: false, reason: 'focus_requires_snapshot', mirrorStatus };
+
+    let overlayProject = null;
+    try {
+      overlayProject = await callPageBridge('getProjectSnapshot', {
+        force: true,
+        maxAgeMs: 0,
+        preferLightweight: true,
+        allowZipFallback: false,
+        allowEditorNavigation: false,
+        requireFullProject: false,
+        includeBinaryFiles: false,
+        focusFiles
+      });
+    } catch (error) {
+      return { useExistingMirror: false, reason: 'overlay_probe_failed', mirrorStatus };
+    }
+    const fileOverlays = buildSnapshotFileOverlays(overlayProject, focusFiles);
+    if (!fileOverlays.length) {
+      return { useExistingMirror: false, reason: 'missing_current_overlay', mirrorStatus };
+    }
+    if (focusFiles.length && !focusFiles.every(path => {
+      const normalized = normalizeSnapshotPath(path);
+      return fileOverlays.some(file => normalizeSnapshotPath(file.path) === normalized);
+    })) {
+      return { useExistingMirror: false, reason: 'missing_focus_overlay', mirrorStatus };
     }
 
     return {
@@ -2598,19 +2621,8 @@
       warmStart: true,
       reason: mode === 'ask' ? 'warm_whole_project_ask' : 'warm_whole_project',
       mirrorStatus,
-      fileOverlays: [],
-      project: {
-        projectId: getCurrentProjectId(),
-        files: [],
-        activePath: '',
-        source: 'warm-mirror',
-        warmMirror: true,
-        capabilities: {
-          fullProjectSnapshot: true,
-          method: 'warm-mirror',
-          source: 'warm-mirror'
-        }
-      }
+      fileOverlays,
+      project: overlayProject
     };
   }
 

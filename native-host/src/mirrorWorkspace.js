@@ -383,10 +383,21 @@ function hashBytes(bytes) {
 function getMirrorStatus(projectId, options = {}) {
   const mirror = getProjectMirror(projectId, options);
   const baseline = readBaseline(mirror.baselinePath);
-  if (!baseline.lastFullSyncAt && !baseline.capturedAt) {
-    return { exists: false, fileCount: 0, ageMs: Infinity, baselineCapturedAt: '' };
+  if (!baseline.lastFullSyncAt) {
+    return {
+      exists: false,
+      projectKey: mirror.projectKey,
+      fileCount: 0,
+      ageMs: Infinity,
+      baselineCapturedAt: baseline.capturedAt || '',
+      lastFullSyncAt: '',
+      lastPartialSyncAt: baseline.lastPartialSyncAt || '',
+      lastSyncSource: baseline.lastSyncSource || '',
+      lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
+      workspacePath: mirror.workspacePath
+    };
   }
-  const lastFullSyncAt = baseline.lastFullSyncAt || baseline.capturedAt;
+  const lastFullSyncAt = baseline.lastFullSyncAt;
   const ageMs = Date.now() - new Date(lastFullSyncAt).getTime();
   return {
     exists: true,

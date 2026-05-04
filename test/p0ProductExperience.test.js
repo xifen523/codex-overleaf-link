@@ -328,6 +328,22 @@ test('warm send checks mirror status before full project snapshot fallback', () 
   assert.ok(runTaskBody.indexOf('resolveWarmRunStart') < runTaskBody.indexOf('getRunProjectSnapshot'));
 });
 
+test('warm send verifies a non-invasive current or focus overlay before reusing mirror', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const warmStartBody = contentScript.match(/async function resolveWarmRunStart[\s\S]*?\n  async function prepareMirrorStaleRetry/)?.[0] || '';
+
+  assert.match(warmStartBody, /callPageBridge\('getProjectSnapshot'/);
+  assert.match(warmStartBody, /allowEditorNavigation:\s*false/);
+  assert.match(warmStartBody, /allowZipFallback:\s*false/);
+  assert.match(warmStartBody, /buildSnapshotFileOverlays/);
+  assert.match(warmStartBody, /catch \(error\)[\s\S]*useExistingMirror:\s*false/);
+  assert.doesNotMatch(warmStartBody, /fileOverlays:\s*\[\]/);
+  assert.doesNotMatch(warmStartBody, /fullProjectSnapshot:\s*true[\s\S]*method:\s*'warm-mirror'/);
+});
+
 test('ask mode is not blocked by write-safety preconditions', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
