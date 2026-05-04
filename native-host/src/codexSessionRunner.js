@@ -162,7 +162,7 @@ function normalizeFocusFiles(value) {
   const seen = new Set();
   const files = [];
   for (const item of Array.isArray(value) ? value : []) {
-    const filePath = String(item || '').trim();
+    const filePath = normalizeProjectPath(item);
     if (!filePath || seen.has(filePath)) {
       continue;
     }
@@ -187,7 +187,7 @@ function filterSyncChangesForFocus({ changes = [], focusFiles = [], restrictToFo
   const accepted = [];
   const rejected = [];
   for (const change of changes || []) {
-    if (focusSet.has(change?.path)) {
+    if (focusSet.has(normalizeProjectPath(change?.path))) {
       accepted.push(change);
     } else if (change?.path) {
       rejected.push({
@@ -201,6 +201,14 @@ function filterSyncChangesForFocus({ changes = [], focusFiles = [], restrictToFo
     changes: accepted,
     unsupportedChanges: rejected
   };
+}
+
+function normalizeProjectPath(value) {
+  return String(value || '')
+    .replace(/^@file:/i, '')
+    .replace(/\\/g, '/')
+    .trim()
+    .replace(/^\/+/, '');
 }
 
 function formatFocusFiles(files) {

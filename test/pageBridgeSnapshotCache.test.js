@@ -276,6 +276,55 @@ test('non-invasive lightweight snapshots do not open inactive focus files', asyn
   assert.equal(bridge.getActivePath(), 'main.tex');
 });
 
+test('requested-only lightweight snapshots do not expand to unrelated project doc records', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'refs.bib': '@article{x}',
+      'sections/extra.tex': 'Extra'
+    },
+    docFetchFiles: {
+      bbbbbbbbbbbbbbbbbbbbbbbb: '@article{x}',
+      cccccccccccccccccccccccc: 'Extra'
+    },
+    internalState: {
+      project: {
+        rootFolder: {
+          name: '',
+          children: [
+            {
+              name: 'refs.bib',
+              id: 'bbbbbbbbbbbbbbbbbbbbbbbb'
+            },
+            {
+              name: 'sections',
+              children: [
+                {
+                  name: 'extra.tex',
+                  id: 'cccccccccccccccccccccccc'
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  });
+
+  const result = await bridge.call('getProjectSnapshot', {
+    preferLightweight: true,
+    allowZipFallback: false,
+    allowEditorNavigation: false,
+    restrictToRequestedPathsOnly: true,
+    focusFiles: ['refs.bib'],
+    maxAgeMs: 0
+  });
+
+  assert.deepEqual(Array.from(result.files, file => file.path), ['main.tex', 'refs.bib']);
+  assert.equal(bridge.getFetchCount(), 1);
+  assert.equal(bridge.getOpenClickCount(), 0);
+});
+
 test('run snapshots can require full project and fall back to ZIP without editor navigation', async () => {
   const bridge = createSnapshotHarness({
     files: {

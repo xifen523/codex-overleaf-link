@@ -79,6 +79,109 @@ function createAbortAwareRunner() {
   };
 }
 
+function createDelayedSyncRunner() {
+  let releaseSync;
+  let syncStarted;
+  const syncStartedPromise = new Promise(resolve => {
+    syncStarted = resolve;
+  });
+  const originalSync = require('../native-host/src/mirrorWorkspace').syncOverleafToMirror;
+  let syncCalls = 0;
+
+  async function delayedSync(...args) {
+    syncCalls++;
+    syncStarted();
+    await new Promise(resolve => {
+      releaseSync = resolve;
+    });
+    return originalSync(...args);
+  }
+
+  return {
+    delayedSync,
+    syncStarted: syncStartedPromise,
+    releaseSync: () => releaseSync?.(),
+    getSyncCalls: () => syncCalls
+  };
+}
+
+function loadTaskRunnerWithFakeModules({ fakeRunner, fakeSync }) {
+  const runnerPath = require.resolve('../native-host/src/codexSessionRunner');
+  const mirrorPath = require.resolve('../native-host/src/mirrorWorkspace');
+  const taskRunnerPath = require.resolve('../native-host/src/taskRunner');
+  const originalRunner = require(runnerPath);
+  const originalMirror = require(mirrorPath);
+
+  delete require.cache[taskRunnerPath];
+  require.cache[runnerPath].exports = {
+    ...originalRunner,
+    runCodexSession: fakeRunner || originalRunner.runCodexSession
+  };
+  require.cache[mirrorPath].exports = {
+    ...originalMirror,
+    syncOverleafToMirror: fakeSync || originalMirror.syncOverleafToMirror
+  };
+
+  return {
+    ...require(taskRunnerPath),
+    restore() {
+      require.cache[runnerPath].exports = originalRunner;
+      require.cache[mirrorPath].exports = originalMirror;
+    }
+  };
+}
+
+test('codex.run is rejected while mirror.sync holds the same project lock', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
+  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
+  const syncRunner = createDelayedSyncRunner();
+  const runnerCalls = [];
+  const taskRunner = loadTaskRunnerWithFakeModules({
+    fakeRunner: async input => {
+      runnerCalls.push(input);
+      return { status: 'completed', syncChanges: [] };
+    },
+    fakeSync: syncRunner.delayedSync
+  });
+  const { handleRequest } = taskRunner;
+
+  try {
+    const syncPromise = handleRequest({
+      id: 'sync-holds-lock',
+      method: 'mirror.sync',
+      params: {
+        projectId: 'sync-lock-project',
+        project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'syncing' }] }
+      }
+    }, env);
+
+    await syncRunner.syncStarted;
+
+    const runResponse = await handleRequest({
+      id: 'run-during-sync',
+      method: 'codex.run',
+      params: {
+        projectId: 'sync-lock-project',
+        mode: 'ask',
+        task: 'check',
+        project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'run' }] }
+      }
+    }, env);
+
+    syncRunner.releaseSync();
+    const syncResponse = await syncPromise;
+    assert.equal(syncResponse.ok, true);
+
+    assert.equal(runResponse.ok, false);
+    assert.equal(runResponse.error.code, 'project_locked');
+    assert.equal(runnerCalls.length, 0, 'codex.run should not enter runner while mirror.sync holds lock');
+  } finally {
+    syncRunner.releaseSync();
+    taskRunner.restore();
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('mirror.sync is rejected while codex.run holds the project lock', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
   const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };

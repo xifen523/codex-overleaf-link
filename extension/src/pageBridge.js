@@ -1050,11 +1050,19 @@
     const snapshotActivePath = params.allowEditorNavigation === false
       ? getActiveFilePath()
       : activePath;
-    const projectPaths = window.CodexOverleafProjectFiles.collectUniqueTextPaths([
+    const requestedPaths = [
       snapshotActivePath,
-      ...(Array.isArray(params.focusFiles) ? params.focusFiles : []),
-      ...collectProjectTextPaths(snapshotActivePath)
-    ], 80);
+      ...(Array.isArray(params.focusFiles) ? params.focusFiles : [])
+    ];
+    const projectPaths = window.CodexOverleafProjectFiles.collectUniqueTextPaths(
+      params.restrictToRequestedPathsOnly === true
+        ? requestedPaths
+        : [
+          ...requestedPaths,
+          ...collectProjectTextPaths(snapshotActivePath)
+        ],
+      80
+    );
     const files = [];
     const skipped = [];
     if (zipSnapshot && !zipSnapshot.ok) {

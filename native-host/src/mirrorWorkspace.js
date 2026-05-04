@@ -398,7 +398,22 @@ function getMirrorStatus(projectId, options = {}) {
     };
   }
   const lastFullSyncAt = baseline.lastFullSyncAt;
-  const ageMs = Date.now() - new Date(lastFullSyncAt).getTime();
+  const lastFullSyncTime = new Date(lastFullSyncAt).getTime();
+  if (!Number.isFinite(lastFullSyncTime)) {
+    return {
+      exists: false,
+      projectKey: mirror.projectKey,
+      fileCount: 0,
+      ageMs: Infinity,
+      baselineCapturedAt: lastFullSyncAt,
+      lastFullSyncAt: '',
+      lastPartialSyncAt: baseline.lastPartialSyncAt || '',
+      lastSyncSource: baseline.lastSyncSource || '',
+      lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
+      workspacePath: mirror.workspacePath
+    };
+  }
+  const ageMs = Date.now() - lastFullSyncTime;
   return {
     exists: true,
     projectKey: mirror.projectKey,

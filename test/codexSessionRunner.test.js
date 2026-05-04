@@ -221,6 +221,37 @@ test('focused partial runs only return sync changes for focused files', async ()
   }
 });
 
+test('focused partial sync filtering normalizes @file labels and leading slashes', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  try {
+    const result = await runCodexSession({
+      params: {
+        projectId: 'project-focused-normalized',
+        task: '只改 main.tex',
+        mode: 'auto',
+        focusFiles: ['@file:/main.tex'],
+        restrictToFocusFiles: true,
+        project: {
+          capabilities: { fullProjectSnapshot: false },
+          files: [{ path: 'main.tex', content: 'Before' }]
+        }
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async ({ workspacePath }) => {
+        fs.writeFileSync(path.join(workspacePath, 'main.tex'), 'After', 'utf8');
+      }
+    });
+
+    assert.deepEqual(result.syncChanges.map(change => [change.type, change.path]), [
+      ['write', 'main.tex']
+    ]);
+    assert.equal(result.unsupportedChanges.length, 0);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('returns the final assistant message from the Codex runner', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
   try {

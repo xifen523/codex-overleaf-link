@@ -52,4 +52,6 @@ test('i18n covers warm mirror run status copy', () => {
   );
   assert.match(I18n.t('en', 'warmMirrorPartialOverlayTitle'), /current-file overlay/);
   assert.match(I18n.t('zh', 'warmMirrorFocusOverlayTitle'), /焦点文件差异/);
+  assert.match(I18n.t('en', 'warmMirrorStaleRetryTitle'), /fresh full sync/);
+  assert.match(I18n.t('zh', 'warmMirrorStaleBlockedTitle'), /本地 workspace 过期/);
 });

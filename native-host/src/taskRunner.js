@@ -90,11 +90,7 @@ async function handleCodexRun(request, env, emit) {
       const status = getMirrorStatus(projectKey, { rootDir });
       const maxFreshness = params.expectedMirrorFreshness || 15000;
 
-      if (!status.exists || status.ageMs > maxFreshness) {
-        releaseProjectLock(projectKey, lockToken);
-        if (request.id && activeRunControllers.get(request.id) === abortController) {
-          activeRunControllers.delete(request.id);
-        }
+      if (!status.exists || !Number.isFinite(status.ageMs) || status.ageMs > maxFreshness) {
         return errorResponse(request.id, 'mirror_stale', `Mirror is ${status.ageMs}ms old (max ${maxFreshness}ms)`);
       }
 
@@ -247,10 +243,12 @@ async function handleMirrorSync(request, env) {
   const projectKey = resolveProjectKey(params);
   const rootDir = env.CODEX_OVERLEAF_MIRROR_ROOT;
 
-  if (isProjectLocked(projectKey)) {
+  const lockToken = acquireProjectLock(projectKey);
+  if (!lockToken) {
     return errorResponse(request.id, 'project_locked', `Project ${projectKey} is currently in use by codex.run`);
   }
   if (params.project?.capabilities?.fullProjectSnapshot !== true) {
+    releaseProjectLock(projectKey, lockToken);
     return errorResponse(
       request.id,
       'mirror_sync_requires_full_project',
@@ -271,6 +269,8 @@ async function handleMirrorSync(request, env) {
     });
   } catch (error) {
     return errorResponse(request.id, 'mirror_sync_failed', error.message);
+  } finally {
+    releaseProjectLock(projectKey, lockToken);
   }
 }
 

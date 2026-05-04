@@ -1356,7 +1356,7 @@
 
       // Handle mirror_stale error by retrying with full sync
       if (!response.ok && response.error?.code === 'mirror_stale' && useExistingMirror) {
-        appendRunEvent({ title: tx('Warmed workspace is stale. Running a fresh full sync.', '预热 workspace 已过期，正在重新完整同步。'), status: 'running' });
+        appendRunEvent({ title: tr('warmMirrorStaleRetryTitle'), status: 'running' });
         const staleRetry = await prepareMirrorStaleRetry({
           project: await getRunProjectSnapshot(),
           focusFiles
@@ -2598,6 +2598,7 @@
         preferLightweight: true,
         allowZipFallback: false,
         allowEditorNavigation: false,
+        restrictToRequestedPathsOnly: true,
         requireFullProject: false,
         includeBinaryFiles: false,
         focusFiles
@@ -2641,13 +2642,13 @@
         appendLog(tx(`Cannot continue: ${formatProjectSnapshotWarning(warning)}`, `无法继续：${formatProjectSnapshotWarning(warning)}`));
       }
       appendCompletionReport({
-        conclusion: tx('This run did not continue: Overleaf did not provide the full project, and the local workspace is not fresh enough.', '这轮没有继续：Overleaf 没有提供完整项目内容，本地 workspace 也不够新。'),
+        conclusion: tr('warmMirrorStaleBlockedConclusion'),
         status: 'blocked',
         operations: [],
         applyResults: [],
-        nextStep: tx('Reload the Overleaf project and wait for the file list to load, then retry. You can also select a specific .tex file as @context first.', '请刷新 Overleaf 项目，等文件列表加载完成后重试；也可以先选中一个具体 .tex 文件作为 @context。')
+        nextStep: tr('warmMirrorStaleBlockedNextStep')
       });
-      finishRunView(tx('Blocked: local workspace is stale', '已阻止：本地 workspace 过期'), 'failed');
+      finishRunView(tr('warmMirrorStaleBlockedTitle'), 'failed');
       return { ok: false };
     }
     if (focusedPartialSnapshot) {

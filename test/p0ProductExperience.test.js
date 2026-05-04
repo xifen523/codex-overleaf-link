@@ -343,6 +343,7 @@ test('warm send verifies a non-invasive current or focus overlay before reusing 
   assert.match(warmStartBody, /callPageBridge\('getProjectSnapshot'/);
   assert.match(warmStartBody, /allowEditorNavigation:\s*false/);
   assert.match(warmStartBody, /allowZipFallback:\s*false/);
+  assert.match(warmStartBody, /restrictToRequestedPathsOnly:\s*true/);
   assert.match(warmStartBody, /buildSnapshotFileOverlays/);
   assert.match(warmStartBody, /catch \(error\)[\s\S]*useExistingMirror:\s*false/);
   assert.doesNotMatch(warmStartBody, /fileOverlays:\s*\[\]/);

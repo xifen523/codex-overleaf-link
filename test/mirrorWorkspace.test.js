@@ -117,6 +117,25 @@ test('legacy capturedAt-only baselines are not reusable as verified full mirrors
   }
 });
 
+test('invalid lastFullSyncAt baselines are not reusable as verified full mirrors', () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = getProjectMirror('invalid-full-sync-time', { rootDir });
+    fs.mkdirSync(mirror.metadataPath, { recursive: true });
+    fs.writeFileSync(mirror.baselinePath, JSON.stringify({
+      lastFullSyncAt: 'not-a-date',
+      files: [{ path: 'main.tex', kind: 'text', content: 'corrupt', hash: 'corrupt' }]
+    }, null, 2), 'utf8');
+
+    const status = getMirrorStatus('invalid-full-sync-time', { rootDir });
+
+    assert.equal(status.exists, false);
+    assert.equal(status.ageMs, Infinity);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('syncs binary Overleaf assets to the mirror without treating them as editable text changes', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
   try {
