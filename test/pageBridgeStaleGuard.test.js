@@ -52,18 +52,51 @@ test('page bridge maps a missing save indicator to unknown timeout', async () =>
 });
 
 test('page bridge only returns ok true for a verified saved indicator', async () => {
-  const bridge = createPageBridgeHarness({
-    activePath: 'main.tex',
-    saveIndicatorText: 'All changes saved',
-    files: {
-      'main.tex': 'alpha'
-    }
-  });
+  const verifiedIndicators = [
+    'All changes saved',
+    'Changes saved',
+    'Saved'
+  ];
 
-  const result = await bridge.call('waitForSaveState', { deadlineMs: 1, pollIntervalMs: 1 });
+  for (const saveIndicatorText of verifiedIndicators) {
+    const bridge = createPageBridgeHarness({
+      activePath: 'main.tex',
+      saveIndicatorText,
+      files: {
+        'main.tex': 'alpha'
+      }
+    });
 
-  assert.equal(result.ok, true);
-  assert.equal(result.state, 'verified_saved');
+    const result = await bridge.call('waitForSaveState', { deadlineMs: 1, pollIntervalMs: 1 });
+
+    assert.equal(result.ok, true, saveIndicatorText);
+    assert.equal(result.state, 'verified_saved', saveIndicatorText);
+  }
+});
+
+test('page bridge does not verify negative save indicators', async () => {
+  const negativeIndicators = [
+    'Not saved',
+    'Changes not saved',
+    'Save failed',
+    '未保存',
+    '保存失败'
+  ];
+
+  for (const saveIndicatorText of negativeIndicators) {
+    const bridge = createPageBridgeHarness({
+      activePath: 'main.tex',
+      saveIndicatorText,
+      files: {
+        'main.tex': 'alpha'
+      }
+    });
+
+    const result = await bridge.call('waitForSaveState', { deadlineMs: 1, pollIntervalMs: 1 });
+
+    assert.equal(result.ok, false, saveIndicatorText);
+    assert.equal(result.state, 'unknown_timeout', saveIndicatorText);
+  }
 });
 
 test('page bridge allows multiple successful edits to the same fresh file', async () => {

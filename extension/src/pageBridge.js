@@ -680,6 +680,12 @@
         if (!text) {
           continue;
         }
+        if (isNegativeSaveStateText(text)) {
+          return {
+            state: 'unknown',
+            reason: 'Overleaf save indicator reports changes are not saved.'
+          };
+        }
         if (isSavingStateText(text)) {
           return {
             state: 'saving',
@@ -703,21 +709,29 @@
   }
 
   function readSaveIndicatorText(node) {
-    return [
+    const parts = [
       node.textContent,
       node.innerText,
       node.getAttribute?.('aria-label'),
       node.getAttribute?.('title'),
       node.getAttribute?.('value')
-    ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    ].map(value => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    return Array.from(new Set(parts)).join(' ');
+  }
+
+  function isNegativeSaveStateText(text) {
+    return /\b(?:not saved|changes not saved|unsaved|save failed|failed to save|could not save|unable to save)\b|未保存|保存失败/i.test(text);
   }
 
   function isSavingStateText(text) {
-    return /\b(saving|unsaved|syncing|compiling)\b|未保存|保存中|正在保存|同步中/i.test(text);
+    return /\b(saving|syncing|compiling)\b|保存中|正在保存|同步中/i.test(text);
   }
 
   function isVerifiedSavedText(text) {
-    return /\ball changes saved\b|\bchanges saved\b|\bsaved\b|已保存/i.test(text);
+    if (isNegativeSaveStateText(text)) {
+      return false;
+    }
+    return /\ball changes saved\b|\bchanges saved\b|^\s*saved[\s.!]*$|已保存/i.test(text);
   }
 
   function isSaveIndicatorCandidateText(text) {
