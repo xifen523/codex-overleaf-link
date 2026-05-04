@@ -136,12 +136,17 @@ test('fresh warm mirror can carry a run when Overleaf only returns a partial sna
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
 
   assert.match(contentScript, /async function resolveWarmMirrorReuse/);
   assert.match(contentScript, /Full project snapshot was not captured/);
   assert.match(contentScript, /classifyMirrorHealth\(mirrorStatus\)/);
   assert.match(contentScript, /mirrorHealth\.reusable/);
-  assert.match(contentScript, /没有读到完整 Overleaf 项目，但本地 workspace 刚同步过/);
+  assert.match(contentScript, /tr\('warmMirrorPartialOverlayTitle'\)/);
+  assert.match(i18n, /没有读到完整 Overleaf 项目，但本地 workspace 刚同步过/);
   assert.match(contentScript, /mergeProjectWithSyncChangeBaseFiles\(project,\s*syncChanges\)/);
 });
 

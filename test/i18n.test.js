@@ -40,3 +40,16 @@ test('i18n covers plugin dialogs, diff review, toasts, and undo actions', () => 
   assert.equal(I18n.t('en', 'dismissNotification'), 'Dismiss notification');
   assert.equal(I18n.t('zh', 'dismissNotification'), '关闭通知');
 });
+
+test('i18n covers warm mirror run status copy', () => {
+  assert.equal(
+    I18n.t('en', 'warmMirrorReuseTitle'),
+    'Using the warmed local workspace. No Overleaf editor navigation was needed before this run.'
+  );
+  assert.equal(
+    I18n.t('zh', 'warmMirrorReuseTitle'),
+    '使用已预热的本地 workspace；本轮开始前没有导航 Overleaf 编辑器。'
+  );
+  assert.match(I18n.t('en', 'warmMirrorPartialOverlayTitle'), /current-file overlay/);
+  assert.match(I18n.t('zh', 'warmMirrorFocusOverlayTitle'), /焦点文件差异/);
+});

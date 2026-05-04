@@ -1298,10 +1298,10 @@
         fileOverlays = warmMirrorReuse.fileOverlays;
         appendRunEvent({
           title: warmMirrorReuse.warmStart
-            ? tx('Using the warmed local workspace. No Overleaf editor navigation was needed before this run.', '使用已预热的本地 workspace；本轮开始前没有导航 Overleaf 编辑器。')
+            ? tr('warmMirrorReuseTitle')
             : warmMirrorReuse.partialSnapshot
-            ? tx('The full Overleaf project was not read, but the local workspace was synced recently. Continuing with the latest full workspace plus current-file overlay.', '没有读到完整 Overleaf 项目，但本地 workspace 刚同步过；继续使用最近的完整 workspace，并叠加当前文件内容。')
-            : tx('Using the warmed local workspace and syncing only focus-file deltas.', '使用已预热的本地 workspace（仅同步焦点文件差异）。'),
+            ? tr('warmMirrorPartialOverlayTitle')
+            : tr('warmMirrorFocusOverlayTitle'),
           status: 'completed'
         });
       } else if (focusedPartialSnapshot) {
