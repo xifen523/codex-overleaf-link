@@ -139,7 +139,7 @@
 
       const id = message?.id;
       if (!pending.has(id)) {
-        if (message?.ok === false) {
+        if (message?.ok === false && isMissingNativeRequestId(id)) {
           resolveUnmatchedNativeError(message);
         }
         return;
@@ -260,6 +260,10 @@
       message?.error || message,
       'Native host returned an error without a request id while multiple requests were pending.'
     );
+  }
+
+  function isMissingNativeRequestId(id) {
+    return id === undefined || id === null || id === '';
   }
 
   function createNativeRequestError(code, message) {

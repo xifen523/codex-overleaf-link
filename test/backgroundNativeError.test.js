@@ -241,6 +241,113 @@ test('background scopes no-id native errors through per-request retry policy', a
   assert.equal(retriedStatus.result.status, 'ready');
 });
 
+test('background ignores explicit unknown native error ids for a single pending request', async () => {
+  const harness = loadBackgroundHarness();
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const statusResponse = harness.sendNative(
+    { id: 'status-known', method: 'mirror.status', params: { projectId: 'abc123' } },
+    sender
+  );
+
+  harness.ports[0].emitMessage({
+    id: 'unknown',
+    ok: false,
+    error: {
+      code: 'cancel_failed',
+      message: 'Cancel request was not found.'
+    }
+  });
+
+  await assert.rejects(
+    settleWithin(statusResponse),
+    /Timed out waiting for native response to settle/
+  );
+  assert.equal(harness.ports.length, 1);
+
+  harness.ports[0].emitMessage({
+    id: 'status-known',
+    ok: true,
+    result: {
+      status: 'ready'
+    }
+  });
+
+  const status = await statusResponse;
+  assert.equal(status.ok, true);
+  assert.equal(status.result.status, 'ready');
+});
+
+test('background ignores explicit unknown native error ids while multiple requests are pending', async () => {
+  const harness = loadBackgroundHarness();
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const statusResponse = harness.sendNative(
+    { id: 'status-known-multi', method: 'mirror.status', params: { projectId: 'abc123' } },
+    sender
+  );
+  const runResponse = harness.sendNative(
+    { id: 'run-known-multi', method: 'codex.run', params: { task: 'write' } },
+    sender
+  );
+
+  harness.ports[0].emitMessage({
+    id: 'unknown',
+    ok: false,
+    error: {
+      code: 'cancel_failed',
+      message: 'Cancel request was not found.'
+    }
+  });
+
+  await assert.rejects(
+    settleWithin(statusResponse),
+    /Timed out waiting for native response to settle/
+  );
+  await assert.rejects(
+    settleWithin(runResponse),
+    /Timed out waiting for native response to settle/
+  );
+  assert.equal(harness.ports.length, 1);
+  assert.deepEqual(
+    harness.ports[0].messages.map(message => `${message.id}:${message.method}`),
+    ['status-known-multi:mirror.status', 'run-known-multi:codex.run']
+  );
+
+  harness.ports[0].emitMessage({
+    id: 'status-known-multi',
+    ok: true,
+    result: {
+      status: 'ready'
+    }
+  });
+  harness.ports[0].emitMessage({
+    id: 'run-known-multi',
+    ok: false,
+    error: {
+      code: 'native_execution_interrupted',
+      message: 'Native host disconnected while an execution request was running.'
+    }
+  });
+
+  const status = await statusResponse;
+  const run = await runResponse;
+  assert.equal(status.ok, true);
+  assert.equal(status.result.status, 'ready');
+  assert.equal(run.ok, false);
+  assert.equal(run.error.code, 'native_execution_interrupted');
+});
+
 test('background retries all safe requests attached to a port when a later postMessage throws', async () => {
   const harness = loadBackgroundHarness({
     configurePort(port, index) {
