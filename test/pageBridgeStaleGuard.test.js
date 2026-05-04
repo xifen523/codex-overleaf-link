@@ -146,6 +146,26 @@ test('page bridge prefers visible unverified save state over hidden stale saved 
   }
 });
 
+test('page bridge scans all visible save indicators before verifying saved state', async () => {
+  for (const visibleText of ['Not saved', 'Saving...']) {
+    const bridge = createPageBridgeHarness({
+      activePath: 'main.tex',
+      saveIndicatorNodes: [
+        { text: 'All changes saved' },
+        { text: visibleText }
+      ],
+      files: {
+        'main.tex': 'alpha'
+      }
+    });
+
+    const result = await bridge.call('waitForSaveState', { deadlineMs: 1, pollIntervalMs: 1 });
+
+    assert.equal(result.ok, false, visibleText);
+    assert.equal(result.state, 'unknown_timeout', visibleText);
+  }
+});
+
 test('page bridge does not verify negative save indicators', async () => {
   const negativeIndicators = [
     'Not saved',

@@ -673,6 +673,9 @@
       '[aria-label*="save" i]'
     ];
     let sawSaveCandidate = false;
+    let sawVerifiedSaved = false;
+    let sawNegativeState = false;
+    let sawSavingState = false;
     for (const selector of selectors) {
       const elements = document.querySelectorAll(selector);
       for (const el of elements) {
@@ -685,24 +688,38 @@
         }
         const combinedText = texts.join(' ');
         if (isAnySaveIndicatorText(texts, combinedText, isNegativeSaveStateText)) {
-          return {
-            state: 'unknown',
-            reason: 'Overleaf save indicator reports changes are not saved.'
-          };
+          sawNegativeState = true;
+          sawSaveCandidate = true;
+          continue;
         }
         if (isAnySaveIndicatorText(texts, combinedText, isSavingStateText)) {
-          return {
-            state: 'saving',
-            reason: 'Overleaf is still saving or syncing changes.'
-          };
+          sawSavingState = true;
+          sawSaveCandidate = true;
+          continue;
         }
         if (texts.some(isVerifiedSavedText)) {
-          return { state: 'verified_saved' };
+          sawVerifiedSaved = true;
+          continue;
         }
         if (isAnySaveIndicatorText(texts, combinedText, isSaveIndicatorCandidateText)) {
           sawSaveCandidate = true;
         }
       }
+    }
+    if (sawNegativeState) {
+      return {
+        state: 'unknown',
+        reason: 'Overleaf save indicator reports changes are not saved.'
+      };
+    }
+    if (sawSavingState) {
+      return {
+        state: 'saving',
+        reason: 'Overleaf is still saving or syncing changes.'
+      };
+    }
+    if (sawVerifiedSaved) {
+      return { state: 'verified_saved' };
     }
     return {
       state: 'unknown',
