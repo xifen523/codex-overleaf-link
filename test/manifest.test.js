@@ -50,3 +50,9 @@ test('content script loads shared i18n before the panel script', () => {
   assert.ok(scripts.indexOf('src/shared/i18n.js') > -1);
   assert.ok(scripts.indexOf('src/shared/i18n.js') < scripts.indexOf('src/contentScript.js'));
 });
+
+test('content script loads shared model catalog before the panel script', () => {
+  const scripts = extensionManifest.content_scripts[0].js;
+  assert.ok(scripts.indexOf('src/shared/models.js') > -1);
+  assert.ok(scripts.indexOf('src/shared/models.js') < scripts.indexOf('src/contentScript.js'));
+});
