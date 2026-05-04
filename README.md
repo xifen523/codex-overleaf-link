@@ -21,6 +21,12 @@ Overleaf is great for collaborative LaTeX writing. Codex is great for AI-assiste
 
 Codex Overleaf Link bridges the two: it adds a Codex panel directly inside Overleaf, mirrors the project locally for Codex to work on, and writes accepted changes back through the browser — with stale-write guards, diff review, and undo checkpoints to reduce the risk of accidental overwrites.
 
+## Preview
+
+<p align="center">
+  <img src="assets/codex-preview.png" alt="Codex Overleaf Link running inside Overleaf">
+</p>
+
 ## Install
 
 ```bash
