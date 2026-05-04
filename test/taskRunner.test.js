@@ -80,6 +80,56 @@ test('codex.run returns a clear error before spawning when Codex is missing', as
   assert.equal(calls, 0);
 });
 
+test('codex.run rejects project snapshots without explicit freshness evidence', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-unverified-snapshot',
+    method: 'codex.run',
+    params: {
+      projectId: 'unverified-codex-project',
+      mode: 'ask',
+      task: '检查 citation',
+      project: { files: [{ path: 'main.tex', content: 'hello' }] }
+    }
+  }, {});
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, 'codex_run_requires_snapshot_evidence');
+  assert.equal(calls, 0);
+});
+
+test('codex.run accepts explicit focused partial snapshots', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-focused-partial',
+    method: 'codex.run',
+    params: {
+      projectId: 'focused-partial-codex-project',
+      mode: 'ask',
+      task: '检查 main.tex',
+      restrictToFocusFiles: true,
+      focusFiles: ['main.tex'],
+      project: {
+        capabilities: { fullProjectSnapshot: false },
+        files: [{ path: 'main.tex', content: 'hello' }]
+      }
+    }
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(calls, 1);
+});
+
 test('codex.history.clearPlugin removes only the requested plugin Codex thread history', async () => {
   const fs = require('node:fs');
   const os = require('node:os');

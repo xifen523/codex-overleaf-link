@@ -101,6 +101,12 @@ async function handleCodexRun(request, env, emit) {
       if (Array.isArray(params.fileOverlays) && params.fileOverlays.length) {
         await applyFileOverlays({ projectId: projectKey, overlays: params.fileOverlays, rootDir });
       }
+    } else if (!hasRunnableProjectSnapshotEvidence(params)) {
+      return errorResponse(
+        request.id,
+        'codex_run_requires_snapshot_evidence',
+        'codex.run requires an explicit full project snapshot or a focused partial snapshot'
+      );
     }
 
     const result = await runCodexSession({
@@ -158,6 +164,18 @@ function handleCodexHistoryClear(request, env) {
   } catch (error) {
     return errorResponse(request.id, 'codex_history_clear_failed', error.message);
   }
+}
+
+function hasRunnableProjectSnapshotEvidence(params = {}) {
+  if (params.project?.capabilities?.fullProjectSnapshot === true) {
+    return true;
+  }
+  if (params.project?.capabilities?.fullProjectSnapshot !== false) {
+    return false;
+  }
+  return params.restrictToFocusFiles === true
+    && Array.isArray(params.focusFiles)
+    && params.focusFiles.length > 0;
 }
 
 function createCancellationError() {

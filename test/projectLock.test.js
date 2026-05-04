@@ -93,7 +93,7 @@ test('mirror.sync is rejected while codex.run holds the project lock', async () 
         projectId: 'lock-test',
         mode: 'ask',
         task: 'check',
-        project: { files: [{ path: 'main.tex', content: 'hello' }] }
+        project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'hello' }] }
       }
     }, env);
 
@@ -146,7 +146,7 @@ test('mirror.sync works for a different project while codex.run is active', asyn
         projectId: 'project-a',
         mode: 'ask',
         task: 'check',
-        project: { files: [{ path: 'main.tex', content: 'a' }] }
+        project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'a' }] }
       }
     }, env);
 
@@ -186,7 +186,7 @@ test('codex.run is rejected while another codex.run holds the same project lock'
         projectId: 'same-project',
         mode: 'ask',
         task: 'first',
-        project: { files: [{ path: 'main.tex', content: 'a' }] }
+        project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'a' }] }
       }
     }, env);
 
@@ -199,7 +199,7 @@ test('codex.run is rejected while another codex.run holds the same project lock'
         projectId: 'same-project',
         mode: 'ask',
         task: 'second',
-        project: { files: [{ path: 'main.tex', content: 'b' }] }
+        project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'b' }] }
       }
     }, env);
 
@@ -230,7 +230,7 @@ test('codex.cancel aborts an active codex.run and releases the project lock', as
         projectId: 'cancel-project',
         mode: 'ask',
         task: 'long run',
-        project: { files: [{ path: 'main.tex', content: 'hello' }] }
+        project: { capabilities: { fullProjectSnapshot: true }, files: [{ path: 'main.tex', content: 'hello' }] }
       }
     }, env);
 
