@@ -565,6 +565,84 @@ test('compile bridge includes save metadata on post-save failure returns', async
   assert.equal(result.saveState, 'verified_saved');
 });
 
+test('compile bridge getCompileLog preserves zero waitForSaveMs deadline', async () => {
+  const CompileBridge = require('../extension/src/page/compileBridge');
+  let observedDeadlineMs = null;
+  const pageWindow = {
+    location: { origin: 'https://www.overleaf.com' },
+    CodexOverleafCompileAdapter: {
+      isCompileLogFresh() {
+        return false;
+      }
+    },
+    fetch: async () => {
+      throw new Error('fetch should not run');
+    }
+  };
+  const pageDocument = {
+    addEventListener() {},
+    querySelectorAll() {
+      return [];
+    }
+  };
+  const bridge = CompileBridge.create({
+    document: pageDocument,
+    getActiveFilePath: () => 'main.tex',
+    waitForSaveState: async params => {
+      observedDeadlineMs = params.deadlineMs;
+      return {
+        ok: false,
+        state: 'unknown_timeout',
+        reason: 'Timed out immediately.'
+      };
+    },
+    window: pageWindow
+  });
+
+  const result = await bridge.getCompileLog({ triggerIfStale: true, waitForSaveMs: 0 });
+
+  assert.equal(result.ok, false);
+  assert.equal(observedDeadlineMs, 0);
+});
+
+test('compile bridge getCompileLog preserves save metadata from failed fresh compile', async () => {
+  const CompileBridge = require('../extension/src/page/compileBridge');
+  const pageWindow = {
+    location: { origin: 'https://www.overleaf.com' },
+    CodexOverleafCompileAdapter: {
+      isCompileLogFresh() {
+        return false;
+      }
+    },
+    fetch: async () => {
+      throw new Error('fetch should not run');
+    }
+  };
+  const pageDocument = {
+    addEventListener() {},
+    querySelectorAll() {
+      return [];
+    }
+  };
+  const bridge = CompileBridge.create({
+    document: pageDocument,
+    getActiveFilePath: () => 'main.tex',
+    waitForSaveState: async () => ({
+      ok: false,
+      state: 'unknown_timeout',
+      reason: 'Timed out waiting for a verified Overleaf save state.'
+    }),
+    window: pageWindow
+  });
+
+  const result = await bridge.getCompileLog({ triggerIfStale: true, waitForSaveMs: 10 });
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /Could not get fresh compile/);
+  assert.equal(result.saveStateVerified, false);
+  assert.equal(result.saveState, 'unknown_timeout');
+});
+
 test('compile bridge can explicitly opt out of verified save before compile', async () => {
   const CompileBridge = require('../extension/src/page/compileBridge');
   let fetchCount = 0;

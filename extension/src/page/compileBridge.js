@@ -266,9 +266,14 @@
         || !compileLogFresh;
 
       if (needsFreshCompile && params.triggerIfStale !== false) {
-        const compileResult = await triggerCompile({ waitForSaveMs: params.waitForSaveMs || 5000 });
+        const compileResult = await triggerCompile({ waitForSaveMs: resolveWaitForSaveMs(params.waitForSaveMs) });
         if (!compileResult.ok) {
-          return { ok: false, reason: `Could not get fresh compile: ${compileResult.reason}` };
+          return {
+            ok: false,
+            reason: `Could not get fresh compile: ${compileResult.reason}`,
+            saveStateVerified: compileResult.saveStateVerified,
+            saveState: compileResult.saveState
+          };
         }
       }
 
