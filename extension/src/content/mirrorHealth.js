@@ -34,16 +34,8 @@
         reusable
       };
     }
-    if (ageMs >= MIRROR_STALE_LABEL_MS) {
-      return {
-        state: 'stale',
-        exists: true,
-        ageMs,
-        reusable: false
-      };
-    }
     return {
-      state: 'warm',
+      state: 'stale',
       exists: true,
       ageMs,
       reusable
@@ -51,7 +43,7 @@
   }
 
   function shouldStartPrefetch(state = {}) {
-    if (state.busy === true) {
+    if (state.busy === true || state.inFlight) {
       return { ok: false, reason: 'busy' };
     }
 
