@@ -44,6 +44,7 @@
         "src/content/nativeChannel.js",
         "src/content/writebackController.js",
         "src/content/runController.js",
+        "src/content/mirrorHealth.js",
         "src/contentScript.js"
       ],
       "css": [
