@@ -98,11 +98,7 @@
       try {
         postNativeRequest(pendingRequest);
       } catch (error) {
-        pending.delete(id);
-        reject(createNativeRequestError(
-          'native_connection_failed',
-          getErrorMessage(error, 'Native host connection failed.')
-        ));
+        handleNativePostFailure(id, pendingRequest, error);
       }
     });
   }
@@ -124,8 +120,13 @@
       return port;
     }
 
-    port = chrome.runtime.connectNative(HOST_NAME);
-    port.onMessage.addListener(message => {
+    const nativePort = chrome.runtime.connectNative(HOST_NAME);
+    port = nativePort;
+    nativePort.onMessage.addListener(message => {
+      if (nativePort !== port) {
+        return;
+      }
+
       const id = message?.id;
       if (!pending.has(id)) {
         if (message?.ok === false) {
@@ -145,7 +146,11 @@
       pending.delete(id);
       pendingRequest.resolve(message);
     });
-    port.onDisconnect.addListener(() => {
+    nativePort.onDisconnect.addListener(() => {
+      if (nativePort !== port) {
+        return;
+      }
+
       const error = chrome.runtime.lastError?.message || 'Native host disconnected';
       handlePortDisconnect(error);
     });
@@ -163,33 +168,52 @@
       }
 
       if (canRetryNativeRequest(pendingRequest)) {
-        pendingRequest.retryCount += 1;
-        try {
-          postNativeRequest(pendingRequest);
-        } catch (error) {
-          pending.delete(pendingId);
-          pendingRequest.reject(createNativeRequestError(
-            'native_connection_failed',
-            getErrorMessage(error, 'Native host connection failed during retry.')
-          ));
-        }
+        retryNativeRequest(pendingId, pendingRequest);
         continue;
       }
 
-      pending.delete(pendingId);
-      if (pendingRequest.retryClass === 'no_silent_retry') {
-        pendingRequest.reject(createNativeRequestError(
-          'native_execution_interrupted',
-          'Native host disconnected while an execution request was running. The request was not retried to avoid repeating side effects.'
-        ));
-        continue;
-      }
-
-      pendingRequest.reject(createNativeRequestError(
-        'native_connection_failed',
-        errorMessage || 'Native host disconnected'
-      ));
+      rejectInterruptedNativeRequest(pendingId, pendingRequest, errorMessage);
     }
+  }
+
+  function retryNativeRequest(pendingId, pendingRequest) {
+    pendingRequest.retryCount += 1;
+    try {
+      postNativeRequest(pendingRequest);
+    } catch (error) {
+      handleNativePostFailure(pendingId, pendingRequest, error);
+    }
+  }
+
+  function handleNativePostFailure(pendingId, pendingRequest, error) {
+    port = null;
+
+    if (canRetryNativeRequest(pendingRequest)) {
+      retryNativeRequest(pendingId, pendingRequest);
+      return;
+    }
+
+    rejectInterruptedNativeRequest(
+      pendingId,
+      pendingRequest,
+      getErrorMessage(error, 'Native host connection failed.')
+    );
+  }
+
+  function rejectInterruptedNativeRequest(pendingId, pendingRequest, errorMessage) {
+    pending.delete(pendingId);
+    if (pendingRequest.retryClass === 'no_silent_retry') {
+      pendingRequest.reject(createNativeRequestError(
+        'native_execution_interrupted',
+        'Native host disconnected while an execution request was running. The request was not retried to avoid repeating side effects.'
+      ));
+      return;
+    }
+
+    pendingRequest.reject(createNativeRequestError(
+      'native_connection_failed',
+      errorMessage || 'Native host disconnected'
+    ));
   }
 
   function canRetryNativeRequest(pendingRequest) {
@@ -216,19 +240,16 @@
     }
 
     const ambiguousRequests = Array.from(pending.entries());
-    for (const [pendingId, pendingRequest] of ambiguousRequests) {
-      pendingRequest.finalResponseReceived = true;
-      pending.delete(pendingId);
-      pendingRequest.resolve({
-        id: pendingId,
-        ok: false,
-        error: {
-          code: 'ambiguous_native_error',
-          message: 'Native host returned an error without a request id while multiple requests were pending.',
-          nativeError: message.error || message
-        }
-      });
+    if (ambiguousRequests.length > 0) {
+      handlePortDisconnect(getUnmatchedNativeErrorMessage(message));
     }
+  }
+
+  function getUnmatchedNativeErrorMessage(message) {
+    return getErrorMessage(
+      message?.error || message,
+      'Native host returned an error without a request id while multiple requests were pending.'
+    );
   }
 
   function createNativeRequestError(code, message) {

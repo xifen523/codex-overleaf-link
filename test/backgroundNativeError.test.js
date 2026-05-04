@@ -30,10 +30,12 @@ test('background validates Overleaf senders before forwarding native requests', 
   assert.match(background, /forbidden_sender/);
 });
 
-test('background rejects ambiguous unmatched native errors without corrupting all pending requests', () => {
+test('background routes multi-request unmatched native errors through retry policy', () => {
   const background = readBackground();
 
-  assert.match(background, /ambiguous_native_error/);
+  assert.match(background, /pending\.size === 1/);
+  assert.match(background, /handlePortDisconnect\(getUnmatchedNativeErrorMessage\(message\)\)/);
+  assert.doesNotMatch(background, /ambiguous_native_error/);
   assert.doesNotMatch(background, /for \(const \[pendingId, pendingRequest\] of pending\.entries\(\)\)/);
 });
 
@@ -115,7 +117,131 @@ test('background retries safe status after disconnect while failing codex.run wi
   assert.equal(retriedStatus.result.status, 'ready');
 });
 
-function loadBackgroundHarness() {
+test('background retries a safe request once when cached native port postMessage throws', async () => {
+  const harness = loadBackgroundHarness({
+    configurePort(port, index) {
+      if (index === 0) {
+        port.failNextPostMessage('Stale native port');
+      }
+    }
+  });
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const statusResponse = harness.sendNative(
+    { id: 'status-stale', method: 'mirror.status', params: { projectId: 'abc123' } },
+    sender
+  );
+
+  assert.equal(harness.ports.length, 2);
+  assert.deepEqual(harness.ports[0].messages, []);
+  assert.deepEqual(
+    harness.ports[1].messages.map(message => `${message.id}:${message.method}`),
+    ['status-stale:mirror.status']
+  );
+
+  harness.ports[1].emitMessage({
+    id: 'status-stale',
+    ok: true,
+    result: {
+      status: 'ready'
+    }
+  });
+
+  const retriedStatus = await statusResponse;
+  assert.equal(retriedStatus.id, 'status-stale');
+  assert.equal(retriedStatus.ok, true);
+  assert.equal(retriedStatus.result.status, 'ready');
+});
+
+test('background does not retry execution requests when native postMessage throws', async () => {
+  const harness = loadBackgroundHarness({
+    configurePort(port, index) {
+      if (index === 0) {
+        port.failNextPostMessage('Stale native port');
+      }
+    }
+  });
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const runResponse = harness.sendNative(
+    { id: 'run-stale', method: 'codex.run', params: { task: 'write' } },
+    sender
+  );
+
+  assert.equal(harness.ports.length, 1);
+  assert.deepEqual(harness.ports[0].messages, []);
+
+  const interruptedRun = await runResponse;
+  assert.equal(interruptedRun.ok, false);
+  assert.equal(interruptedRun.error.code, 'native_execution_interrupted');
+});
+
+test('background scopes no-id native errors through per-request retry policy', async () => {
+  const harness = loadBackgroundHarness();
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const statusResponse = harness.sendNative(
+    { id: 'status-bad-frame', method: 'mirror.status', params: { projectId: 'abc123' } },
+    sender
+  );
+  const runResponse = harness.sendNative(
+    { id: 'run-bad-frame', method: 'codex.run', params: { task: 'write' } },
+    sender
+  );
+
+  assert.deepEqual(
+    harness.ports[0].messages.map(message => `${message.id}:${message.method}`),
+    ['status-bad-frame:mirror.status', 'run-bad-frame:codex.run']
+  );
+
+  harness.ports[0].emitMessage({
+    ok: false,
+    error: {
+      code: 'bad_frame',
+      message: 'Native host returned an error without a request id.'
+    }
+  });
+
+  assert.equal(harness.ports.length, 2);
+  assert.deepEqual(
+    harness.ports[1].messages.map(message => `${message.id}:${message.method}`),
+    ['status-bad-frame:mirror.status']
+  );
+
+  const interruptedRun = await runResponse;
+  assert.equal(interruptedRun.ok, false);
+  assert.equal(interruptedRun.error.code, 'native_execution_interrupted');
+
+  harness.ports[1].emitMessage({
+    id: 'status-bad-frame',
+    ok: true,
+    result: {
+      status: 'ready'
+    }
+  });
+
+  const retriedStatus = await statusResponse;
+  assert.equal(retriedStatus.id, 'status-bad-frame');
+  assert.equal(retriedStatus.ok, true);
+  assert.equal(retriedStatus.result.status, 'ready');
+});
+
+function loadBackgroundHarness(options = {}) {
   const ports = [];
   let onMessageListener = null;
   let uuidCounter = 0;
@@ -135,6 +261,9 @@ function loadBackgroundHarness() {
       connectNative() {
         const port = createNativePort(chrome);
         ports.push(port);
+        if (typeof options.configurePort === 'function') {
+          options.configurePort(port, ports.length - 1);
+        }
         return port;
       }
     },
@@ -176,6 +305,7 @@ function loadBackgroundHarness() {
 function createNativePort(chrome) {
   const messageListeners = [];
   const disconnectListeners = [];
+  const postMessageFailures = [];
 
   return {
     messages: [],
@@ -190,7 +320,13 @@ function createNativePort(chrome) {
       }
     },
     postMessage(message) {
+      if (postMessageFailures.length > 0) {
+        throw postMessageFailures.shift();
+      }
       this.messages.push(message);
+    },
+    failNextPostMessage(message = 'Native postMessage failed') {
+      postMessageFailures.push(new Error(message));
     },
     emitMessage(message) {
       for (const listener of messageListeners) {
