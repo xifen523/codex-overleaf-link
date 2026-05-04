@@ -14,7 +14,6 @@ function buildLauncherScript({ nodePath, bridgeEntryPath, agentPath }) {
     'export PATH="/Library/TeX/texbin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"',
     `export CODEX_OVERLEAF_AGENT_FILE=${shellSingleQuoted(nodePath)}`,
     `export CODEX_OVERLEAF_AGENT_ARGS_JSON=${shellSingleQuoted(JSON.stringify([agentPath]))}`,
-    `export CODEX_OVERLEAF_AGENT_CMD="${escapeDoubleQuoted(nodePath)} ${escapeDoubleQuoted(agentPath)}"`,
     `exec "${escapeDoubleQuoted(nodePath)}" "${escapeDoubleQuoted(bridgeEntryPath)}"`,
     ''
   ].join('\n');

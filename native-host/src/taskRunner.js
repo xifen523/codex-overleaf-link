@@ -1,6 +1,7 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const crypto = require('node:crypto');
 const { buildOperationSummary, splitDeletePlan } = require('../../extension/src/shared/summary');
 const { runCodexSession } = require('./codexSessionRunner');
 const { clearPluginCodexHistory } = require('./codexHome');
@@ -11,6 +12,7 @@ const { summarizeNativeEnvironment } = require('./nativeEnvironment');
 const activeProjectLocks = new Map();
 const activeRunControllers = new Map();
 const pendingPlans = new Map();
+const PENDING_PLAN_TTL_MS = 30 * 60 * 1000;
 
 async function handleRequest(request, env = process.env, emit = () => {}) {
   if (!request || typeof request !== 'object') {
@@ -290,6 +292,7 @@ function isVerifiedReviewing(reviewing) {
 
 async function handleTaskConfirm(request) {
   const planId = request.params?.planId;
+  purgeExpiredPendingPlans();
   if (!planId || !pendingPlans.has(planId)) {
     return errorResponse(request.id, 'plan_not_found', 'No pending task plan matched the supplied planId');
   }
@@ -407,8 +410,11 @@ function prepareResultForResponse(mode, result) {
     return result;
   }
 
-  const planId = `plan_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  purgeExpiredPendingPlans();
+  const planId = `plan_${crypto.randomUUID()}`;
   pendingPlans.set(planId, {
+    createdAt: Date.now(),
+    expiresAt: Date.now() + PENDING_PLAN_TTL_MS,
     notes: result.notes || '',
     userReport: result.userReport,
     operations: Array.isArray(result.operations) ? result.operations : []
@@ -540,13 +546,6 @@ function resolveExternalAgent(env) {
     };
   }
 
-  if (env.CODEX_OVERLEAF_AGENT_CMD) {
-    return {
-      command: env.CODEX_OVERLEAF_AGENT_CMD,
-      label: env.CODEX_OVERLEAF_AGENT_CMD
-    };
-  }
-
   return null;
 }
 
@@ -563,13 +562,7 @@ function parseAgentArgsJson(value) {
 
 function runExternalAgent(agentSpec, params, emit = () => {}, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = agentSpec.command
-      ? spawn(agentSpec.command, {
-        env: options.env || process.env,
-        shell: true,
-        stdio: ['pipe', 'pipe', 'pipe']
-      })
-      : spawn(agentSpec.file, agentSpec.args || [], {
+    const child = spawn(agentSpec.file, agentSpec.args || [], {
       env: options.env || process.env,
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe']
@@ -670,6 +663,14 @@ function runExternalAgent(agentSpec, params, emit = () => {}, options = {}) {
   });
 }
 
+function purgeExpiredPendingPlans(now = Date.now()) {
+  for (const [planId, plan] of pendingPlans.entries()) {
+    if (Number.isFinite(plan?.expiresAt) && plan.expiresAt <= now) {
+      pendingPlans.delete(planId);
+    }
+  }
+}
+
 function parsePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -742,5 +743,6 @@ function errorResponse(id, code, message) {
 module.exports = {
   buildDefaultTaskResult,
   handleRequest,
-  parseAgentEventLines
+  parseAgentEventLines,
+  purgeExpiredPendingPlans
 };

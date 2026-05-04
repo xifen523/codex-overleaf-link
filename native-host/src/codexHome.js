@@ -42,6 +42,7 @@ function preparePluginCodexHome(env = process.env) {
   const pluginHome = getPluginCodexHome(env);
 
   fs.mkdirSync(pluginHome, { recursive: true });
+  chmodIfPossible(pluginHome, 0o700);
   if (samePath(userHome, pluginHome)) {
     return { userHome, pluginHome, copied: [] };
   }
@@ -56,6 +57,9 @@ function preparePluginCodexHome(env = process.env) {
     }
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(source, target);
+    if (fileName === 'auth.json') {
+      chmodIfPossible(target, 0o600);
+    }
     copied.push(fileName);
   }
 
@@ -266,6 +270,14 @@ function ensureSymlink(source, target) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.symlinkSync(source, target, 'dir');
   return true;
+}
+
+function chmodIfPossible(target, mode) {
+  try {
+    fs.chmodSync(target, mode);
+  } catch {
+    // Best effort: native host still works on filesystems that do not support POSIX modes.
+  }
 }
 
 function samePath(left, right) {

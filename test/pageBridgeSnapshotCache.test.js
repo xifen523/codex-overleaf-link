@@ -809,6 +809,7 @@ function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, f
       });
       await listener({
         source: window,
+        origin: window.location.origin,
         data: {
           source: 'codex-overleaf/content',
           id,

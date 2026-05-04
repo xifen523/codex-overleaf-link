@@ -38,7 +38,9 @@
   });
 
   window.addEventListener('message', async event => {
-    if (event.source !== window || event.data?.source !== 'codex-overleaf/content') {
+    if (event.source !== window
+      || event.origin !== window.location.origin
+      || event.data?.source !== 'codex-overleaf/content') {
       return;
     }
 

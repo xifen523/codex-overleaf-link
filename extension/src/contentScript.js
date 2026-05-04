@@ -1470,8 +1470,7 @@
             [tx('Impact', '影响')]: tx('This answer is already visible. After reloading, this run may not appear in session history.', '本轮回答已经显示；刷新页面后，这轮可能不会出现在历史 session 里。')
           },
           technicalDetail: {
-            message: persistenceError.message,
-            stack: persistenceError.stack
+            message: persistenceError.message
           }
         });
       }
@@ -1486,8 +1485,7 @@
         title: translated.conclusion,
         status: 'failed',
         technicalDetail: {
-          message: error.message,
-          stack: error.stack
+          message: error.message
         }
       });
       appendTechnicalEvent({
@@ -1495,8 +1493,7 @@
         title: 'Task exception',
         status: 'failed',
         detail: {
-          message: error.message,
-          stack: error.stack
+          message: error.message
         }
       });
       appendCompletionReport({
@@ -3242,7 +3239,10 @@
       }, timeoutMs);
 
       function onMessage(event) {
-        if (event.source !== window || event.data?.source !== 'codex-overleaf/page' || event.data.id !== id) {
+        if (event.source !== window
+          || event.origin !== window.location.origin
+          || event.data?.source !== 'codex-overleaf/page'
+          || event.data.id !== id) {
           return;
         }
         window.clearTimeout(timeout);
@@ -3956,29 +3956,46 @@
       row.className = 'codex-session-row';
       row.dataset.active = session.id === state.activeSessionId ? 'true' : 'false';
       row.dataset.running = isRunningSession ? 'true' : 'false';
-      row.innerHTML = `
-        <button type="button" class="codex-session-switch">
-          <span class="codex-session-row-title"></span>
-          <time></time>
-        </button>
-        <input type="text" class="codex-session-title-input" aria-label="${tr('renameSession')}" maxlength="80" hidden>
-        <button type="button" class="codex-session-rename" title="${tr('renameSession')}" aria-label="${tr('renameSession')}">✎</button>
-        <button type="button" class="codex-session-delete" title="${tr('deleteSession')}" aria-label="${tr('deleteSession')}">×</button>
-      `;
+      const switchButton = document.createElement('button');
+      switchButton.type = 'button';
+      switchButton.className = 'codex-session-switch';
+      const titleNode = document.createElement('span');
+      titleNode.className = 'codex-session-row-title';
+      const timeNode = document.createElement('time');
+      switchButton.append(titleNode, timeNode);
+
+      const titleInput = document.createElement('input');
+      titleInput.type = 'text';
+      titleInput.className = 'codex-session-title-input';
+      titleInput.setAttribute('aria-label', tr('renameSession'));
+      titleInput.maxLength = 80;
+      titleInput.hidden = true;
+
+      const renameButton = document.createElement('button');
+      renameButton.type = 'button';
+      renameButton.className = 'codex-session-rename';
+      renameButton.title = tr('renameSession');
+      renameButton.setAttribute('aria-label', tr('renameSession'));
+      renameButton.textContent = '✎';
+
+      const deleteButton = document.createElement('button');
+      deleteButton.type = 'button';
+      deleteButton.className = 'codex-session-delete';
+      deleteButton.textContent = '×';
+
+      row.append(switchButton, titleInput, renameButton, deleteButton);
       const displayTitle = getSessionDisplayTitle(session);
-      const switchButton = row.querySelector('.codex-session-switch');
       switchButton.title = displayTitle;
-      row.querySelector('.codex-session-row-title').textContent = displayTitle;
-      row.querySelector('time').textContent = formatSessionTime(session.updatedAt || session.createdAt);
+      titleNode.textContent = displayTitle;
+      timeNode.textContent = formatSessionTime(session.updatedAt || session.createdAt);
       switchButton.addEventListener('click', () => switchSession(session.id));
-      const renameButton = row.querySelector('.codex-session-rename');
       renameButton.addEventListener('click', event => {
         event.stopPropagation();
         beginSessionRename(row, session.id);
       });
-      const deleteButton = row.querySelector('.codex-session-delete');
       deleteButton.disabled = isRunningSession;
       deleteButton.title = isRunningSession ? tr('deleteRunningSession') : tr('deleteSession');
+      deleteButton.setAttribute('aria-label', isRunningSession ? tr('deleteRunningSession') : tr('deleteSession'));
       deleteButton.addEventListener('click', event => {
         event.stopPropagation();
         deleteSessionWithConfirm(session.id);
@@ -4376,14 +4393,19 @@
   }
 
   function formatMarkdownHref(href) {
-    const target = String(href || '');
-    if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
-      return target;
+    const target = String(href || '').trim();
+    if (!/^[a-z][a-z0-9+.-]*:/i.test(target)) {
+      return '#';
     }
-    if (target.startsWith('/')) {
-      return `file://${target}`;
+    try {
+      const parsed = new URL(target);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        return parsed.href;
+      }
+    } catch (_error) {
+      // Fall through to inert link for malformed URLs.
     }
-    return target || '#';
+    return '#';
   }
 
   function renderMarkdownBlockText(target, value) {

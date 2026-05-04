@@ -3,7 +3,7 @@ const test = require('node:test');
 
 const { buildLauncherScript } = require('../native-host/src/launcher');
 
-test('builds a macOS launcher with absolute Node and default Codex agent command', () => {
+test('builds a macOS launcher with absolute Node and default Codex agent file', () => {
   const script = buildLauncherScript({
     nodePath: '/opt/homebrew/bin/node',
     bridgeEntryPath: '/app/native-host/src/index.js',
@@ -11,7 +11,7 @@ test('builds a macOS launcher with absolute Node and default Codex agent command
   });
 
   assert.match(script, /^#!\/bin\/sh/);
-  assert.match(script, /CODEX_OVERLEAF_AGENT_CMD=/);
+  assert.doesNotMatch(script, /CODEX_OVERLEAF_AGENT_CMD/);
   assert.match(script, /CODEX_OVERLEAF_AGENT_FILE=/);
   assert.match(script, /CODEX_OVERLEAF_AGENT_ARGS_JSON=/);
   assert.match(script, /\/opt\/homebrew\/bin\/node/);

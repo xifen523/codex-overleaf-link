@@ -377,3 +377,61 @@ test('compile bridge prefers the Overleaf Recompile button for visible auto comp
   assert.equal(directCompileFetches, 1);
   assert.equal(result.triggeredBy, 'overleaf-button');
 });
+
+test('compile bridge does not replay expired compile request templates', async () => {
+  const CompileBridge = require('../extension/src/page/compileBridge');
+  const originalNow = Date.now;
+  let now = 1000;
+  let fetchCount = 0;
+  const compileJson = { status: 'success', outputFiles: [{ path: 'output.log', url: '/output.log' }] };
+  Date.now = () => now;
+  try {
+    const pageWindow = {
+      location: { origin: 'https://www.overleaf.com' },
+      CodexOverleafCompileAdapter: {
+        parseCompileResponse(json) {
+          return { ok: true, status: json.status, logUrl: json.outputFiles[0].url };
+        }
+      },
+      fetch: async () => {
+        fetchCount += 1;
+        return {
+          ok: true,
+          clone() {
+            return {
+              async json() {
+                return compileJson;
+              }
+            };
+          },
+          async json() {
+            return compileJson;
+          }
+        };
+      }
+    };
+    const pageDocument = {
+      addEventListener() {},
+      querySelectorAll() {
+        return [];
+      }
+    };
+    const bridge = CompileBridge.create({
+      document: pageDocument,
+      getActiveFilePath: () => 'main.tex',
+      waitForSaveState: async () => ({ ok: true }),
+      window: pageWindow
+    });
+    bridge.install();
+    await pageWindow.fetch('/project/abc/compile', { method: 'POST', body: 'captured-template' });
+
+    now += CompileBridge.COMPILE_TEMPLATE_TTL_MS + 1;
+    const result = await bridge.triggerCompile({ waitForSaveMs: 10, captureTimeoutMs: 10 });
+
+    assert.equal(result.ok, false);
+    assert.match(result.reason, /compile request template expired/i);
+    assert.equal(fetchCount, 1);
+  } finally {
+    Date.now = originalNow;
+  }
+});

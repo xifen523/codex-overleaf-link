@@ -7,6 +7,8 @@
 })(typeof window !== 'undefined' ? window : globalThis, function compileBridgeFactory() {
   'use strict';
 
+  const COMPILE_TEMPLATE_TTL_MS = 5 * 60 * 1000;
+
   function create(deps = {}) {
     const pageWindow = deps.window || window;
     const pageDocument = deps.document || document;
@@ -43,6 +45,7 @@
           state.capturedRequestTemplate = {
             url,
             method: 'POST',
+            capturedAt: Date.now(),
             headers: init?.headers ? (
               init.headers instanceof Headers
                 ? Object.fromEntries(init.headers.entries())
@@ -101,6 +104,22 @@
         const clicked = clickOverleafCompileButton();
         if (!clicked) {
           return { ok: false, reason: 'No Overleaf Recompile button or compile request template is available.' };
+        }
+        const captured = await waitForCapturedCompile(params.captureTimeoutMs || 60000);
+        if (!captured.ok) {
+          return captured;
+        }
+        return {
+          ok: true,
+          compile: state.lastCompileResponse,
+          saveStateVerified: saveResult.ok,
+          triggeredBy: 'overleaf-button'
+        };
+      }
+      if (!isFreshCapturedRequestTemplate(template)) {
+        const clicked = clickOverleafCompileButton();
+        if (!clicked) {
+          return { ok: false, reason: 'Stored compile request template expired. Please click Overleaf Recompile once, then retry.' };
         }
         const captured = await waitForCapturedCompile(params.captureTimeoutMs || 60000);
         if (!captured.ok) {
@@ -200,11 +219,18 @@
       return {
         ok: true,
         hasCapturedTemplate: Boolean(state.capturedRequestTemplate),
+        capturedTemplateAgeMs: state.capturedRequestTemplate?.capturedAt
+          ? Date.now() - state.capturedRequestTemplate.capturedAt
+          : null,
         lastCompileAt: state.lastCompileAt,
         lastCompileOk: state.lastCompileResponse?.ok || false,
         lastCompileSourceChangeTimestamp: state.lastCompileSourceChangeTimestamp,
         lastKnownSourceEditTimestamp: state.lastKnownSourceEditTimestamp
       };
+    }
+
+    function isFreshCapturedRequestTemplate(template) {
+      return Boolean(template?.capturedAt && Date.now() - template.capturedAt <= COMPILE_TEMPLATE_TTL_MS);
     }
 
     function markSourceEdited(timestamp = Date.now()) {
@@ -320,6 +346,7 @@
   }
 
   return {
+    COMPILE_TEMPLATE_TTL_MS,
     create,
     isLikelyEditorInputTarget
   };

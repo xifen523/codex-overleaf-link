@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.1.1 - 2026-05-04
+
+Security and reliability hotfix for the initial stable preview.
+
+### Fixed
+
+- Removed the legacy shell-command external agent path; the native host now launches the bundled agent with an explicit executable and argument list.
+- Restricted background native-host requests to Overleaf project pages.
+- Added same-origin checks to page-bridge messages.
+- Avoid replaying stale Overleaf compile request templates.
+- Tightened plugin Codex home permissions for copied auth state.
+- Prevented ambiguous native framing errors from being applied to unrelated pending requests.
+- Prevented user-facing task diagnostics from exposing raw stack traces.
+- Hardened markdown links and session-list rendering in the panel.
+
 ## v0.1.0 - 2026-05-04
 
 Initial stable preview for using Codex from inside Overleaf.

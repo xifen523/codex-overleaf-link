@@ -4,6 +4,14 @@ const test = require('node:test');
 
 const { handleRequest } = require('../native-host/src/taskRunner');
 
+function fixtureAgentEnv(fixtureName, extra = {}) {
+  return {
+    CODEX_OVERLEAF_AGENT_FILE: process.execPath,
+    CODEX_OVERLEAF_AGENT_ARGS_JSON: JSON.stringify([path.join(__dirname, 'fixtures', fixtureName)]),
+    ...extra
+  };
+}
+
 function loadTaskRunnerWithFakeRunner(fakeRunner) {
   const runnerPath = require.resolve('../native-host/src/codexSessionRunner');
   const taskRunnerPath = require.resolve('../native-host/src/taskRunner');
@@ -215,9 +223,7 @@ test('task.run in Ask Mode strips external-agent pending write operations', asyn
       task: 'Explain pending citation fix',
       project: { id: 'abc', files: [{ path: 'main.tex', content: 'old' }] }
     }
-  }, {
-    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentConfirmPending.cjs')}`
-  });
+  }, fixtureAgentEnv('agentConfirmPending.cjs'));
 
   assert.equal(response.ok, true);
   assert.equal(response.result.status, 'completed');
@@ -235,9 +241,7 @@ test('task.run in Ask Mode preserves external-agent userReport', async () => {
       task: 'Check citations',
       project: { id: 'abc', files: [{ path: 'main.tex', content: '\\cite{x}' }] }
     }
-  }, {
-    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentUserReport.cjs')}`
-  });
+  }, fixtureAgentEnv('agentUserReport.cjs'));
 
   assert.equal(response.ok, true);
   assert.equal(response.result.userReport.conclusion, '没有发现缺失 citation key，也没有修改文件。');
@@ -254,9 +258,7 @@ test('Confirm Mode redaction keeps userReport while hiding operations', async ()
       task: 'Prepare grammar edit',
       project: { id: 'abc', files: [{ path: 'main.tex', content: 'old' }] }
     }
-  }, {
-    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentUserReportWithOps.cjs')}`
-  });
+  }, fixtureAgentEnv('agentUserReportWithOps.cjs'));
 
   assert.equal(response.ok, true);
   assert.equal(response.result.status, 'requires_task_confirmation');
@@ -317,9 +319,7 @@ test('Auto Mode pauses external-agent delete operations behind a delete plan', a
       checkpoint: { ok: true },
       project: { id: 'abc', files: [] }
     }
-  }, {
-    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentDelete.cjs')}`
-  });
+  }, fixtureAgentEnv('agentDelete.cjs'));
 
   assert.equal(response.ok, true);
   assert.equal(response.result.status, 'delete_plan_required');
@@ -340,9 +340,7 @@ test('Confirm Mode forces external-agent operations behind task confirmation', a
       task: 'Edit main',
       project: { id: 'abc', files: [{ path: 'main.tex', content: 'old' }] }
     }
-  }, {
-    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentCompletedWithOps.cjs')}`
-  });
+  }, fixtureAgentEnv('agentCompletedWithOps.cjs'));
 
   assert.equal(response.ok, true);
   assert.equal(response.result.status, 'requires_task_confirmation');
@@ -360,9 +358,7 @@ test('Confirm Mode forces external-agent pendingOperations behind task confirmat
       task: 'Edit pending',
       project: { id: 'abc', files: [{ path: 'main.tex', content: 'old' }] }
     }
-  }, {
-    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentConfirmPending.cjs')}`
-  });
+  }, fixtureAgentEnv('agentConfirmPending.cjs'));
 
   assert.equal(response.ok, true);
   assert.equal(response.result.status, 'requires_task_confirmation');
@@ -382,9 +378,7 @@ test('Auto Mode re-splits unsafe delete_plan_required agent operations', async (
       checkpoint: { ok: true },
       project: { id: 'abc', files: [] }
     }
-  }, {
-    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentDeletePlanUnsafe.cjs')}`
-  });
+  }, fixtureAgentEnv('agentDeletePlanUnsafe.cjs'));
 
   assert.equal(response.ok, true);
   assert.equal(response.result.status, 'delete_plan_required');
@@ -408,9 +402,7 @@ test('task.run returns external-agent notes for analysis-only tasks', async () =
       reviewing: { ok: true },
       project: { id: 'abc', files: [{ path: 'main.tex', content: '\\cite{x}' }] }
     }
-  }, {
-    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentNotes.cjs')}`
-  });
+  }, fixtureAgentEnv('agentNotes.cjs'));
 
   assert.equal(response.ok, true);
   assert.equal(response.result.status, 'completed');
@@ -438,6 +430,43 @@ test('task.run starts an external agent from file and args without shell command
   assert.equal(response.result.notes, 'No obvious citation issues found in the supplied files.');
 });
 
+test('task.run ignores legacy shell command env var', async () => {
+  const response = await handleRequest({
+    id: '8c',
+    method: 'task.run',
+    params: {
+      mode: 'ask',
+      task: 'Check citations only',
+      project: { id: 'abc', files: [{ path: 'main.tex', content: '\\cite{x}' }] }
+    }
+  }, {
+    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentNotes.cjs')}`
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.status, 'completed');
+  assert.notEqual(response.result.notes, 'No obvious citation issues found in the supplied files.');
+  assert.deepEqual(response.result.operations, []);
+});
+
+test('Confirm Mode plan ids use random UUIDs', async () => {
+  const response = await handleRequest({
+    id: '8d',
+    method: 'task.run',
+    params: {
+      mode: 'confirm',
+      task: 'Prepare appendix',
+      project: { id: 'abc', files: [{ path: 'main.tex', content: 'hello' }] },
+      proposedOperations: [
+        { type: 'edit', path: 'main.tex', hunks: [{ before: 'hello', after: 'hello world' }] }
+      ]
+    }
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.match(response.result.planId, /^plan_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+});
+
 test('task.run emits realtime lifecycle events while external agent runs', async () => {
   const events = [];
   const response = await handleRequest({
@@ -452,9 +481,7 @@ test('task.run emits realtime lifecycle events while external agent runs', async
       model: 'gpt-5.5',
       reasoningEffort: 'xhigh'
     }
-  }, {
-    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentProgress.cjs')}`
-  }, event => events.push(event));
+  }, fixtureAgentEnv('agentProgress.cjs'), event => events.push(event));
 
   assert.equal(response.ok, true);
   assert.equal(response.result.notes, 'Progress fixture completed.');
@@ -477,10 +504,9 @@ test('task.run fails a hanging external agent after the configured timeout', asy
       task: 'Hang',
       project: { id: 'abc', files: [] }
     }
-  }, {
-    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentHang.cjs')}`,
+  }, fixtureAgentEnv('agentHang.cjs', {
     CODEX_OVERLEAF_AGENT_TIMEOUT_MS: '50'
-  });
+  }));
 
   assert.equal(response.ok, false);
   assert.equal(response.error.code, 'agent_failed');
@@ -496,10 +522,9 @@ test('task.run fails an external agent that exceeds the output byte limit', asyn
       task: 'Too much output',
       project: { id: 'abc', files: [] }
     }
-  }, {
-    CODEX_OVERLEAF_AGENT_CMD: `${process.execPath} ${path.join(__dirname, 'fixtures/agentHugeStdout.cjs')}`,
+  }, fixtureAgentEnv('agentHugeStdout.cjs', {
     CODEX_OVERLEAF_AGENT_OUTPUT_MAX_BYTES: '1024'
-  });
+  }));
 
   assert.equal(response.ok, false);
   assert.equal(response.error.code, 'agent_failed');

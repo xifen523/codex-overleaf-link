@@ -34,6 +34,24 @@ test('plugin Codex home mirrors auth/config but does not copy global sessions', 
   }
 });
 
+test('plugin Codex home and copied auth use restrictive permissions', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-home-'));
+  const userCodexHome = path.join(home, '.codex');
+  try {
+    fs.mkdirSync(userCodexHome, { recursive: true });
+    fs.writeFileSync(path.join(userCodexHome, 'auth.json'), '{"token":"user-token"}\n', 'utf8');
+
+    const prepared = preparePluginCodexHome({ HOME: home });
+    const pluginHomeMode = fs.statSync(prepared.pluginHome).mode & 0o777;
+    const authMode = fs.statSync(path.join(prepared.pluginHome, 'auth.json')).mode & 0o777;
+
+    assert.equal(pluginHomeMode, 0o700);
+    assert.equal(authMode, 0o600);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('plugin Codex home reuses local Codex skills and plugin config without linking history', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-home-'));
   const userCodexHome = path.join(home, '.codex');

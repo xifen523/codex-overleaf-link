@@ -1219,6 +1219,7 @@ function createPageBridgeHarness({
       });
       await listener({
         source: window,
+        origin: window.location.origin,
         data: {
           source: 'codex-overleaf/content',
           id: 'test-call',

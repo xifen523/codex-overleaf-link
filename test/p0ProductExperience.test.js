@@ -1050,3 +1050,52 @@ test('English locale is applied to dialogs, diff review, undo controls, and tran
   assert.match(transcriptCallBody, /mapAgentEventToActivity\(event,\s*\{\s*locale:\s*getLocale\(\)\s*\}\)/);
   assert.match(completionBody, /locale:\s*getLocale\(\)/);
 });
+
+test('page bridge messages require same-origin responses in both directions', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const pageBridge = fs.readFileSync(
+    path.join(__dirname, '../extension/src/pageBridge.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /event\.origin !== window\.location\.origin/);
+  assert.match(pageBridge, /event\.origin !== window\.location\.origin/);
+});
+
+test('markdown links only allow http and https URLs', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const hrefBody = contentScript.match(/function formatMarkdownHref\(href\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(hrefBody, /protocol === 'http:' \|\| parsed\.protocol === 'https:'/);
+  assert.doesNotMatch(hrefBody, /file:\/\//);
+  assert.doesNotMatch(hrefBody, /return target/);
+});
+
+test('session row controls do not interpolate translated strings through innerHTML', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const renderBody = contentScript.match(/function renderSessionList\([^)]*\) \{[\s\S]*?\n  function getRunningSessionIds/)?.[0] || '';
+
+  assert.doesNotMatch(renderBody, /innerHTML\s*=/);
+  assert.match(renderBody, /createElement\('button'\)/);
+  assert.match(renderBody, /setAttribute\('aria-label', tr\('renameSession'\)\)/);
+});
+
+test('user-facing task failures do not render raw stack traces', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function persistRunResult/)?.[0] || '';
+
+  assert.doesNotMatch(runTaskBody, /stack:\s*error\.stack/);
+  assert.doesNotMatch(runTaskBody, /stack:\s*persistenceError\.stack/);
+});

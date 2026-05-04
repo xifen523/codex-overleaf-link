@@ -5,8 +5,19 @@
   let port = null;
   const pending = new Map();
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type !== 'codex-overleaf/native-request') {
+      return undefined;
+    }
+
+    if (!isAllowedOverleafSender(sender)) {
+      sendResponse({
+        ok: false,
+        error: {
+          code: 'forbidden_sender',
+          message: 'Native requests are only accepted from Overleaf project pages.'
+        }
+      });
       return undefined;
     }
 
@@ -32,7 +43,7 @@
       return undefined;
     }
 
-    sendNativeRequest(message.payload, _sender)
+    sendNativeRequest(message.payload, sender)
       .then(result => sendResponse(result))
       .catch(error => {
         sendResponse({
@@ -114,13 +125,37 @@
       return;
     }
 
-    for (const [pendingId, pendingRequest] of pending.entries()) {
+    const ambiguousRequests = Array.from(pending.entries());
+    pending.clear();
+    for (const [pendingId, pendingRequest] of ambiguousRequests) {
       pendingRequest.resolve({
-        ...message,
-        id: pendingId
+        id: pendingId,
+        ok: false,
+        error: {
+          code: 'ambiguous_native_error',
+          message: 'Native host returned an error without a request id while multiple requests were pending.',
+          nativeError: message.error || message
+        }
       });
     }
-    pending.clear();
+  }
+
+  function isAllowedOverleafSender(sender) {
+    if (!sender?.tab) {
+      const extensionUrl = chrome.runtime.getURL('');
+      const senderUrl = sender?.url || '';
+      return sender?.id === chrome.runtime.id && senderUrl.startsWith(extensionUrl);
+    }
+
+    const senderUrl = sender.tab?.url || '';
+    try {
+      const url = new URL(senderUrl);
+      return url.protocol === 'https:' && (
+        url.hostname === 'www.overleaf.com' || url.hostname === 'overleaf.com'
+      );
+    } catch (_error) {
+      return false;
+    }
   }
 
   function forwardNativeEvent(tabId, id, event) {
