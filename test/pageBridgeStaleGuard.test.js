@@ -74,6 +74,23 @@ test('page bridge only returns ok true for a verified saved indicator', async ()
   }
 });
 
+test('page bridge verifies visible saved text with generic save accessibility labels', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    saveIndicatorText: 'All changes saved',
+    saveIndicatorAriaLabel: 'Save project',
+    saveIndicatorTitle: 'Save project',
+    files: {
+      'main.tex': 'alpha'
+    }
+  });
+
+  const result = await bridge.call('waitForSaveState', { deadlineMs: 1, pollIntervalMs: 1 });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'verified_saved');
+});
+
 test('page bridge does not verify negative save indicators', async () => {
   const negativeIndicators = [
     'Not saved',
@@ -1181,6 +1198,8 @@ function createPageBridgeHarness({
   modeOptionClassName = 'mode-option',
   internalReviewingState = undefined,
   saveIndicatorText = null,
+  saveIndicatorAriaLabel = saveIndicatorText,
+  saveIndicatorTitle = saveIndicatorAriaLabel,
   dispatchApplies = true,
   trackChangesOnDispatch = false,
   rerenderTrackedChangeIdsOnReject = false,
@@ -1218,7 +1237,9 @@ function createPageBridgeHarness({
     },
     querySelectorAll(selector) {
       if (/save|saving-status|save-status/i.test(selector)) {
-        return saveIndicatorText == null ? [] : [makeSaveIndicatorNode(saveIndicatorText)];
+        return saveIndicatorText == null
+          ? []
+          : [makeSaveIndicatorNode(saveIndicatorText, saveIndicatorAriaLabel, saveIndicatorTitle)];
       }
       if (/treeitem|role="row"|file-tree|project-tree|data-entity-id|data-doc-id|data-id|data-file-id/.test(selector)) {
         return Array.from(fileMap.keys(), makeTreeNode);
@@ -1547,7 +1568,7 @@ function createPageBridgeHarness({
     };
   }
 
-  function makeSaveIndicatorNode(text) {
+  function makeSaveIndicatorNode(text, ariaLabel = text, title = ariaLabel) {
     return {
       tagName: 'DIV',
       textContent: text,
@@ -1557,8 +1578,11 @@ function createPageBridgeHarness({
       disabled: false,
       parentElement: null,
       getAttribute(attribute) {
-        if (attribute === 'aria-label' || attribute === 'title') {
-          return text;
+        if (attribute === 'aria-label') {
+          return ariaLabel;
+        }
+        if (attribute === 'title') {
+          return title;
         }
         if (attribute === 'data-testid') {
           return 'save-status';

@@ -676,26 +676,27 @@
     for (const selector of selectors) {
       const elements = document.querySelectorAll(selector);
       for (const el of elements) {
-        const text = readSaveIndicatorText(el);
-        if (!text) {
+        const texts = readSaveIndicatorTexts(el);
+        if (!texts.length) {
           continue;
         }
-        if (isNegativeSaveStateText(text)) {
+        const combinedText = texts.join(' ');
+        if (isAnySaveIndicatorText(texts, combinedText, isNegativeSaveStateText)) {
           return {
             state: 'unknown',
             reason: 'Overleaf save indicator reports changes are not saved.'
           };
         }
-        if (isSavingStateText(text)) {
+        if (isAnySaveIndicatorText(texts, combinedText, isSavingStateText)) {
           return {
             state: 'saving',
             reason: 'Overleaf is still saving or syncing changes.'
           };
         }
-        if (isVerifiedSavedText(text)) {
+        if (texts.some(isVerifiedSavedText)) {
           return { state: 'verified_saved' };
         }
-        if (isSaveIndicatorCandidateText(text)) {
+        if (isAnySaveIndicatorText(texts, combinedText, isSaveIndicatorCandidateText)) {
           sawSaveCandidate = true;
         }
       }
@@ -708,7 +709,7 @@
     };
   }
 
-  function readSaveIndicatorText(node) {
+  function readSaveIndicatorTexts(node) {
     const parts = [
       node.textContent,
       node.innerText,
@@ -716,7 +717,11 @@
       node.getAttribute?.('title'),
       node.getAttribute?.('value')
     ].map(value => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
-    return Array.from(new Set(parts)).join(' ');
+    return Array.from(new Set(parts));
+  }
+
+  function isAnySaveIndicatorText(texts, combinedText, predicate) {
+    return predicate(combinedText) || texts.some(predicate);
   }
 
   function isNegativeSaveStateText(text) {
