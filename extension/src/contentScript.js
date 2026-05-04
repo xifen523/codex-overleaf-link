@@ -3484,13 +3484,18 @@
 
   function readPanelInputs() {
     state = updateActiveSession(state, {
-      model: panel.querySelector('[data-model]').value,
+      model: readSelectedModelInput(),
       reasoningEffort: panel.querySelector('[data-reasoning]').value,
       mode: panel.querySelector('[data-mode]').value,
       task: panel.querySelector('[data-task]').value,
       requireReviewing: panel.querySelector('[data-require-reviewing]').checked
     });
     state.autoRecompile = panel.querySelector('[data-auto-recompile]')?.checked !== false;
+  }
+
+  function readSelectedModelInput() {
+    const modelSelect = panel?.querySelector('[data-model]');
+    return modelSelect?.value || state?.model || '';
   }
 
   async function loadModelOptions() {
@@ -3584,7 +3589,7 @@
   }
 
   function resolveSelectedModel() {
-    return state?.model || panel?.querySelector('[data-model]')?.value || '';
+    return panel?.querySelector('[data-model]')?.value || state?.model || '';
   }
 
   function normalizeModelOptionId(id) {
@@ -3628,6 +3633,9 @@
   }
 
   function applyStateToPanel() {
+    if (!modelSelectHasOption(state.model)) {
+      renderModelOptions(window.CodexOverleafModels.FALLBACK_MODELS, state.model);
+    }
     panel.querySelector('[data-model]').value = state.model;
     panel.querySelector('[data-reasoning]').value = state.reasoningEffort;
     panel.querySelector('[data-mode]').value = state.mode;
@@ -3649,6 +3657,15 @@
     if (!panel.querySelector('[data-context-tray]')?.hidden) {
       renderContextFiles(contextProject);
     }
+  }
+
+  function modelSelectHasOption(modelId) {
+    const selectedId = normalizeModelOptionId(modelId);
+    if (!selectedId) {
+      return true;
+    }
+    const modelSelect = panel?.querySelector('[data-model]');
+    return Array.from(modelSelect?.options || []).some(option => option.value === selectedId);
   }
 
   function applySessionLabel() {

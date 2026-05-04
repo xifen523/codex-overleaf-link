@@ -3,6 +3,26 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
+function extractFunction(source, name) {
+  const marker = `function ${name}(`;
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, `${name} should exist`);
+  const openBrace = source.indexOf('{', start);
+  assert.notEqual(openBrace, -1, `${name} should have a body`);
+  let depth = 0;
+  for (let index = openBrace; index < source.length; index++) {
+    if (source[index] === '{') {
+      depth++;
+    } else if (source[index] === '}') {
+      depth--;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+  assert.fail(`${name} body should close`);
+}
+
 test('composer keeps the send button in a fixed visible toolbar column', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -84,6 +104,24 @@ test('composer discovers model options through the native codex.models endpoint'
   assert.match(i18n, /modelSourceFallback:\s*'fallback'/);
   assert.match(i18n, /modelSourceDiscovered:\s*'discovered'/);
   assert.match(i18n, /modelDisplayTitle:\s*'\{label\} - Model list: \{source\}'/);
+});
+
+test('composer preserves a custom selected model before async discovery finishes', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const applyStateToPanel = extractFunction(contentScript, 'applyStateToPanel');
+  const readPanelInputs = extractFunction(contentScript, 'readPanelInputs');
+  const readSelectedModelInput = extractFunction(contentScript, 'readSelectedModelInput');
+  const renderIndex = applyStateToPanel.indexOf('renderModelOptions(window.CodexOverleafModels.FALLBACK_MODELS, state.model)');
+  const assignIndex = applyStateToPanel.indexOf("panel.querySelector('[data-model]').value = state.model");
+
+  assert.notEqual(renderIndex, -1, 'applyStateToPanel should render fallback/custom model options synchronously');
+  assert.notEqual(assignIndex, -1, 'applyStateToPanel should still select state.model');
+  assert.equal(renderIndex < assignIndex, true, 'custom option must exist before assigning state.model');
+  assert.match(readPanelInputs, /model:\s*readSelectedModelInput\(\)/);
+  assert.match(readSelectedModelInput, /modelSelect\?\.value\s*\|\|\s*state\?\.model\s*\|\|\s*''/);
 });
 
 test('composer model picker stays compact when the side panel is wide', () => {
