@@ -4,6 +4,7 @@ const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const { buildOperationSummary, splitDeletePlan } = require('../../extension/src/shared/summary');
 const { runCodexSession } = require('./codexSessionRunner');
+const { resolveCodexModels } = require('./codexModels');
 const { clearPluginCodexHistory } = require('./codexHome');
 const { logDebug, truncateText } = require('./debugLog');
 const { HOST_NAME } = require('./manifest');
@@ -34,6 +35,10 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
 
   if (request.method === 'mirror.status') {
     return handleMirrorStatus(request, env);
+  }
+
+  if (request.method === 'codex.models') {
+    return okResponse(request.id, resolveCodexModels(request.params || {}, env));
   }
 
   if (request.method === 'codex.run') {

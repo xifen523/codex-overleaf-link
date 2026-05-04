@@ -61,6 +61,31 @@ test('composer model picker shows the full selected model name while preserving 
   assert.match(css, /\.codex-model-picker select\s*\{[\s\S]*opacity:\s*0/);
 });
 
+test('composer discovers model options through the native codex.models endpoint', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /let modelDiscovery\s*=\s*\{\s*status:\s*'fallback'/);
+  assert.match(contentScript, /loadModelOptions\(\)\.catch/);
+  assert.match(contentScript, /async function loadModelOptions\(\)/);
+  assert.match(contentScript, /method:\s*'codex\.models'/);
+  assert.match(contentScript, /window\.CodexOverleafModels\.FALLBACK_MODELS/);
+  assert.match(contentScript, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel/);
+  assert.match(contentScript, /function renderModelOptions\(models,\s*selectedModel\)/);
+  assert.match(contentScript, /document\.createElement\('option'\)/);
+  assert.match(contentScript, /option\.textContent\s*=\s*model\.label/);
+  assert.match(contentScript, /modelDisplay\.title\s*=\s*tr\('modelDisplayTitle'/);
+  assert.match(i18n, /modelSourceFallback:\s*'fallback'/);
+  assert.match(i18n, /modelSourceDiscovered:\s*'discovered'/);
+  assert.match(i18n, /modelDisplayTitle:\s*'\{label\} - Model list: \{source\}'/);
+});
+
 test('composer model picker stays compact when the side panel is wide', () => {
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),

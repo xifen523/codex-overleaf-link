@@ -43,6 +43,17 @@ test('bridge.ping returns bridge metadata', async () => {
   assert.deepEqual(response.result.environment.latex.available, ['latexmk']);
 });
 
+test('codex.models returns a usable fallback model list', async () => {
+  const response = await handleRequest({ id: 'models-1', method: 'codex.models', params: {} }, {});
+
+  assert.equal(response.id, 'models-1');
+  assert.equal(response.ok, true);
+  assert.equal(Array.isArray(response.result.models), true);
+  assert.equal(response.result.models.some(model => model.id === 'gpt-5.5'), true);
+  assert.match(response.result.source, /^(codex|config|fallback|unknown)$/);
+  assert.equal(typeof response.result.fetchedAt, 'string');
+});
+
 test('codex.run returns a clear error before spawning when Codex is missing', async () => {
   let calls = 0;
   const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {

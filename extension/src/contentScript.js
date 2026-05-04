@@ -67,6 +67,7 @@
   let userScrollIntentUntil = 0;
   let runCancellationRequested = false;
   let activePluginConfirmResolve = null;
+  let modelDiscovery = { status: 'fallback', source: 'fallback', fetchedAt: '' };
 
   chrome.runtime.onMessage.addListener(message => {
     if (message?.type === 'codex-overleaf/open-panel') {
@@ -84,6 +85,9 @@
     state = normalizePanelState(await loadStoredState(), { restoreRunningRuns: true });
     ensurePanelOpen();
     applyStateToPanel();
+    loadModelOptions().catch(error => {
+      applyFallbackModelOptions(resolveSelectedModel(), error);
+    });
     await refreshProbe({ quiet: true });
   }
 
@@ -383,6 +387,7 @@
     }
 
     syncModeControls();
+    updateModelDisplay();
     renderSessionList();
     renderContextSelection();
   }
@@ -3488,6 +3493,117 @@
     state.autoRecompile = panel.querySelector('[data-auto-recompile]')?.checked !== false;
   }
 
+  async function loadModelOptions() {
+    const selectedModel = resolveSelectedModel();
+    const fallbackModels = window.CodexOverleafModels.FALLBACK_MODELS;
+
+    try {
+      const response = await sendBackgroundNative({
+        method: 'codex.models',
+        params: {}
+      });
+      const hasDiscoveredModels = response?.ok
+        && Array.isArray(response.result?.models)
+        && response.result.models.length > 0;
+      const sourceModels = hasDiscoveredModels ? response.result.models : fallbackModels;
+      const normalized = window.CodexOverleafModels.normalizeDiscoveredModels({ models: sourceModels, selectedModel });
+      renderModelOptions(normalized.models, selectedModel);
+      modelDiscovery = {
+        status: hasDiscoveredModels && !normalized.usedFallback ? 'discovered' : 'fallback',
+        source: hasDiscoveredModels ? response.result?.source || 'unknown' : 'fallback',
+        fetchedAt: hasDiscoveredModels ? response.result?.fetchedAt || '' : '',
+        errorCode: hasDiscoveredModels ? '' : response?.error?.code || '',
+        errorMessage: hasDiscoveredModels ? '' : response?.error?.message || ''
+      };
+      updateModelDisplay();
+    } catch (error) {
+      applyFallbackModelOptions(selectedModel, error);
+    }
+  }
+
+  function applyFallbackModelOptions(selectedModel, error) {
+    const fallbackModels = window.CodexOverleafModels.FALLBACK_MODELS;
+    const sourceModels = fallbackModels;
+    const normalized = window.CodexOverleafModels.normalizeDiscoveredModels({ models: sourceModels, selectedModel });
+    renderModelOptions(normalized.models, selectedModel);
+    modelDiscovery = {
+      status: 'fallback',
+      source: 'fallback',
+      fetchedAt: '',
+      errorCode: error?.code || '',
+      errorMessage: error?.message || (error ? String(error) : '')
+    };
+    updateModelDisplay();
+  }
+
+  function renderModelOptions(models, selectedModel) {
+    const modelSelect = panel?.querySelector('[data-model]');
+    if (!modelSelect) {
+      return;
+    }
+
+    const selectedId = normalizeModelOptionId(selectedModel);
+    modelSelect.textContent = '';
+    let renderedSelected = false;
+    let firstModelId = '';
+
+    for (const model of Array.isArray(models) ? models : []) {
+      const id = normalizeModelOptionId(model?.id);
+      if (!id) {
+        continue;
+      }
+      if (!firstModelId) {
+        firstModelId = id;
+      }
+      const option = document.createElement('option');
+      option.value = id;
+      option.textContent = model.label;
+      if (model.unverified) {
+        option.dataset.unverified = 'true';
+      }
+      modelSelect.append(option);
+      if (id === selectedId) {
+        renderedSelected = true;
+      }
+    }
+
+    if (selectedId && !renderedSelected) {
+      const option = document.createElement('option');
+      option.value = selectedId;
+      option.textContent = `${selectedId} (custom)`;
+      option.dataset.unverified = 'true';
+      modelSelect.append(option);
+      renderedSelected = true;
+    }
+
+    if (selectedId && renderedSelected) {
+      modelSelect.value = selectedId;
+    } else if (firstModelId) {
+      modelSelect.value = firstModelId;
+    }
+  }
+
+  function resolveSelectedModel() {
+    return state?.model || panel?.querySelector('[data-model]')?.value || '';
+  }
+
+  function normalizeModelOptionId(id) {
+    return typeof id === 'string' ? id.trim() : '';
+  }
+
+  function getModelDiscoverySourceLabel() {
+    if (modelDiscovery.errorCode || modelDiscovery.errorMessage) {
+      return `${tr('modelSourceFailed')} (${tr('modelSourceFallback')})`;
+    }
+    if (modelDiscovery.source === 'fallback') {
+      return tr('modelSourceFallback');
+    }
+    if (modelDiscovery.source) {
+      return modelDiscovery.source;
+    }
+    return modelDiscovery.status === 'discovered' ? tr('modelSourceDiscovered') : tr('modelSourceFallback');
+  }
+
   function updateModelDisplay() {
     const modelSelect = panel?.querySelector('[data-model]');
     const modelDisplay = panel?.querySelector('[data-model-display]');
@@ -3496,7 +3612,10 @@
     }
     const fullLabel = modelSelect.options[modelSelect.selectedIndex]?.textContent || modelSelect.value;
     modelDisplay.textContent = fullLabel;
-    modelDisplay.title = fullLabel;
+    modelDisplay.title = tr('modelDisplayTitle', {
+      label: fullLabel,
+      source: getModelDiscoverySourceLabel()
+    });
   }
 
   function clearTaskComposer() {
