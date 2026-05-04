@@ -53,6 +53,7 @@ test('getMirrorStatus reports project key and full/partial sync timestamps', asy
   assert.equal(status.exists, true);
   assert.ok(status.lastFullSyncAt);
   assert.equal(status.lastPartialSyncAt || '', '');
+  assert.equal(status.lastFileCount, 1);
 });
 
 test('partial sync does not update project-level freshness', async () => {

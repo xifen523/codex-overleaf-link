@@ -396,6 +396,7 @@ function getMirrorStatus(projectId, options = {}) {
     lastFullSyncAt,
     lastPartialSyncAt: baseline.lastPartialSyncAt || '',
     lastSyncSource: baseline.lastSyncSource || '',
+    lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
     workspacePath: mirror.workspacePath
   };
 }
