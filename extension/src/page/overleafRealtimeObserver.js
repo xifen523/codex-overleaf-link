@@ -9,17 +9,20 @@
 
   const STRATEGY_ACTIVE_EDITOR = 'active-editor';
   const CHANNEL_ROOT_NAMES = ['overleaf', 'Overleaf', '_ide', 'OL'];
+  const BASELINE_REFRESH_EVENT_TYPES = ['click', 'focusin', 'change'];
   const CHANNEL_KEY_PATTERN = /socket|websocket|channel|realtime|collab|share|ot|doc|editor|connection|event|broadcast|presence/i;
   const SENSITIVE_KEY_PATTERN = /^(content|previousContent|nextContent|text|body|raw|rawContent|source|sourceText)$/i;
 
   function create(deps = {}) {
     const pageWindow = deps.window || getDefaultWindow();
-    const pageDocument = deps.document || getDefaultDocument();
+    const pageDocument = Object.prototype.hasOwnProperty.call(deps, 'document')
+      ? deps.document
+      : getDefaultDocument();
     const events = [];
     let activePath = '';
     let lastContent = '';
     let running = false;
-    let listenerAttached = false;
+    let listenersAttached = false;
     let statusName = 'off';
     let statusReason = '';
     let lastEventAt = null;
@@ -27,18 +30,21 @@
     let channelCandidates = [];
 
     function start(_params = {}) {
-      running = true;
       channelCandidates = collectChannelCandidates(pageWindow);
+      if (!canAttachDocumentListeners()) {
+        running = false;
+        markUnavailable('missing_document');
+        return getStatus();
+      }
+
+      running = true;
       refreshActiveBaseline();
-      attachInputListener();
+      attachDocumentListeners();
       return getStatus();
     }
 
     function stop() {
-      if (listenerAttached && pageDocument && typeof pageDocument.removeEventListener === 'function') {
-        pageDocument.removeEventListener('input', handleEditorInput, true);
-      }
-      listenerAttached = false;
+      detachDocumentListeners();
       running = false;
       statusName = 'off';
       statusReason = '';
@@ -48,6 +54,7 @@
     function getStatus() {
       const status = {
         status: statusName,
+        state: statusName,
         running,
         strategy: STRATEGY_ACTIVE_EDITOR,
         activePath,
@@ -68,30 +75,76 @@
       return drained;
     }
 
-    function attachInputListener() {
-      if (listenerAttached) {
-        return;
-      }
-      if (!pageDocument || typeof pageDocument.addEventListener !== 'function') {
-        markUnavailable('missing_document');
-        return;
+    function canAttachDocumentListeners() {
+      return Boolean(pageDocument && typeof pageDocument.addEventListener === 'function');
+    }
+
+    function attachDocumentListeners() {
+      if (listenersAttached) {
+        return true;
       }
       pageDocument.addEventListener('input', handleEditorInput, true);
-      listenerAttached = true;
+      for (const type of BASELINE_REFRESH_EVENT_TYPES) {
+        pageDocument.addEventListener(type, handleBaselineRefreshEvent, true);
+      }
+      listenersAttached = true;
+      return true;
+    }
+
+    function detachDocumentListeners() {
+      if (!listenersAttached || !pageDocument || typeof pageDocument.removeEventListener !== 'function') {
+        listenersAttached = false;
+        return;
+      }
+      pageDocument.removeEventListener('input', handleEditorInput, true);
+      for (const type of BASELINE_REFRESH_EVENT_TYPES) {
+        pageDocument.removeEventListener(type, handleBaselineRefreshEvent, true);
+      }
+      listenersAttached = false;
     }
 
     function refreshActiveBaseline() {
-      const nextPath = readActivePath();
-      if (!nextPath) {
-        activePath = '';
-        lastContent = '';
-        markUnavailable('missing_active_path');
+      const pathResult = readActivePath();
+      if (!pathResult.ok) {
+        handleActivePathUnavailable(pathResult.reason);
         return false;
       }
-      activePath = nextPath;
-      lastContent = readEditorText();
+
+      const textResult = readEditorText();
+      if (!textResult.ok) {
+        markUnavailable(textResult.reason);
+        return false;
+      }
+
+      activePath = pathResult.path;
+      lastContent = textResult.text;
       markObserving();
       return true;
+    }
+
+    function handleBaselineRefreshEvent() {
+      if (!running) {
+        return;
+      }
+
+      const pathResult = readActivePath();
+      if (!pathResult.ok) {
+        handleActivePathUnavailable(pathResult.reason);
+        return;
+      }
+      if (pathResult.path === activePath) {
+        return;
+      }
+
+      const textResult = readEditorText();
+      if (!textResult.ok) {
+        markUnavailable(textResult.reason);
+        return;
+      }
+
+      activePath = pathResult.path;
+      lastContent = textResult.text;
+      markObserving();
     }
 
     function handleEditorInput() {
@@ -99,17 +152,22 @@
         return;
       }
 
-      const nextPath = readActivePath();
-      if (!nextPath) {
-        activePath = '';
-        lastContent = '';
-        markUnavailable('missing_active_path');
+      const pathResult = readActivePath();
+      if (!pathResult.ok) {
+        handleActivePathUnavailable(pathResult.reason);
         return;
       }
 
-      const nextContent = readEditorText();
-      if (nextPath !== activePath) {
-        activePath = nextPath;
+      const textResult = readEditorText();
+      if (!textResult.ok) {
+        markUnavailable(textResult.reason);
+        return;
+      }
+
+      const nextContent = textResult.text;
+      if (pathResult.path !== activePath) {
+        // Fallback for file switches that were not preceded by a selection/focus event.
+        activePath = pathResult.path;
         lastContent = nextContent;
         markObserving();
         return;
@@ -120,10 +178,9 @@
         return;
       }
 
-      const observedAt = new Date(resolveNow()).toISOString();
+      const observedAt = resolveObservedAt();
       const otText = resolveOtText(deps, pageWindow, root);
       if (!otText || typeof otText.normalizeObservedTextEvent !== 'function') {
-        lastContent = nextContent;
         markUnavailable('missing_ot_text');
         return;
       }
@@ -136,8 +193,9 @@
         source: STRATEGY_ACTIVE_EDITOR
       });
       if (event && event.ok === true) {
-        events.push(event);
-        lastEventAt = event.observedAt || observedAt;
+        const queuedEvent = sanitizeObservedEvent(event);
+        events.push(queuedEvent);
+        lastEventAt = queuedEvent.observedAt || observedAt;
         markObserving();
       } else {
         lastErrorCode = event?.reason || 'normalize_observed_text_event_failed';
@@ -145,37 +203,69 @@
       lastContent = nextContent;
     }
 
+    function handleActivePathUnavailable(reason) {
+      if (reason === 'missing_active_path') {
+        activePath = '';
+        lastContent = '';
+      }
+      markUnavailable(reason);
+    }
+
     function readActivePath() {
       if (typeof deps.getActiveFilePath !== 'function') {
-        return '';
+        return {
+          ok: false,
+          reason: 'missing_active_path'
+        };
       }
       try {
-        return normalizePath(deps.getActiveFilePath());
+        const path = normalizePath(deps.getActiveFilePath());
+        if (!path) {
+          return {
+            ok: false,
+            reason: 'missing_active_path'
+          };
+        }
+        return {
+          ok: true,
+          path
+        };
       } catch (_error) {
-        markUnavailable('read_active_path_failed');
-        return '';
+        return {
+          ok: false,
+          reason: 'read_active_path_failed'
+        };
       }
     }
 
     function readEditorText() {
       if (typeof deps.readActiveEditorText !== 'function') {
-        markUnavailable('missing_editor_reader');
-        return '';
+        return {
+          ok: false,
+          reason: 'missing_editor_reader'
+        };
       }
       try {
-        return String(deps.readActiveEditorText() ?? '');
+        return {
+          ok: true,
+          text: String(deps.readActiveEditorText() ?? '')
+        };
       } catch (_error) {
-        markUnavailable('read_active_editor_failed');
-        return '';
+        return {
+          ok: false,
+          reason: 'read_active_editor_failed'
+        };
       }
     }
 
-    function resolveNow() {
-      if (typeof deps.now !== 'function') {
-        return Date.now();
+    function resolveObservedAt() {
+      let value;
+      try {
+        value = typeof deps.now === 'function' ? deps.now() : Date.now();
+      } catch (_error) {
+        value = Date.now();
       }
-      const value = deps.now();
-      return Number.isFinite(Number(value)) ? Number(value) : Date.now();
+      return validDateToIso(value) || validDateToIso(Date.now()) || new Date().toISOString();
     }
 
     function markObserving() {
@@ -240,11 +330,11 @@
         }
         seen.add(current);
       }
-      if (isDomLikeObject(current)) {
+      const descriptors = getDescriptors(current);
+      if (isDomLikeDescriptorMap(descriptors)) {
         return;
       }
 
-      const descriptors = getDescriptors(current);
       for (const key of Object.keys(descriptors)) {
         const descriptor = descriptors[key];
         const keyPath = prefix ? `${prefix}.${key}` : key;
@@ -291,12 +381,59 @@
     return Boolean(value && typeof value === 'object');
   }
 
-  function isDomLikeObject(value) {
-    return Boolean(value
-      && (value.nodeType
-        || value.ownerDocument
-        || typeof value.querySelectorAll === 'function'
-        || typeof value.addEventListener === 'function'));
+  function isDomLikeDescriptorMap(descriptors) {
+    return isDomMarkerDescriptor(descriptors.nodeType)
+      || isDomMarkerDescriptor(descriptors.ownerDocument)
+      || isDomFunctionDescriptor(descriptors.querySelectorAll)
+      || isDomFunctionDescriptor(descriptors.addEventListener);
+  }
+
+  function isDomMarkerDescriptor(descriptor) {
+    if (!descriptor) {
+      return false;
+    }
+    if (!Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      return true;
+    }
+    return Boolean(descriptor.value);
+  }
+
+  function isDomFunctionDescriptor(descriptor) {
+    if (!descriptor) {
+      return false;
+    }
+    if (!Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+      return true;
+    }
+    return typeof descriptor.value === 'function';
+  }
+
+  function sanitizeObservedEvent(event) {
+    return {
+      path: event.path,
+      baseHash: event.baseHash,
+      nextHash: event.nextHash,
+      nextContent: event.nextContent,
+      ops: Array.isArray(event.ops) ? event.ops.map(cloneTextOp) : [],
+      observedAt: event.observedAt,
+      observedVersion: event.observedVersion ?? null,
+      source: event.source
+    };
+  }
+
+  function cloneTextOp(op) {
+    return op && typeof op === 'object' && !Array.isArray(op)
+      ? { ...op }
+      : op;
+  }
+
+  function validDateToIso(value) {
+    try {
+      const date = new Date(value);
+      return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+    } catch (_error) {
+      return null;
+    }
   }
 
   function normalizePath(value) {

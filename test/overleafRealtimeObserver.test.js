@@ -14,12 +14,13 @@ function createHarness(options = {}) {
   const removals = [];
   let activePath = options.activePath ?? 'main.tex';
   let editorText = options.editorText ?? 'hello';
+  let readError = options.readError || null;
   let now = options.now ?? Date.parse('2026-05-05T00:00:00.000Z');
   let dispatchCount = 0;
   let socketHookCount = 0;
   const normalizeCalls = [];
 
-  const document = {
+  const defaultDocument = {
     addEventListener(type, handler, optionsArg) {
       listeners.push({ type, handler, options: optionsArg });
     },
@@ -27,6 +28,9 @@ function createHarness(options = {}) {
       removals.push({ type, handler, options: optionsArg });
     }
   };
+  const document = Object.prototype.hasOwnProperty.call(options, 'document')
+    ? options.document
+    : defaultDocument;
   const window = options.window || {
     overleaf: {
       realtime: {
@@ -98,6 +102,9 @@ function createHarness(options = {}) {
       return activePath;
     },
     readActiveEditorText() {
+      if (readError) {
+        throw readError;
+      }
       return editorText;
     },
     getCodeMirrorEditorView() {
@@ -113,6 +120,9 @@ function createHarness(options = {}) {
       ];
     },
     now() {
+      if (typeof now === 'function') {
+        return now();
+      }
       return now;
     }
   };
@@ -121,6 +131,11 @@ function createHarness(options = {}) {
     document,
     get dispatchCount() {
       return dispatchCount;
+    },
+    fireEvent(type, event = { target: {} }) {
+      const listener = listeners.find(item => item.type === type);
+      assert.ok(listener, `${type} listener should be registered`);
+      listener.handler(event);
     },
     fireInput(event = { target: {} }) {
       const listener = listeners.find(item => item.type === 'input');
@@ -138,6 +153,9 @@ function createHarness(options = {}) {
     setEditorText(value) {
       editorText = value;
     },
+    setReadError(value) {
+      readError = value;
+    },
     setNow(value) {
       now = value;
     },
@@ -154,13 +172,14 @@ test('start initializes active editor state and queues an event for same-file in
   const startStatus = harness.observer.start({ projectId: 'project-123' });
 
   assert.equal(startStatus.status, 'observing');
+  assert.equal(startStatus.state, 'observing');
   assert.equal(startStatus.running, true);
   assert.equal(startStatus.strategy, 'active-editor');
   assert.equal(startStatus.activePath, 'main.tex');
   assert.equal(startStatus.queuedEventCount, 0);
-  assert.equal(harness.listeners.length, 1);
-  assert.equal(harness.listeners[0].type, 'input');
-  assert.equal(harness.listeners[0].options, true);
+  const inputListener = harness.listeners.find(listener => listener.type === 'input');
+  assert.ok(inputListener);
+  assert.equal(inputListener.options, true);
 
   harness.fireInput();
   assert.equal(harness.normalizeCalls.length, 0, 'unchanged input must not queue empty operations');
@@ -191,22 +210,21 @@ test('drainEvents returns queued events and empties the queue', () => {
 
   assert.equal(events.length, 1);
   assert.deepEqual(events[0], {
-    ok: true,
     path: 'main.tex',
-    previousContent: 'hello',
-    nextContent: 'hello world',
     baseHash: 'base:5',
     nextHash: 'next:11',
+    nextContent: 'hello world',
     ops: [{ p: 5, i: ' world' }],
     observedAt: '2026-05-05T00:00:00.000Z',
     observedVersion: null,
     source: 'active-editor'
   });
+  assert.equal(Object.prototype.hasOwnProperty.call(events[0], 'previousContent'), false);
   assert.deepEqual(harness.observer.drainEvents(), []);
   assert.equal(harness.observer.getStatus().queuedEventCount, 0);
 });
 
-test('active file switches update the baseline without queueing an event', () => {
+test('direct input switch adopts new active file as baseline when no selection event was observed', () => {
   const harness = createHarness();
   harness.observer.start({ projectId: 'project-123' });
 
@@ -227,16 +245,100 @@ test('active file switches update the baseline without queueing an event', () =>
   assert.equal(harness.normalizeCalls[0].nextContent, 'intro baseline plus edit');
 });
 
+test('selection events refresh active baseline so the first typed edit in a new file is queued', () => {
+  const harness = createHarness();
+  harness.observer.start({ projectId: 'project-123' });
+
+  harness.setActivePath('sections/intro.tex');
+  harness.setEditorText('intro baseline');
+  harness.fireEvent('focusin');
+
+  assert.equal(harness.observer.getStatus().activePath, 'sections/intro.tex');
+  assert.equal(harness.observer.getStatus().queuedEventCount, 0);
+  assert.equal(harness.normalizeCalls.length, 0);
+
+  harness.setEditorText('intro baseline plus edit');
+  harness.fireInput();
+
+  assert.equal(harness.normalizeCalls.length, 1);
+  assert.equal(harness.normalizeCalls[0].path, 'sections/intro.tex');
+  assert.equal(harness.normalizeCalls[0].previousContent, 'intro baseline');
+  assert.equal(harness.normalizeCalls[0].nextContent, 'intro baseline plus edit');
+  assert.equal(harness.observer.drainEvents()[0].path, 'sections/intro.tex');
+});
+
+test('editor read failures do not queue deletion events or reset the baseline', () => {
+  const harness = createHarness();
+  harness.observer.start({ projectId: 'project-123' });
+
+  harness.setReadError(new Error('editor unavailable'));
+  harness.fireInput();
+
+  assert.equal(harness.observer.getStatus().status, 'unavailable');
+  assert.equal(harness.observer.getStatus().reason, 'read_active_editor_failed');
+  assert.equal(harness.normalizeCalls.length, 0);
+  assert.deepEqual(harness.observer.drainEvents(), []);
+
+  harness.setReadError(null);
+  harness.setEditorText('hello world');
+  harness.fireInput();
+
+  assert.equal(harness.normalizeCalls.length, 1);
+  assert.equal(harness.normalizeCalls[0].previousContent, 'hello');
+  assert.equal(harness.normalizeCalls[0].nextContent, 'hello world');
+});
+
+test('invalid observed timestamps fall back to Date.now without throwing', () => {
+  const originalDateNow = Date.now;
+  Date.now = () => Date.parse('2026-05-05T01:02:03.000Z');
+  try {
+    const outOfRange = createHarness({ now: Number.MAX_VALUE });
+    outOfRange.observer.start({ projectId: 'project-123' });
+    outOfRange.setEditorText('hello world');
+
+    assert.doesNotThrow(() => outOfRange.fireInput());
+    assert.equal(outOfRange.normalizeCalls[0].observedAt, '2026-05-05T01:02:03.000Z');
+
+    const throwingClock = createHarness({
+      now() {
+        throw new Error('clock unavailable');
+      }
+    });
+    throwingClock.observer.start({ projectId: 'project-123' });
+    throwingClock.setEditorText('hello world');
+
+    assert.doesNotThrow(() => throwingClock.fireInput());
+    assert.equal(throwingClock.normalizeCalls[0].observedAt, '2026-05-05T01:02:03.000Z');
+  } finally {
+    Date.now = originalDateNow;
+  }
+});
+
 test('missing active path reports unavailable status with a stable reason', () => {
   const harness = createHarness({ activePath: '' });
 
   const status = harness.observer.start({ projectId: 'project-123' });
 
   assert.equal(status.status, 'unavailable');
+  assert.equal(status.state, 'unavailable');
   assert.equal(status.running, true);
   assert.equal(status.reason, 'missing_active_path');
   assert.equal(status.lastErrorCode, 'missing_active_path');
   assert.equal(status.activePath, '');
+});
+
+test('missing document reports unavailable status without running', () => {
+  const harness = createHarness({ document: null });
+
+  const status = harness.observer.start({ projectId: 'project-123' });
+
+  assert.equal(status.status, 'unavailable');
+  assert.equal(status.state, 'unavailable');
+  assert.equal(status.running, false);
+  assert.equal(status.reason, 'missing_document');
+  assert.equal(status.lastErrorCode, 'missing_document');
+  assert.equal(status.queuedEventCount, 0);
+  assert.equal(harness.listeners.length, 0);
 });
 
 test('observer remains read-only and diagnostics expose only channel key names', () => {
@@ -262,16 +364,49 @@ test('observer remains read-only and diagnostics expose only channel key names',
   assert.doesNotMatch(JSON.stringify(status.channelCandidates), /SECRET_/);
 });
 
+test('channel diagnostics do not invoke page-owned DOM marker getters', () => {
+  const Observer = loadObserverFactory();
+  let getterCallCount = 0;
+  const domLike = {};
+  Object.defineProperty(domLike, 'nodeType', {
+    enumerable: true,
+    get() {
+      getterCallCount += 1;
+      return 1;
+    }
+  });
+  Object.defineProperty(domLike, 'socket', {
+    enumerable: true,
+    value: {}
+  });
+
+  const candidates = Observer.collectChannelCandidates({
+    overleaf: {
+      editor: domLike,
+      realtime: {
+        socket: {}
+      }
+    }
+  });
+  const candidateKeys = candidates.flatMap(candidate =>
+    candidate.keyPaths.map(keyPath => `${candidate.root}:${keyPath}`)
+  );
+
+  assert.equal(getterCallCount, 0);
+  assert.ok(candidateKeys.includes('overleaf:realtime.socket'));
+  assert.equal(candidateKeys.includes('overleaf:editor.socket'), false);
+});
+
 test('stop removes the active-editor input listener and returns off status', () => {
   const harness = createHarness();
   harness.observer.start({ projectId: 'project-123' });
 
   const status = harness.observer.stop();
 
-  assert.equal(harness.removals.length, 1);
-  assert.equal(harness.removals[0].type, 'input');
-  assert.equal(harness.removals[0].options, true);
+  assert.deepEqual(harness.removals.map(removal => removal.type), ['input', 'click', 'focusin', 'change']);
+  assert.ok(harness.removals.every(removal => removal.options === true));
   assert.equal(status.status, 'off');
+  assert.equal(status.state, 'off');
   assert.equal(status.running, false);
 });
 
