@@ -268,6 +268,14 @@ function mergePartialBaselineFiles(previousFiles, overlayFiles) {
   return Array.from(filesByPath.values()).sort((left, right) => left.path.localeCompare(right.path));
 }
 
+function mergePatchedBaselineFiles(previousFiles, patchedFilesByPath) {
+  const filesByPath = new Map((previousFiles || []).map(file => [file.path, file]));
+  for (const [filePath, file] of patchedFilesByPath) {
+    filesByPath.set(filePath, file);
+  }
+  return Array.from(filesByPath.values()).sort((left, right) => left.path.localeCompare(right.path));
+}
+
 function hashProjectFile(file) {
   return hashBytes(getProjectFileBytes(file));
 }
@@ -414,7 +422,8 @@ function getMirrorStatus(projectId, options = {}) {
       lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
       dirty: baseline.dirty === true,
       dirtyReason: baseline.dirtyReason || '',
-      workspacePath: mirror.workspacePath
+      workspacePath: mirror.workspacePath,
+      ...buildOtStatusFields(baseline, false)
     };
   }
   if (baseline.dirty === true) {
@@ -430,7 +439,8 @@ function getMirrorStatus(projectId, options = {}) {
       lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
       dirty: true,
       dirtyReason: baseline.dirtyReason || 'dirty_mirror',
-      workspacePath: mirror.workspacePath
+      workspacePath: mirror.workspacePath,
+      ...buildOtStatusFields(baseline, false)
     };
   }
   const lastFullSyncAt = baseline.lastFullSyncAt;
@@ -448,7 +458,8 @@ function getMirrorStatus(projectId, options = {}) {
       lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
       dirty: false,
       dirtyReason: '',
-      workspacePath: mirror.workspacePath
+      workspacePath: mirror.workspacePath,
+      ...buildOtStatusFields(baseline, false)
     };
   }
   const integrity = verifyWorkspaceMatchesBaseline(mirror.workspacePath, baseline.files || []);
@@ -466,7 +477,8 @@ function getMirrorStatus(projectId, options = {}) {
       dirty: true,
       dirtyReason: integrity.reason,
       dirtyPath: integrity.path || '',
-      workspacePath: mirror.workspacePath
+      workspacePath: mirror.workspacePath,
+      ...buildOtStatusFields(baseline, false)
     };
   }
   const ageMs = Date.now() - lastFullSyncTime;
@@ -482,7 +494,41 @@ function getMirrorStatus(projectId, options = {}) {
     lastFileCount: Number.isFinite(Number(baseline.lastFileCount)) ? Number(baseline.lastFileCount) : (baseline.files || []).length,
     dirty: false,
     dirtyReason: '',
-    workspacePath: mirror.workspacePath
+    workspacePath: mirror.workspacePath,
+    ...buildOtStatusFields(baseline, true)
+  };
+}
+
+function buildOtStatusFields(baseline = {}, trusted) {
+  const metadata = {
+    lastOtPatchAt: baseline.lastOtPatchAt || '',
+    lastOtErrorCode: baseline.lastOtErrorCode || ''
+  };
+  if (!trusted) {
+    return {
+      ...metadata,
+      otFreshFileCount: 0,
+      otStaleFileCount: 0,
+      otFreshFiles: []
+    };
+  }
+  const textFiles = (baseline.files || []).filter(file => file?.kind === 'text');
+  const freshFiles = textFiles
+    .filter(file => file.freshness?.source === 'ot' && file.freshness?.state === 'fresh')
+    .map(file => ({
+      path: file.path,
+      source: file.freshness.source,
+      state: file.freshness.state,
+      lastFullSyncAt: file.freshness.lastFullSyncAt || '',
+      lastPatchAt: file.freshness.lastPatchAt || '',
+      observedVersion: file.freshness.observedVersion ?? null
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  return {
+    ...metadata,
+    otFreshFileCount: freshFiles.length,
+    otStaleFileCount: textFiles.length - freshFiles.length,
+    otFreshFiles: freshFiles
   };
 }
 
@@ -513,6 +559,109 @@ async function applyFileOverlays({ projectId, overlays, rootDir }) {
     ...baseline,
     files: Array.from(filesByPath.values())
   });
+}
+
+async function patchMirrorFiles({ projectId, files, rootDir, source = 'ot' }) {
+  const mirror = getProjectMirror(projectId, { rootDir });
+  const baseline = readBaseline(mirror.baselinePath);
+  const baselineByPath = new Map((baseline.files || []).map(file => [file.path, file]));
+  const patchedFilesByPath = new Map();
+  const appliedFiles = [];
+  const skippedFiles = [];
+  const patchSource = typeof source === 'string' && source ? source : 'ot';
+  let lastOtPatchAt = baseline.lastOtPatchAt || '';
+  let lastOtErrorCode = '';
+  let patchBatchAt = '';
+
+  for (const patch of Array.isArray(files) ? files : []) {
+    const normalized = normalizePatchPath(patch, mirror.workspacePath);
+    if (!normalized.ok) {
+      skippedFiles.push({ path: normalized.path, reason: 'unsafe_path' });
+      lastOtErrorCode = 'unsafe_path';
+      continue;
+    }
+
+    const baselineFile = baselineByPath.get(normalized.path);
+    if (!baselineFile) {
+      skippedFiles.push({ path: normalized.path, reason: 'missing_baseline' });
+      lastOtErrorCode = 'missing_baseline';
+      continue;
+    }
+    if (baselineFile.kind !== 'text') {
+      skippedFiles.push({ path: normalized.path, reason: 'not_text' });
+      lastOtErrorCode = 'not_text';
+      continue;
+    }
+    if (typeof patch?.nextContent !== 'string') {
+      skippedFiles.push({ path: normalized.path, reason: 'missing_content' });
+      lastOtErrorCode = 'missing_content';
+      continue;
+    }
+    if (Object.hasOwn(patch, 'baseHash') && patch.baseHash !== baselineFile.hash) {
+      skippedFiles.push({ path: normalized.path, reason: 'base_hash_mismatch' });
+      lastOtErrorCode = 'base_hash_mismatch';
+      continue;
+    }
+
+    patchBatchAt ||= new Date().toISOString();
+    lastOtPatchAt = patchBatchAt;
+    fs.mkdirSync(path.dirname(normalized.target), { recursive: true });
+    fs.writeFileSync(normalized.target, patch.nextContent, 'utf8');
+
+    const hash = hashText(patch.nextContent);
+    const nextBaselineFile = {
+      ...baselineFile,
+      path: normalized.path,
+      kind: 'text',
+      hash,
+      content: patch.nextContent,
+      freshness: {
+        source: patchSource,
+        state: 'fresh',
+        lastFullSyncAt: baseline.lastFullSyncAt || '',
+        lastPatchAt: patchBatchAt,
+        observedVersion: patch.observedVersion ?? null
+      }
+    };
+    patchedFilesByPath.set(normalized.path, nextBaselineFile);
+    baselineByPath.set(normalized.path, nextBaselineFile);
+    appliedFiles.push({
+      path: normalized.path,
+      hash,
+      observedVersion: patch.observedVersion ?? null
+    });
+  }
+
+  if (appliedFiles.length || skippedFiles.length) {
+    writeBaseline(mirror.baselinePath, {
+      ...baseline,
+      lastOtPatchAt,
+      lastOtErrorCode,
+      files: mergePatchedBaselineFiles(baseline.files || [], patchedFilesByPath)
+    });
+  }
+
+  return {
+    ...mirror,
+    appliedCount: appliedFiles.length,
+    skippedCount: skippedFiles.length,
+    appliedFiles,
+    skippedFiles
+  };
+}
+
+function normalizePatchPath(patch, workspacePath) {
+  const rawPath = typeof patch?.path === 'string' ? patch.path : '';
+  try {
+    const normalizedPath = normalizeRelativePath(rawPath);
+    return {
+      ok: true,
+      path: normalizedPath,
+      target: resolveWorkspacePath(workspacePath, normalizedPath)
+    };
+  } catch {
+    return { ok: false, path: rawPath };
+  }
 }
 
 function markMirrorDirty({ projectId, rootDir, reason = 'dirty_mirror' }) {
@@ -567,5 +716,6 @@ module.exports = {
   getMirrorStatus,
   getProjectMirror,
   markMirrorDirty,
+  patchMirrorFiles,
   syncOverleafToMirror
 };

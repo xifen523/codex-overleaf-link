@@ -5,7 +5,14 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { syncOverleafToMirror, getProjectMirror, getMirrorStatus, applyFileOverlays } = require('../native-host/src/mirrorWorkspace');
+const {
+  syncOverleafToMirror,
+  getProjectMirror,
+  getMirrorStatus,
+  applyFileOverlays,
+  markMirrorDirty,
+  patchMirrorFiles
+} = require('../native-host/src/mirrorWorkspace');
 
 let tempRoot;
 
@@ -77,6 +84,11 @@ test('getMirrorStatus returns exists:false for unknown project', () => {
   const status = getMirrorStatus('nonexistent', { rootDir: tempRoot });
   assert.strictEqual(status.exists, false);
   assert.strictEqual(status.fileCount, 0);
+  assert.strictEqual(status.otFreshFileCount, 0);
+  assert.strictEqual(status.otStaleFileCount, 0);
+  assert.strictEqual(status.lastOtPatchAt, '');
+  assert.strictEqual(status.lastOtErrorCode, '');
+  assert.deepStrictEqual(status.otFreshFiles, []);
 });
 
 test('applyFileOverlays writes content to workspace', async () => {
@@ -133,6 +145,180 @@ test('applyFileOverlays can add a new file without affecting others', async () =
   const mirror = getProjectMirror('test-proj', { rootDir: tempRoot });
   assert.strictEqual(fs.readFileSync(path.join(mirror.workspacePath, 'main.tex'), 'utf8'), 'hello');
   assert.strictEqual(fs.readFileSync(path.join(mirror.workspacePath, 'refs.bib'), 'utf8'), '@article{foo}');
+});
+
+test('patchMirrorFiles applies verified text patch without updating lastFullSyncAt', async () => {
+  await syncOverleafToMirror({
+    projectId: 'test-proj',
+    project: { files: [{ path: 'main.tex', content: 'old content' }] },
+    rootDir: tempRoot
+  });
+  const mirror = getProjectMirror('test-proj', { rootDir: tempRoot });
+  const baselineBefore = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+  const entryBefore = baselineBefore.files.find(f => f.path === 'main.tex');
+
+  const result = await patchMirrorFiles({
+    projectId: 'test-proj',
+    rootDir: tempRoot,
+    source: 'ot',
+    files: [{
+      path: 'main.tex',
+      baseHash: entryBefore.hash,
+      nextContent: 'patched content',
+      observedVersion: 12
+    }]
+  });
+
+  assert.strictEqual(result.appliedCount, 1);
+  assert.strictEqual(result.skippedCount, 0);
+  assert.deepStrictEqual(result.appliedFiles.map(file => file.path), ['main.tex']);
+  assert.strictEqual(fs.readFileSync(path.join(mirror.workspacePath, 'main.tex'), 'utf8'), 'patched content');
+
+  const baselineAfter = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+  assert.strictEqual(baselineAfter.lastFullSyncAt, baselineBefore.lastFullSyncAt);
+  assert.strictEqual(baselineAfter.capturedAt, baselineBefore.capturedAt);
+  assert.ok(baselineAfter.lastOtPatchAt);
+  assert.strictEqual(baselineAfter.lastOtErrorCode, '');
+
+  const entryAfter = baselineAfter.files.find(f => f.path === 'main.tex');
+  assert.strictEqual(entryAfter.content, 'patched content');
+  assert.notStrictEqual(entryAfter.hash, entryBefore.hash);
+  assert.deepStrictEqual(entryAfter.freshness, {
+    source: 'ot',
+    state: 'fresh',
+    lastFullSyncAt: baselineBefore.lastFullSyncAt,
+    lastPatchAt: baselineAfter.lastOtPatchAt,
+    observedVersion: 12
+  });
+});
+
+test('patchMirrorFiles skips base hash mismatch and unsafe path', async () => {
+  await syncOverleafToMirror({
+    projectId: 'test-proj',
+    project: { files: [{ path: 'main.tex', content: 'old content' }] },
+    rootDir: tempRoot
+  });
+  const mirror = getProjectMirror('test-proj', { rootDir: tempRoot });
+
+  const result = await patchMirrorFiles({
+    projectId: 'test-proj',
+    rootDir: tempRoot,
+    files: [
+      { path: 'main.tex', baseHash: 'wrong-hash', nextContent: 'should not write' },
+      { path: 'main.tex', baseHash: '', nextContent: 'should not write either' },
+      { path: '../outside.tex', nextContent: 'unsafe' }
+    ]
+  });
+
+  assert.strictEqual(result.appliedCount, 0);
+  assert.deepStrictEqual(result.skippedFiles.map(file => [file.path, file.reason]), [
+    ['main.tex', 'base_hash_mismatch'],
+    ['main.tex', 'base_hash_mismatch'],
+    ['../outside.tex', 'unsafe_path']
+  ]);
+  assert.strictEqual(fs.readFileSync(path.join(mirror.workspacePath, 'main.tex'), 'utf8'), 'old content');
+
+  const baseline = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+  const entry = baseline.files.find(f => f.path === 'main.tex');
+  assert.strictEqual(entry.content, 'old content');
+  assert.strictEqual(baseline.lastOtErrorCode, 'unsafe_path');
+});
+
+test('getMirrorStatus reports OT fresh file paths without file content', async () => {
+  await syncOverleafToMirror({
+    projectId: 'test-proj',
+    project: {
+      files: [
+        { path: 'main.tex', content: 'old main' },
+        { path: 'refs.bib', content: '@article{old}' }
+      ]
+    },
+    rootDir: tempRoot
+  });
+  const mirror = getProjectMirror('test-proj', { rootDir: tempRoot });
+  const baselineBefore = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+  const mainEntry = baselineBefore.files.find(f => f.path === 'main.tex');
+
+  await patchMirrorFiles({
+    projectId: 'test-proj',
+    rootDir: tempRoot,
+    files: [{ path: 'main.tex', baseHash: mainEntry.hash, nextContent: 'fresh main', observedVersion: 13 }]
+  });
+
+  const status = getMirrorStatus('test-proj', { rootDir: tempRoot });
+  assert.strictEqual(status.otFreshFileCount, 1);
+  assert.strictEqual(status.otStaleFileCount, 1);
+  assert.ok(status.lastOtPatchAt);
+  assert.strictEqual(status.lastOtErrorCode, '');
+  assert.deepStrictEqual(status.otFreshFiles.map(file => file.path), ['main.tex']);
+  assert.strictEqual(status.otFreshFiles[0].observedVersion, 13);
+  assert.strictEqual(Object.hasOwn(status.otFreshFiles[0], 'content'), false);
+  assert.strictEqual(JSON.stringify(status).includes('fresh main'), false);
+  assert.strictEqual(JSON.stringify(status).includes('@article{old}'), false);
+});
+
+test('getMirrorStatus returns OT safe defaults for dirty mirrors', async () => {
+  await syncOverleafToMirror({
+    projectId: 'test-proj',
+    project: { files: [{ path: 'main.tex', content: 'old main' }] },
+    rootDir: tempRoot
+  });
+  const mirror = getProjectMirror('test-proj', { rootDir: tempRoot });
+  const baselineBefore = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+  const mainEntry = baselineBefore.files.find(f => f.path === 'main.tex');
+
+  await patchMirrorFiles({
+    projectId: 'test-proj',
+    rootDir: tempRoot,
+    files: [{ path: 'main.tex', baseHash: mainEntry.hash, nextContent: 'fresh main', observedVersion: 13 }]
+  });
+  markMirrorDirty({ projectId: 'test-proj', rootDir: tempRoot, reason: 'local_dirty' });
+
+  const status = getMirrorStatus('test-proj', { rootDir: tempRoot });
+  assert.strictEqual(status.exists, false);
+  assert.strictEqual(status.dirty, true);
+  assert.strictEqual(status.otFreshFileCount, 0);
+  assert.strictEqual(status.otStaleFileCount, 0);
+  assert.ok(status.lastOtPatchAt);
+  assert.deepStrictEqual(status.otFreshFiles, []);
+  assert.strictEqual(JSON.stringify(status).includes('fresh main'), false);
+});
+
+test('patchMirrorFiles skips binary files, missing baselines, and missing content', async () => {
+  await syncOverleafToMirror({
+    projectId: 'test-proj',
+    project: {
+      files: [
+        { path: 'main.tex', content: 'old content' },
+        { path: 'Figure/plot.pdf', contentBase64: Buffer.from([0, 1, 2]).toString('base64') }
+      ]
+    },
+    rootDir: tempRoot
+  });
+  const mirror = getProjectMirror('test-proj', { rootDir: tempRoot });
+
+  const result = await patchMirrorFiles({
+    projectId: 'test-proj',
+    rootDir: tempRoot,
+    files: [
+      { path: 'missing.tex', nextContent: 'new file' },
+      { path: 'Figure/plot.pdf', nextContent: 'not really pdf' },
+      { path: 'main.tex' }
+    ]
+  });
+
+  assert.strictEqual(result.appliedCount, 0);
+  assert.deepStrictEqual(result.skippedFiles.map(file => [file.path, file.reason]), [
+    ['missing.tex', 'missing_baseline'],
+    ['Figure/plot.pdf', 'not_text'],
+    ['main.tex', 'missing_content']
+  ]);
+  assert.deepStrictEqual(fs.readFileSync(path.join(mirror.workspacePath, 'Figure/plot.pdf')), Buffer.from([0, 1, 2]));
+
+  const baseline = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+  const entry = baseline.files.find(f => f.path === 'main.tex');
+  assert.strictEqual(entry.content, 'old content');
+  assert.strictEqual(baseline.lastOtErrorCode, 'missing_content');
 });
 
 test('handleRequest mirror.status returns status for known project', async () => {
