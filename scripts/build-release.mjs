@@ -30,7 +30,7 @@ export function buildRelease(options = {}) {
     throw new Error('package.json must define a version.');
   }
 
-  const outputDir = path.resolve(options.outputDir || path.join(rootDir, 'dist/releases', `v${version}`));
+  const outputDir = path.resolve(options.outputDir || getDefaultReleaseOutputDir({ rootDir, version }));
   const extensionZipName = `codex-overleaf-link-extension-v${version}.zip`;
   const nativeTarballName = `codex-overleaf-native-host-v${version}.tar.gz`;
   const extensionZipPath = path.join(outputDir, extensionZipName);
@@ -96,17 +96,21 @@ export function extractReleaseNotes(changelog, version) {
     throw new Error(`CHANGELOG.md does not contain a release section for v${version}.`);
   }
 
-  const sectionStart = headingMatch.index;
-  const rest = changelog.slice(sectionStart);
-  const nextHeadingMatch = rest.slice(headingMatch[0].length).match(/\n## /);
-  const sectionEnd = nextHeadingMatch
-    ? headingMatch[0].length + nextHeadingMatch.index
-    : rest.length;
-  const section = rest.slice(0, sectionEnd).trim();
-  if (!section) {
+  const rest = changelog.slice(headingMatch.index);
+  const bodyAndFollowingSections = rest.slice(headingMatch[0].length);
+  const nextHeadingMatch = bodyAndFollowingSections.match(/\n## /);
+  const body = (nextHeadingMatch
+    ? bodyAndFollowingSections.slice(0, nextHeadingMatch.index)
+    : bodyAndFollowingSections
+  ).trim();
+  if (!body) {
     throw new Error(`CHANGELOG.md release section for v${version} is empty.`);
   }
-  return `${section}\n`;
+  return `${headingMatch[0]}\n\n${body}\n`;
+}
+
+export function getDefaultReleaseOutputDir({ rootDir, version }) {
+  return path.join(rootDir, 'dist/releases', `v${version}`);
 }
 
 function createExtensionZip({ rootDir, outputPath }) {

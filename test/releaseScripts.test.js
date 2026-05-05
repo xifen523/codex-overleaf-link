@@ -41,6 +41,10 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   const manifestVersion = overrides.manifestVersion || packageVersion;
   const readmeVersion = overrides.readmeVersion || packageVersion;
   const changelogVersion = overrides.changelogVersion || packageVersion;
+  const changelogDate = overrides.changelogDate || '2026-05-06';
+  const changelogBody = Object.hasOwn(overrides, 'changelogBody')
+    ? overrides.changelogBody
+    : 'Fixture release notes.\n';
 
   fs.mkdirSync(path.join(rootDir, 'extension'), { recursive: true });
   fs.writeFileSync(
@@ -57,7 +61,7 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   );
   fs.writeFileSync(
     path.join(rootDir, 'CHANGELOG.md'),
-    `# Changelog\n\n## v${changelogVersion} - 2026-05-06\n\nFixture release notes.\n`
+    overrides.changelogText || `# Changelog\n\n## v${changelogVersion} - ${changelogDate}\n\n${changelogBody}`
   );
 }
 
@@ -90,6 +94,141 @@ test('release verifier catches package and extension manifest version mismatch',
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('release verifier catches README badge mismatch', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-readme-'));
+  try {
+    writeReleaseFixture(tempDir, {
+      packageVersion: '1.2.3',
+      readmeVersion: '1.2.4'
+    });
+    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
+    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+
+    const errors = collectReleaseVerificationErrors({
+      rootDir: tempDir,
+      releaseDate: '2026-05-06'
+    });
+
+    assert.ok(
+      errors.some((error) => /README\.md.*version-1\.2\.3-blue/i.test(error)),
+      errors.join('\n')
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('release verifier catches CHANGELOG heading date mismatch', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-changelog-'));
+  try {
+    writeReleaseFixture(tempDir, {
+      packageVersion: '1.2.3',
+      changelogDate: '2026-05-07'
+    });
+    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
+    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+
+    const errors = collectReleaseVerificationErrors({
+      rootDir: tempDir,
+      releaseDate: '2026-05-06'
+    });
+
+    assert.ok(
+      errors.some((error) => /CHANGELOG\.md.*## v1\.2\.3 - 2026-05-06/i.test(error)),
+      errors.join('\n')
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('release verifier checks Chrome Web Store docs only when docs directory exists', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-docs-'));
+  try {
+    writeReleaseFixture(tempDir);
+    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
+    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+
+    assert.deepEqual(collectReleaseVerificationErrors({ rootDir: tempDir, releaseDate: '2026-05-06' }), []);
+
+    const docsDir = path.join(tempDir, 'docs/chrome-web-store');
+    fs.mkdirSync(docsDir, { recursive: true });
+    fs.writeFileSync(path.join(docsDir, 'permissions.md'), 'permissions\n');
+
+    const missingDocErrors = collectReleaseVerificationErrors({
+      rootDir: tempDir,
+      releaseDate: '2026-05-06'
+    });
+    assert.ok(
+      missingDocErrors.some((error) => /docs\/chrome-web-store\/privacy\.md/.test(error)),
+      missingDocErrors.join('\n')
+    );
+    assert.ok(
+      missingDocErrors.some((error) => /docs\/chrome-web-store\/listing\.md/.test(error)),
+      missingDocErrors.join('\n')
+    );
+    assert.ok(
+      missingDocErrors.some((error) => /docs\/chrome-web-store\/release-checklist\.md/.test(error)),
+      missingDocErrors.join('\n')
+    );
+
+    for (const fileName of ['privacy.md', 'listing.md', 'release-checklist.md']) {
+      fs.writeFileSync(path.join(docsDir, fileName), `${fileName}\n`);
+    }
+    assert.deepEqual(collectReleaseVerificationErrors({ rootDir: tempDir, releaseDate: '2026-05-06' }), []);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('release verifier CLI exits 1 on metadata mismatch', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-cli-'));
+  try {
+    writeReleaseFixture(tempDir, {
+      packageVersion: '1.2.3',
+      manifestVersion: '1.2.4'
+    });
+
+    const result = spawnSync(process.execPath, [
+      path.join(repoRoot, 'scripts/verify-release.mjs'),
+      '--root',
+      tempDir
+    ], {
+      encoding: 'utf8'
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Release verification failed/);
+    assert.match(result.stderr, /extension\/manifest\.json version 1\.2\.4/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('build-release derives the default output directory from version', async () => {
+  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
+  const { getDefaultReleaseOutputDir } = await import(moduleUrl);
+
+  assert.equal(
+    getDefaultReleaseOutputDir({ rootDir: '/tmp/codex-overleaf-link', version: '1.2.3' }),
+    path.join('/tmp/codex-overleaf-link', 'dist/releases/v1.2.3')
+  );
+});
+
+test('release note extraction fails for missing or empty changelog sections', async () => {
+  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
+  const { extractReleaseNotes } = await import(moduleUrl);
+
+  assert.throws(
+    () => extractReleaseNotes('# Changelog\n\n## v1.2.2 - 2026-05-05\n\nPrevious notes.\n', '1.2.3'),
+    /does not contain a release section for v1\.2\.3/
+  );
+  assert.throws(
+    () => extractReleaseNotes('# Changelog\n\n## v1.2.3 - 2026-05-06\n\n## v1.2.2 - 2026-05-05\n\nPrevious notes.\n', '1.2.3'),
+    /release section for v1\.2\.3 is empty/
+  );
 });
 
 test('build-release creates expected artifacts and metadata', (t) => {
