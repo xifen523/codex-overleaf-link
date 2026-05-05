@@ -82,11 +82,15 @@
     if (method === 'ensureReviewing') {
       return ensureReviewing(params);
     }
+    if (method === 'ensureEditing') {
+      return ensureEditing(params);
+    }
     if (method === 'applyOperations') {
       return applyOperations(params.operations || [], {
         baseFiles: params.baseFiles || null,
         reviewingPolicy: params.reviewingPolicy || '',
-        requireReviewing: params.requireReviewing === true
+        requireReviewing: params.requireReviewing === true,
+        requireEditing: params.requireEditing === true
       });
     }
     if (method === 'rejectTrackedChanges') {
@@ -184,6 +188,39 @@
       reason: switched.attempted
         ? 'Codex clicked the Overleaf mode control, but Overleaf still did not report Reviewing/Track Changes as enabled.'
         : 'Overleaf Reviewing/Track Changes is not enabled, and Codex could not find a Reviewing control to activate.',
+      reviewing: switched.reviewing || initial.reviewing
+    };
+  }
+
+  async function ensureEditing(params = {}) {
+    const initial = getReviewingState(params);
+    if (isEditingConfirmedForNoTraceUndo(initial)) {
+      return {
+        ok: true,
+        activated: false,
+        changed: false,
+        enabled: false,
+        reviewing: initial.reviewing
+      };
+    }
+
+    const switched = await toggleReviewingMode(false, params);
+    if (switched.ok) {
+      return {
+        ok: true,
+        activated: true,
+        changed: true,
+        enabled: false,
+        reviewing: switched.reviewing
+      };
+    }
+
+    return {
+      ok: false,
+      code: 'editing_not_confirmed',
+      reason: switched.attempted
+        ? 'Codex clicked the Overleaf mode control, but Overleaf still did not clearly report Editing mode.'
+        : 'Overleaf Editing mode was not clearly confirmed, and Codex could not find a mode control to switch to Editing.',
       reviewing: switched.reviewing || initial.reviewing
     };
   }
@@ -425,9 +462,17 @@
       control.dataOlName
     ].filter(Boolean).join(' '));
 
-    return /^(editing|source editing|source mode)$/i.test(visibleLabel)
+    return isRepeatedEditingModeLabel(visibleLabel)
       && /\b(editor-mode|mode|source|dropdown|switcher|toggle)\b/i.test(controlIdentity)
       && !/\breviewing\b|\btrack(?:ed)? changes?\b|\bsuggest(?:ing|ions?)\b/i.test(text);
+  }
+
+  function isRepeatedEditingModeLabel(value) {
+    const labels = normalizeReviewingSignalText(value)
+      .split(/\s+(?=editing\b|source editing\b|source mode\b)/i)
+      .map(label => normalizeReviewingSignalText(label))
+      .filter(Boolean);
+    return labels.length > 0 && labels.every(label => /^(editing|source editing|source mode)$/i.test(label));
   }
 
   function normalizeReviewingSignalText(value) {
@@ -1382,17 +1427,42 @@
     if (options.reviewingPolicy === 'no-trace-undo') {
       return applyOperationsWithNoTraceUndo(operations, options);
     }
-    const trackReviewingChanges = options.requireReviewing === true && (operations || []).length > 0;
-    if (options.requireReviewing === true && (operations || []).length > 0) {
+    const hasOperations = (operations || []).length > 0;
+    const trackReviewingChanges = options.requireReviewing === true && hasOperations;
+    let reviewingPolicy = null;
+    if (options.requireReviewing === true && hasOperations) {
       const reviewing = await ensureReviewing({ waitMs: 1800 });
       if (!reviewing.ok) {
         return buildReviewingRequiredBlockedResult(operations, reviewing);
       }
+    } else if (options.requireEditing === true && hasOperations) {
+      const editing = await ensureEditing({ waitMs: 1800 });
+      if (!editing.ok) {
+        return buildEditingRequiredBlockedResult(operations, editing);
+      }
+      reviewingPolicy = {
+        policy: 'editing-write',
+        disabled: editing.activated === true,
+        leftEditing: true,
+        reason: editing.activated ? 'switched_to_editing_before_write' : 'editing_already_confirmed',
+        disable: summarizeReviewingToggleResult({
+          ok: true,
+          changed: editing.activated === true,
+          enabled: false,
+          reason: editing.activated ? 'Switched to Editing before untracked write.' : 'Editing already confirmed before untracked write.'
+        })
+      };
     }
-    return applyOperationsCore(operations, {
+    const result = await applyOperationsCore(operations, {
       ...options,
       trackReviewingChanges
     });
+    return reviewingPolicy
+      ? {
+        ...result,
+        reviewingPolicy
+      }
+      : result;
   }
 
   async function applyOperationsWithNoTraceUndo(operations, options = {}) {
@@ -1961,6 +2031,23 @@
         }
       })),
       reviewing
+    };
+  }
+
+  function buildEditingRequiredBlockedResult(operations, editing) {
+    return {
+      ok: false,
+      applied: [],
+      skipped: (operations || []).map(rawOperation => ({
+        operation: normalizeOperationPaths(rawOperation),
+        result: {
+          ok: false,
+          code: editing?.code || 'editing_not_confirmed',
+          reason: editing?.reason || 'Overleaf Editing mode was not confirmed before writing. Codex did not change this file.',
+          reviewing: editing?.reviewing || null
+        }
+      })),
+      reviewing: editing
     };
   }
 

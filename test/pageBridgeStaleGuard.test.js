@@ -487,6 +487,66 @@ test('page bridge blocks required Reviewing writes at the final apply boundary',
   assert.equal(bridge.getFile('main.tex'), 'alpha beta');
 });
 
+test('page bridge switches to Editing before untracked write operations', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    reviewingClickBehavior: 'menu',
+    reviewingButtonShowsCurrentMode: true,
+    files: {
+      'main.tex': 'alpha beta'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    requireEditing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta' }
+    ],
+    operations: [
+      { type: 'edit', path: 'main.tex', find: 'alpha', replace: 'omega' }
+    ]
+  });
+
+  assert.equal(result.ok, true, result.error || JSON.stringify(result));
+  assert.equal(bridge.getFile('main.tex'), 'omega beta');
+  assert.equal(bridge.getReviewingClickCount(), 1);
+  assert.equal(bridge.getModeOptionClickCount(), 1);
+  assert.equal(bridge.isReviewingActive(), false);
+  assert.equal(result.reviewingPolicy.policy, 'editing-write');
+  assert.equal(result.reviewingPolicy.disabled, true);
+  assert.equal(result.reviewingPolicy.leftEditing, true);
+});
+
+test('page bridge blocks untracked writes when Editing cannot be confirmed', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    reviewingClickBehavior: 'noop',
+    reviewingButtonShowsCurrentMode: true,
+    files: {
+      'main.tex': 'alpha beta'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    requireEditing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta' }
+    ],
+    operations: [
+      { type: 'edit', path: 'main.tex', find: 'alpha', replace: 'omega' }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.code, 'editing_not_confirmed');
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta');
+  assert.equal(bridge.isReviewingActive(), true);
+});
+
 test('page bridge rejects write-safety confirmation when Reviewing click does not activate', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',

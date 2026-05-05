@@ -741,17 +741,23 @@ test('write paths enforce Overleaf Reviewing before applying changes when reques
   assert.match(applySyncBody, /const runRequireReviewing = typeof options\.requireReviewing === 'boolean'/);
   assert.match(applySyncBody, /await ensureReviewingBeforeWrite\(operations,\s*\{\s*requireReviewing:\s*runRequireReviewing\s*\}\)/);
   assert.match(applySyncBody, /requireReviewing:\s*runRequireReviewing/);
+  assert.match(applySyncBody, /requireEditing:\s*!runRequireReviewing/);
   assert.doesNotMatch(applySyncBody, /requireReviewing:\s*state\.requireReviewing === true/);
   assert.match(applyTaskBody, /await ensureReviewingBeforeWrite\(partitioned\.safe,\s*\{\s*requireReviewing:\s*runRequireReviewing\s*\}\)/);
   assert.match(applyTaskBody, /requireReviewing:\s*runRequireReviewing/);
+  assert.match(applyTaskBody, /requireEditing:\s*!runRequireReviewing/);
   assert.doesNotMatch(applyTaskBody, /requireReviewing:\s*state\.requireReviewing === true/);
   assert.match(pageBridge, /method === 'ensureReviewing'/);
+  assert.match(pageBridge, /method === 'ensureEditing'/);
   assert.match(pageBridge, /function ensureReviewing\(/);
+  assert.match(pageBridge, /function ensureEditing\(/);
   assert.match(pageBridge, /requireReviewing:\s*params\.requireReviewing === true/);
+  assert.match(pageBridge, /requireEditing:\s*params\.requireEditing === true/);
   assert.match(pageBridge, /buildReviewingRequiredBlockedResult/);
+  assert.match(pageBridge, /buildEditingRequiredBlockedResult/);
 });
 
-test('write tasks preflight Reviewing before syncing or starting local Codex', () => {
+test('write tasks preflight Reviewing or Editing before syncing or starting local Codex', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -773,13 +779,17 @@ test('write tasks preflight Reviewing before syncing or starting local Codex', (
   assert.match(preflightBody, /const mode = options\.mode \|\| state\.mode/);
   assert.match(preflightBody, /const requireReviewing = typeof options\.requireReviewing === 'boolean'/);
   assert.match(preflightBody, /mode === 'ask'/);
-  assert.match(preflightBody, /!requireReviewing/);
-  assert.match(preflightBody, /callPageBridge\('ensureReviewing'/);
+  assert.match(preflightBody, /const method = requireReviewing \? 'ensureReviewing' : 'ensureEditing'/);
+  assert.match(preflightBody, /callPageBridge\(method/);
   assert.match(preflightBody, /任务未开始：无法开启 Overleaf 留痕/);
-  assert.match(preflightBody, /finishRunView\(tx\('Not started: could not enable Track Changes', '未开始：无法开启留痕'\), 'failed'\)/);
+  assert.match(preflightBody, /任务未开始：无法切换到 Overleaf Editing/);
+  assert.match(preflightBody, /const finishTitle = requireReviewing/);
+  assert.match(preflightBody, /tx\('Not started: could not enable Track Changes', '未开始：无法开启留痕'\)/);
+  assert.match(preflightBody, /tx\('Not started: could not switch to Editing', '未开始：无法切换到 Editing'\)/);
+  assert.match(preflightBody, /finishRunView\(finishTitle, 'failed'\)/);
 });
 
-test('write preflight gives natural feedback for automatic Reviewing activation', () => {
+test('write preflight gives natural feedback for automatic Reviewing or Editing activation', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -787,9 +797,13 @@ test('write preflight gives natural feedback for automatic Reviewing activation'
   const preflightBody = contentScript.match(/async function preflightWriteSafety\([^)]*\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
 
   assert.match(preflightBody, /正在确认 Overleaf 留痕状态/);
+  assert.match(preflightBody, /正在确认 Overleaf Editing 模式/);
   assert.match(preflightBody, /已开启 Overleaf 留痕，开始处理任务/);
   assert.match(preflightBody, /Overleaf 留痕已经开启，开始处理任务/);
+  assert.match(preflightBody, /已切到 Overleaf Editing，开始处理任务/);
+  assert.match(preflightBody, /Overleaf 已在 Editing 模式，开始处理任务/);
   assert.match(preflightBody, /你可能没有权限，或 Overleaf 当前页面没有暴露切换入口/);
+  assert.match(preflightBody, /请在 Overleaf 手动切到 Editing 后重试/);
 });
 
 test('native and raw agent events go through the human transcript mapper', () => {

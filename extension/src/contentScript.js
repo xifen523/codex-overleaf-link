@@ -1561,43 +1561,61 @@
     const requireReviewing = typeof options.requireReviewing === 'boolean'
       ? options.requireReviewing
       : state?.requireReviewing === true;
-    if (mode === 'ask' || !requireReviewing) {
+    if (mode === 'ask') {
       return { ok: true, skipped: true };
     }
+    const method = requireReviewing ? 'ensureReviewing' : 'ensureEditing';
 
     appendRunEvent({
-      title: tx('Checking Overleaf Reviewing/Track Changes before starting.', '正在确认 Overleaf 留痕状态。'),
+      title: requireReviewing
+        ? tx('Checking Overleaf Reviewing/Track Changes before starting.', '正在确认 Overleaf 留痕状态。')
+        : tx('Checking Overleaf Editing mode before starting.', '正在确认 Overleaf Editing 模式。'),
       status: 'running'
     });
 
     let result = null;
     try {
-      result = await callPageBridge('ensureReviewing', { waitMs: 1800 });
+      result = await callPageBridge(method, { waitMs: 1800 });
     } catch (error) {
       result = {
         ok: false,
-        reason: error?.message || tx('Overleaf did not return track changes status', 'Overleaf 没有返回留痕状态'),
+        reason: error?.message || (requireReviewing
+          ? tx('Overleaf did not return track changes status', 'Overleaf 没有返回留痕状态')
+          : tx('Overleaf did not return Editing mode status', 'Overleaf 没有返回 Editing 模式状态')),
         reviewing: null
       };
     }
 
     if (result?.ok) {
       appendRunEvent({
-        title: result.activated
-          ? tx('Overleaf Reviewing/Track Changes is now on. Starting the task.', '已开启 Overleaf 留痕，开始处理任务。')
-          : tx('Overleaf Reviewing/Track Changes is already on. Starting the task.', 'Overleaf 留痕已经开启，开始处理任务。'),
+        title: requireReviewing
+          ? (result.activated
+            ? tx('Overleaf Reviewing/Track Changes is now on. Starting the task.', '已开启 Overleaf 留痕，开始处理任务。')
+            : tx('Overleaf Reviewing/Track Changes is already on. Starting the task.', 'Overleaf 留痕已经开启，开始处理任务。'))
+          : (result.activated
+            ? tx('Switched to Overleaf Editing. Starting the task.', '已切到 Overleaf Editing，开始处理任务。')
+            : tx('Overleaf is already in Editing mode. Starting the task.', 'Overleaf 已在 Editing 模式，开始处理任务。')),
         status: 'completed'
       });
       return result;
     }
 
-    const reason = localizeVisibleReason(result?.reason || tx('Overleaf did not return track changes status', 'Overleaf 没有返回留痕状态'));
-    const nextStep = tx(
-      'You may not have permission, or this Overleaf page did not expose the Reviewing switch. Switch to Reviewing manually and retry, or turn off Track before writing.',
-      '你可能没有权限，或 Overleaf 当前页面没有暴露切换入口。可以手动切到 Reviewing 后重试，或关闭“留痕”再运行。'
-    );
+    const reason = localizeVisibleReason(result?.reason || (requireReviewing
+      ? tx('Overleaf did not return track changes status', 'Overleaf 没有返回留痕状态')
+      : tx('Overleaf did not return Editing mode status', 'Overleaf 没有返回 Editing 模式状态')));
+    const nextStep = requireReviewing
+      ? tx(
+        'You may not have permission, or this Overleaf page did not expose the Reviewing switch. Switch to Reviewing manually and retry, or turn off Track before writing.',
+        '你可能没有权限，或 Overleaf 当前页面没有暴露切换入口。可以手动切到 Reviewing 后重试，或关闭“留痕”再运行。'
+      )
+      : tx(
+        'You may not have permission, or this Overleaf page did not expose the Editing switch. Switch to Editing manually and retry.',
+        '你可能没有权限，或 Overleaf 当前页面没有暴露切换入口。请在 Overleaf 手动切到 Editing 后重试。'
+      );
     appendRunEvent({
-      title: tx('Task not started: could not enable Overleaf Reviewing/Track Changes.', '任务未开始：无法开启 Overleaf 留痕。'),
+      title: requireReviewing
+        ? tx('Task not started: could not enable Overleaf Reviewing/Track Changes.', '任务未开始：无法开启 Overleaf 留痕。')
+        : tx('Task not started: could not switch to Overleaf Editing.', '任务未开始：无法切换到 Overleaf Editing。'),
       status: 'failed',
       detail: {
         [tr('detailReason')]: reason,
@@ -1615,7 +1633,10 @@
       applyResults: [],
       nextStep
     });
-    finishRunView(tx('Not started: could not enable Track Changes', '未开始：无法开启留痕'), 'failed');
+    const finishTitle = requireReviewing
+      ? tx('Not started: could not enable Track Changes', '未开始：无法开启留痕')
+      : tx('Not started: could not switch to Editing', '未开始：无法切换到 Editing');
+    finishRunView(finishTitle, 'failed');
     return {
       ok: false,
       reason,
@@ -2206,7 +2227,8 @@
       ? await callPageBridge('applyOperations', {
         operations,
         baseFiles: project?.files || [],
-        requireReviewing: runRequireReviewing
+        requireReviewing: runRequireReviewing,
+        requireEditing: !runRequireReviewing
       })
       : { ok: true, applied: [], skipped: [] };
     const hasConfirmedApplyResult = hasApplyResultEntries(applied);
@@ -2983,7 +3005,8 @@
       ? await callPageBridge('applyOperations', {
         operations: partitioned.safe,
         baseFiles: project?.files || [],
-        requireReviewing: runRequireReviewing
+        requireReviewing: runRequireReviewing,
+        requireEditing: !runRequireReviewing
       })
       : { ok: true, applied: [], skipped: [] };
 
@@ -3001,41 +3024,55 @@
     const requireReviewing = typeof options.requireReviewing === 'boolean'
       ? options.requireReviewing
       : state?.requireReviewing === true;
-    if (!requireReviewing || !operations.length) {
+    if (!operations.length) {
       return { ok: true, skipped: true };
     }
+    const method = requireReviewing ? 'ensureReviewing' : 'ensureEditing';
 
     appendRunEvent({
-      title: tx('Verifying Overleaf Reviewing/Track Changes before writing.', '正在确认 Overleaf 已开启 Reviewing/Track Changes。'),
+      title: requireReviewing
+        ? tx('Verifying Overleaf Reviewing/Track Changes before writing.', '正在确认 Overleaf 已开启 Reviewing/Track Changes。')
+        : tx('Verifying Overleaf Editing mode before writing.', '正在确认 Overleaf 已切到 Editing 模式。'),
       status: 'running'
     });
-    const result = await callPageBridge('ensureReviewing', { waitMs: 1800 });
+    const result = await callPageBridge(method, { waitMs: 1800 });
     if (result?.ok) {
       appendRunEvent({
-        title: result.activated
-          ? tx('Switched to Overleaf Reviewing/Track Changes. Upcoming writes will be tracked.', '已切到 Overleaf Reviewing/Track Changes，接下来写入会留痕。')
-          : tx('Overleaf Reviewing/Track Changes is on. Upcoming writes will be tracked.', '已确认 Overleaf Reviewing/Track Changes 正在开启，接下来写入会留痕。'),
+        title: requireReviewing
+          ? (result.activated
+            ? tx('Switched to Overleaf Reviewing/Track Changes. Upcoming writes will be tracked.', '已切到 Overleaf Reviewing/Track Changes，接下来写入会留痕。')
+            : tx('Overleaf Reviewing/Track Changes is on. Upcoming writes will be tracked.', '已确认 Overleaf Reviewing/Track Changes 正在开启，接下来写入会留痕。'))
+          : (result.activated
+            ? tx('Switched to Overleaf Editing mode. Upcoming writes will not use Track Changes.', '已切到 Overleaf Editing 模式，接下来写入不会使用 Track Changes。')
+            : tx('Overleaf Editing mode is on. Upcoming writes will not use Track Changes.', '已确认 Overleaf Editing 模式开启，接下来写入不会使用 Track Changes。')),
         status: 'completed'
       });
       return result;
     }
 
     appendRunEvent({
-      title: tx('Write blocked: Codex could not verify Overleaf Reviewing/Track Changes.', '已阻止写入：Codex 没能确认 Overleaf 正在用 Reviewing/Track Changes。'),
+      title: requireReviewing
+        ? tx('Write blocked: Codex could not verify Overleaf Reviewing/Track Changes.', '已阻止写入：Codex 没能确认 Overleaf 正在用 Reviewing/Track Changes。')
+        : tx('Write blocked: Codex could not verify Overleaf Editing mode.', '已阻止写入：Codex 没能确认 Overleaf 正在用 Editing 模式。'),
       status: 'failed',
       detail: {
-          [tr('detailReason')]: localizeVisibleReason(result?.reason || tx('Overleaf did not return track changes status', 'Overleaf 没有返回留痕状态')),
+        [tr('detailReason')]: localizeVisibleReason(result?.reason || (requireReviewing
+          ? tx('Overleaf did not return track changes status', 'Overleaf 没有返回留痕状态')
+          : tx('Overleaf did not return Editing mode status', 'Overleaf 没有返回 Editing 模式状态'))),
         [tx('Status', '状态')]: result?.reviewing?.status || 'unknown'
       }
     });
     return {
       ok: false,
-      reason: result?.reason || 'Reviewing/Track Changes was not enabled',
-      reviewing: result?.reviewing || null
+      code: result?.code || (requireReviewing ? 'reviewing_not_enabled' : 'editing_not_confirmed'),
+      reason: result?.reason || (requireReviewing ? 'Reviewing/Track Changes was not enabled' : 'Editing mode was not confirmed'),
+      reviewing: result?.reviewing || null,
+      requireReviewing
     };
   }
 
   function buildReviewingBlockedApplyResult(operations = [], reviewing = {}, extraSkipped = []) {
+    const blockedByEditing = reviewing?.code === 'editing_not_confirmed' || reviewing?.requireReviewing === false;
     return {
       ok: false,
       applied: [],
@@ -3044,11 +3081,16 @@
           operation,
           result: {
             ok: false,
-            code: 'reviewing_not_enabled',
-            reason: tx(
-              'Track is enabled, but Overleaf Reviewing/Track Changes was not verified before writing. Codex did not write this file.',
-              '已开启“留痕”要求，但写入前没有确认 Overleaf 正在用 Reviewing/Track Changes。Codex 没有写入这个文件。'
-            )
+            code: blockedByEditing ? 'editing_not_confirmed' : 'reviewing_not_enabled',
+            reason: blockedByEditing
+              ? tx(
+                'Track is off, but Overleaf Editing mode was not verified before writing. Codex did not write this file.',
+                '已关闭“留痕”，但写入前没有确认 Overleaf 正在用 Editing 模式。Codex 没有写入这个文件。'
+              )
+              : tx(
+                'Track is enabled, but Overleaf Reviewing/Track Changes was not verified before writing. Codex did not write this file.',
+                '已开启“留痕”要求，但写入前没有确认 Overleaf 正在用 Reviewing/Track Changes。Codex 没有写入这个文件。'
+              )
           }
         })),
         ...(extraSkipped || [])
