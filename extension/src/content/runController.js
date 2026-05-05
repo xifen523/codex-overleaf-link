@@ -34,6 +34,7 @@
       restrictToFocusFiles: restrictToFocusFiles || undefined,
       model: state.model,
       reasoningEffort: state.reasoningEffort,
+      speedTier: state.speedTier,
       session: state.session,
       threadId: codexThreadId || undefined
     };

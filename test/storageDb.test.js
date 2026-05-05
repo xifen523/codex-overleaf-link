@@ -105,6 +105,7 @@ test('buildSessionRecord preserves reloadable session state', () => {
     mode: 'auto',
     model: 'gpt-5.3-codex-spark',
     reasoningEffort: 'xhigh',
+    speedTier: 'fast',
     requireReviewing: false,
     history: [{ task: '上一轮', result: '改了摘要', at: '2026-05-02T01:00:00.000Z' }],
     runs: [{
@@ -121,6 +122,7 @@ test('buildSessionRecord preserves reloadable session state', () => {
   assert.equal(record.mode, 'auto');
   assert.equal(record.model, 'gpt-5.3-codex-spark');
   assert.equal(record.reasoningEffort, 'xhigh');
+  assert.equal(record.speedTier, 'fast');
   assert.equal(record.requireReviewing, false);
   assert.deepEqual(record.history, input.history);
   assert.deepEqual(record.runs, input.runs);
@@ -140,6 +142,7 @@ test('buildTurnRecord normalizes with defaults', () => {
   assert.equal(record.mode, '');
   assert.equal(record.model, '');
   assert.equal(record.reasoningEffort, '');
+  assert.equal(record.speedTier, '');
   assert.ok(typeof record.createdAt === 'string' && record.createdAt.length > 0);
   assert.equal(record.completedAt, '');
   assert.equal(record.finalSummary, '');
@@ -153,6 +156,7 @@ test('buildTurnRecord preserves provided values', () => {
     mode: 'auto',
     model: 'gpt-5.4',
     reasoningEffort: 'high',
+    speedTier: 'fast',
     createdAt: '2025-03-01T00:00:00.000Z',
     completedAt: '2025-03-01T00:05:00.000Z',
     finalSummary: 'Bug fixed successfully'
@@ -164,6 +168,7 @@ test('buildTurnRecord preserves provided values', () => {
   assert.equal(record.mode, 'auto');
   assert.equal(record.model, 'gpt-5.4');
   assert.equal(record.reasoningEffort, 'high');
+  assert.equal(record.speedTier, 'fast');
   assert.equal(record.createdAt, '2025-03-01T00:00:00.000Z');
   assert.equal(record.completedAt, '2025-03-01T00:05:00.000Z');
   assert.equal(record.finalSummary, 'Bug fixed successfully');
@@ -247,6 +252,7 @@ test('extractLightweightPrefs extracts correct fields', () => {
   const state = {
     model: 'gpt-5.4',
     reasoningEffort: 'high',
+    speedTier: 'fast',
     mode: 'confirm',
     locale: 'zh',
     requireReviewing: true,
@@ -260,6 +266,7 @@ test('extractLightweightPrefs extracts correct fields', () => {
   assert.equal(prefs.storageSchemaVersion, TARGET_SCHEMA_VERSION);
   assert.equal(prefs.model, 'gpt-5.4');
   assert.equal(prefs.reasoningEffort, 'high');
+  assert.equal(prefs.speedTier, 'fast');
   assert.equal(prefs.mode, 'confirm');
   assert.equal(prefs.locale, 'zh');
   assert.equal(prefs.requireReviewing, true);
@@ -275,6 +282,7 @@ test('extractLightweightPrefs defaults missing values', () => {
   assert.equal(prefs.storageSchemaVersion, TARGET_SCHEMA_VERSION);
   assert.equal(prefs.model, '');
   assert.equal(prefs.reasoningEffort, '');
+  assert.equal(prefs.speedTier, '');
   assert.equal(prefs.mode, '');
   assert.equal(prefs.locale, '');
   assert.equal(prefs.requireReviewing, true);

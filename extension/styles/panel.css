@@ -1088,7 +1088,7 @@
 
 #codex-overleaf-panel .codex-composer-toolbar {
   display: grid;
-  grid-template-columns: 26px 42px minmax(0, 1fr) minmax(112px, 150px) 66px 28px;
+  grid-template-columns: 26px 42px minmax(0, 1fr) minmax(112px, 150px) 66px 54px 28px;
   align-items: center;
   gap: 4px;
   padding: 4px 6px 6px;
@@ -1236,7 +1236,7 @@
 
 #codex-overleaf-panel .codex-composer-toolbar [data-run] {
   position: relative;
-  grid-column: 6;
+  grid-column: 7;
   width: 28px;
   min-width: 28px;
   padding: 0;

@@ -11,6 +11,7 @@
     mode: 'confirm',
     model: 'gpt-5.4',
     reasoningEffort: 'high',
+    speedTier: 'standard',
     locale: 'en',
     requireReviewing: true,
     autoOpen: true,
@@ -25,6 +26,7 @@
 
   const VALID_MODES = new Set(['ask', 'confirm', 'auto']);
   const VALID_REASONING = new Set(['low', 'medium', 'high', 'xhigh']);
+  const VALID_SPEED_TIERS = new Set(['standard', 'fast']);
   const VALID_LOCALES = new Set(['en', 'zh']);
   const VALID_TITLE_SOURCES = new Set(['auto', 'manual']);
   const LEGACY_DEFAULT_SESSION_TITLE = 'New task';
@@ -73,6 +75,9 @@
     if (!VALID_REASONING.has(state.reasoningEffort)) {
       state.reasoningEffort = DEFAULT_PANEL_STATE.reasoningEffort;
     }
+    if (!VALID_SPEED_TIERS.has(state.speedTier)) {
+      state.speedTier = DEFAULT_PANEL_STATE.speedTier;
+    }
     if (!VALID_LOCALES.has(state.locale)) {
       state.locale = DEFAULT_PANEL_STATE.locale;
     }
@@ -105,6 +110,7 @@
       mode: state.mode,
       model: state.model,
       reasoningEffort: state.reasoningEffort,
+      speedTier: state.speedTier,
       requireReviewing: state.requireReviewing,
       focusFiles: normalizeFocusFiles(state.focusFiles || legacySession.focusFiles),
       runs: state.runs,
@@ -137,6 +143,9 @@
       reasoningEffort: VALID_REASONING.has(session.reasoningEffort)
         ? session.reasoningEffort
         : fallbackState.reasoningEffort,
+      speedTier: VALID_SPEED_TIERS.has(session.speedTier)
+        ? session.speedTier
+        : fallbackState.speedTier,
       requireReviewing: session.requireReviewing !== false,
       focusFiles: normalizeFocusFiles(session.focusFiles),
       codexThreadId: typeof session.codexThreadId === 'string' ? session.codexThreadId : ''
@@ -161,6 +170,7 @@
         mode: session.mode,
         model: session.model,
         reasoningEffort: session.reasoningEffort,
+        speedTier: session.speedTier,
         status: 'completed',
         statusText: '已处理',
         startedAt: timestamp,
@@ -192,6 +202,7 @@
         mode: state.mode,
         model: state.model,
         reasoningEffort: state.reasoningEffort,
+        speedTier: state.speedTier,
         requireReviewing: state.requireReviewing
       });
       state.sessions = [session];
@@ -213,6 +224,9 @@
     state.reasoningEffort = VALID_REASONING.has(active.reasoningEffort)
       ? active.reasoningEffort
       : DEFAULT_PANEL_STATE.reasoningEffort;
+    state.speedTier = VALID_SPEED_TIERS.has(active.speedTier)
+      ? active.speedTier
+      : DEFAULT_PANEL_STATE.speedTier;
     state.requireReviewing = active.requireReviewing !== false;
 
     return state;
@@ -239,6 +253,9 @@
       reasoningEffort: VALID_REASONING.has(overrides.reasoningEffort)
         ? overrides.reasoningEffort
         : DEFAULT_PANEL_STATE.reasoningEffort,
+      speedTier: VALID_SPEED_TIERS.has(overrides.speedTier)
+        ? overrides.speedTier
+        : DEFAULT_PANEL_STATE.speedTier,
       requireReviewing: overrides.requireReviewing !== false,
       focusFiles: normalizeFocusFiles(overrides.focusFiles),
       codexThreadId: typeof overrides.codexThreadId === 'string' ? overrides.codexThreadId : ''
@@ -318,6 +335,7 @@
         mode: state.mode,
         model: state.model,
         reasoningEffort: state.reasoningEffort,
+        speedTier: state.speedTier,
         requireReviewing: state.requireReviewing
       });
       return mirrorActiveSession({
@@ -470,6 +488,7 @@
       mode: typeof run.mode === 'string' ? run.mode : '',
       model: typeof run.model === 'string' ? run.model : '',
       reasoningEffort: typeof run.reasoningEffort === 'string' ? run.reasoningEffort : '',
+      speedTier: typeof run.speedTier === 'string' ? run.speedTier : '',
       status: shouldStopRestoredRun ? 'failed' : normalizeRunStatus(run.status),
       statusText: shouldStopRestoredRun ? '页面刷新后已停止跟踪' : typeof run.statusText === 'string' ? run.statusText : '',
       startedAt: typeof run.startedAt === 'string' ? run.startedAt : '',
@@ -580,6 +599,7 @@
       reasoningEffort: VALID_REASONING.has(active?.reasoningEffort)
         ? active.reasoningEffort
         : normalizeReasoning(source.reasoningEffort),
+      speedTier: normalizeSpeedTier(active?.speedTier || source.speedTier),
       locale: normalizeLocale(source.locale),
       requireReviewing: active ? active.requireReviewing !== false : source.requireReviewing !== false,
       autoOpen: source.autoOpen !== false,
@@ -605,6 +625,7 @@
       mode: source.mode,
       model: source.model,
       reasoningEffort: source.reasoningEffort,
+      speedTier: source.speedTier,
       requireReviewing: source.requireReviewing
     });
     return [{
@@ -613,6 +634,7 @@
       mode: source.mode,
       model: source.model,
       reasoningEffort: source.reasoningEffort,
+      speedTier: source.speedTier,
       requireReviewing: source.requireReviewing,
       focusFiles: normalizeFocusFiles(source.focusFiles || legacySession.focusFiles),
       runs: Array.isArray(source.runs) ? source.runs : legacySession.runs,
@@ -657,6 +679,7 @@
       mode: normalizeMode(session.mode || fallbackState.mode),
       model: normalizeTextField(session.model || fallbackState.model || DEFAULT_PANEL_STATE.model, 80),
       reasoningEffort: normalizeReasoning(session.reasoningEffort || fallbackState.reasoningEffort),
+      speedTier: normalizeSpeedTier(session.speedTier || fallbackState.speedTier),
       requireReviewing: session.requireReviewing !== false,
       focusFiles: normalizeFocusFiles(session.focusFiles)
     };
@@ -693,6 +716,7 @@
       mode: typeof run.mode === 'string' ? run.mode : '',
       model: normalizeTextField(run.model, 80),
       reasoningEffort: typeof run.reasoningEffort === 'string' ? run.reasoningEffort : '',
+      speedTier: typeof run.speedTier === 'string' ? run.speedTier : '',
       status: normalizeRunStatus(run.status),
       statusText: normalizeTextField(run.statusText, limits.statusTextChars),
       startedAt: typeof run.startedAt === 'string' ? run.startedAt : '',
@@ -790,6 +814,12 @@
     return VALID_REASONING.has(reasoningEffort)
       ? reasoningEffort
       : DEFAULT_PANEL_STATE.reasoningEffort;
+  }
+
+  function normalizeSpeedTier(speedTier) {
+    return VALID_SPEED_TIERS.has(speedTier)
+      ? speedTier
+      : DEFAULT_PANEL_STATE.speedTier;
   }
 
   function normalizeLocale(locale) {

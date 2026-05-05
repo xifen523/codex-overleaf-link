@@ -674,7 +674,7 @@ test('session titles auto-name once and can be manually renamed inline', () => {
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
-  const startRunBody = contentScript.match(/function startRunView\(\{ task, mode, model, reasoningEffort \}\) \{[\s\S]*?\n  function finishRunView/)?.[0] || '';
+  const startRunBody = contentScript.match(/function startRunView\(\{ task, mode, model, reasoningEffort, speedTier \}\) \{[\s\S]*?\n  function finishRunView/)?.[0] || '';
   const sessionListBody = contentScript.match(/function renderSessionList\(\{ showAll = false \} = \{\}\) \{[\s\S]*?\n  function getRunningSessionIds/)?.[0] || '';
 
   assert.match(startRunBody, /active\?\.titleSource !== 'manual'/);

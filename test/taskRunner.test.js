@@ -1,4 +1,6 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -44,14 +46,44 @@ test('bridge.ping returns bridge metadata', async () => {
 });
 
 test('codex.models returns a usable fallback model list', async () => {
-  const response = await handleRequest({ id: 'models-1', method: 'codex.models', params: {} }, {});
+  const response = await handleRequest(
+    { id: 'models-1', method: 'codex.models', params: {} },
+    { HOME: path.join(__dirname, 'fixtures', 'missing-codex-model-home') }
+  );
 
   assert.equal(response.id, 'models-1');
   assert.equal(response.ok, true);
   assert.equal(Array.isArray(response.result.models), true);
   assert.equal(response.result.models.some(model => model.id === 'gpt-5.5'), true);
-  assert.match(response.result.source, /^(codex|config|fallback|unknown)$/);
+  assert.equal(response.result.source, 'fallback');
   assert.equal(typeof response.result.fetchedAt, 'string');
+});
+
+test('codex.models returns models discovered from the Codex cache', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-task-models-'));
+  try {
+    const cachePath = path.join(home, '.codex', 'models_cache.json');
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify({
+      fetched_at: '2026-05-05T06:44:19.541424Z',
+      models: [
+        {
+          slug: 'gpt-taskrunner-cache',
+          display_name: 'GPT TaskRunner Cache',
+          visibility: 'list'
+        }
+      ]
+    }), 'utf8');
+
+    const response = await handleRequest({ id: 'models-cache', method: 'codex.models', params: {} }, { HOME: home });
+
+    assert.equal(response.id, 'models-cache');
+    assert.equal(response.ok, true);
+    assert.equal(response.result.source, 'codex-cache');
+    assert.deepEqual(response.result.models.map(model => model.id), ['gpt-taskrunner-cache']);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('codex.run returns a clear error before spawning when Codex is missing', async () => {

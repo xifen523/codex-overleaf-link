@@ -303,6 +303,7 @@ async function handleTaskRun(request, env, emit) {
     mode,
     model: params.model,
     reasoningEffort: params.reasoningEffort,
+    speedTier: params.speedTier,
     fileCount,
     totalChars
   });
@@ -321,12 +322,14 @@ async function handleTaskRun(request, env, emit) {
         mode,
         model: params.model,
         reasoningEffort: params.reasoningEffort,
+        speedTier: params.speedTier,
         fileCount
       });
       emitTaskEvent(emit, 'agent.command.started', 'Codex agent command started', {
         mode,
         model: params.model,
         reasoningEffort: params.reasoningEffort,
+        speedTier: params.speedTier,
         fileCount
       });
       const result = await runExternalAgent(agentSpec, params, emit, {

@@ -39,7 +39,7 @@ test('composer keeps the send button in a fixed visible toolbar column', () => {
   assert.match(contentScript, /data-run title="Send" aria-label="Send"/);
   assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*display: grid/);
   assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*grid-template-columns:/);
-  assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*grid-column: 6/);
+  assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*grid-column: 7/);
   assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*width: 28px/);
   assert.match(css, /\.codex-composer-toolbar select\s*\{[\s\S]*min-width: 0/);
 });
@@ -102,6 +102,9 @@ test('composer discovers model options through the native codex.models endpoint'
   assert.match(contentScript, /modelCatalog\.FALLBACK_MODELS/);
   assert.match(contentScript, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel:\s*currentSelectedModel\s*\}\)/);
   assert.match(contentScript, /function renderModelOptions\(models,\s*selectedModel\)/);
+  assert.match(contentScript, /function renderSpeedOptions\(/);
+  assert.match(contentScript, /data-speed/);
+  assert.match(contentScript, /model\.speedTiers/);
   assert.match(contentScript, /document\.createElement\('option'\)/);
   assert.match(contentScript, /option\.textContent\s*=\s*model\.label/);
   assert.match(contentScript, /modelDisplay\.title\s*=\s*tr\('modelDisplayTitle'/);
@@ -172,7 +175,7 @@ test('composer model picker stays compact when the side panel is wide', () => {
   const modelBlock = css.match(/#codex-overleaf-panel \.codex-model-picker\s*\{[\s\S]*?\n\}/)?.[0] || '';
 
   assert.doesNotMatch(toolbarBlock, /minmax\(96px,\s*1fr\)/);
-  assert.match(toolbarBlock, /grid-template-columns:\s*26px 42px minmax\(0,\s*1fr\) minmax\(112px,\s*150px\) 66px 28px/);
+  assert.match(toolbarBlock, /grid-template-columns:\s*26px 42px minmax\(0,\s*1fr\) minmax\(112px,\s*150px\) 66px 54px 28px/);
   assert.match(modelBlock, /max-width:\s*150px/);
 });
 

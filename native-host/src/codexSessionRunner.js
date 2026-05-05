@@ -5,6 +5,7 @@ const { collectMirrorChangesDetailed, getProjectMirror, markMirrorDirty, syncOve
 const { computeLineDiff } = require('./diffEngine');
 const { computeTextPatches } = require('./textPatch');
 const { buildCodexHomeEnv } = require('./codexHome');
+const { buildCodexSpeedArgs } = require('./codexArgs');
 const { truncateText } = require('./debugLog');
 
 async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex, signal } = {}) {
@@ -46,6 +47,7 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     mode: params.mode || 'auto',
     model: params.model || '',
     reasoningEffort: params.reasoningEffort || '',
+    speedTier: normalizeSpeedTier(params.speedTier),
     sandboxMode: settings.sandboxMode,
     approvalPolicy: settings.approvalPolicy,
     env,
@@ -312,6 +314,15 @@ function buildThreadResumeParams(input = {}) {
   };
 }
 
+function buildCodexAppServerArgs(input = {}) {
+  return [
+    ...buildCodexSpeedArgs(normalizeSpeedTier(input.speedTier)),
+    'app-server',
+    '--listen',
+    'stdio://'
+  ];
+}
+
 function buildTurnStartParams(input = {}, threadId = input.threadId || '') {
   const params = {
     threadId,
@@ -349,7 +360,7 @@ function runCodexAppServerSession(input) {
       return;
     }
 
-    const child = spawn(codexCommand, ['app-server', '--listen', 'stdio://'], {
+    const child = spawn(codexCommand, buildCodexAppServerArgs(input), {
       env: childEnv,
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -859,6 +870,10 @@ function normalizeReasoningEffort(value) {
   return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value) ? value : null;
 }
 
+function normalizeSpeedTier(value) {
+  return value === 'fast' ? 'fast' : 'standard';
+}
+
 function isUnsupportedReasoningSummaryError(error) {
   const message = String(error?.message || error || '');
   return /unsupported_parameter/i.test(message) && /reasoning\.summary|summary/i.test(message);
@@ -870,6 +885,7 @@ function cleanAssistantMessage(value) {
 
 module.exports = {
   buildCodexTurnPrompt,
+  buildCodexAppServerArgs,
   buildFinalAssistantMessage,
   buildCodexSettings,
   buildThreadStartParams,

@@ -32,7 +32,8 @@ try {
     taskLength: String(request.task || '').length,
     promptLength: prompt.length,
     model: request.model,
-    reasoningEffort: request.reasoningEffort
+    reasoningEffort: request.reasoningEffort,
+    speedTier: request.speedTier
   });
   const result = await runCodexExec({
     cwd: tempDir,
@@ -40,7 +41,8 @@ try {
     schemaPath,
     outputPath,
     model: request.model,
-    reasoningEffort: request.reasoningEffort
+    reasoningEffort: request.reasoningEffort,
+    speedTier: request.speedTier
   });
 
   process.stdout.write(JSON.stringify(result));
@@ -87,14 +89,15 @@ function writeSnapshotFiles(root, files) {
   }
 }
 
-function runCodexExec({ cwd, prompt, schemaPath, outputPath, model, reasoningEffort }) {
+function runCodexExec({ cwd, prompt, schemaPath, outputPath, model, reasoningEffort, speedTier }) {
   return new Promise((resolve, reject) => {
     const child = spawn('codex', buildCodexExecArgs({
       cwd,
       schemaPath,
       outputPath,
       model,
-      reasoningEffort
+      reasoningEffort,
+      speedTier
     }), {
       stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -142,7 +145,8 @@ function runCodexExec({ cwd, prompt, schemaPath, outputPath, model, reasoningEff
       pid: child.pid,
       cwd,
       model,
-      reasoningEffort
+      reasoningEffort,
+      speedTier
     });
     child.stdin.end(prompt);
   });

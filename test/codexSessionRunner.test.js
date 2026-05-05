@@ -6,6 +6,7 @@ const test = require('node:test');
 
 const {
   buildCodexTurnPrompt,
+  buildCodexAppServerArgs,
   buildFinalAssistantMessage,
   buildThreadStartParams,
   decideCommandApproval,
@@ -138,6 +139,7 @@ test('passes Codex mode, model, and reasoning settings to the runner boundary', 
         mode: 'ask',
         model: 'gpt-5.4',
         reasoningEffort: 'high',
+        speedTier: 'fast',
         project: { files: [{ path: 'main.tex', content: 'Hello' }] }
       },
       rootDir,
@@ -152,6 +154,7 @@ test('passes Codex mode, model, and reasoning settings to the runner boundary', 
     assert.equal(received.mode, 'ask');
     assert.equal(received.model, 'gpt-5.4');
     assert.equal(received.reasoningEffort, 'high');
+    assert.equal(received.speedTier, 'fast');
     assert.equal(received.sandboxMode, 'read-only');
     assert.equal(received.approvalPolicy, 'never');
   } finally {
@@ -367,6 +370,26 @@ test('thread start params avoid experimental app-server capabilities', () => {
   });
   assert.equal(Object.hasOwn(params, 'persistExtendedHistory'), false);
   assert.equal(Object.hasOwn(params, 'persistFullHistory'), false);
+});
+
+test('Codex app-server spawn args enable fast mode only for fast speed runs', () => {
+  assert.deepEqual(buildCodexAppServerArgs({ speedTier: 'fast' }), [
+    '--enable',
+    'fast_mode',
+    '-c',
+    'service_tier="fast"',
+    'app-server',
+    '--listen',
+    'stdio://'
+  ]);
+
+  assert.deepEqual(buildCodexAppServerArgs({ speedTier: 'standard' }), [
+    '--disable',
+    'fast_mode',
+    'app-server',
+    '--listen',
+    'stdio://'
+  ]);
 });
 
 test('Codex app-server sessions do not impose a default wall-clock timeout', () => {

@@ -9,13 +9,17 @@ test('builds Codex CLI args with selected model and reasoning effort', () => {
     schemaPath: '/tmp/schema.json',
     outputPath: '/tmp/out.json',
     model: 'gpt-5.4',
-    reasoningEffort: 'high'
+    reasoningEffort: 'high',
+    speedTier: 'fast'
   });
 
   assert.equal(args.includes('-m'), true);
   assert.equal(args.includes('gpt-5.4'), true);
   assert.equal(args.includes('-c'), true);
   assert.equal(args.includes('model_reasoning_effort="high"'), true);
+  assert.equal(args.includes('service_tier="fast"'), true);
+  assert.equal(args.includes('--enable'), true);
+  assert.equal(args.includes('fast_mode'), true);
 });
 
 test('places approval policy before exec for current Codex CLI', () => {
@@ -25,7 +29,7 @@ test('places approval policy before exec for current Codex CLI', () => {
     outputPath: '/tmp/out.json'
   });
 
-  assert.deepEqual(args.slice(0, 3), ['--ask-for-approval', 'never', 'exec']);
+  assert.deepEqual(args.slice(0, 5), ['--disable', 'fast_mode', '--ask-for-approval', 'never', 'exec']);
 });
 
 test('enables Codex JSONL event stream while preserving final output file', () => {
@@ -48,4 +52,16 @@ test('omits model and reasoning args when unset', () => {
 
   assert.equal(args.includes('-m'), false);
   assert.equal(args.includes('model_reasoning_effort="high"'), false);
+});
+
+test('disables Codex fast mode for standard speed runs', () => {
+  const args = buildCodexExecArgs({
+    cwd: '/tmp/project',
+    schemaPath: '/tmp/schema.json',
+    outputPath: '/tmp/out.json',
+    speedTier: 'standard'
+  });
+
+  assert.deepEqual(args.slice(0, 2), ['--disable', 'fast_mode']);
+  assert.equal(args.includes('service_tier="fast"'), false);
 });

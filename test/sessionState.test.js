@@ -22,6 +22,7 @@ test('normalizes missing panel state with defaults and a session id', () => {
   assert.equal(state.mode, DEFAULT_PANEL_STATE.mode);
   assert.equal(state.model, DEFAULT_PANEL_STATE.model);
   assert.equal(state.reasoningEffort, DEFAULT_PANEL_STATE.reasoningEffort);
+  assert.equal(state.speedTier, DEFAULT_PANEL_STATE.speedTier);
   assert.equal(state.locale, 'en');
   assert.match(state.session.id, /^session_/);
   assert.equal(state.sessions.length, 1);
@@ -246,6 +247,7 @@ test('migrates legacy single-session state into a switchable session list', () =
     mode: 'confirm',
     model: 'gpt-5.5',
     reasoningEffort: 'xhigh',
+    speedTier: 'fast',
     requireReviewing: false,
     task: 'legacy draft',
     session: { id: 'session_legacy', history: [{ task: 'old task', result: 'done' }] },
@@ -259,6 +261,7 @@ test('migrates legacy single-session state into a switchable session list', () =
   assert.equal(state.mode, 'confirm');
   assert.equal(state.model, 'gpt-5.5');
   assert.equal(state.reasoningEffort, 'xhigh');
+  assert.equal(state.speedTier, 'fast');
   assert.equal(state.requireReviewing, false);
   assert.equal(state.runs[0].id, 'run_legacy');
   assert.equal(getActiveSession(state).runs[0].id, 'run_legacy');
@@ -274,6 +277,7 @@ test('switches active session and mirrors composer settings from that session', 
       mode: 'auto',
       model: 'gpt-5.4',
       reasoningEffort: 'high',
+      speedTier: 'standard',
       runs: [{ id: 'run_a', task: 'task a', status: 'completed' }]
     }, {
       id: 'session_b',
@@ -282,6 +286,7 @@ test('switches active session and mirrors composer settings from that session', 
       mode: 'confirm',
       model: 'gpt-5.5',
       reasoningEffort: 'xhigh',
+      speedTier: 'fast',
       runs: [{ id: 'run_b', task: 'task b', status: 'completed' }]
     }]
   });
@@ -291,6 +296,7 @@ test('switches active session and mirrors composer settings from that session', 
   assert.equal(state.mode, 'confirm');
   assert.equal(state.model, 'gpt-5.5');
   assert.equal(state.reasoningEffort, 'xhigh');
+  assert.equal(state.speedTier, 'fast');
   assert.equal(state.runs[0].id, 'run_b');
 });
 

@@ -1,7 +1,8 @@
 'use strict';
 
-function buildCodexExecArgs({ cwd, schemaPath, outputPath, model, reasoningEffort }) {
+function buildCodexExecArgs({ cwd, schemaPath, outputPath, model, reasoningEffort, speedTier }) {
   const args = [
+    ...buildCodexSpeedArgs(speedTier),
     '--ask-for-approval',
     'never',
     'exec',
@@ -29,6 +30,14 @@ function buildCodexExecArgs({ cwd, schemaPath, outputPath, model, reasoningEffor
   return args;
 }
 
+function buildCodexSpeedArgs(speedTier) {
+  if (speedTier === 'fast') {
+    return ['--enable', 'fast_mode', '-c', 'service_tier="fast"'];
+  }
+  return ['--disable', 'fast_mode'];
+}
+
 module.exports = {
-  buildCodexExecArgs
+  buildCodexExecArgs,
+  buildCodexSpeedArgs
 };

@@ -10,6 +10,7 @@ test('run controller builds codex.run params without embedding project when mirr
       mode: 'auto',
       model: 'gpt-5.5',
       reasoningEffort: 'xhigh',
+      speedTier: 'fast',
       session: { id: 'session-1' }
     },
     task: '检查语法',
@@ -34,6 +35,7 @@ test('run controller builds codex.run params without embedding project when mirr
   assert.deepEqual(params.fileOverlays, [{ path: 'main.tex', content: 'live' }]);
   assert.equal(params.expectedMirrorFreshness, 300000);
   assert.equal(params.threadId, 'thread-1');
+  assert.equal(params.speedTier, 'fast');
   assert.equal(params.compileLog, 'compile log');
   assert.deepEqual(params.compileErrors, ['error']);
 });

@@ -199,6 +199,7 @@
       mode: typeof input.mode === 'string' ? input.mode : '',
       model: typeof input.model === 'string' ? input.model : '',
       reasoningEffort: typeof input.reasoningEffort === 'string' ? input.reasoningEffort : '',
+      speedTier: typeof input.speedTier === 'string' ? input.speedTier : '',
       requireReviewing: input.requireReviewing !== false,
       createdAt: typeof input.createdAt === 'string' ? input.createdAt : now,
       updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : now
@@ -214,6 +215,7 @@
       mode: typeof input.mode === 'string' ? input.mode : '',
       model: typeof input.model === 'string' ? input.model : '',
       reasoningEffort: typeof input.reasoningEffort === 'string' ? input.reasoningEffort : '',
+      speedTier: typeof input.speedTier === 'string' ? input.speedTier : '',
       createdAt: typeof input.createdAt === 'string' ? input.createdAt : now,
       completedAt: typeof input.completedAt === 'string' ? input.completedAt : '',
       finalSummary: typeof input.finalSummary === 'string' ? input.finalSummary : ''
@@ -252,6 +254,7 @@
       storageSchemaVersion: TARGET_SCHEMA_VERSION,
       model: typeof state.model === 'string' ? state.model : '',
       reasoningEffort: typeof state.reasoningEffort === 'string' ? state.reasoningEffort : '',
+      speedTier: typeof state.speedTier === 'string' ? state.speedTier : '',
       mode: typeof state.mode === 'string' ? state.mode : '',
       locale: typeof state.locale === 'string' ? state.locale : '',
       requireReviewing: state.requireReviewing !== false,

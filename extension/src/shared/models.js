@@ -62,14 +62,33 @@
     const normalized = {
       id,
       label,
-      reasoningEfforts: Array.isArray(model?.reasoningEfforts) ? model.reasoningEfforts.slice() : []
+      reasoningEfforts: Array.isArray(model?.reasoningEfforts) ? model.reasoningEfforts.slice() : [],
+      speedTiers: normalizeSpeedTiers(model?.speedTiers)
     };
 
     if (Object.prototype.hasOwnProperty.call(Object(model), 'defaultReasoningEffort')) {
       normalized.defaultReasoningEffort = model.defaultReasoningEffort;
     }
+    if (Object.prototype.hasOwnProperty.call(Object(model), 'defaultSpeedTier')) {
+      normalized.defaultSpeedTier = model.defaultSpeedTier;
+    }
 
     return normalized;
+  }
+
+  function normalizeSpeedTiers(speedTiers) {
+    if (!Array.isArray(speedTiers)) {
+      return ['standard'];
+    }
+
+    const result = [];
+    for (const tier of speedTiers) {
+      const normalized = normalizeModelId(tier);
+      if (normalized && !result.includes(normalized)) {
+        result.push(normalized);
+      }
+    }
+    return result.includes('standard') ? result : ['standard', ...result];
   }
 
   function normalizeModelId(id) {

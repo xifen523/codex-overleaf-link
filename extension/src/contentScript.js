@@ -228,6 +228,10 @@
               <option value="high">High</option>
               <option value="xhigh">XHigh</option>
             </select>
+            <select data-speed aria-label="Speed">
+              <option value="standard">Std</option>
+              <option value="fast">Fast</option>
+            </select>
             <button type="submit" data-run title="Send" aria-label="Send">↑</button>
           </div>
           <div class="codex-context-tray" data-context-tray hidden>
@@ -293,7 +297,7 @@
         });
       }
 
-      for (const selector of ['[data-model]', '[data-reasoning]', '[data-mode]', '[data-task]', '[data-require-reviewing]', '[data-auto-recompile]']) {
+      for (const selector of ['[data-model]', '[data-reasoning]', '[data-speed]', '[data-mode]', '[data-task]', '[data-require-reviewing]', '[data-auto-recompile]']) {
         panel.querySelector(selector).addEventListener('change', persistPanelInputs);
         panel.querySelector(selector).addEventListener('input', persistPanelInputs);
       }
@@ -1220,7 +1224,8 @@
       task,
       mode: submittedMode,
       model: state.model,
-      reasoningEffort: state.reasoningEffort
+      reasoningEffort: state.reasoningEffort,
+      speedTier: state.speedTier
     });
     const runSessionId = currentRunView.sessionId;
     clearTaskComposer();
@@ -1231,6 +1236,7 @@
         [tr('mode')]: formatModeLabel(submittedMode),
         [tx('Model', '模型')]: state.model,
         [tx('Reasoning effort', '推理强度')]: state.reasoningEffort,
+        [tx('Speed', '速度')]: state.speedTier,
         [tx('Track required', '要求留痕')]: submittedRequireReviewing ? tx('yes', '是') : tx('no', '否'),
         '@context': formatContextItems(getActiveFocusFiles())
       }
@@ -3819,6 +3825,7 @@
       return {
         model: prefs.model || '',
         reasoningEffort: prefs.reasoningEffort || '',
+        speedTier: prefs.speedTier || '',
         mode: prefs.mode || '',
         locale: prefs.locale || '',
         requireReviewing: prefs.requireReviewing !== false,
@@ -3838,6 +3845,7 @@
           mode: session.mode || prefs.mode || 'confirm',
           model: session.model || prefs.model || 'gpt-5.4',
           reasoningEffort: session.reasoningEffort || prefs.reasoningEffort || 'high',
+          speedTier: session.speedTier || prefs.speedTier || 'standard',
           requireReviewing: typeof session.requireReviewing === 'boolean'
             ? session.requireReviewing
             : prefs.requireReviewing !== false
@@ -3941,11 +3949,21 @@
 
   async function persistPanelInputs() {
     readPanelInputs();
+    renderSpeedOptions(getRenderedModelEntries());
     updateModelDisplay();
     await saveState();
     syncModeControls();
     applySessionLabel();
     renderSessionList();
+  }
+
+  function getRenderedModelEntries() {
+    return Array.from(panel?.querySelector('[data-model]')?.options || []).map(option => ({
+      id: option.value,
+      label: option.textContent,
+      speedTiers: (option.dataset.speedTiers || 'standard').split(',').filter(Boolean),
+      defaultSpeedTier: option.dataset.defaultSpeedTier || 'standard'
+    }));
   }
 
   async function selectMode(mode) {
@@ -3975,6 +3993,7 @@
     state = updateActiveSession(state, {
       model: readSelectedModelInput(),
       reasoningEffort: panel.querySelector('[data-reasoning]').value,
+      speedTier: readSelectedSpeedInput(),
       mode: panel.querySelector('[data-mode]').value,
       task: panel.querySelector('[data-task]').value,
       requireReviewing: panel.querySelector('[data-require-reviewing]').checked
@@ -3985,6 +4004,11 @@
   function readSelectedModelInput() {
     const modelSelect = panel?.querySelector('[data-model]');
     return modelSelect?.value || state?.model || '';
+  }
+
+  function readSelectedSpeedInput() {
+    const speedSelect = panel?.querySelector('[data-speed]');
+    return speedSelect?.value || state?.speedTier || 'standard';
   }
 
   async function loadModelOptions() {
@@ -4101,10 +4125,14 @@
       const normalized = {
         id,
         label: typeof model?.label === 'string' && model.label.length > 0 ? model.label : id,
-        reasoningEfforts: Array.isArray(model?.reasoningEfforts) ? model.reasoningEfforts.slice() : []
+        reasoningEfforts: Array.isArray(model?.reasoningEfforts) ? model.reasoningEfforts.slice() : [],
+        speedTiers: normalizeSpeedTiersForSelect(model?.speedTiers)
       };
       if (Object.prototype.hasOwnProperty.call(Object(model), 'defaultReasoningEffort')) {
         normalized.defaultReasoningEffort = model.defaultReasoningEffort;
+      }
+      if (Object.prototype.hasOwnProperty.call(Object(model), 'defaultSpeedTier')) {
+        normalized.defaultSpeedTier = model.defaultSpeedTier;
       }
       result.push(normalized);
     }
@@ -4134,6 +4162,8 @@
       const option = document.createElement('option');
       option.value = id;
       option.textContent = model.label;
+      option.dataset.speedTiers = normalizeSpeedTiersForSelect(model.speedTiers).join(',');
+      option.dataset.defaultSpeedTier = model.defaultSpeedTier || 'standard';
       if (model.unverified) {
         option.dataset.unverified = 'true';
       }
@@ -4147,6 +4177,8 @@
       const option = document.createElement('option');
       option.value = selectedId;
       option.textContent = `${selectedId} (custom)`;
+      option.dataset.speedTiers = 'standard';
+      option.dataset.defaultSpeedTier = 'standard';
       option.dataset.unverified = 'true';
       modelSelect.append(option);
       renderedSelected = true;
@@ -4157,6 +4189,43 @@
     } else if (firstModelId) {
       modelSelect.value = firstModelId;
     }
+    renderSpeedOptions(models);
+  }
+
+  function renderSpeedOptions(models) {
+    const speedSelect = panel?.querySelector('[data-speed]');
+    const modelSelect = panel?.querySelector('[data-model]');
+    if (!speedSelect || !modelSelect) {
+      return;
+    }
+
+    const selectedModel = normalizeModelOptionId(modelSelect.value);
+    const model = (Array.isArray(models) ? models : []).find(item => normalizeModelOptionId(item?.id) === selectedModel);
+    const speedTiers = normalizeSpeedTiersForSelect(model?.speedTiers);
+    const selectedSpeed = speedTiers.includes(state?.speedTier) ? state.speedTier : (model?.defaultSpeedTier || 'standard');
+    speedSelect.textContent = '';
+    for (const tier of speedTiers) {
+      const option = document.createElement('option');
+      option.value = tier;
+      option.textContent = formatSpeedTierLabel(tier);
+      speedSelect.append(option);
+    }
+    speedSelect.value = speedTiers.includes(selectedSpeed) ? selectedSpeed : 'standard';
+    speedSelect.disabled = speedTiers.length <= 1;
+    speedSelect.title = speedSelect.disabled
+      ? tx('Fast mode is not available for this model.', '当前模型不支持 Fast 模式。')
+      : tx('Codex speed tier. Fast mode uses extra credits.', 'Codex 速度档；Fast 会消耗额外 credits。');
+  }
+
+  function normalizeSpeedTiersForSelect(speedTiers) {
+    const tiers = Array.isArray(speedTiers)
+      ? speedTiers.map(tier => normalizeModelOptionId(tier)).filter(Boolean)
+      : ['standard'];
+    return tiers.includes('standard') ? tiers : ['standard', ...tiers];
+  }
+
+  function formatSpeedTierLabel(tier) {
+    return tier === 'fast' ? 'Fast' : 'Std';
   }
 
   function resolveSelectedModel() {
@@ -4209,6 +4278,13 @@
     }
     panel.querySelector('[data-model]').value = state.model;
     panel.querySelector('[data-reasoning]').value = state.reasoningEffort;
+    renderSpeedOptions(Array.from(panel.querySelector('[data-model]')?.options || []).map(option => ({
+      id: option.value,
+      label: option.textContent,
+      speedTiers: (option.dataset.speedTiers || 'standard').split(',').filter(Boolean),
+      defaultSpeedTier: option.dataset.defaultSpeedTier || 'standard'
+    })));
+    panel.querySelector('[data-speed]').value = state.speedTier;
     panel.querySelector('[data-mode]').value = state.mode;
     panel.querySelector('[data-task]').value = state.task;
     panel.querySelector('[data-require-reviewing]').checked = state.requireReviewing;
@@ -4251,6 +4327,7 @@
       mode: state.mode,
       model: state.model,
       reasoningEffort: state.reasoningEffort,
+      speedTier: state.speedTier,
       requireReviewing: state.requireReviewing
     });
     state = normalizePanelState({
@@ -4332,7 +4409,7 @@
     panel.dataset.cancelling = running && runCancellationRequested ? 'true' : 'false';
   }
 
-  function startRunView({ task, mode, model, reasoningEffort }) {
+  function startRunView({ task, mode, model, reasoningEffort, speedTier }) {
     logAutoFollow = true;
     userScrollIntentUntil = 0;
     const record = {
@@ -4341,6 +4418,7 @@
       mode,
       model,
       reasoningEffort,
+      speedTier,
       status: 'running',
       statusText: tr('processing', { elapsed: '' }).trim(),
       startedAt: new Date().toISOString(),
@@ -4406,7 +4484,8 @@
         text,
         record?.mode ? `${tr('mode')}: ${formatModeLabel(record.mode)}` : '',
         record?.model,
-        record?.reasoningEffort
+        record?.reasoningEffort,
+        record?.speedTier
       ].filter(Boolean).join(' · ');
       collapseRunProcess(visibleView, statusText);
     }
@@ -4889,6 +4968,7 @@
       `${tr('mode')}: ${formatModeLabel(run.mode)}`,
       run.model,
       run.reasoningEffort,
+      run.speedTier,
       run.startedAt ? formatEventTime(run.startedAt) : ''
     ].filter(Boolean).join(' · ');
     root.innerHTML = `
