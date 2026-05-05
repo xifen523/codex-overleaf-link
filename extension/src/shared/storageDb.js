@@ -260,9 +260,26 @@
       requireReviewing: state.requireReviewing !== false,
       autoRecompile: state.autoRecompile !== false,
       panelWidth: Number.isFinite(Number(state.panelWidth)) ? Math.round(Number(state.panelWidth)) : 0,
-      activeSessionByProject: state.activeSessionByProject || {}
+      activeSessionByProject: state.activeSessionByProject || {},
+      experimentalOtByProject: normalizeBooleanMap(state.experimentalOtByProject)
     };
     return prefs;
+  }
+
+  function normalizeBooleanMap(value) {
+    var result = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    var keys = Object.keys(value);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (!key) {
+        continue;
+      }
+      result[key] = Boolean(value[key]);
+    }
+    return result;
   }
 
   function buildActiveSessionByProject(existing, projectId, sessionId) {

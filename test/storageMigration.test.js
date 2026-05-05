@@ -19,6 +19,67 @@ test('storageMigration exports loadPrefs', () => {
   assert.strictEqual(typeof Migration.loadPrefs, 'function');
 });
 
+test('loadPrefs defaults missing experimental OT map to an empty object', async () => {
+  const previousChrome = global.chrome;
+  global.chrome = {
+    storage: {
+      local: {
+        get() {
+          return Promise.resolve({ [Migration.PREFS_KEY]: { storageSchemaVersion: 1 } });
+        }
+      }
+    }
+  };
+
+  try {
+    const prefs = await Migration.loadPrefs();
+    assert.deepEqual(prefs.experimentalOtByProject, {});
+  } finally {
+    global.chrome = previousChrome;
+  }
+});
+
+test('current-schema migration load path normalizes experimental OT map values', async () => {
+  const previousWindow = global.window;
+  const previousChrome = global.chrome;
+  const fakeStorageDb = {
+    TARGET_SCHEMA_VERSION: 1,
+    getAllByIndex() {
+      return Promise.resolve([]);
+    }
+  };
+  global.window = { CodexOverleafStorageDb: fakeStorageDb };
+  global.chrome = {
+    storage: {
+      local: {
+        get() {
+          return Promise.resolve({
+            [Migration.PREFS_KEY]: {
+              storageSchemaVersion: 1,
+              activeSessionByProject: { project_1: 'session_1' },
+              experimentalOtByProject: { project_1: true, project_2: 0, project_3: 'yes' }
+            }
+          });
+        }
+      }
+    }
+  };
+
+  try {
+    const result = await Migration.runMigrationIfNeeded('project_1', 'legacy');
+    assert.equal(result.migrated, false);
+    assert.deepEqual(result.prefs.experimentalOtByProject, {
+      project_1: true,
+      project_2: false,
+      project_3: true
+    });
+    assert.equal(result.activeSessionId, 'session_1');
+  } finally {
+    global.window = previousWindow;
+    global.chrome = previousChrome;
+  }
+});
+
 test('migration preserves legacy session task, history, runs, and settings', async () => {
   const calls = {
     putRecords: [],
@@ -31,6 +92,7 @@ test('migration preserves legacy session task, history, runs, and settings', asy
     reasoningEffort: 'xhigh',
     mode: 'auto',
     requireReviewing: false,
+    experimentalOtByProject: { project_1: true },
     activeSessionId: 'session_legacy',
     sessions: [{
       id: 'session_legacy',
@@ -71,6 +133,7 @@ test('migration preserves legacy session task, history, runs, and settings', asy
         reasoningEffort: blob.reasoningEffort,
         mode: blob.mode,
         requireReviewing: blob.requireReviewing !== false,
+        experimentalOtByProject: blob.experimentalOtByProject || {},
         activeSessionByProject: {}
       };
     },
@@ -113,6 +176,8 @@ test('migration preserves legacy session task, history, runs, and settings', asy
     assert.deepEqual(record.focusFiles, ['paper.tex']);
     assert.deepEqual(record.history, legacyBlob.sessions[0].history);
     assert.deepEqual(record.runs, legacyBlob.sessions[0].runs);
+    assert.deepEqual(result.prefs.experimentalOtByProject, { project_1: true });
+    assert.deepEqual(calls.set[0][Migration.PREFS_KEY].experimentalOtByProject, { project_1: true });
     assert.equal(calls.remove[0], legacyStorageKey);
   } finally {
     global.window = previousWindow;

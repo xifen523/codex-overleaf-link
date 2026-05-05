@@ -15,7 +15,7 @@
       : require('./storageDb');
 
     return chrome.storage.local.get([PREFS_KEY, legacyStorageKey]).then(function (stored) {
-      var prefs = stored[PREFS_KEY] || {};
+      var prefs = normalizePrefs(stored[PREFS_KEY] || {});
       var schemaVersion = prefs.storageSchemaVersion || 0;
 
       if (schemaVersion >= StorageDb.TARGET_SCHEMA_VERSION) {
@@ -66,6 +66,7 @@
           projectId,
           legacyBlob.activeSessionId || (migratedSessions.length ? migratedSessions[migratedSessions.length - 1].id : '')
         );
+        newPrefs = normalizePrefs(newPrefs);
 
         return chrome.storage.local.set({ [PREFS_KEY]: newPrefs }).then(function () {
           return chrome.storage.local.remove(legacyStorageKey).catch(function () {});
@@ -82,13 +83,36 @@
   }
 
   function savePrefs(prefs) {
-    return chrome.storage.local.set({ [PREFS_KEY]: prefs });
+    return chrome.storage.local.set({ [PREFS_KEY]: normalizePrefs(prefs) });
   }
 
   function loadPrefs() {
     return chrome.storage.local.get([PREFS_KEY]).then(function (stored) {
-      return stored[PREFS_KEY] || {};
+      return normalizePrefs(stored[PREFS_KEY] || {});
     });
+  }
+
+  function normalizePrefs(prefs) {
+    var source = prefs && typeof prefs === 'object' ? prefs : {};
+    return Object.assign({}, source, {
+      experimentalOtByProject: normalizeBooleanMap(source.experimentalOtByProject)
+    });
+  }
+
+  function normalizeBooleanMap(value) {
+    var result = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    var keys = Object.keys(value);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (!key) {
+        continue;
+      }
+      result[key] = Boolean(value[key]);
+    }
+    return result;
   }
 
   return {

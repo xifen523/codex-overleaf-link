@@ -69,6 +69,7 @@
   let runCancellationRequested = false;
   let activePluginConfirmResolve = null;
   let modelDiscovery = { status: 'fallback', source: 'fallback', fetchedAt: '' };
+  let currentOtStatus = 'off';
   let mirrorPrefetchState = {
     inFlight: null,
     lastSuccessAt: 0,
@@ -96,6 +97,10 @@
     applyStateToPanel();
     loadModelOptions().catch(error => {
       applyFallbackModelOptions(resolveSelectedModel(), error);
+    });
+    syncOtWarmMirrorController().catch(error => {
+      updateOtStatusDisplay('unavailable');
+      appendPlainLog(tx(`Failed to sync experimental OT warm mirror: ${error.message}`, `同步实验性 OT 预热镜像失败：${error.message}`));
     });
     await refreshProbe({ quiet: true });
   }
@@ -207,6 +212,11 @@
               <input type="checkbox" data-require-reviewing>
               <span class="codex-review-label" data-i18n="requireReviewing">Track</span>
             </label>
+            <label class="codex-ot-toggle" title="Experimental read-only OT mirror warming. If unavailable or stale, Codex falls back to the normal project read path.">
+              <input type="checkbox" data-experimental-ot>
+              <span data-i18n="experimentalOtWarmMirrorShort">OT</span>
+              <small data-ot-status>Off</small>
+            </label>
             <label class="codex-recompile-toggle" title="After Codex writes, click Overleaf Recompile and record the compile result for this task. Ask mode will not trigger it.">
               <input type="checkbox" data-auto-recompile>
               <span class="codex-recompile-label" data-i18n="autoCompile">Auto Compile</span>
@@ -307,6 +317,14 @@
       panel.querySelector('[data-model-config-toggle]').addEventListener('click', event => {
         event.preventDefault();
         toggleModelConfigPopover();
+      });
+      panel.querySelector('[data-experimental-ot]').addEventListener('change', () => {
+        readPanelInputs();
+        syncOtWarmMirrorController().catch(error => {
+          updateOtStatusDisplay('unavailable');
+          appendPlainLog(tx(`Experimental OT warm mirror unavailable: ${error.message}`, `实验性 OT 预热镜像不可用：${error.message}`));
+        });
+        saveStateSoon();
       });
       panel.querySelector('[data-model-config-popover]').addEventListener('click', event => {
         handleModelConfigChoiceClick(event).catch(error => {
@@ -478,6 +496,14 @@
     if (recompileToggle) {
       recompileToggle.title = tr('autoCompileTitle');
     }
+    const otToggle = panel.querySelector('.codex-ot-toggle');
+    if (otToggle) {
+      otToggle.title = tr('experimentalOtWarmMirrorTitle');
+    }
+    const otCheckbox = panel.querySelector('[data-experimental-ot]');
+    if (otCheckbox) {
+      otCheckbox.setAttribute('aria-label', tr('experimentalOtWarmMirror'));
+    }
     const contextStatus = panel.querySelector('[data-context-status]');
     if (contextStatus && !contextStatus.dataset.customStatus) {
       contextStatus.textContent = tr('contextStatus');
@@ -488,6 +514,7 @@
     }
 
     syncModeControls();
+    updateOtStatusDisplay();
     renderModelConfigChoices();
     updateModelDisplay();
     renderSessionList();
@@ -2658,6 +2685,91 @@
     return window.location.pathname.match(/\/project\/([^/?#]+)/)?.[1] || window.location.href;
   }
 
+  function isExperimentalOtEnabled() {
+    const projectId = getCurrentProjectId();
+    return state?.experimentalOtByProject?.[projectId] === true;
+  }
+
+  function setExperimentalOtEnabled(enabled) {
+    const projectId = getCurrentProjectId();
+    state = {
+      ...state,
+      experimentalOtByProject: {
+        ...normalizeExperimentalOtByProject(state?.experimentalOtByProject),
+        [projectId]: enabled === true
+      }
+    };
+  }
+
+  function normalizeExperimentalOtByProject(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {};
+    }
+    const normalized = {};
+    for (const key of Object.keys(value)) {
+      if (key) {
+        normalized[key] = value[key] === true;
+      }
+    }
+    return normalized;
+  }
+
+  async function syncOtWarmMirrorController() {
+    const enabled = isExperimentalOtEnabled();
+    updateOtStatusDisplay(enabled ? 'starting' : currentOtStatus);
+    const response = enabled
+      ? await callPageBridge('startOtObserver', { projectId: getCurrentProjectId() })
+      : await callPageBridge('stopOtObserver', {});
+    if (!enabled) {
+      updateOtStatusDisplay('off');
+      return response;
+    }
+    updateOtStatusDisplay(readOtBridgeStatus(response));
+    return response;
+  }
+
+  function readOtBridgeStatus(response) {
+    if (!response || response.ok === false) {
+      return 'unavailable';
+    }
+    return response.state || response.status || response.result?.state || response.result?.status || 'unavailable';
+  }
+
+  function updateOtStatusDisplay(status = currentOtStatus) {
+    const normalized = normalizeOtStatus(status);
+    currentOtStatus = normalized;
+    const statusElement = panel?.querySelector('[data-ot-status]');
+    if (statusElement) {
+      const label = formatOtStatusLabel(normalized);
+      statusElement.textContent = label;
+      statusElement.dataset.otStatus = normalized;
+      statusElement.title = label;
+    }
+    const toggle = panel?.querySelector('.codex-ot-toggle');
+    if (toggle) {
+      toggle.dataset.otStatus = normalized;
+    }
+  }
+
+  function formatOtStatusLabel(status) {
+    const labels = {
+      off: 'otStatusOff',
+      starting: 'otStatusStarting',
+      observing: 'otStatusObserving',
+      unavailable: 'otStatusUnavailable',
+      stale: 'otStatusStale',
+      inconsistent: 'otStatusInconsistent'
+    };
+    return tr(labels[normalizeOtStatus(status)] || 'otStatusUnavailable');
+  }
+
+  function normalizeOtStatus(status) {
+    const value = typeof status === 'string' ? status : '';
+    return ['off', 'starting', 'observing', 'unavailable', 'stale', 'inconsistent'].includes(value)
+      ? value
+      : 'unavailable';
+  }
+
   function scheduleMirrorPrefetch(options = {}) {
     syncMirrorPrefetchStateForProject();
     if (!mirrorHealth?.shouldStartPrefetch) {
@@ -3936,6 +4048,7 @@
         locale: prefs.locale || '',
         requireReviewing: prefs.requireReviewing !== false,
         autoRecompile: prefs.autoRecompile !== false,
+        experimentalOtByProject: prefs.experimentalOtByProject || {},
         panelWidth: prefs.panelWidth || PANEL_DEFAULT_WIDTH,
         sessions: sessions.map(session => ({
           id: session.id,
@@ -3975,6 +4088,7 @@
       const Migration = window.CodexOverleafStorageMigration;
       const projectId = getCurrentProjectId();
       const compactState = prepareStateForStorage(state);
+      compactState.experimentalOtByProject = state.experimentalOtByProject;
 
       // Save lightweight prefs to chrome.storage.local
       const prefs = StorageDb.extractLightweightPrefs(compactState, projectId);
@@ -4106,6 +4220,10 @@
       requireReviewing: panel.querySelector('[data-require-reviewing]').checked
     });
     state.autoRecompile = panel.querySelector('[data-auto-recompile]')?.checked !== false;
+    const experimentalOtCheckbox = panel.querySelector('[data-experimental-ot]');
+    if (experimentalOtCheckbox) {
+      setExperimentalOtEnabled(experimentalOtCheckbox.checked);
+    }
   }
 
   function readSelectedModelInput() {
@@ -4527,6 +4645,13 @@
     const recompileCheckbox = panel?.querySelector('[data-auto-recompile]');
     if (recompileCheckbox) {
       recompileCheckbox.checked = state.autoRecompile !== false;
+    }
+    const experimentalOtCheckbox = panel?.querySelector('[data-experimental-ot]');
+    if (experimentalOtCheckbox) {
+      experimentalOtCheckbox.checked = isExperimentalOtEnabled();
+      updateOtStatusDisplay(experimentalOtCheckbox.checked
+        ? (currentOtStatus === 'off' ? 'starting' : currentOtStatus)
+        : 'off');
     }
     applyPanelWidth(state.panelWidth || PANEL_DEFAULT_WIDTH, { persist: false });
     renderModelConfigChoices();

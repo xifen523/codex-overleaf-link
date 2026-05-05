@@ -1405,6 +1405,36 @@ test('page bridge exposes a read-only realtime OT observer', () => {
   assert.doesNotMatch(pageBridge, /\b(?:writeOt|applyOt|sendOt)\b/);
 });
 
+test('composer exposes an experimental project-scoped OT warm mirror toggle', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
+  const otToggleMarkup = contentScript.match(/<label class="codex-ot-toggle"[\s\S]*?<\/label>/)?.[0] || '';
+  const syncBody = contentScript.match(/async function syncOtWarmMirrorController\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(otToggleMarkup, /data-experimental-ot/);
+  assert.match(otToggleMarkup, /data-i18n="experimentalOtWarmMirrorShort">OT<\/span>/);
+  assert.match(otToggleMarkup, /data-ot-status>Off<\/small>/);
+  assert.doesNotMatch(otToggleMarkup, /\bchecked\b/);
+  assert.match(contentScript, /experimentalOtWarmMirror/);
+  assert.match(contentScript, /function isExperimentalOtEnabled\(\)/);
+  assert.match(contentScript, /function setExperimentalOtEnabled\(enabled\)/);
+  assert.match(contentScript, /syncOtWarmMirrorController/);
+  assert.match(contentScript, /updateOtStatusDisplay/);
+  assert.match(contentScript, /formatOtStatusLabel/);
+  assert.match(syncBody, /callPageBridge\('startOtObserver',\s*\{\s*projectId:\s*getCurrentProjectId\(\)\s*\}\)/);
+  assert.match(syncBody, /callPageBridge\('stopOtObserver',\s*\{\s*\}\)/);
+  assert.doesNotMatch(syncBody, /drainOtEvents/);
+  assert.doesNotMatch(syncBody, /mirror\.patchFiles/);
+  assert.match(i18n, /experimentalOtWarmMirror:\s*'/);
+  assert.match(i18n, /otStatusObserving:\s*'/);
+});
+
 test('markdown links only allow http and https URLs', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),

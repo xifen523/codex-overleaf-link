@@ -259,6 +259,7 @@ test('extractLightweightPrefs extracts correct fields', () => {
     autoRecompile: true,
     panelWidth: 512,
     activeSessionByProject: { proj_1: 'ses_1' },
+    experimentalOtByProject: { proj_1: true, proj_2: false },
     extraField: 'should be ignored',
     sessions: [{ id: 'ses_1' }]
   };
@@ -273,8 +274,33 @@ test('extractLightweightPrefs extracts correct fields', () => {
   assert.equal(prefs.autoRecompile, true);
   assert.equal(prefs.panelWidth, 512);
   assert.deepEqual(prefs.activeSessionByProject, { proj_1: 'ses_1' });
+  assert.deepEqual(prefs.experimentalOtByProject, { proj_1: true, proj_2: false });
   assert.equal(prefs.extraField, undefined);
   assert.equal(prefs.sessions, undefined);
+});
+
+test('extractLightweightPrefs normalizes experimental OT project prefs to booleans', () => {
+  const prefs = extractLightweightPrefs({
+    experimentalOtByProject: {
+      proj_true: true,
+      proj_false: false,
+      proj_number: 1,
+      proj_empty: '',
+      proj_string: 'enabled'
+    }
+  }, 'proj_true');
+
+  assert.deepEqual(prefs.experimentalOtByProject, {
+    proj_true: true,
+    proj_false: false,
+    proj_number: true,
+    proj_empty: false,
+    proj_string: true
+  });
+  assert.deepEqual(
+    Object.values(prefs.experimentalOtByProject).map(value => typeof value),
+    ['boolean', 'boolean', 'boolean', 'boolean', 'boolean']
+  );
 });
 
 test('extractLightweightPrefs defaults missing values', () => {
@@ -289,6 +315,7 @@ test('extractLightweightPrefs defaults missing values', () => {
   assert.equal(prefs.autoRecompile, true);
   assert.equal(prefs.panelWidth, 0);
   assert.deepEqual(prefs.activeSessionByProject, {});
+  assert.deepEqual(prefs.experimentalOtByProject, {});
 });
 
 test('buildActiveSessionByProject merges new mapping into empty existing', () => {

@@ -39,7 +39,7 @@ test('composer keeps the send button in a fixed visible toolbar column', () => {
   assert.match(contentScript, /data-run title="Send" aria-label="Send"/);
   assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*display: grid/);
   assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*grid-template-columns:/);
-  assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*grid-column: 5/);
+  assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*grid-column: 6/);
   assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*width: 28px/);
   assert.match(css, /\.codex-model-config-button\s*\{[\s\S]*min-width: 0/);
 });
@@ -193,8 +193,31 @@ test('composer model picker stays compact when the side panel is wide', () => {
 
   assert.doesNotMatch(toolbarBlock, /minmax\(96px,\s*1fr\)/);
   assert.doesNotMatch(toolbarBlock, /66px 54px/);
-  assert.match(toolbarBlock, /grid-template-columns:\s*26px 42px minmax\(0,\s*1fr\) minmax\(104px,\s*156px\) 28px/);
+  assert.match(toolbarBlock, /grid-template-columns:\s*26px 42px 54px minmax\(0,\s*1fr\) minmax\(104px,\s*156px\) 28px/);
   assert.match(modelBlock, /max-width:\s*156px/);
+});
+
+test('experimental OT toggle keeps toolbar columns compact', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const otBlock = css.match(/#codex-overleaf-panel \.codex-ot-toggle\s*\{[\s\S]*?\n\}/)?.[0] || '';
+  const statusBlock = css.match(/#codex-overleaf-panel \.codex-ot-toggle \[data-ot-status\]\s*\{[\s\S]*?\n\}/)?.[0] || '';
+
+  assert.match(contentScript, /class="codex-ot-toggle"/);
+  assert.match(contentScript, /data-experimental-ot/);
+  assert.match(otBlock, /min-height:\s*26px/);
+  assert.match(otBlock, /width:\s*54px/);
+  assert.match(otBlock, /overflow:\s*hidden/);
+  assert.match(statusBlock, /min-width:\s*0/);
+  assert.match(statusBlock, /overflow:\s*hidden/);
+  assert.match(statusBlock, /text-overflow:\s*ellipsis/);
+  assert.match(statusBlock, /white-space:\s*nowrap/);
 });
 
 test('composer describes compile toggle as a post-write action', () => {
