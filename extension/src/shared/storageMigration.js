@@ -110,7 +110,7 @@
       if (!key) {
         continue;
       }
-      result[key] = Boolean(value[key]);
+      result[key] = value[key] === true;
     }
     return result;
   }

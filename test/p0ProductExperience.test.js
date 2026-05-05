@@ -1427,12 +1427,59 @@ test('composer exposes an experimental project-scoped OT warm mirror toggle', ()
   assert.match(contentScript, /syncOtWarmMirrorController/);
   assert.match(contentScript, /updateOtStatusDisplay/);
   assert.match(contentScript, /formatOtStatusLabel/);
-  assert.match(syncBody, /callPageBridge\('startOtObserver',\s*\{\s*projectId:\s*getCurrentProjectId\(\)\s*\}\)/);
+  assert.match(syncBody, /callPageBridge\('startOtObserver',\s*\{\s*projectId\s*\}\)/);
   assert.match(syncBody, /callPageBridge\('stopOtObserver',\s*\{\s*\}\)/);
   assert.doesNotMatch(syncBody, /drainOtEvents/);
   assert.doesNotMatch(syncBody, /mirror\.patchFiles/);
   assert.match(i18n, /experimentalOtWarmMirror:\s*'/);
   assert.match(i18n, /otStatusObserving:\s*'/);
+});
+
+test('experimental OT sync ignores stale responses and reverts failed starts to default off', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const syncBody = contentScript.match(/async function syncOtWarmMirrorController\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const failBody = contentScript.match(/function handleFailedOtStart\(projectId, requestId\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const projectChangeBody = contentScript.match(/function syncOtWarmMirrorStateForProject\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(contentScript, /let otSyncRequestId\s*=\s*0/);
+  assert.match(syncBody, /const projectId = getCurrentProjectId\(\)/);
+  assert.match(syncBody, /const requestId = \+\+otSyncRequestId/);
+  assert.match(syncBody, /const enabled = isExperimentalOtEnabledForProject\(projectId\)/);
+  assert.match(syncBody, /isCurrentOtSync\(requestId,\s*projectId\)/);
+  assert.match(syncBody, /getCurrentProjectId\(\) !== projectId/);
+  assert.match(syncBody, /handleStaleOtStartResponse\(projectId,\s*requestId\)/);
+  assert.match(syncBody, /isSuccessfulOtBridgeResponse\(response\)/);
+  assert.match(syncBody, /handleFailedOtStart\(projectId,\s*requestId\)/);
+  assert.match(failBody, /setExperimentalOtEnabledForProject\(projectId,\s*false\)/);
+  assert.match(failBody, /experimentalOtCheckbox\.checked = false/);
+  assert.match(failBody, /updateOtStatusDisplay\('unavailable'\)/);
+  assert.match(failBody, /saveStateSoon\(\)/);
+  assert.match(projectChangeBody, /otWarmMirrorProjectId = projectId/);
+  assert.match(projectChangeBody, /otSyncRequestId\+\+/);
+  assert.match(projectChangeBody, /callPageBridge\('stopOtObserver',\s*\{\s*\}\)/);
+  assert.match(projectChangeBody, /syncOtWarmMirrorController\(\)/);
+});
+
+test('experimental OT stop does not mark off when stop bridge fails', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const syncBody = contentScript.match(/async function syncOtWarmMirrorController\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const disabledIndex = syncBody.indexOf('if (!enabled) {');
+  const failedStopIndex = syncBody.indexOf('if (!isSuccessfulOtBridgeResponse(response))', disabledIndex);
+  const unavailableIndex = syncBody.indexOf("updateOtStatusDisplay('unavailable')", failedStopIndex);
+  const offIndex = syncBody.indexOf("updateOtStatusDisplay('off')", disabledIndex);
+
+  assert.notEqual(disabledIndex, -1, 'sync should have a disabled stop branch');
+  assert.notEqual(failedStopIndex, -1, 'disabled branch should check stop bridge success');
+  assert.notEqual(unavailableIndex, -1, 'failed stop should show unavailable');
+  assert.notEqual(offIndex, -1, 'successful stop should show off');
+  assert.ok(offIndex > failedStopIndex, 'off status should only be applied after successful stop handling');
+  assert.ok(offIndex > unavailableIndex, 'off status should not be applied inside failed stop handling');
 });
 
 test('markdown links only allow http and https URLs', () => {

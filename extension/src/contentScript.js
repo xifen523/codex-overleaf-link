@@ -70,6 +70,8 @@
   let activePluginConfirmResolve = null;
   let modelDiscovery = { status: 'fallback', source: 'fallback', fetchedAt: '' };
   let currentOtStatus = 'off';
+  let otSyncRequestId = 0;
+  let otWarmMirrorProjectId = '';
   let mirrorPrefetchState = {
     inFlight: null,
     lastSuccessAt: 0,
@@ -2687,11 +2689,22 @@
 
   function isExperimentalOtEnabled() {
     const projectId = getCurrentProjectId();
+    return isExperimentalOtEnabledForProject(projectId);
+  }
+
+  function isExperimentalOtEnabledForProject(projectId) {
     return state?.experimentalOtByProject?.[projectId] === true;
   }
 
   function setExperimentalOtEnabled(enabled) {
     const projectId = getCurrentProjectId();
+    setExperimentalOtEnabledForProject(projectId, enabled);
+  }
+
+  function setExperimentalOtEnabledForProject(projectId, enabled) {
+    if (!projectId) {
+      return;
+    }
     state = {
       ...state,
       experimentalOtByProject: {
@@ -2715,17 +2728,68 @@
   }
 
   async function syncOtWarmMirrorController() {
-    const enabled = isExperimentalOtEnabled();
-    updateOtStatusDisplay(enabled ? 'starting' : currentOtStatus);
+    const projectId = getCurrentProjectId();
+    const requestId = ++otSyncRequestId;
+    const enabled = isExperimentalOtEnabledForProject(projectId);
+    otWarmMirrorProjectId = projectId;
+    if (enabled) {
+      updateOtStatusDisplay('starting');
+    }
     const response = enabled
-      ? await callPageBridge('startOtObserver', { projectId: getCurrentProjectId() })
+      ? await callPageBridge('startOtObserver', { projectId })
       : await callPageBridge('stopOtObserver', {});
+    if (!isCurrentOtSync(requestId, projectId) || getCurrentProjectId() !== projectId) {
+      if (enabled) {
+        await handleStaleOtStartResponse(projectId, requestId);
+      }
+      return response;
+    }
     if (!enabled) {
+      if (!isSuccessfulOtBridgeResponse(response)) {
+        updateOtStatusDisplay('unavailable');
+        return response;
+      }
       updateOtStatusDisplay('off');
       return response;
     }
-    updateOtStatusDisplay(readOtBridgeStatus(response));
+    const status = readOtBridgeStatus(response);
+    if (!isSuccessfulOtBridgeResponse(response) || status === 'unavailable') {
+      handleFailedOtStart(projectId, requestId);
+      return response;
+    }
+    updateOtStatusDisplay(status);
     return response;
+  }
+
+  function isCurrentOtSync(requestId, projectId) {
+    return requestId === otSyncRequestId && projectId === otWarmMirrorProjectId;
+  }
+
+  function isSuccessfulOtBridgeResponse(response) {
+    return Boolean(response) && response.ok !== false;
+  }
+
+  async function handleStaleOtStartResponse(projectId, requestId) {
+    if (isCurrentOtSync(requestId, projectId) && getCurrentProjectId() === projectId) {
+      return;
+    }
+    await callPageBridge('stopOtObserver', {});
+    if (isExperimentalOtEnabled()) {
+      await syncOtWarmMirrorController();
+    }
+  }
+
+  function handleFailedOtStart(projectId, requestId) {
+    if (!isCurrentOtSync(requestId, projectId) || getCurrentProjectId() !== projectId) {
+      return;
+    }
+    setExperimentalOtEnabledForProject(projectId, false);
+    const experimentalOtCheckbox = panel?.querySelector('[data-experimental-ot]');
+    if (experimentalOtCheckbox) {
+      experimentalOtCheckbox.checked = false;
+    }
+    updateOtStatusDisplay('unavailable');
+    saveStateSoon();
   }
 
   function readOtBridgeStatus(response) {
@@ -2980,6 +3044,7 @@
 
   function syncMirrorPrefetchStateForProject() {
     const projectId = getCurrentProjectId();
+    syncOtWarmMirrorStateForProject();
     if (!mirrorPrefetchState.projectId || mirrorPrefetchState.projectId === projectId) {
       return;
     }
@@ -2994,6 +3059,28 @@
       timer: null,
       projectId
     };
+  }
+
+  function syncOtWarmMirrorStateForProject() {
+    const projectId = getCurrentProjectId();
+    if (!otWarmMirrorProjectId) {
+      otWarmMirrorProjectId = projectId;
+      return;
+    }
+    if (otWarmMirrorProjectId === projectId) {
+      return;
+    }
+    otWarmMirrorProjectId = projectId;
+    otSyncRequestId++;
+    callPageBridge('stopOtObserver', {}).then(response => {
+      if (!isSuccessfulOtBridgeResponse(response)) {
+        updateOtStatusDisplay('unavailable');
+      }
+      return syncOtWarmMirrorController();
+    }).catch(error => {
+      updateOtStatusDisplay('unavailable');
+      appendPlainLog(tx(`Experimental OT warm mirror unavailable: ${error.message}`, `实验性 OT 预热镜像不可用：${error.message}`));
+    });
   }
 
   async function handleTaskResult(mode, result, project) {

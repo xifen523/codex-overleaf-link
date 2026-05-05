@@ -57,7 +57,13 @@ test('current-schema migration load path normalizes experimental OT map values',
             [Migration.PREFS_KEY]: {
               storageSchemaVersion: 1,
               activeSessionByProject: { project_1: 'session_1' },
-              experimentalOtByProject: { project_1: true, project_2: 0, project_3: 'yes' }
+              experimentalOtByProject: {
+                project_1: true,
+                project_2: 0,
+                project_3: 'yes',
+                project_4: {},
+                project_5: []
+              }
             }
           });
         }
@@ -71,7 +77,9 @@ test('current-schema migration load path normalizes experimental OT map values',
     assert.deepEqual(result.prefs.experimentalOtByProject, {
       project_1: true,
       project_2: false,
-      project_3: true
+      project_3: false,
+      project_4: false,
+      project_5: false
     });
     assert.equal(result.activeSessionId, 'session_1');
   } finally {

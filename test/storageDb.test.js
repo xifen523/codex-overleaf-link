@@ -279,27 +279,31 @@ test('extractLightweightPrefs extracts correct fields', () => {
   assert.equal(prefs.sessions, undefined);
 });
 
-test('extractLightweightPrefs normalizes experimental OT project prefs to booleans', () => {
+test('extractLightweightPrefs preserves only literal true experimental OT project prefs', () => {
   const prefs = extractLightweightPrefs({
     experimentalOtByProject: {
       proj_true: true,
       proj_false: false,
       proj_number: 1,
       proj_empty: '',
-      proj_string: 'enabled'
+      proj_string: 'enabled',
+      proj_object: {},
+      proj_array: []
     }
   }, 'proj_true');
 
   assert.deepEqual(prefs.experimentalOtByProject, {
     proj_true: true,
     proj_false: false,
-    proj_number: true,
+    proj_number: false,
     proj_empty: false,
-    proj_string: true
+    proj_string: false,
+    proj_object: false,
+    proj_array: false
   });
   assert.deepEqual(
     Object.values(prefs.experimentalOtByProject).map(value => typeof value),
-    ['boolean', 'boolean', 'boolean', 'boolean', 'boolean']
+    ['boolean', 'boolean', 'boolean', 'boolean', 'boolean', 'boolean', 'boolean']
   );
 });
 
