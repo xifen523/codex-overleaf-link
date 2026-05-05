@@ -18,16 +18,20 @@ test('project snapshot action lives in the diagnostics menu instead of the heade
   assert.match(contentScript, /data-diagnostics-native-env/);
   assert.match(contentScript, /data-diagnostics-page-state/);
   assert.match(contentScript, /data-diagnostics-snapshot/);
+  assert.match(contentScript, /data-diagnostics-ot/);
   assert.match(contentScript, /data-language-toggle/);
   assert.match(contentScript, /data-diagnostics-result/);
   assert.match(contentScript, /Use when Codex cannot run, write, or read files/);
   assert.match(contentScript, /Check Local Connection/);
   assert.match(contentScript, /Check Overleaf Write Access/);
   assert.match(contentScript, /Check Project Read/);
+  assert.match(contentScript, /Check Experimental OT Mirror/);
   assert.match(contentScript, /Switch to Chinese/);
   assert.match(contentScript, /function toggleLanguage\(/);
   assert.match(contentScript, /function applyLocaleToPanel\(/);
   assert.match(contentScript, /function inspectNativeEnvironment\(/);
+  assert.match(contentScript, /function inspectOtWarmMirrorDiagnostics\(/);
+  assert.match(contentScript, /function formatOtDiagnosticsResult\(/);
   assert.match(contentScript, /function formatNativeEnvironmentResult\(/);
   assert.match(contentScript, /function toggleDiagnosticsMenu\(/);
   assert.match(contentScript, /function closeDiagnosticsMenu\(/);
@@ -57,6 +61,58 @@ test('diagnostics render in a floating result panel instead of the task transcri
   assert.match(nativeBody, /showDiagnosticsResult\(formatNativeEnvironmentResult/);
   assert.match(pageBody, /showDiagnosticsResult\(formatPageStateDiagnosticsResult/);
   assert.match(snapshotBody, /showDiagnosticsResult\(formatProjectSnapshotDiagnosticsResult/);
+});
+
+test('experimental OT diagnostics read metadata without draining project content', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const menuBody = contentScript.match(/panel\.querySelector\('\[data-diagnostics-menu\]'\)[\s\S]*?panel\.querySelector\('\[data-language-toggle\]'\)/)?.[0] || '';
+  const inspectBody = contentScript.match(/async function inspectOtWarmMirrorDiagnostics\(\) \{[\s\S]*?\n  function formatOtDiagnosticsResult/)?.[0] || '';
+  const formatBody = contentScript.match(/function formatOtDiagnosticsResult\(\{ otStatus, mirrorStatus \}\) \{[\s\S]*?\n  function /)?.[0] || '';
+
+  assert.match(menuBody, /\[data-diagnostics-ot\]/);
+  assert.match(menuBody, /closeDiagnosticsMenu\(\)/);
+  assert.match(menuBody, /inspectOtWarmMirrorDiagnostics\(\)/);
+  assert.match(inspectBody, /showDiagnosticsLoading\(tr\('diagnosticsOtTitle'\)/);
+  assert.match(inspectBody, /callPageBridge\('getOtStatus'/);
+  assert.match(inspectBody, /getMirrorFreshness\(\)/);
+  assert.doesNotMatch(inspectBody, /drainOtEvents/);
+  assert.match(inspectBody, /showDiagnosticsResult\(formatOtDiagnosticsResult\(\{ otStatus, mirrorStatus \}\)\)/);
+  assert.match(inspectBody, /status:\s*'warning'/);
+  assert.match(formatBody, /isExperimentalOtEnabled\(\)/);
+  assert.match(formatBody, /formatOtStatusLabel/);
+  assert.match(formatBody, /lastOtPatchAt/);
+  assert.match(formatBody, /queuedEventCount/);
+  assert.match(formatBody, /channelCandidates/);
+  assert.match(formatBody, /diagnosticsOtSummaryEnabled/);
+  assert.match(formatBody, /diagnosticsOtSummaryDisabled/);
+  assert.doesNotMatch(formatBody, /nextContent/);
+  assert.doesNotMatch(formatBody, /previousContent/);
+  assert.doesNotMatch(formatBody, /\bops\b/);
+  assert.doesNotMatch(formatBody, /JSON\.stringify\((otStatus|mirrorStatus)/);
+});
+
+test('experimental OT diagnostics i18n is available in English and Chinese', () => {
+  const I18n = require('../extension/src/shared/i18n');
+  const keys = [
+    'diagnosticsOtTitle',
+    'diagnosticsOtSubtitle',
+    'diagnosticsOtSummaryEnabled',
+    'diagnosticsOtSummaryDisabled',
+    'diagnosticsOtNextStep',
+    'otStatus',
+    'otFreshFiles',
+    'otFallback',
+    'yes',
+    'no'
+  ];
+
+  for (const key of keys) {
+    assert.notEqual(I18n.t('en', key), key, `missing English i18n key ${key}`);
+    assert.notEqual(I18n.t('zh', key), key, `missing Chinese i18n key ${key}`);
+  }
 });
 
 test('diagnostic summaries use natural language while raw details stay collapsed', () => {

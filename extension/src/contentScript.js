@@ -161,6 +161,10 @@
                   <span data-i18n="diagnosticsSnapshotTitle">Check Project Read</span>
                   <small data-i18n="diagnosticsSnapshotSubtitle">Full project, assets, read source</small>
                 </button>
+                <button type="button" data-diagnostics-ot>
+                  <span data-i18n="diagnosticsOtTitle">Check Experimental OT Mirror</span>
+                  <small data-i18n="diagnosticsOtSubtitle">Status, fresh files, fallback</small>
+                </button>
                 <button type="button" data-language-toggle>
                   <span data-i18n="switchLanguage">Switch to Chinese</span>
                   <small data-i18n="switchLanguageHint">Change panel language</small>
@@ -322,6 +326,10 @@
       panel.querySelector('[data-diagnostics-snapshot]').addEventListener('click', () => {
         closeDiagnosticsMenu();
         inspectProjectSnapshot();
+      });
+      panel.querySelector('[data-diagnostics-ot]').addEventListener('click', () => {
+        closeDiagnosticsMenu();
+        inspectOtWarmMirrorDiagnostics();
       });
       panel.querySelector('[data-language-toggle]').addEventListener('click', () => toggleLanguage());
       panel.querySelector('[data-diagnostics-result-close]').addEventListener('click', () => closeDiagnosticsResult());
@@ -1221,6 +1229,161 @@
         technical: error?.stack || error?.message || String(error)
       });
     }
+  }
+
+  async function inspectOtWarmMirrorDiagnostics() {
+    showDiagnosticsLoading(tr('diagnosticsOtTitle'), tr('diagnosticsLoading'));
+    const projectId = getCurrentProjectId();
+    let otStatus = null;
+    let mirrorStatus = null;
+    const warnings = [];
+
+    try {
+      otStatus = await callPageBridge('getOtStatus', { projectId });
+      if (otStatus?.ok === false) {
+        warnings.push(formatOtDiagnosticValue(otStatus.error, 'getOtStatus failed'));
+      }
+    } catch (error) {
+      warnings.push(error?.message || String(error));
+    }
+
+    try {
+      mirrorStatus = await getMirrorFreshness();
+      if (!mirrorStatus) {
+        warnings.push(tx('Native mirror status is unavailable.', '本机 mirror 状态暂时不可用。'));
+      }
+    } catch (error) {
+      warnings.push(error?.message || String(error));
+    }
+
+    if (!warnings.length) {
+      showDiagnosticsResult(formatOtDiagnosticsResult({ otStatus, mirrorStatus }));
+      return;
+    }
+
+    const result = formatOtDiagnosticsResult({ otStatus, mirrorStatus });
+    showDiagnosticsResult({
+      ...result,
+      status: 'warning',
+      summary: `${result.summary} ${tx('Some OT diagnostic metadata is unavailable.', '部分 OT 诊断元数据暂时不可用。')}`,
+      technical: [
+        result.technical,
+        'warnings:',
+        ...warnings.map(warning => `- ${formatOtDiagnosticValue(warning, 'unknown')}`)
+      ].filter(Boolean).join('\n')
+    });
+  }
+
+  function formatOtDiagnosticsResult({ otStatus, mirrorStatus }) {
+    const enabled = isExperimentalOtEnabled();
+    const statusValue = normalizeOtStatus(otStatus ? readOtBridgeStatus(otStatus) : currentOtStatus);
+    const stateValue = normalizeOtStatus(otStatus?.state || statusValue);
+    const queuedEventCount = normalizeOtDiagnosticsCount(otStatus?.queuedEventCount);
+    const lastEventAt = formatOtDiagnosticValue(otStatus?.lastEventAt, tr('noneValue'));
+    const lastOtPatchAt = formatOtDiagnosticValue(mirrorStatus?.lastOtPatchAt || otWarmMirrorState.lastPatchAt, tr('noneValue'));
+    const lastOtErrorCode = formatOtDiagnosticValue(mirrorStatus?.lastOtErrorCode || otWarmMirrorState.lastErrorCode, tr('noneValue'));
+    const lastErrorCode = formatOtDiagnosticValue(otStatus?.lastErrorCode || otStatus?.reason || otStatus?.error, tr('noneValue'));
+    const channelCandidates = formatOtChannelCandidates(otStatus?.channelCandidates);
+    const otFreshFileCount = normalizeOtDiagnosticsCount(
+      mirrorStatus?.otFreshFileCount,
+      Array.isArray(mirrorStatus?.otFreshFiles) ? mirrorStatus.otFreshFiles.length : 0
+    );
+    const otStaleFileCount = normalizeOtDiagnosticsCount(mirrorStatus?.otStaleFileCount);
+    const fallback = !enabled || statusValue !== 'observing' || otFreshFileCount <= 0;
+    const bridgeFailed = otStatus?.ok === false;
+
+    return {
+      title: tr('diagnosticsOtTitle'),
+      subtitle: tr('diagnosticsOtSubtitle'),
+      status: enabled && !fallback && !bridgeFailed ? 'completed' : (enabled || bridgeFailed ? 'warning' : 'completed'),
+      summary: tr(enabled ? 'diagnosticsOtSummaryEnabled' : 'diagnosticsOtSummaryDisabled'),
+      bullets: [
+        `${tr('otStatus')}: ${formatOtStatusLabel(statusValue)}`,
+        `${tr('otFreshFiles')}: ${otFreshFileCount}`,
+        `${tr('otFallback')}: ${fallback ? tr('yes') : tr('no')}`
+      ],
+      nextStep: fallback ? tr('diagnosticsOtNextStep') : '',
+      technical: formatOtDiagnosticsTechnicalDetails({
+        enabled,
+        fallback,
+        status: statusValue,
+        state: stateValue,
+        running: otStatus?.running === true,
+        strategy: formatOtDiagnosticValue(otStatus?.strategy, 'unknown'),
+        activePath: formatOtDiagnosticValue(otStatus?.activePath, tr('noneValue')),
+        queuedEventCount,
+        lastEventAt,
+        lastOtPatchAt,
+        lastOtErrorCode,
+        lastErrorCode,
+        mirrorExists: mirrorStatus?.exists === true,
+        mirrorAgeMs: formatOtDiagnosticValue(mirrorStatus?.ageMs, tr('noneValue')),
+        otFreshFileCount,
+        otStaleFileCount,
+        channelCandidates
+      })
+    };
+  }
+
+  function formatOtDiagnosticsTechnicalDetails(metadata = {}) {
+    const lines = [
+      `enabled: ${Boolean(metadata.enabled)}`,
+      `fallback: ${Boolean(metadata.fallback)}`,
+      `status: ${metadata.status || 'unknown'}`,
+      `state: ${metadata.state || 'unknown'}`,
+      `running: ${Boolean(metadata.running)}`,
+      `strategy: ${metadata.strategy || 'unknown'}`,
+      `activePath: ${metadata.activePath || tr('noneValue')}`,
+      `queuedEventCount: ${metadata.queuedEventCount}`,
+      `lastEventAt: ${metadata.lastEventAt || tr('noneValue')}`,
+      `lastOtPatchAt: ${metadata.lastOtPatchAt || tr('noneValue')}`,
+      `lastOtErrorCode: ${metadata.lastOtErrorCode || tr('noneValue')}`,
+      `lastErrorCode: ${metadata.lastErrorCode || tr('noneValue')}`,
+      `mirrorExists: ${Boolean(metadata.mirrorExists)}`,
+      `mirrorAgeMs: ${metadata.mirrorAgeMs || tr('noneValue')}`,
+      `otFreshFileCount: ${metadata.otFreshFileCount}`,
+      `otStaleFileCount: ${metadata.otStaleFileCount}`
+    ];
+    const candidates = Array.isArray(metadata.channelCandidates) ? metadata.channelCandidates : [];
+    lines.push(`channelCandidates: ${candidates.length ? '' : tr('noneValue')}`);
+    for (const candidate of candidates) {
+      lines.push(`- ${candidate}`);
+    }
+    return lines.join('\n');
+  }
+
+  function formatOtChannelCandidates(candidates) {
+    return (Array.isArray(candidates) ? candidates : [])
+      .slice(0, 4)
+      .map(candidate => {
+        const root = formatOtDiagnosticValue(candidate?.root, 'unknown');
+        const keyPaths = (Array.isArray(candidate?.keyPaths) ? candidate.keyPaths : [])
+          .map(value => formatOtDiagnosticValue(value, ''))
+          .filter(Boolean)
+          .slice(0, 6);
+        return keyPaths.length ? `${root}: ${keyPaths.join(', ')}` : root;
+      })
+      .filter(Boolean);
+  }
+
+  function normalizeOtDiagnosticsCount(value, fallback = 0) {
+    const count = Number(value);
+    return Number.isFinite(count) && count >= 0 ? Math.floor(count) : fallback;
+  }
+
+  function formatOtDiagnosticValue(value, fallback = '') {
+    let text = '';
+    if (typeof value === 'string') {
+      text = value;
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      text = String(value);
+    } else if (value?.code || value?.message) {
+      text = String(value.code || value.message);
+    }
+    if (!text) {
+      return fallback;
+    }
+    return text.length > 160 ? `${text.slice(0, 157)}...` : text;
   }
 
   function formatPageStateDiagnosticsResult(probe) {
