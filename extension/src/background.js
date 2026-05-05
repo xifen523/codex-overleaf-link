@@ -134,6 +134,14 @@ importScripts('shared/compatibility.js');
   function getNativeCompatibilityBlock(request = {}) {
     const evidence = getNativeCompatibilityEvidence(request);
     if (!evidence) {
+      if (COMPATIBILITY_REQUIRED_METHODS.has(request.method)) {
+        return {
+          code: 'native_incompatible',
+          message: formatNativeCompatibilityBlockMessage('unknown_native'),
+          status: 'unknown_native',
+          installCommand: undefined
+        };
+      }
       return null;
     }
 

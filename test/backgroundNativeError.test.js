@@ -133,6 +133,85 @@ test('background blocks side-effecting native requests with non-ok compatibility
   assert.match(blockedRun.error.message, /Native host/i);
 });
 
+test('background blocks side-effecting native requests without compatibility evidence before posting', async () => {
+  const harness = loadBackgroundHarness();
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const runResponse = harness.sendNative({
+    id: 'run-no-evidence',
+    method: 'codex.run',
+    params: { task: 'write' }
+  }, sender);
+
+  assert.equal(harness.ports.length, 0);
+
+  const blockedRun = await settleWithin(runResponse);
+  assert.equal(blockedRun.ok, false);
+  assert.equal(blockedRun.error.code, 'native_incompatible');
+  assert.match(blockedRun.error.message, /Native host/i);
+});
+
+test('background allows recoverable native requests without compatibility evidence', async () => {
+  const harness = loadBackgroundHarness();
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const pingResponse = harness.sendNative(
+    { id: 'ping-no-evidence', method: 'bridge.ping', params: {} },
+    sender
+  );
+  const statusResponse = harness.sendNative(
+    { id: 'status-no-evidence', method: 'mirror.status', params: { projectId: 'abc123' } },
+    sender
+  );
+  const modelsResponse = harness.sendNative(
+    { id: 'models-no-evidence', method: 'codex.models', params: {} },
+    sender
+  );
+
+  assert.equal(harness.ports.length, 1);
+  assert.deepEqual(
+    harness.ports[0].messages.map(message => `${message.id}:${message.method}`),
+    [
+      'ping-no-evidence:bridge.ping',
+      'status-no-evidence:mirror.status',
+      'models-no-evidence:codex.models'
+    ]
+  );
+
+  harness.ports[0].emitMessage({ id: 'ping-no-evidence', ok: true, result: { version: '0.4.0' } });
+  harness.ports[0].emitMessage({ id: 'status-no-evidence', ok: true, result: { status: 'ready' } });
+  harness.ports[0].emitMessage({ id: 'models-no-evidence', ok: true, result: { models: [] } });
+
+  assert.equal((await pingResponse).ok, true);
+  assert.equal((await statusResponse).ok, true);
+  assert.equal((await modelsResponse).ok, true);
+
+  const cancelResponse = await harness.sendNative(
+    { id: 'cancel-no-evidence', method: 'codex.cancel', params: { requestId: 'run-id' } },
+    sender
+  );
+  assert.equal(cancelResponse.ok, true);
+  assert.deepEqual(
+    harness.ports[0].messages.map(message => `${message.id}:${message.method}`),
+    [
+      'ping-no-evidence:bridge.ping',
+      'status-no-evidence:mirror.status',
+      'models-no-evidence:codex.models',
+      'cancel-no-evidence:codex.cancel'
+    ]
+  );
+});
+
 test('background retries safe status after disconnect while failing codex.run without restart', async () => {
   const harness = loadBackgroundHarness();
   const sender = {
@@ -147,7 +226,7 @@ test('background retries safe status after disconnect while failing codex.run wi
     sender
   );
   const runResponse = harness.sendNative(
-    { id: 'run-1', method: 'codex.run', params: { task: 'write' } },
+    { id: 'run-1', method: 'codex.run', params: withOkNativeCompatibility({ task: 'write' }) },
     sender
   );
 
@@ -244,7 +323,7 @@ test('background does not retry execution requests when native postMessage throw
   };
 
   const runResponse = harness.sendNative(
-    { id: 'run-stale', method: 'codex.run', params: { task: 'write' } },
+    { id: 'run-stale', method: 'codex.run', params: withOkNativeCompatibility({ task: 'write' }) },
     sender
   );
 
@@ -270,7 +349,7 @@ test('background scopes no-id native errors through per-request retry policy', a
     sender
   );
   const runResponse = harness.sendNative(
-    { id: 'run-bad-frame', method: 'codex.run', params: { task: 'write' } },
+    { id: 'run-bad-frame', method: 'codex.run', params: withOkNativeCompatibility({ task: 'write' }) },
     sender
   );
 
@@ -367,7 +446,7 @@ test('background ignores explicit unknown native error ids while multiple reques
     sender
   );
   const runResponse = harness.sendNative(
-    { id: 'run-known-multi', method: 'codex.run', params: { task: 'write' } },
+    { id: 'run-known-multi', method: 'codex.run', params: withOkNativeCompatibility({ task: 'write' }) },
     sender
   );
 
@@ -489,7 +568,7 @@ test('background fails older execution request when later safe postMessage throw
   };
 
   const runResponse = harness.sendNative(
-    { id: 'run-old', method: 'codex.run', params: { task: 'write' } },
+    { id: 'run-old', method: 'codex.run', params: withOkNativeCompatibility({ task: 'write' }) },
     sender
   );
   const statusResponse = harness.sendNative(
@@ -540,7 +619,7 @@ test('background fails pending codex.run when cancel postMessage throws on the s
   };
 
   const runResponse = harness.sendNative(
-    { id: 'run-cancel-target', method: 'codex.run', params: { task: 'write' } },
+    { id: 'run-cancel-target', method: 'codex.run', params: withOkNativeCompatibility({ task: 'write' }) },
     sender
   );
   const cancelResponse = await harness.sendNative(
@@ -745,4 +824,14 @@ function settleWithin(promise) {
       setTimeout(() => reject(new Error('Timed out waiting for native response to settle.')), 20);
     })
   ]);
+}
+
+function withOkNativeCompatibility(params = {}) {
+  return {
+    ...params,
+    nativeCompatibility: {
+      status: 'ok',
+      installCommand: compatibility.buildInstallCommand()
+    }
+  };
 }

@@ -15,6 +15,8 @@ test('popup checks native host status and offers a copyable install command', ()
   assert.match(popupHtml, /id="native-install"/);
   assert.match(popupHtml, /id="install-command"/);
   assert.match(popupHtml, /id="copy-install-command"/);
+  assert.match(popupHtml, /Native host attention required/);
+  assert.doesNotMatch(popupHtml, /Native host not connected/);
   assert.ok(compatibilityScriptIndex > -1);
   assert.ok(compatibilityScriptIndex < popupScriptIndex);
   assert.match(popupJs, /const INSTALL_COMMAND/);
