@@ -21,10 +21,11 @@ test('release metadata is prepared for v0.3.0', () => {
   assert.equal(extensionManifest.version, packageJson.version);
   assert.match(readme, /version-0\.3\.0-blue/);
   assert.match(readme, /The OT warm mirror is experimental, off by default/);
-  assert.match(changelog, /## v0\.3\.0 - 2026-05-05/);
-  assert.match(changelog, /Experimental read-only OT warm mirror toggle/);
-  assert.match(changelog, /Native `mirror\.patchFiles` endpoint/);
-  assert.match(changelog, /Full snapshot sync remains the project-level source of truth/);
+  assert.match(changelog, /## v0\.3\.0 - 2026-05-06/);
+  assert.match(changelog, /Experimental read-only OT warm mirror for focused Overleaf editor changes/);
+  assert.match(changelog, /verified native `mirror\.patchFiles` updates/);
+  assert.match(changelog, /Moved the experimental OT control out of the composer toolbar/);
+  assert.match(changelog, /Full snapshot sync remains the project-level source of truth and fallback/);
 });
 
 test('validates Chrome extension ids', () => {

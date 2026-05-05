@@ -149,6 +149,11 @@
               <button type="button" data-diagnostics-menu title="Diagnostics" aria-label="Diagnostics" aria-expanded="false">⋯</button>
               <div class="codex-diagnostics-menu" data-diagnostics-popover hidden>
                 <div class="codex-diagnostics-hint" data-i18n="diagnosticsHint">Use when Codex cannot run, write, or read files</div>
+                <input type="checkbox" data-experimental-ot hidden>
+                <button type="button" class="codex-diagnostics-ot-toggle" data-experimental-ot-toggle role="switch" aria-checked="false" title="Experimental read-only OT mirror warming. If unavailable or stale, Codex falls back to the normal project read path.">
+                  <span data-i18n="experimentalOtMenuTitle">Experimental OT Mirror</span>
+                  <small data-experimental-ot-menu-status>OT: Off · Experimental: tracks the current editor and warms the local mirror; falls back when unsafe.</small>
+                </button>
                 <button type="button" data-diagnostics-native-env>
                   <span data-i18n="diagnosticsNativeTitle">Check Local Connection</span>
                   <small data-i18n="diagnosticsNativeSubtitle">Codex, Native Host, LaTeX tools</small>
@@ -230,14 +235,9 @@
               <input type="checkbox" data-require-reviewing>
               <span class="codex-review-label" data-i18n="requireReviewing">Track</span>
             </label>
-            <label class="codex-ot-toggle" title="Experimental read-only OT mirror warming. If unavailable or stale, Codex falls back to the normal project read path.">
-              <input type="checkbox" data-experimental-ot>
-              <span data-i18n="experimentalOtWarmMirrorShort">OT</span>
-              <small data-ot-status>Off</small>
-            </label>
             <label class="codex-recompile-toggle" title="After Codex writes, click Overleaf Recompile and record the compile result for this task. Ask mode will not trigger it.">
               <input type="checkbox" data-auto-recompile>
-              <span class="codex-recompile-label" data-i18n="autoCompile">Auto Compile</span>
+              <span class="codex-recompile-label" data-i18n="autoCompile">Compile</span>
             </label>
             <div class="codex-model-config" data-model-config>
               <button type="button" class="codex-model-config-button" data-model-config-toggle aria-haspopup="menu" aria-expanded="false">
@@ -340,14 +340,9 @@
         event.preventDefault();
         toggleModelConfigPopover();
       });
-      panel.querySelector('[data-experimental-ot]').addEventListener('change', () => {
-        readPanelInputs();
-        syncOtWarmMirrorController().catch(error => {
-          updateOtStatusDisplay('unavailable');
-          appendPlainLog(tx(`Experimental OT warm mirror unavailable: ${error.message}`, `实验性 OT 预热镜像不可用：${error.message}`));
-        });
-        saveStateSoon();
-      });
+      panel.querySelector('[data-experimental-ot-toggle]').addEventListener('click', handleExperimentalOtToggleClick);
+      panel.querySelector('[data-experimental-ot-toggle]').addEventListener('keydown', handleExperimentalOtToggleKeydown);
+      panel.querySelector('[data-experimental-ot]').addEventListener('change', handleExperimentalOtToggleChange);
       panel.querySelector('[data-model-config-popover]').addEventListener('click', event => {
         handleModelConfigChoiceClick(event).catch(error => {
           appendPlainLog(tx(`Failed to update model settings: ${error.message}`, `更新模型设置失败：${error.message}`));
@@ -518,7 +513,7 @@
     if (recompileToggle) {
       recompileToggle.title = tr('autoCompileTitle');
     }
-    const otToggle = panel.querySelector('.codex-ot-toggle');
+    const otToggle = panel.querySelector('[data-experimental-ot-toggle]');
     if (otToggle) {
       otToggle.title = tr('experimentalOtWarmMirrorTitle');
     }
@@ -537,6 +532,7 @@
 
     syncModeControls();
     updateOtStatusDisplay();
+    updateExperimentalOtMenuStatus();
     renderModelConfigChoices();
     updateModelDisplay();
     renderSessionList();
@@ -2913,10 +2909,79 @@
     if (experimentalOtCheckbox) {
       experimentalOtCheckbox.checked = enabled;
     }
+    updateExperimentalOtToggleControl(enabled);
     updateOtStatusDisplay(enabled
       ? (currentOtStatus === 'off' ? 'starting' : currentOtStatus)
       : 'off');
     return enabled;
+  }
+
+  async function handleExperimentalOtToggleClick(event) {
+    event.preventDefault();
+    await toggleExperimentalOtCheckbox();
+  }
+
+  async function handleExperimentalOtToggleKeydown(event) {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+    event.preventDefault();
+    await toggleExperimentalOtCheckbox();
+  }
+
+  async function toggleExperimentalOtCheckbox() {
+    const checkbox = panel?.querySelector('[data-experimental-ot]');
+    if (!checkbox) {
+      return;
+    }
+    const nextEnabled = !checkbox.checked;
+    if (nextEnabled) {
+      closeDiagnosticsMenu();
+      const approved = await showPluginConfirm({
+        title: tr('experimentalOtConfirmTitle'),
+        message: tr('experimentalOtConfirmMessage'),
+        confirmLabel: tr('experimentalOtConfirmEnable'),
+        cancelLabel: tr('confirmDefaultCancel')
+      });
+      if (!approved) {
+        return;
+      }
+    } else {
+      closeDiagnosticsMenu();
+    }
+    checkbox.checked = nextEnabled;
+    handleExperimentalOtToggleChange({ currentTarget: checkbox });
+    if (nextEnabled) {
+      showPluginToast(tr('experimentalOtEnabledToast'), { status: 'info' });
+    }
+  }
+
+  function handleExperimentalOtToggleChange(event) {
+    const checkbox = event?.currentTarget || panel?.querySelector('[data-experimental-ot]');
+    if (!checkbox) {
+      return;
+    }
+    const projectId = getCurrentProjectId();
+    lastExperimentalOtProjectId = projectId;
+    setExperimentalOtEnabledForProject(projectId, checkbox.checked);
+    updateExperimentalOtToggleControl(checkbox.checked);
+    updateOtStatusDisplay(checkbox.checked ? (currentOtStatus === 'off' ? 'starting' : currentOtStatus) : 'off');
+    syncOtWarmMirrorController().catch(error => {
+      updateOtStatusDisplay('unavailable');
+      appendPlainLog(tx(`Experimental OT warm mirror unavailable: ${error.message}`, `实验性 OT 预热镜像不可用：${error.message}`));
+    });
+    saveStateSoon();
+  }
+
+  function updateExperimentalOtToggleControl(enabled) {
+    const toggle = panel?.querySelector('[data-experimental-ot-toggle]');
+    if (!toggle) {
+      return;
+    }
+    const checked = enabled === true;
+    toggle.dataset.checked = checked ? 'true' : 'false';
+    toggle.setAttribute('aria-checked', checked ? 'true' : 'false');
+    updateExperimentalOtMenuStatus();
   }
 
   async function syncOtWarmMirrorController() {
@@ -3292,14 +3357,12 @@
     const statusElement = panel?.querySelector('[data-ot-status]');
     if (statusElement) {
       const label = formatOtStatusLabel(normalized);
-      statusElement.textContent = label;
+      statusElement.textContent = formatOtToggleStatusText(label);
       statusElement.dataset.otStatus = normalized;
-      statusElement.title = label;
+      statusElement.title = formatOtToggleStatusText(label);
     }
-    const toggle = panel?.querySelector('.codex-ot-toggle');
-    if (toggle) {
-      toggle.dataset.otStatus = normalized;
-    }
+    updateExperimentalOtMenuStatus();
+    updateProbeStatusOtSuffix();
   }
 
   function formatOtStatusLabel(status) {
@@ -3312,6 +3375,18 @@
       inconsistent: 'otStatusInconsistent'
     };
     return tr(labels[normalizeOtStatus(status)] || 'otStatusUnavailable');
+  }
+
+  function formatOtToggleStatusText(label) {
+    return `OT: ${label}`;
+  }
+
+  function updateExperimentalOtMenuStatus() {
+    const statusElement = panel?.querySelector('[data-experimental-ot-menu-status]');
+    if (!statusElement) {
+      return;
+    }
+    statusElement.textContent = `${formatOtToggleStatusText(formatOtStatusLabel(currentOtStatus))} · ${tr('experimentalOtMenuSubtitle')}`;
   }
 
   function normalizeOtStatus(status) {
@@ -4008,17 +4083,39 @@
     const editorWritable = readiness.editorWritable;
 
     if (state?.mode === 'ask') {
-      return `${formatModeLabel('ask')} · ${readiness.contextLabel}`;
+      return appendOtStatusToProbeStatus(`${formatModeLabel('ask')} · ${readiness.contextLabel}`);
     }
     if (reviewingOk) {
-      return editorWritable
+      const status = editorWritable
         ? `${tr('canRun')} · ${readiness.contextLabel}`
         : `${formatModeLabel(state?.mode)} · ${tr('validatingEditor')}`;
+      return appendOtStatusToProbeStatus(status);
     }
     if (readiness.contextReady) {
-      return tr('needsReviewing');
+      return appendOtStatusToProbeStatus(tr('needsReviewing'));
     }
-    return tr('needsReviewingAndFile');
+    return appendOtStatusToProbeStatus(tr('needsReviewingAndFile'));
+  }
+
+  function appendOtStatusToProbeStatus(status) {
+    const base = String(status || '');
+    if (!isExperimentalOtEnabled()) {
+      return base;
+    }
+    return `${base} · OT ${formatOtStatusLabel(currentOtStatus)}`;
+  }
+
+  function updateProbeStatusOtSuffix() {
+    const status = panel?.querySelector('[data-probe-status]');
+    if (!status || status.dataset.refreshing === 'true') {
+      return;
+    }
+    const text = String(status.textContent || '');
+    if (!text) {
+      return;
+    }
+    const base = text.split(' · OT ')[0];
+    status.textContent = appendOtStatusToProbeStatus(base);
   }
 
   function isProbeReadyForCurrentMode(probe) {

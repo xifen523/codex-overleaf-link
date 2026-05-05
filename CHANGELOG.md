@@ -1,19 +1,36 @@
 # Changelog
 
-## v0.3.0 - 2026-05-05
+## v0.3.0 - 2026-05-06
+
+Experimental OT warm mirror release. This version focuses on reducing startup sync work for focused-file tasks while keeping the normal full snapshot path as the safe source of truth.
 
 ### Added
 
-- Experimental read-only OT warm mirror toggle.
-- Active-editor observation for known text files.
-- Native `mirror.patchFiles` endpoint for verified per-file mirror patches.
-- Per-file OT freshness metadata in mirror status.
-- OT diagnostics with fallback state and no project content.
+- Experimental read-only OT warm mirror for focused Overleaf editor changes.
+- Active-editor observation for known text files, with verified native `mirror.patchFiles` updates to the local mirror.
+- Per-file OT freshness metadata in mirror status, used only when focused files are fresh and covered.
+- OT diagnostics showing status, fresh files, fallback state, and safe next steps without exposing project content.
+- Project-scoped experimental OT preference persisted separately per Overleaf project.
+
+### Changed
+
+- Moved the experimental OT control out of the composer toolbar and into the diagnostics menu with a first-use confirmation prompt.
+- Added lightweight `OT Live` status to the probe footer only when the experimental mirror is enabled.
+- Shortened the composer compile toggle to `Compile` and made Track/Compile visual states self-contained.
+- Reworked the composer toolbar layout so Track, Compile, model selection, and Send stay in stable columns.
+- Kept English and Chinese UI strings locale-specific instead of mixing both languages in one control.
+
+### Fixed
+
+- Fixed the experimental OT toggle so it gives visible feedback, can be clicked from the diagnostics menu, and does not appear as a dead `Off` label.
+- Fixed model picker alignment in the bottom toolbar after adding the Compile/Track pills.
+- Preserved fallback to normal project reads whenever OT is unavailable, stale, inconsistent, or missing focused-file coverage.
 
 ### Notes
 
 - OT warm mirror is off by default.
-- Full snapshot sync remains the project-level source of truth.
+- Full snapshot sync remains the project-level source of truth and fallback.
+- OT warm mirror is read-only with respect to Overleaf realtime channels; browser writeback still uses the existing guarded write path.
 - Browser writeback, stale guards, verified save gates, and undo remain unchanged.
 
 ## v0.2.0 - 2026-05-05

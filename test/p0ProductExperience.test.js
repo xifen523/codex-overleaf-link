@@ -1530,7 +1530,7 @@ test('page bridge exposes a read-only realtime OT observer', () => {
   assert.doesNotMatch(pageBridge, /\b(?:writeOt|applyOt|sendOt)\b/);
 });
 
-test('composer exposes an experimental project-scoped OT warm mirror toggle', () => {
+test('diagnostics menu exposes an experimental project-scoped OT warm mirror toggle', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -1539,13 +1539,19 @@ test('composer exposes an experimental project-scoped OT warm mirror toggle', ()
     path.join(__dirname, '../extension/src/shared/i18n.js'),
     'utf8'
   );
-  const otToggleMarkup = contentScript.match(/<label class="codex-ot-toggle"[\s\S]*?<\/label>/)?.[0] || '';
+  const toolbarMarkup = contentScript.match(/<div class="codex-composer-toolbar">[\s\S]*?<\/div>\n\s*<\/form>/)?.[0] || '';
+  const otToggleMarkup = contentScript.match(/<button type="button" class="codex-diagnostics-ot-toggle"[\s\S]*?<\/button>/)?.[0] || '';
   const syncBody = contentScript.match(/async function syncOtWarmMirrorController\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
+  assert.match(contentScript, /<input type="checkbox" data-experimental-ot hidden>/);
+  assert.doesNotMatch(toolbarMarkup, /data-experimental-ot-toggle/);
   assert.match(otToggleMarkup, /data-experimental-ot/);
-  assert.match(otToggleMarkup, /data-i18n="experimentalOtWarmMirrorShort">OT<\/span>/);
-  assert.match(otToggleMarkup, /data-ot-status>Off<\/small>/);
-  assert.doesNotMatch(otToggleMarkup, /\bchecked\b/);
+  assert.match(otToggleMarkup, /data-i18n="experimentalOtMenuTitle"/);
+  assert.match(otToggleMarkup, /data-experimental-ot-menu-status/);
+  assert.match(otToggleMarkup, /aria-checked="false"/);
+  assert.doesNotMatch(contentScript, /<input type="checkbox" data-experimental-ot hidden[^>]*\bchecked\b/);
+  assert.match(contentScript, /experimentalOtConfirmMessage/);
+  assert.match(contentScript, /experimentalOtEnabledToast/);
   assert.match(contentScript, /experimentalOtWarmMirror/);
   assert.match(contentScript, /function isExperimentalOtEnabled\(\)/);
   assert.match(contentScript, /function setExperimentalOtEnabled\(enabled\)/);
@@ -1628,6 +1634,7 @@ test('experimental OT input persistence does not leak checked state after projec
     function readSelectedModelInput() { return state.model; }
     function readSelectedSpeedInput() { return state.speedTier; }
     function updateOtStatusDisplay(status) { currentOtStatus = status; }
+    function updateExperimentalOtToggleControl() {}
     ${extractFunction(contentScript, 'normalizeExperimentalOtByProject')}
     ${extractFunction(contentScript, 'isExperimentalOtEnabledForProject')}
     ${extractFunction(contentScript, 'setExperimentalOtEnabledForProject')}

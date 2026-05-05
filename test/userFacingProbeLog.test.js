@@ -120,6 +120,20 @@ test('ask mode probe copy does not mention write verification or Reviewing requi
   assert.match(noticeBody, /不会写入 Overleaf/);
 });
 
+test('probe status line shows OT state only when the experimental mirror is enabled', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const statusBody = contentScript.match(/function formatProbeStatusBar\(probe\) \{[\s\S]*?\n  \}/)?.[0] || '';
+
+  assert.match(contentScript, /function appendOtStatusToProbeStatus\(/);
+  assert.match(statusBody, /appendOtStatusToProbeStatus\(/);
+  assert.match(contentScript, /isExperimentalOtEnabled\(\)/);
+  assert.match(contentScript, /formatOtStatusLabel\(currentOtStatus\)/);
+  assert.match(contentScript, /OT \$\{formatOtStatusLabel\(currentOtStatus\)\}/);
+});
+
 test('probe footer readiness follows current mode instead of requiring Reviewing for ask mode', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),

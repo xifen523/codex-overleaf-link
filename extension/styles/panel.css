@@ -239,6 +239,16 @@
   line-height: 1.3;
 }
 
+#codex-overleaf-panel .codex-diagnostics-ot-toggle {
+  border-bottom: 1px solid #33373a;
+  margin-bottom: 4px;
+}
+
+#codex-overleaf-panel .codex-diagnostics-ot-toggle[data-checked="true"] span,
+#codex-overleaf-panel .codex-diagnostics-ot-toggle[data-checked="true"] small {
+  color: #d7ba7d;
+}
+
 #codex-overleaf-panel .codex-diagnostics-result {
   position: fixed;
   z-index: 2147483647;
@@ -1090,7 +1100,7 @@
 
 #codex-overleaf-panel .codex-composer-toolbar {
   display: grid;
-  grid-template-columns: 26px 42px 54px minmax(0, 1fr) minmax(104px, 156px) 28px;
+  grid-template-columns: 26px 54px 70px minmax(0, 1fr) minmax(112px, 156px) 28px;
   align-items: center;
   gap: 4px;
   padding: 4px 6px 6px;
@@ -1098,7 +1108,7 @@
 
 #codex-overleaf-panel .codex-composer-toolbar button,
 #codex-overleaf-panel .codex-review-toggle,
-#codex-overleaf-panel .codex-ot-toggle,
+#codex-overleaf-panel .codex-recompile-toggle,
 #codex-overleaf-panel .codex-model-config-button {
   display: inline-flex;
   align-items: center;
@@ -1112,114 +1122,60 @@
   min-width: 26px;
 }
 
-#codex-overleaf-panel .codex-review-toggle {
+#codex-overleaf-panel .codex-review-toggle,
+#codex-overleaf-panel .codex-recompile-toggle {
   position: relative;
-  min-width: 42px;
-  padding: 0 6px;
+  overflow: hidden;
+  padding: 0 8px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
-#codex-overleaf-panel .codex-review-toggle:hover {
+#codex-overleaf-panel .codex-review-toggle {
+  min-width: 54px;
+}
+
+#codex-overleaf-panel .codex-recompile-toggle {
+  min-width: 70px;
+}
+
+#codex-overleaf-panel .codex-review-toggle:hover,
+#codex-overleaf-panel .codex-recompile-toggle:hover {
   background: #2a2d2e;
 }
 
-#codex-overleaf-panel .codex-review-toggle input {
+#codex-overleaf-panel .codex-review-toggle input,
+#codex-overleaf-panel .codex-recompile-toggle input {
   position: absolute;
   opacity: 0;
   pointer-events: none;
 }
 
-#codex-overleaf-panel .codex-review-label {
+#codex-overleaf-panel .codex-review-label,
+#codex-overleaf-panel .codex-recompile-label {
+  overflow: hidden;
   font-size: 11px;
   line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-#codex-overleaf-panel .codex-review-toggle:has(input:checked) {
+#codex-overleaf-panel .codex-review-toggle:has(input:checked),
+#codex-overleaf-panel .codex-recompile-toggle:has(input:checked) {
   color: #89d185;
   background: rgba(137, 209, 133, 0.08);
 }
 
-#codex-overleaf-panel .codex-review-toggle:has(input:focus-visible) {
+#codex-overleaf-panel .codex-review-toggle:has(input:focus-visible),
+#codex-overleaf-panel .codex-recompile-toggle:has(input:focus-visible) {
   outline: 1px solid #007fd4;
   outline-offset: 2px;
-}
-
-#codex-overleaf-panel .codex-ot-toggle {
-  position: relative;
-  box-sizing: border-box;
-  width: 54px;
-  min-width: 0;
-  min-height: 26px;
-  gap: 3px;
-  overflow: hidden;
-  padding: 0 5px;
-  cursor: pointer;
-}
-
-#codex-overleaf-panel .codex-ot-toggle:hover {
-  background: #2a2d2e;
-}
-
-#codex-overleaf-panel .codex-ot-toggle input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-#codex-overleaf-panel .codex-ot-toggle span {
-  flex: 0 0 auto;
-  font-size: 11px;
-  line-height: 1;
-}
-
-#codex-overleaf-panel .codex-ot-toggle [data-ot-status] {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: #8f9499;
-  font-size: 10px;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#codex-overleaf-panel .codex-ot-toggle:has(input:checked) {
-  color: #d7ba7d;
-  background: rgba(215, 186, 125, 0.08);
-}
-
-#codex-overleaf-panel .codex-ot-toggle:has(input:checked) [data-ot-status] {
-  color: #d7ba7d;
-}
-
-#codex-overleaf-panel .codex-ot-toggle:has(input:focus-visible) {
-  outline: 1px solid #007fd4;
-  outline-offset: 2px;
-}
-
-#codex-overleaf-panel .codex-recompile-toggle {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  cursor: pointer;
-  font-size: 12px;
-  color: #a0a0a0;
-}
-
-#codex-overleaf-panel .codex-recompile-toggle input[type="checkbox"] {
-  margin: 0;
-  cursor: pointer;
-}
-
-#codex-overleaf-panel .codex-recompile-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 #codex-overleaf-panel .codex-model-config {
   position: relative;
+  grid-column: 5;
+  justify-self: end;
   width: 100%;
   max-width: 156px;
   min-width: 0;

@@ -26,7 +26,7 @@ function extractFunction(source, name) {
   assert.fail(`${name} body should close`);
 }
 
-test('composer keeps the send button in a fixed visible toolbar column', () => {
+test('composer keeps the send button in an explicit fixed toolbar column', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -35,10 +35,11 @@ test('composer keeps the send button in a fixed visible toolbar column', () => {
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
+  const toolbarBlock = css.match(/#codex-overleaf-panel \.codex-composer-toolbar\s*\{[\s\S]*?\n\}/)?.[0] || '';
 
   assert.match(contentScript, /data-run title="Send" aria-label="Send"/);
   assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*display: grid/);
-  assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*grid-template-columns:/);
+  assert.match(toolbarBlock, /grid-template-columns:\s*26px 54px 70px minmax\(0,\s*1fr\) minmax\(112px,\s*156px\) 28px/);
   assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*grid-column: 6/);
   assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*width: 28px/);
   assert.match(css, /\.codex-model-config-button\s*\{[\s\S]*min-width: 0/);
@@ -91,6 +92,8 @@ test('composer model config is one compact control with hidden state selects', (
   assert.match(modelSelect, /<option value="gpt-5\.5">GPT-5\.5<\/option>/);
   assert.match(modelSelect, /<option value="gpt-5\.3-codex-spark">GPT-5\.3 Codex Spark<\/option>/);
   assert.match(css, /\.codex-model-config\s*\{[\s\S]*position:\s*relative/);
+  assert.match(css, /\.codex-model-config\s*\{[\s\S]*grid-column:\s*5/);
+  assert.match(css, /\.codex-model-config\s*\{[\s\S]*justify-self:\s*end/);
   assert.match(css, /\.codex-model-config-button\s*\{[\s\S]*justify-content:\s*flex-start/);
   assert.match(css, /\.codex-model-config-button \[data-model-display\]\s*\{[\s\S]*text-overflow:\s*ellipsis/);
   assert.doesNotMatch(css, /\.codex-model-config-button \[data-model-display\]\s*\{[\s\S]*flex:\s*1 1 auto/);
@@ -193,11 +196,14 @@ test('composer model picker stays compact when the side panel is wide', () => {
 
   assert.doesNotMatch(toolbarBlock, /minmax\(96px,\s*1fr\)/);
   assert.doesNotMatch(toolbarBlock, /66px 54px/);
-  assert.match(toolbarBlock, /grid-template-columns:\s*26px 42px 54px minmax\(0,\s*1fr\) minmax\(104px,\s*156px\) 28px/);
+  assert.doesNotMatch(toolbarBlock, /92px/);
+  assert.match(toolbarBlock, /grid-template-columns:\s*26px 54px 70px minmax\(0,\s*1fr\) minmax\(112px,\s*156px\) 28px/);
   assert.match(modelBlock, /max-width:\s*156px/);
+  assert.match(modelBlock, /grid-column:\s*5/);
+  assert.match(modelBlock, /justify-self:\s*end/);
 });
 
-test('experimental OT toggle keeps toolbar columns compact', () => {
+test('composer run toggles are self-contained pills without ambiguous visible checkboxes', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -206,18 +212,51 @@ test('experimental OT toggle keeps toolbar columns compact', () => {
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
-  const otBlock = css.match(/#codex-overleaf-panel \.codex-ot-toggle\s*\{[\s\S]*?\n\}/)?.[0] || '';
-  const statusBlock = css.match(/#codex-overleaf-panel \.codex-ot-toggle \[data-ot-status\]\s*\{[\s\S]*?\n\}/)?.[0] || '';
+  const hiddenInputsBlock = css.match(/#codex-overleaf-panel \.codex-review-toggle input,\n#codex-overleaf-panel \.codex-recompile-toggle input\s*\{[\s\S]*?\n\}/)?.[0] || '';
 
-  assert.match(contentScript, /class="codex-ot-toggle"/);
+  assert.match(contentScript, /<input type="checkbox" data-require-reviewing>/);
+  assert.match(contentScript, /<input type="checkbox" data-auto-recompile>/);
+  assert.match(contentScript, /<span class="codex-review-label" data-i18n="requireReviewing">Track<\/span>/);
+  assert.match(contentScript, /<span class="codex-recompile-label" data-i18n="autoCompile">Compile<\/span>/);
+  assert.match(css, /#codex-overleaf-panel \.codex-review-toggle\s*\{\n\s*min-width:\s*54px/);
+  assert.match(css, /#codex-overleaf-panel \.codex-recompile-toggle\s*\{\n\s*min-width:\s*70px/);
+  assert.match(hiddenInputsBlock, /opacity:\s*0/);
+  assert.match(hiddenInputsBlock, /pointer-events:\s*none/);
+  assert.match(css, /\.codex-recompile-toggle:has\(input:checked\)/);
+  assert.doesNotMatch(css, /\.codex-recompile-toggle input\[type="checkbox"\]\s*\{[\s\S]*?margin:\s*0/);
+});
+
+test('experimental OT toggle lives in diagnostics menu with locale-specific guidance', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const toolbarMarkup = contentScript.match(/<div class="codex-composer-toolbar">[\s\S]*?<\/div>\n\s*<\/form>/)?.[0] || '';
+  const otMenuMarkup = contentScript.match(/<button type="button" class="codex-diagnostics-ot-toggle"[\s\S]*?<\/button>/)?.[0] || '';
+  const otBlock = css.match(/#codex-overleaf-panel \.codex-diagnostics-ot-toggle\s*\{[\s\S]*?\n\}/)?.[0] || '';
+  const changeHandler = extractFunction(contentScript, 'handleExperimentalOtToggleChange');
+
+  assert.doesNotMatch(toolbarMarkup, /data-experimental-ot-toggle/);
+  assert.match(contentScript, /<input type="checkbox" data-experimental-ot hidden>/);
+  assert.match(otMenuMarkup, /data-experimental-ot-toggle/);
+  assert.match(otMenuMarkup, /data-i18n="experimentalOtMenuTitle"/);
+  assert.match(otMenuMarkup, /data-experimental-ot-menu-status/);
+  assert.match(contentScript, /experimentalOtConfirmMessage/);
+  assert.match(contentScript, /experimentalOtEnabledToast/);
+  assert.match(contentScript, /data-experimental-ot-toggle/);
   assert.match(contentScript, /data-experimental-ot/);
-  assert.match(otBlock, /min-height:\s*26px/);
-  assert.match(otBlock, /width:\s*54px/);
-  assert.match(otBlock, /overflow:\s*hidden/);
-  assert.match(statusBlock, /min-width:\s*0/);
-  assert.match(statusBlock, /overflow:\s*hidden/);
-  assert.match(statusBlock, /text-overflow:\s*ellipsis/);
-  assert.match(statusBlock, /white-space:\s*nowrap/);
+  assert.match(contentScript, /addEventListener\('click', handleExperimentalOtToggleClick\)/);
+  assert.match(contentScript, /addEventListener\('keydown', handleExperimentalOtToggleKeydown\)/);
+  assert.match(contentScript, /showPluginConfirm\(\{\s*title:\s*tr\('experimentalOtConfirmTitle'\)/);
+  assert.match(contentScript, /updateExperimentalOtMenuStatus\(\)/);
+  assert.match(changeHandler, /setExperimentalOtEnabledForProject\(projectId,\s*checkbox\.checked\)/);
+  assert.doesNotMatch(changeHandler, /readPanelInputs\(\)/);
+  assert.match(otBlock, /border-bottom:\s*1px solid #33373a/);
+  assert.match(otBlock, /margin-bottom:\s*4px/);
 });
 
 test('composer describes compile toggle as a post-write action', () => {
@@ -231,7 +270,9 @@ test('composer describes compile toggle as a post-write action', () => {
   );
 
   assert.match(contentScript, /data-auto-recompile/);
-  assert.match(contentScript, /<span class="codex-recompile-label" data-i18n="autoCompile">Auto Compile<\/span>/);
+  assert.match(contentScript, /<span class="codex-recompile-label" data-i18n="autoCompile">Compile<\/span>/);
+  assert.match(i18n, /autoCompile:\s*'Compile'/);
+  assert.match(i18n, /autoCompile:\s*'编译'/);
   assert.match(i18n, /Codex 写入后自动点击 Overleaf Recompile/);
 });
 

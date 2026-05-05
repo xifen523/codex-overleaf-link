@@ -18,6 +18,7 @@ test('project snapshot action lives in the diagnostics menu instead of the heade
   assert.match(contentScript, /data-diagnostics-native-env/);
   assert.match(contentScript, /data-diagnostics-page-state/);
   assert.match(contentScript, /data-diagnostics-snapshot/);
+  assert.match(contentScript, /data-experimental-ot-toggle/);
   assert.match(contentScript, /data-diagnostics-ot/);
   assert.match(contentScript, /data-language-toggle/);
   assert.match(contentScript, /data-diagnostics-result/);
@@ -25,6 +26,9 @@ test('project snapshot action lives in the diagnostics menu instead of the heade
   assert.match(contentScript, /Check Local Connection/);
   assert.match(contentScript, /Check Overleaf Write Access/);
   assert.match(contentScript, /Check Project Read/);
+  assert.match(contentScript, /<span data-i18n="experimentalOtMenuTitle">Experimental OT Mirror<\/span>/);
+  assert.doesNotMatch(contentScript, /Experimental OT Mirror\s*\/\s*实验性 OT Mirror/);
+  assert.doesNotMatch(contentScript, /Turn on\s*\/\s*开启/);
   assert.match(contentScript, /Check Experimental OT Mirror/);
   assert.match(contentScript, /Switch to Chinese/);
   assert.match(contentScript, /function toggleLanguage\(/);
@@ -128,6 +132,12 @@ test('experimental OT diagnostics i18n is available in English and Chinese', () 
     'diagnosticsOtSummaryEnabled',
     'diagnosticsOtSummaryDisabled',
     'diagnosticsOtNextStep',
+    'experimentalOtMenuTitle',
+    'experimentalOtMenuSubtitle',
+    'experimentalOtConfirmTitle',
+    'experimentalOtConfirmMessage',
+    'experimentalOtConfirmEnable',
+    'experimentalOtEnabledToast',
     'otStatus',
     'otFreshFiles',
     'otFallback',
@@ -138,6 +148,25 @@ test('experimental OT diagnostics i18n is available in English and Chinese', () 
   for (const key of keys) {
     assert.notEqual(I18n.t('en', key), key, `missing English i18n key ${key}`);
     assert.notEqual(I18n.t('zh', key), key, `missing Chinese i18n key ${key}`);
+  }
+
+  assert.equal(I18n.t('en', 'experimentalOtMenuTitle'), 'Experimental OT Mirror');
+  assert.equal(I18n.t('zh', 'experimentalOtMenuTitle'), '实验性 OT Mirror');
+  assert.equal(I18n.t('en', 'experimentalOtConfirmEnable'), 'Turn on');
+  assert.equal(I18n.t('zh', 'experimentalOtConfirmEnable'), '开启');
+  assert.doesNotMatch(I18n.t('en', 'experimentalOtConfirmMessage'), /[\u4e00-\u9fff]/);
+  assert.doesNotMatch(I18n.t('zh', 'experimentalOtConfirmMessage'), /Experimental: tracks/);
+  for (const locale of ['en', 'zh']) {
+    for (const key of [
+      'experimentalOtMenuTitle',
+      'experimentalOtMenuSubtitle',
+      'experimentalOtConfirmTitle',
+      'experimentalOtConfirmMessage',
+      'experimentalOtConfirmEnable',
+      'experimentalOtEnabledToast'
+    ]) {
+      assert.doesNotMatch(I18n.t(locale, key), /\s\/\s/, `${locale}.${key} should not inline both locales`);
+    }
   }
 });
 
