@@ -3,7 +3,7 @@
   <h1>Codex Overleaf Link</h1>
   <p><strong>Empower Overleaf with Codex.</strong></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.1.1-blue" alt="version">
+    <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="version">
     <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="platform">
     <img src="https://img.shields.io/badge/chrome-MV3-green" alt="chrome manifest v3">
     <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="node version">
@@ -101,7 +101,7 @@ Remove the extension from `chrome://extensions`. Optionally delete `~/.codex-ove
 - **Track Changes integration** — optionally enables Overleaf Reviewing before writing.
 - **Auto-recompile** — triggers Overleaf recompile after writeback; logs compile errors as context.
 - **@ context** — attach specific files, `@compile-log`, or `@current-section` to the prompt.
-- **Model picker** — switch models and reasoning effort from the panel.
+- **Model picker** — discover available Codex models locally, then switch model, reasoning effort, and speed from one compact control.
 - **Session history** — multi-session management with rename, resume, and delete.
 - **Isolated Codex home** — plugin sessions stay under `~/.codex-overleaf/codex-home`, not global `~/.codex/sessions`.
 

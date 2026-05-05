@@ -452,11 +452,24 @@ test('session deletion status uses plugin toast instead of task transcript space
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
   const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
   const plainLogBody = contentScript.match(/function appendPlainLog\(text\) \{[\s\S]*?\n  function updateProbeNotice/)?.[0] || '';
+  const toastCss = css.match(/#codex-overleaf-panel \.codex-toast-region \{[\s\S]*?\n\}/)?.[0] || '';
+  const taskSectionIndex = contentScript.indexOf('<section class="codex-task-section">');
+  const toastRegionIndex = contentScript.indexOf('<div class="codex-toast-region" data-toast-region');
+  const threadSectionIndex = contentScript.indexOf('<section class="codex-thread-section">');
 
   assert.match(contentScript, /data-toast-region/);
   assert.match(contentScript, /function showPluginToast\(/);
+  assert.ok(taskSectionIndex >= 0, 'task section exists');
+  assert.ok(toastRegionIndex > taskSectionIndex, 'toast region renders below task section');
+  assert.ok(threadSectionIndex > toastRegionIndex, 'toast region renders above the transcript');
+  assert.doesNotMatch(toastCss, /position:\s*(?:fixed|absolute|sticky)/);
+  assert.doesNotMatch(toastCss, /top:\s*44px/);
   assert.match(deleteBody, /showPluginToast/);
   assert.doesNotMatch(deleteBody, /appendPlainLog/);
   assert.doesNotMatch(plainLogBody, /log\.append\(item\)/);

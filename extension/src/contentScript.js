@@ -165,8 +165,6 @@
             <button type="button" data-new-session title="New Session" aria-label="New Session">✎</button>
           </div>
         </div>
-        <div class="codex-toast-region" data-toast-region aria-live="polite" aria-atomic="false"></div>
-
         <div class="codex-vscode-main" data-main>
           <section class="codex-task-section">
             <div class="codex-section-head">
@@ -176,6 +174,8 @@
             <div class="codex-session-list" data-session-list></div>
             <button type="button" class="codex-view-all" data-view-all hidden></button>
           </section>
+
+          <div class="codex-toast-region" data-toast-region aria-live="polite" aria-atomic="false"></div>
 
           <section class="codex-thread-section">
             <div class="codex-thread-title" data-session-label></div>
@@ -211,27 +211,40 @@
               <input type="checkbox" data-auto-recompile>
               <span class="codex-recompile-label" data-i18n="autoCompile">Auto Compile</span>
             </label>
-            <div class="codex-select-shell codex-model-picker" data-model-picker>
-              <span data-model-display>GPT-5.4</span>
-              <select data-model aria-label="Model">
-                <option value="gpt-5.5">GPT-5.5</option>
-                <option value="gpt-5.4">GPT-5.4</option>
-                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
-                <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
-                <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
-                <option value="gpt-5.2">GPT-5.2</option>
-              </select>
+            <div class="codex-model-config" data-model-config>
+              <button type="button" class="codex-model-config-button" data-model-config-toggle aria-haspopup="menu" aria-expanded="false">
+                <span class="codex-model-speed-indicator" data-speed-indicator hidden>⚡</span>
+                <span data-model-display>5.4</span>
+                <span data-reasoning-display>Medium</span>
+              </button>
+              <div class="codex-model-config-popover" data-model-config-popover role="menu" hidden>
+                <div class="codex-model-config-section" data-reasoning-choice-list></div>
+                <div class="codex-model-config-divider"></div>
+                <div class="codex-model-config-section" data-model-choice-list></div>
+                <div class="codex-model-config-divider"></div>
+                <div class="codex-model-config-section" data-speed-choice-list></div>
+                <div class="codex-model-config-inputs" hidden>
+                  <select data-model aria-label="Model">
+                    <option value="gpt-5.5">GPT-5.5</option>
+                    <option value="gpt-5.4">GPT-5.4</option>
+                    <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+                    <option value="gpt-5.3-codex">GPT-5.3 Codex</option>
+                    <option value="gpt-5.3-codex-spark">GPT-5.3 Codex Spark</option>
+                    <option value="gpt-5.2">GPT-5.2</option>
+                  </select>
+                  <select data-reasoning aria-label="Reasoning">
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="xhigh">XHigh</option>
+                  </select>
+                  <select data-speed aria-label="Speed">
+                    <option value="standard">Std</option>
+                    <option value="fast">Fast</option>
+                  </select>
+                </div>
+              </div>
             </div>
-            <select data-reasoning aria-label="Reasoning">
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="xhigh">XHigh</option>
-            </select>
-            <select data-speed aria-label="Speed">
-              <option value="standard">Std</option>
-              <option value="fast">Fast</option>
-            </select>
             <button type="submit" data-run title="Send" aria-label="Send">↑</button>
           </div>
           <div class="codex-context-tray" data-context-tray hidden>
@@ -291,6 +304,15 @@
       panel.querySelector('[data-view-all]').addEventListener('click', () => renderSessionList({ showAll: true }));
       panel.querySelector('[data-add-context]').addEventListener('click', () => toggleContextTray());
       panel.querySelector('[data-context-refresh]').addEventListener('click', () => loadContextFiles({ force: true }));
+      panel.querySelector('[data-model-config-toggle]').addEventListener('click', event => {
+        event.preventDefault();
+        toggleModelConfigPopover();
+      });
+      panel.querySelector('[data-model-config-popover]').addEventListener('click', event => {
+        handleModelConfigChoiceClick(event).catch(error => {
+          appendPlainLog(tx(`Failed to update model settings: ${error.message}`, `更新模型设置失败：${error.message}`));
+        });
+      });
       for (const button of panel.querySelectorAll('[data-mode-choice]')) {
         button.addEventListener('click', () => {
           selectMode(button.dataset.modeChoice).catch(error => appendPlainLog(tr('modeSwitchFailedToast', { message: error.message })));
@@ -303,6 +325,7 @@
       }
       installDiagnosticsDismiss();
       installContextDismiss();
+      installModelConfigDismiss();
       bindLogAutoFollow();
       renderSessionList();
       renderRunHistory();
@@ -321,6 +344,10 @@
     }
 
     const open = popover.hidden;
+    if (open) {
+      closeModelConfigPopover();
+      closeContextTray();
+    }
     popover.hidden = !open;
     button.dataset.active = open ? 'true' : 'false';
     button.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -335,6 +362,60 @@
     popover.hidden = true;
     button.dataset.active = 'false';
     button.setAttribute('aria-expanded', 'false');
+  }
+
+  function toggleModelConfigPopover() {
+    const popover = panel?.querySelector('[data-model-config-popover]');
+    const button = panel?.querySelector('[data-model-config-toggle]');
+    if (!popover || !button) {
+      return;
+    }
+
+    const open = popover.hidden;
+    if (open) {
+      closeDiagnosticsMenu();
+      closeContextTray();
+      renderModelConfigChoices();
+    }
+    popover.hidden = !open;
+    button.dataset.active = open ? 'true' : 'false';
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  function closeModelConfigPopover() {
+    const popover = panel?.querySelector('[data-model-config-popover]');
+    const button = panel?.querySelector('[data-model-config-toggle]');
+    if (!popover || !button) {
+      return;
+    }
+    popover.hidden = true;
+    button.dataset.active = 'false';
+    button.setAttribute('aria-expanded', 'false');
+  }
+
+  async function handleModelConfigChoiceClick(event) {
+    const choice = event.target?.closest?.('[data-reasoning-choice], [data-model-choice], [data-speed-choice]');
+    if (!choice || choice.disabled) {
+      return;
+    }
+    event.preventDefault();
+
+    const modelSelect = panel?.querySelector('[data-model]');
+    const reasoningSelect = panel?.querySelector('[data-reasoning]');
+    const speedSelect = panel?.querySelector('[data-speed]');
+
+    if (choice.dataset.reasoningChoice && reasoningSelect) {
+      reasoningSelect.value = choice.dataset.reasoningChoice;
+    } else if (choice.dataset.modelChoice && modelSelect) {
+      modelSelect.value = choice.dataset.modelChoice;
+      renderSpeedOptions(getRenderedModelEntries());
+    } else if (choice.dataset.speedChoice && speedSelect) {
+      speedSelect.value = choice.dataset.speedChoice;
+    }
+
+    renderModelConfigChoices();
+    updateModelDisplay();
+    await persistPanelInputs();
   }
 
   async function toggleLanguage() {
@@ -407,6 +488,7 @@
     }
 
     syncModeControls();
+    renderModelConfigChoices();
     updateModelDisplay();
     renderSessionList();
     renderContextSelection();
@@ -544,6 +626,16 @@
     }, true);
   }
 
+  function installModelConfigDismiss() {
+    document.addEventListener('click', event => {
+      const config = panel?.querySelector('[data-model-config]');
+      if (!config || config.contains(event.target)) {
+        return;
+      }
+      closeModelConfigPopover();
+    }, true);
+  }
+
   function bindLogAutoFollow() {
     const scroller = getLogScrollContainer();
     if (!scroller || scroller.dataset.autoFollowBound === 'true') {
@@ -621,6 +713,10 @@
     }
 
     const open = tray.hidden;
+    if (open) {
+      closeModelConfigPopover();
+      closeDiagnosticsMenu();
+    }
     tray.hidden = !open;
     button.dataset.active = open ? 'true' : 'false';
     button.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -3950,6 +4046,7 @@
   async function persistPanelInputs() {
     readPanelInputs();
     renderSpeedOptions(getRenderedModelEntries());
+    renderModelConfigChoices();
     updateModelDisplay();
     await saveState();
     syncModeControls();
@@ -4190,6 +4287,8 @@
       modelSelect.value = firstModelId;
     }
     renderSpeedOptions(models);
+    renderModelConfigChoices();
+    updateModelDisplay();
   }
 
   function renderSpeedOptions(models) {
@@ -4215,6 +4314,105 @@
     speedSelect.title = speedSelect.disabled
       ? tx('Fast mode is not available for this model.', '当前模型不支持 Fast 模式。')
       : tx('Codex speed tier. Fast mode uses extra credits.', 'Codex 速度档；Fast 会消耗额外 credits。');
+    renderModelConfigChoices();
+  }
+
+  function renderModelConfigChoices() {
+    renderReasoningChoices();
+    renderModelChoices();
+    renderSpeedChoices();
+    syncModelConfigChoices();
+  }
+
+  function renderReasoningChoices() {
+    const list = panel?.querySelector('[data-reasoning-choice-list]');
+    const reasoningSelect = panel?.querySelector('[data-reasoning]');
+    if (!list || !reasoningSelect) {
+      return;
+    }
+    list.textContent = '';
+    for (const option of Array.from(reasoningSelect.options || [])) {
+      list.append(createModelConfigChoice({
+        value: option.value,
+        label: formatReasoningEffortLabel(option.value),
+        datasetName: 'reasoningChoice'
+      }));
+    }
+  }
+
+  function renderModelChoices() {
+    const list = panel?.querySelector('[data-model-choice-list]');
+    const modelSelect = panel?.querySelector('[data-model]');
+    if (!list || !modelSelect) {
+      return;
+    }
+    list.textContent = '';
+    for (const option of Array.from(modelSelect.options || [])) {
+      const choice = createModelConfigChoice({
+        value: option.value,
+        label: option.textContent || option.value,
+        datasetName: 'modelChoice'
+      });
+      choice.title = option.textContent || option.value;
+      list.append(choice);
+    }
+  }
+
+  function renderSpeedChoices() {
+    const list = panel?.querySelector('[data-speed-choice-list]');
+    const speedSelect = panel?.querySelector('[data-speed]');
+    if (!list || !speedSelect) {
+      return;
+    }
+    list.textContent = '';
+    for (const option of Array.from(speedSelect.options || [])) {
+      const choice = createModelConfigChoice({
+        value: option.value,
+        label: formatSpeedTierLabel(option.value),
+        datasetName: 'speedChoice'
+      });
+      choice.disabled = speedSelect.disabled && speedSelect.options.length <= 1;
+      list.append(choice);
+    }
+  }
+
+  function createModelConfigChoice({ value, label, datasetName }) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'codex-model-config-choice';
+    button.dataset[datasetName] = value;
+    button.setAttribute('role', 'menuitemradio');
+    button.setAttribute('aria-checked', 'false');
+
+    const text = document.createElement('span');
+    text.className = 'codex-model-config-choice-label';
+    text.textContent = label;
+    button.append(text);
+
+    const check = document.createElement('span');
+    check.className = 'codex-model-config-check';
+    check.textContent = '✓';
+    check.setAttribute('aria-hidden', 'true');
+    button.append(check);
+    return button;
+  }
+
+  function syncModelConfigChoices() {
+    const selectedModel = panel?.querySelector('[data-model]')?.value || '';
+    const selectedReasoning = panel?.querySelector('[data-reasoning]')?.value || '';
+    const selectedSpeed = panel?.querySelector('[data-speed]')?.value || 'standard';
+    syncChoiceGroup('[data-model-choice]', selectedModel);
+    syncChoiceGroup('[data-reasoning-choice]', selectedReasoning);
+    syncChoiceGroup('[data-speed-choice]', selectedSpeed);
+  }
+
+  function syncChoiceGroup(selector, selectedValue) {
+    for (const button of panel?.querySelectorAll(selector) || []) {
+      const value = button.dataset.modelChoice || button.dataset.reasoningChoice || button.dataset.speedChoice || '';
+      const active = value === selectedValue;
+      button.dataset.active = active ? 'true' : 'false';
+      button.setAttribute('aria-checked', active ? 'true' : 'false');
+    }
   }
 
   function normalizeSpeedTiersForSelect(speedTiers) {
@@ -4225,7 +4423,18 @@
   }
 
   function formatSpeedTierLabel(tier) {
-    return tier === 'fast' ? 'Fast' : 'Std';
+    return tier === 'fast' ? tx('Fast', '快速') : tx('Standard', '标准');
+  }
+
+  function formatReasoningEffortLabel(effort) {
+    const labels = getLocale() === 'zh'
+      ? { low: '低', medium: '中', high: '高', xhigh: '超高' }
+      : { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'XHigh' };
+    return labels[effort] || effort || '';
+  }
+
+  function formatCompactModelLabel(label) {
+    return String(label || '').replace(/^gpt[-\s]*/i, '');
   }
 
   function resolveSelectedModel() {
@@ -4252,15 +4461,32 @@
   function updateModelDisplay() {
     const modelSelect = panel?.querySelector('[data-model]');
     const modelDisplay = panel?.querySelector('[data-model-display]');
+    const reasoningDisplay = panel?.querySelector('[data-reasoning-display]');
+    const speedIndicator = panel?.querySelector('[data-speed-indicator]');
+    const configButton = panel?.querySelector('[data-model-config-toggle]');
     if (!modelSelect || !modelDisplay) {
       return;
     }
     const fullLabel = modelSelect.options[modelSelect.selectedIndex]?.textContent || modelSelect.value;
-    modelDisplay.textContent = fullLabel;
-    modelDisplay.title = tr('modelDisplayTitle', {
+    modelDisplay.textContent = formatCompactModelLabel(fullLabel);
+    const sourceTitle = tr('modelDisplayTitle', {
       label: fullLabel,
       source: getModelDiscoverySourceLabel()
     });
+    modelDisplay.title = sourceTitle;
+    if (reasoningDisplay) {
+      reasoningDisplay.textContent = formatReasoningEffortLabel(panel?.querySelector('[data-reasoning]')?.value || state?.reasoningEffort || '');
+    }
+    if (speedIndicator) {
+      speedIndicator.hidden = readSelectedSpeedInput() !== 'fast';
+    }
+    if (configButton) {
+      configButton.title = [
+        sourceTitle,
+        reasoningDisplay?.textContent ? `${tx('Reasoning', '推理')}: ${reasoningDisplay.textContent}` : '',
+        readSelectedSpeedInput() === 'fast' ? tx('Fast mode', '快速模式') : tx('Standard speed', '标准速度')
+      ].filter(Boolean).join(' · ');
+    }
   }
 
   function clearTaskComposer() {
@@ -4293,6 +4519,7 @@
       recompileCheckbox.checked = state.autoRecompile !== false;
     }
     applyPanelWidth(state.panelWidth || PANEL_DEFAULT_WIDTH, { persist: false });
+    renderModelConfigChoices();
     updateModelDisplay();
     syncModeControls();
     applySessionLabel();

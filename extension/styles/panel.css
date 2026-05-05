@@ -130,14 +130,16 @@
 }
 
 #codex-overleaf-panel .codex-toast-region {
-  position: fixed;
-  z-index: 2147483647;
-  top: 44px;
-  right: 12px;
   display: grid;
-  width: min(320px, calc(var(--codex-overleaf-panel-width) - 24px));
-  gap: 8px;
+  flex: 0 0 auto;
+  width: 100%;
+  gap: 6px;
+  margin-top: 8px;
   pointer-events: none;
+}
+
+#codex-overleaf-panel .codex-toast-region:empty {
+  display: none;
 }
 
 #codex-overleaf-panel .codex-toast {
@@ -146,11 +148,11 @@
   align-items: start;
   gap: 8px;
   border: 1px solid #3a3d41;
-  border-radius: 7px;
-  background: #252526;
-  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.42);
+  border-radius: 5px;
+  background: #202222;
+  box-shadow: none;
   color: #d4d4d4;
-  padding: 9px 8px 9px 10px;
+  padding: 7px 7px 7px 9px;
   pointer-events: auto;
 }
 
@@ -1088,7 +1090,7 @@
 
 #codex-overleaf-panel .codex-composer-toolbar {
   display: grid;
-  grid-template-columns: 26px 42px minmax(0, 1fr) minmax(112px, 150px) 66px 54px 28px;
+  grid-template-columns: 26px 42px minmax(0, 1fr) minmax(104px, 156px) 28px;
   align-items: center;
   gap: 4px;
   padding: 4px 6px 6px;
@@ -1096,8 +1098,7 @@
 
 #codex-overleaf-panel .codex-composer-toolbar button,
 #codex-overleaf-panel .codex-review-toggle,
-#codex-overleaf-panel .codex-select-shell,
-#codex-overleaf-panel .codex-composer-toolbar select {
+#codex-overleaf-panel .codex-model-config-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1163,80 +1164,138 @@
   white-space: nowrap;
 }
 
-#codex-overleaf-panel .codex-composer-toolbar select {
-  appearance: none;
-  -webkit-appearance: none;
+#codex-overleaf-panel .codex-model-config {
+  position: relative;
+  width: 100%;
+  max-width: 156px;
+  min-width: 0;
+}
+
+#codex-overleaf-panel .codex-model-config-button {
   width: 100%;
   min-width: 0;
-  max-width: 78px;
   border: 0;
   outline: none;
+  justify-content: flex-start;
   background-color: transparent;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5 5 6.5 8 3.5' fill='none' stroke='%23bdbdbd' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 4px center;
   background-size: 10px 10px;
   color: #bdbdbd;
+  gap: 5px;
   overflow: hidden;
-  padding: 0 18px 0 3px;
+  padding: 0 18px 0 6px;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-#codex-overleaf-panel .codex-composer-toolbar [data-model] {
-  max-width: none;
+#codex-overleaf-panel .codex-model-config-button[data-active="true"],
+#codex-overleaf-panel .codex-model-config-button:hover {
+  background-color: #2a2d2e;
 }
 
-#codex-overleaf-panel .codex-model-picker {
-  position: relative;
-  width: 100%;
-  max-width: 150px;
+#codex-overleaf-panel .codex-model-config-button [data-model-display] {
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 72px;
   overflow: hidden;
-}
-
-#codex-overleaf-panel .codex-model-picker [data-model-display] {
-  min-width: 0;
-  width: 100%;
-  overflow: hidden;
-  padding: 0 16px 0 3px;
-  color: #bdbdbd;
+  color: #d4d4d4;
   font-size: 13px;
-  line-height: 26px;
-  pointer-events: none;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-#codex-overleaf-panel .codex-model-picker::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  right: 3px;
-  width: 10px;
-  height: 10px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5 5 6.5 8 3.5' fill='none' stroke='%23bdbdbd' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-size: 10px 10px;
-  pointer-events: none;
-  transform: translateY(-50%);
+#codex-overleaf-panel .codex-model-config-button [data-reasoning-display] {
+  flex: 0 0 auto;
+  max-width: 42px;
+  overflow: hidden;
+  color: #969696;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-#codex-overleaf-panel .codex-model-picker select {
+#codex-overleaf-panel .codex-model-speed-indicator {
+  flex: 0 0 auto;
+  color: #969696;
+  font-size: 13px;
+  line-height: 1;
+}
+
+#codex-overleaf-panel .codex-model-config-popover {
   position: absolute;
-  inset: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 2147483647;
+  width: min(244px, calc(var(--codex-overleaf-panel-width) - 16px));
+  max-height: min(420px, calc(100vh - 180px));
+  overflow: auto;
+  border: 1px solid #3a3d41;
+  border-radius: 8px;
+  background: #252526;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.46);
+  padding: 6px;
+}
+
+#codex-overleaf-panel .codex-model-config-popover[hidden] {
+  display: none;
+}
+
+#codex-overleaf-panel .codex-model-config-section {
+  display: grid;
+  gap: 1px;
+}
+
+#codex-overleaf-panel .codex-model-config-divider {
+  height: 1px;
+  margin: 6px 0;
+  background: #33373a;
+}
+
+#codex-overleaf-panel .codex-model-config-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   width: 100%;
-  height: 100%;
-  max-width: none;
-  min-height: 0;
-  cursor: pointer;
+  min-height: 30px;
+  gap: 10px;
+  border-radius: 6px;
+  color: #d4d4d4;
+  padding: 0 8px 0 10px;
+  text-align: left;
+}
+
+#codex-overleaf-panel .codex-model-config-choice:hover,
+#codex-overleaf-panel .codex-model-config-choice[data-active="true"] {
+  background: #303031;
+}
+
+#codex-overleaf-panel .codex-model-config-choice:disabled {
+  opacity: 0.55;
+}
+
+#codex-overleaf-panel .codex-model-config-choice-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .codex-model-config-check {
+  flex: 0 0 auto;
+  color: #d4d4d4;
   opacity: 0;
-  padding: 0;
+}
+
+#codex-overleaf-panel .codex-model-config-choice[data-active="true"] .codex-model-config-check {
+  opacity: 1;
 }
 
 #codex-overleaf-panel .codex-composer-toolbar [data-run] {
   position: relative;
-  grid-column: 7;
+  grid-column: 5;
   width: 28px;
   min-width: 28px;
   padding: 0;

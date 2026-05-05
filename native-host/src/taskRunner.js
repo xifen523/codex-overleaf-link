@@ -9,6 +9,7 @@ const { clearPluginCodexHistory } = require('./codexHome');
 const { logDebug, truncateText } = require('./debugLog');
 const { HOST_NAME } = require('./manifest');
 const { summarizeNativeEnvironment } = require('./nativeEnvironment');
+const { version: PACKAGE_VERSION } = require('../../package.json');
 
 const activeProjectLocks = new Map();
 const activeRunControllers = new Map();
@@ -25,6 +26,7 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
       host: HOST_NAME,
       platform: 'darwin',
       protocolVersion: 1,
+      version: PACKAGE_VERSION,
       environment: summarizeNativeEnvironment(env)
     });
   }

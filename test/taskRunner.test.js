@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+const packageJson = require('../package.json');
 const { handleRequest } = require('../native-host/src/taskRunner');
 
 function fixtureAgentEnv(fixtureName, extra = {}) {
@@ -41,6 +42,7 @@ test('bridge.ping returns bridge metadata', async () => {
   assert.equal(response.ok, true);
   assert.equal(response.result.host, 'com.codex.overleaf');
   assert.equal(response.result.platform, 'darwin');
+  assert.equal(response.result.version, packageJson.version);
   assert.equal(response.result.environment.codex.ok, true);
   assert.deepEqual(response.result.environment.latex.available, ['latexmk']);
 });

@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.2.0 - 2026-05-05
+
+Reliability and daily-use update for the macOS + Chrome preview.
+
+### Added
+
+- Native host reconnect handling for safe read and mirror sync requests without silently rerunning active Codex tasks.
+- Dynamic Codex model discovery through the native host, with fallback to the v0.1.1 model list when local discovery is unavailable.
+- Non-invasive mirror prefetch and warm-start reuse so recent local workspaces can reduce task startup wait without switching Overleaf files.
+- Mirror status metadata for freshness, dirty state, project key, file count, and sync timestamps.
+- Compact model configuration UI for model, reasoning effort, and speed tier.
+
+### Fixed
+
+- Added a verified Overleaf save-state gate before refreshing the mirror baseline after browser writeback.
+- Hardened warm mirror fallback, stale mirror retry, partial snapshot boundaries, and dirty workspace detection.
+- Required Editing mode for untracked browser writes and preserved Reviewing requirements per submitted run.
+- Improved post-write compile handling when Overleaf save state is unavailable or unverified.
+- Kept plugin session deletion feedback out of the task transcript and below the task list.
+
 ## v0.1.1 - 2026-05-04
 
 Security and reliability hotfix for the initial stable preview.

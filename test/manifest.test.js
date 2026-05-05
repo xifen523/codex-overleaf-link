@@ -1,8 +1,10 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+const packageJson = require('../package.json');
 const {
   DEFAULT_CHROME_EXTENSION_ID,
   buildHostManifest,
@@ -10,6 +12,19 @@ const {
   validateChromeExtensionId
 } = require('../native-host/src/manifest');
 const extensionManifest = require('../extension/manifest.json');
+
+test('release metadata is prepared for v0.2.0', () => {
+  const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
+  const changelog = fs.readFileSync(path.join(__dirname, '../CHANGELOG.md'), 'utf8');
+
+  assert.equal(packageJson.version, '0.2.0');
+  assert.equal(extensionManifest.version, packageJson.version);
+  assert.match(readme, /version-0\.2\.0-blue/);
+  assert.match(changelog, /## v0\.2\.0 - 2026-05-05/);
+  assert.match(changelog, /Native host reconnect/);
+  assert.match(changelog, /dynamic Codex model discovery/i);
+  assert.match(changelog, /verified Overleaf save-state gate/);
+});
 
 test('validates Chrome extension ids', () => {
   assert.equal(validateChromeExtensionId('abcdefghijklmnopabcdefghijklmnop'), true);

@@ -39,28 +39,27 @@ test('composer keeps the send button in a fixed visible toolbar column', () => {
   assert.match(contentScript, /data-run title="Send" aria-label="Send"/);
   assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*display: grid/);
   assert.match(css, /\.codex-composer-toolbar\s*\{[\s\S]*grid-template-columns:/);
-  assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*grid-column: 7/);
+  assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*grid-column: 5/);
   assert.match(css, /\.codex-composer-toolbar \[data-run\]\s*\{[\s\S]*width: 28px/);
-  assert.match(css, /\.codex-composer-toolbar select\s*\{[\s\S]*min-width: 0/);
+  assert.match(css, /\.codex-model-config-button\s*\{[\s\S]*min-width: 0/);
 });
 
-test('composer selects reserve room for the dropdown chevron', () => {
+test('composer model config button reserves room for the dropdown chevron', () => {
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
 
-  const selectBody = (css.match(/#codex-overleaf-panel \.codex-composer-toolbar select\s*\{[\s\S]*?\n\}/g) || [])
+  const buttonBody = (css.match(/#codex-overleaf-panel \.codex-model-config-button\s*\{[\s\S]*?\n\}/g) || [])
     .find(block => /width:\s*100%/.test(block)) || '';
 
-  assert.match(selectBody, /appearance:\s*none/);
-  assert.match(selectBody, /padding:\s*0 18px 0 3px/);
-  assert.match(selectBody, /background-image:\s*url\("data:image\/svg\+xml/);
-  assert.match(selectBody, /background-position:\s*right 4px center/);
-  assert.match(selectBody, /text-overflow:\s*ellipsis/);
+  assert.match(buttonBody, /padding:\s*0 18px 0 6px/);
+  assert.match(buttonBody, /background-image:\s*url\("data:image\/svg\+xml/);
+  assert.match(buttonBody, /background-position:\s*right 4px center/);
+  assert.match(buttonBody, /text-overflow:\s*ellipsis/);
 });
 
-test('composer model picker shows the full selected model name while preserving model ids', () => {
+test('composer model config is one compact control with hidden state selects', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -71,17 +70,32 @@ test('composer model picker shows the full selected model name while preserving 
   );
   const modelSelect = contentScript.match(/<select data-model[\s\S]*?<\/select>/)?.[0] || '';
 
+  assert.match(contentScript, /data-model-config-toggle/);
+  assert.match(contentScript, /data-model-config-popover/);
+  assert.match(contentScript, /data-model-choice-list/);
+  assert.match(contentScript, /data-reasoning-choice-list/);
+  assert.match(contentScript, /data-speed-choice-list/);
+  assert.match(contentScript, /codex-model-config-inputs" hidden/);
   assert.match(contentScript, /data-model-display/);
-  assert.match(contentScript, /<span data-model-display>GPT-5\.4<\/span>/);
+  assert.match(contentScript, /<span data-model-display>5\.4<\/span>/);
+  assert.match(contentScript, /data-reasoning-display/);
+  assert.match(contentScript, /data-speed-indicator/);
   assert.doesNotMatch(contentScript, /const MODEL_DISPLAY_LABELS/);
   assert.doesNotMatch(contentScript, /'gpt-5\.5': '5\.5'/);
   assert.doesNotMatch(contentScript, /'gpt-5\.3-codex-spark': '5\.3S'/);
   assert.match(contentScript, /function updateModelDisplay/);
-  assert.match(contentScript, /modelDisplay\.textContent = fullLabel/);
+  assert.match(contentScript, /function formatCompactModelLabel/);
+  assert.match(contentScript, /modelDisplay\.textContent = formatCompactModelLabel\(fullLabel\)/);
+  assert.match(contentScript, /reasoningDisplay\.textContent = formatReasoningEffortLabel/);
+  assert.match(contentScript, /speedIndicator\.hidden = readSelectedSpeedInput\(\) !== 'fast'/);
   assert.match(modelSelect, /<option value="gpt-5\.5">GPT-5\.5<\/option>/);
   assert.match(modelSelect, /<option value="gpt-5\.3-codex-spark">GPT-5\.3 Codex Spark<\/option>/);
-  assert.match(css, /\.codex-model-picker \[data-model-display\]\s*\{[\s\S]*text-overflow:\s*ellipsis/);
-  assert.match(css, /\.codex-model-picker select\s*\{[\s\S]*opacity:\s*0/);
+  assert.match(css, /\.codex-model-config\s*\{[\s\S]*position:\s*relative/);
+  assert.match(css, /\.codex-model-config-button\s*\{[\s\S]*justify-content:\s*flex-start/);
+  assert.match(css, /\.codex-model-config-button \[data-model-display\]\s*\{[\s\S]*text-overflow:\s*ellipsis/);
+  assert.doesNotMatch(css, /\.codex-model-config-button \[data-model-display\]\s*\{[\s\S]*flex:\s*1 1 auto/);
+  assert.match(css, /\.codex-model-config-button \[data-model-display\]\s*\{[\s\S]*flex:\s*0 1 auto/);
+  assert.match(css, /\.codex-model-config-popover\s*\{[\s\S]*position:\s*absolute/);
 });
 
 test('composer discovers model options through the native codex.models endpoint', () => {
@@ -103,11 +117,14 @@ test('composer discovers model options through the native codex.models endpoint'
   assert.match(contentScript, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel:\s*currentSelectedModel\s*\}\)/);
   assert.match(contentScript, /function renderModelOptions\(models,\s*selectedModel\)/);
   assert.match(contentScript, /function renderSpeedOptions\(/);
+  assert.match(contentScript, /function renderModelConfigChoices\(/);
   assert.match(contentScript, /data-speed/);
   assert.match(contentScript, /model\.speedTiers/);
   assert.match(contentScript, /document\.createElement\('option'\)/);
+  assert.match(contentScript, /document\.createElement\('button'\)/);
   assert.match(contentScript, /option\.textContent\s*=\s*model\.label/);
-  assert.match(contentScript, /modelDisplay\.title\s*=\s*tr\('modelDisplayTitle'/);
+  assert.match(contentScript, /const sourceTitle = tr\('modelDisplayTitle'/);
+  assert.match(contentScript, /modelDisplay\.title = sourceTitle/);
   assert.match(i18n, /modelSourceFallback:\s*'fallback'/);
   assert.match(i18n, /modelSourceDiscovered:\s*'discovered'/);
   assert.match(i18n, /modelDisplayTitle:\s*'\{label\} - Model list: \{source\}'/);
@@ -172,11 +189,12 @@ test('composer model picker stays compact when the side panel is wide', () => {
   );
 
   const toolbarBlock = css.match(/#codex-overleaf-panel \.codex-composer-toolbar\s*\{[\s\S]*?\n\}/)?.[0] || '';
-  const modelBlock = css.match(/#codex-overleaf-panel \.codex-model-picker\s*\{[\s\S]*?\n\}/)?.[0] || '';
+  const modelBlock = css.match(/#codex-overleaf-panel \.codex-model-config\s*\{[\s\S]*?\n\}/)?.[0] || '';
 
   assert.doesNotMatch(toolbarBlock, /minmax\(96px,\s*1fr\)/);
-  assert.match(toolbarBlock, /grid-template-columns:\s*26px 42px minmax\(0,\s*1fr\) minmax\(112px,\s*150px\) 66px 54px 28px/);
-  assert.match(modelBlock, /max-width:\s*150px/);
+  assert.doesNotMatch(toolbarBlock, /66px 54px/);
+  assert.match(toolbarBlock, /grid-template-columns:\s*26px 42px minmax\(0,\s*1fr\) minmax\(104px,\s*156px\) 28px/);
+  assert.match(modelBlock, /max-width:\s*156px/);
 });
 
 test('composer describes compile toggle as a post-write action', () => {
