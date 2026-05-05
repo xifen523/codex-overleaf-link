@@ -3057,6 +3057,15 @@
         updateOtStatusDisplay('inconsistent');
         return response;
       }
+      const appliedFiles = Array.isArray(result?.appliedFiles) ? result.appliedFiles : null;
+      const appliedCount = Number.isFinite(Number(result?.appliedCount))
+        ? Number(result.appliedCount)
+        : NaN;
+      if (!appliedFiles || !Number.isFinite(appliedCount) || appliedCount <= 0 || appliedFiles.length !== appliedCount) {
+        otWarmMirrorState.lastErrorCode = 'mirror_patch_invalid_result';
+        updateOtStatusDisplay('inconsistent');
+        return response;
+      }
 
       otWarmMirrorState.lastPatchAt = Date.now();
       otWarmMirrorState.lastErrorCode = '';

@@ -424,6 +424,31 @@ test('invalid native OT patch results mark the warm mirror inconsistent using sk
   assert.doesNotMatch(flushBody, /result\?\.skipped\b|result\.skipped\b/);
 });
 
+test('native OT patch success requires valid appliedCount and appliedFiles evidence', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const flushBody = extractFunction(contentScript, 'flushOtPatchBatch');
+
+  assert.match(flushBody, /appliedFiles/);
+  assert.match(flushBody, /appliedCount/);
+  assert.match(flushBody, /Array\.isArray\(result\?\.appliedFiles\)/);
+  assert.match(flushBody, /Number\.isFinite\(Number\(result\?\.appliedCount\)\)/);
+  assert.match(flushBody, /appliedCount <= 0/);
+  assert.match(flushBody, /appliedFiles\.length !== appliedCount/);
+  const invalidResultIndex = flushBody.indexOf("otWarmMirrorState.lastErrorCode = 'mirror_patch_invalid_result'");
+  const inconsistentIndex = flushBody.indexOf("updateOtStatusDisplay('inconsistent')", invalidResultIndex);
+  const observingIndex = flushBody.indexOf("updateOtStatusDisplay('observing')");
+
+  assert.ok(invalidResultIndex >= 0, 'invalid applied evidence sets a native patch result error code');
+  assert.ok(inconsistentIndex > invalidResultIndex, 'invalid applied evidence marks OT status inconsistent');
+  assert.ok(
+    observingIndex > inconsistentIndex,
+    'invalid applied evidence is handled before the successful observing status'
+  );
+});
+
 test('warm mirror overlays preserve active file alongside focused files', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
