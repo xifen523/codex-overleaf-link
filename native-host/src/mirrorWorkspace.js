@@ -597,15 +597,34 @@ async function patchMirrorFiles({ projectId, files, rootDir, source = 'ot' }) {
       lastOtErrorCode = 'missing_content';
       continue;
     }
-    if (Object.hasOwn(patch, 'baseHash') && patch.baseHash !== baselineFile.hash) {
+    if (typeof patch.baseHash !== 'string' || !patch.baseHash) {
+      skippedFiles.push({ path: normalized.path, reason: 'missing_base_hash' });
+      lastOtErrorCode = 'missing_base_hash';
+      continue;
+    }
+    if (patch.baseHash !== baselineFile.hash) {
       skippedFiles.push({ path: normalized.path, reason: 'base_hash_mismatch' });
       lastOtErrorCode = 'base_hash_mismatch';
+      continue;
+    }
+    if (baseline.dirty === true) {
+      skippedFiles.push({ path: normalized.path, reason: 'dirty_mirror' });
+      lastOtErrorCode = 'dirty_mirror';
+      continue;
+    }
+    if (!isSafeWorkspaceWriteTarget(mirror.workspacePath, normalized.target)) {
+      skippedFiles.push({ path: normalized.path, reason: 'unsafe_path' });
+      lastOtErrorCode = 'unsafe_path';
+      continue;
+    }
+    if (!workspaceFileMatchesBaseline(normalized.target, baselineFile)) {
+      skippedFiles.push({ path: normalized.path, reason: 'workspace_mismatch' });
+      lastOtErrorCode = 'workspace_mismatch';
       continue;
     }
 
     patchBatchAt ||= new Date().toISOString();
     lastOtPatchAt = patchBatchAt;
-    fs.mkdirSync(path.dirname(normalized.target), { recursive: true });
     fs.writeFileSync(normalized.target, patch.nextContent, 'utf8');
 
     const hash = hashText(patch.nextContent);
@@ -661,6 +680,51 @@ function normalizePatchPath(patch, workspacePath) {
     };
   } catch {
     return { ok: false, path: rawPath };
+  }
+}
+
+function isSafeWorkspaceWriteTarget(workspacePath, target) {
+  const root = path.resolve(workspacePath);
+  const resolvedTarget = path.resolve(target);
+  if (resolvedTarget === root || !resolvedTarget.startsWith(root + path.sep)) {
+    return false;
+  }
+  try {
+    const rootStat = fs.lstatSync(root);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+      return false;
+    }
+    const rootRealPath = fs.realpathSync(root);
+    let current = root;
+    const parts = path.relative(root, resolvedTarget).split(path.sep).filter(Boolean);
+    for (let index = 0; index < parts.length; index++) {
+      current = path.join(current, parts[index]);
+      let stat;
+      try {
+        stat = fs.lstatSync(current);
+      } catch (error) {
+        if (error?.code === 'ENOENT') {
+          break;
+        }
+        return false;
+      }
+      if (stat.isSymbolicLink()) {
+        return false;
+      }
+      if (index < parts.length - 1 && !stat.isDirectory()) {
+        return false;
+      }
+      if (index === parts.length - 1 && !stat.isFile()) {
+        return false;
+      }
+      const realPath = fs.realpathSync(current);
+      if (realPath !== rootRealPath && !realPath.startsWith(rootRealPath + path.sep)) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
   }
 }
 
