@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
@@ -57,6 +58,17 @@ test('rejects invalid positions and unknown operation fields', () => {
   });
 });
 
+test('rejects zero-length insert and delete operations', () => {
+  assert.deepEqual(validateTextOp({ p: 0, i: '' }, 'old'), {
+    ok: false,
+    reason: 'empty_text'
+  });
+  assert.deepEqual(validateTextOp({ p: 0, d: '' }, 'old'), {
+    ok: false,
+    reason: 'empty_text'
+  });
+});
+
 test('diffs old and new content into compact single-span operations', () => {
   const oldText = 'alpha beta gamma';
   const nextText = 'alpha delta gamma';
@@ -101,6 +113,21 @@ test('normalizes observed text events with hashes, fields, and operations', () =
   ]);
 });
 
+test('normalizes out-of-range numeric observedAt without throwing', () => {
+  let event;
+  assert.doesNotThrow(() => {
+    event = normalizeObservedTextEvent({
+      path: 'main.tex',
+      previousContent: 'old',
+      nextContent: 'new',
+      observedAt: Number.MAX_VALUE
+    });
+  });
+
+  assert.equal(event.ok, true);
+  assert.match(event.observedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
 test('normalizing invalid observed text events does not leak source content in errors', () => {
   const result = normalizeObservedTextEvent({
     path: '',
@@ -133,5 +160,9 @@ test('exposes a browser global with a standard SHA-256 fallback', () => {
   assert.equal(
     context.CodexOverleafOtText.hashText('old'),
     'cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4'
+  );
+  assert.equal(
+    context.CodexOverleafOtText.hashText('a\uD800b'),
+    crypto.createHash('sha256').update('a\uD800b', 'utf8').digest('hex')
   );
 });

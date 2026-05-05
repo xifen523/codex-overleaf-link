@@ -96,6 +96,12 @@
           reason: 'invalid_op'
         };
       }
+      if (rawOp.i.length === 0) {
+        return {
+          ok: false,
+          reason: 'empty_text'
+        };
+      }
       if (hasText && rawOp.p > content.length) {
         return {
           ok: false,
@@ -115,6 +121,12 @@
       return {
         ok: false,
         reason: 'invalid_op'
+      };
+    }
+    if (rawOp.d.length === 0) {
+      return {
+        ok: false,
+        reason: 'empty_text'
       };
     }
     if (hasText && rawOp.p + rawOp.d.length > content.length) {
@@ -297,14 +309,18 @@
   }
 
   function normalizeObservedAt(value) {
-    if (value instanceof Date && !Number.isNaN(value.getTime())) {
-      return value.toISOString();
+    if (value instanceof Date) {
+      return validDateToIso(value) || new Date().toISOString();
     }
     if (typeof value === 'number' && Number.isFinite(value)) {
-      return new Date(value).toISOString();
+      return validDateToIso(new Date(value)) || new Date().toISOString();
     }
     const text = String(value || '').trim();
     return text || new Date().toISOString();
+  }
+
+  function validDateToIso(date) {
+    return Number.isFinite(date.getTime()) ? date.toISOString() : null;
   }
 
   function normalizeObservedVersion(value) {
@@ -349,9 +365,17 @@
 
     const bytes = [];
     for (let index = 0; index < text.length; index += 1) {
-      let codePoint = text.codePointAt(index);
-      if (codePoint > 0xffff) {
-        index += 1;
+      let codePoint = text.charCodeAt(index);
+      if (codePoint >= 0xd800 && codePoint <= 0xdbff) {
+        const next = index + 1 < text.length ? text.charCodeAt(index + 1) : 0;
+        if (next >= 0xdc00 && next <= 0xdfff) {
+          codePoint = 0x10000 + ((codePoint - 0xd800) << 10) + (next - 0xdc00);
+          index += 1;
+        } else {
+          codePoint = 0xfffd;
+        }
+      } else if (codePoint >= 0xdc00 && codePoint <= 0xdfff) {
+        codePoint = 0xfffd;
       }
       if (codePoint <= 0x7f) {
         bytes.push(codePoint);
