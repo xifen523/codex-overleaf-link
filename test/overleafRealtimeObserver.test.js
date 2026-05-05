@@ -224,6 +224,36 @@ test('drainEvents returns queued events and empties the queue', () => {
   assert.equal(harness.observer.getStatus().queuedEventCount, 0);
 });
 
+test('start and stop clear pending events so stale edits cannot cross projects', () => {
+  const stopped = createHarness();
+  stopped.observer.start({ projectId: 'project_a' });
+  stopped.setEditorText('project a edit');
+  stopped.fireInput();
+
+  assert.equal(stopped.observer.getStatus().queuedEventCount, 1);
+
+  const stopStatus = stopped.observer.stop();
+  assert.equal(stopStatus.queuedEventCount, 0);
+
+  stopped.setEditorText('project b baseline');
+  const restartStatus = stopped.observer.start({ projectId: 'project_b' });
+
+  assert.equal(restartStatus.queuedEventCount, 0);
+  assert.deepEqual(stopped.observer.drainEvents(), []);
+
+  const restarted = createHarness();
+  restarted.observer.start({ projectId: 'project_a' });
+  restarted.setEditorText('project a edit');
+  restarted.fireInput();
+
+  assert.equal(restarted.observer.getStatus().queuedEventCount, 1);
+
+  const startStatus = restarted.observer.start({ projectId: 'project_b' });
+
+  assert.equal(startStatus.queuedEventCount, 0);
+  assert.deepEqual(restarted.observer.drainEvents(), []);
+});
+
 test('direct input switch adopts new active file as baseline when no selection event was observed', () => {
   const harness = createHarness();
   harness.observer.start({ projectId: 'project-123' });

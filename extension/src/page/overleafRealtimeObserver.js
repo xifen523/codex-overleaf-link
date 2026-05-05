@@ -30,6 +30,7 @@
     let channelCandidates = [];
 
     function start(_params = {}) {
+      clearQueuedEvents();
       channelCandidates = collectChannelCandidates(pageWindow);
       if (!canAttachDocumentListeners()) {
         running = false;
@@ -45,6 +46,7 @@
 
     function stop() {
       detachDocumentListeners();
+      clearQueuedEvents();
       running = false;
       statusName = 'off';
       statusReason = '';
@@ -71,8 +73,12 @@
 
     function drainEvents() {
       const drained = events.slice();
-      events.length = 0;
+      clearQueuedEvents();
       return drained;
+    }
+
+    function clearQueuedEvents() {
+      events.length = 0;
     }
 
     function canAttachDocumentListeners() {
