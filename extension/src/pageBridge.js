@@ -36,8 +36,14 @@
     normalizePath: window.CodexOverleafProjectFiles.normalizePath,
     window
   });
-  const otObserver = window.CodexOverleafRealtimeObserver && typeof window.CodexOverleafRealtimeObserver.create === 'function'
-    ? window.CodexOverleafRealtimeObserver.create({
+  const otObserver = createOtObserver();
+
+  function createOtObserver() {
+    if (!window.CodexOverleafRealtimeObserver || typeof window.CodexOverleafRealtimeObserver.create !== 'function') {
+      return createUnavailableOtObserver();
+    }
+    try {
+      return window.CodexOverleafRealtimeObserver.create({
         document,
         window,
         otText: window.CodexOverleafOtText,
@@ -46,8 +52,11 @@
         getCodeMirrorEditorView,
         collectDocRecords,
         now: () => Date.now()
-      })
-    : createUnavailableOtObserver();
+      });
+    } catch (_error) {
+      return createUnavailableOtObserver('ot_observer_create_failed');
+    }
+  }
 
   window.addEventListener('message', async event => {
     if (event.source !== window
@@ -178,7 +187,7 @@
     return undefined;
   }
 
-  function createUnavailableOtObserver() {
+  function createUnavailableOtObserver(reason = 'missing_realtime_observer') {
     const status = {
       status: 'unavailable',
       state: 'unavailable',
@@ -187,8 +196,8 @@
       activePath: '',
       queuedEventCount: 0,
       lastEventAt: null,
-      lastErrorCode: 'missing_realtime_observer',
-      reason: 'missing_realtime_observer',
+      lastErrorCode: reason,
+      reason,
       channelCandidates: []
     };
     return {

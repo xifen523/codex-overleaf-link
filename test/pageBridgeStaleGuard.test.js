@@ -1420,6 +1420,37 @@ test('page bridge whitelists OT event fields before posting to content', async (
   }]);
 });
 
+test('page bridge remains available when OT observer factory throws', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    saveIndicatorText: 'All changes saved',
+    files: {
+      'main.tex': 'alpha'
+    },
+    realtimeObserverFactory() {
+      throw new Error('observer factory failed');
+    }
+  });
+
+  const probe = await bridge.call('probe', {});
+  assert.equal(probe.ok, true, probe.error || JSON.stringify(probe));
+
+  const saveState = await bridge.call('waitForSaveState', { deadlineMs: 1, pollIntervalMs: 1 });
+  assert.equal(saveState.ok, true);
+  assert.equal(saveState.state, 'verified_saved');
+
+  const status = await bridge.call('getOtStatus', {});
+  assert.equal(status.status, 'unavailable');
+  assert.equal(status.state, 'unavailable');
+  assert.equal(status.running, false);
+  assert.equal(status.lastErrorCode, 'ot_observer_create_failed');
+
+  const stopped = await bridge.call('stopOtObserver', {});
+  assert.equal(stopped.status, 'off');
+  assert.equal(stopped.state, 'off');
+  assert.equal(stopped.running, false);
+});
+
 
 function createPageBridgeHarness({
   activePath,
