@@ -4745,6 +4745,7 @@
       if (!compatibilityGate.ok) {
         return compatibilityGate.response;
       }
+      throwIfCancelledBeforeNativeDispatch(payload?.method);
       return nativeChannel.sendNative(attachNativeCompatibilityEvidence(payload, compatibilityGate.compatibility));
     })();
   }
@@ -4755,8 +4756,15 @@
       if (!compatibilityGate.ok) {
         return compatibilityGate.response;
       }
+      throwIfCancelledBeforeNativeDispatch(payload?.method);
       return nativeChannel.sendBackgroundNative(attachNativeCompatibilityEvidence(payload, compatibilityGate.compatibility));
     })();
+  }
+
+  function throwIfCancelledBeforeNativeDispatch(method) {
+    if (NATIVE_COMPATIBILITY_GATED_METHODS.has(method)) {
+      throwIfRunCancellationRequested();
+    }
   }
 
   async function ensureNativeCompatibilityForMethod(method) {

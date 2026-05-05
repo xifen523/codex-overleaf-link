@@ -118,21 +118,15 @@ test('buildPatchFilesRequest can carry native compatibility evidence for backgro
   });
 });
 
-test('controller exposes a mirror.patchFiles compatibility check', () => {
-  const compatibility = require('../extension/src/shared/compatibility');
-  const sandbox = {
-    globalThis: {
-      CodexOverleafCompatibility: compatibility
-    }
-  };
-  vm.runInNewContext(`
-    const compatibility = globalThis.CodexOverleafCompatibility;
-    globalThis.result = (${Controller.isNativePatchFilesAllowed.toString()})({ status: 'native_too_old' });
-  `, sandbox);
+test('controller does not duplicate native compatibility policy', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/otWarmMirrorController.js'),
+    'utf8'
+  );
 
-  assert.equal(typeof Controller.isNativePatchFilesAllowed, 'function');
-  assert.equal(Controller.isNativePatchFilesAllowed({ status: 'ok' }), true);
-  assert.equal(sandbox.globalThis.result, false);
+  assert.equal(Controller.isNativePatchFilesAllowed, undefined);
+  assert.doesNotMatch(source, /isNativePatchFilesAllowed/);
+  assert.doesNotMatch(source, /isNativeMethodAllowed\('mirror\.patchFiles'/);
 });
 
 test('buildPatchFilesRequest omits non-primitive OT metadata', () => {

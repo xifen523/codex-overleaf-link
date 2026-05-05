@@ -958,6 +958,49 @@ test('native side-effecting requests are gated on compatibility before dispatch'
   assert.match(sendBackgroundNativeBody, /attachNativeCompatibilityEvidence/);
 });
 
+test('cancellation during native compatibility gate prevents codex.run dispatch', async () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const sendNativeBody = extractFunction(contentScript, 'sendNative');
+
+  let cancellationRequested = false;
+  let nativeSent = false;
+  const sendNative = Function(
+    'ensureNativeCompatibilityForMethod',
+    'nativeChannel',
+    'attachNativeCompatibilityEvidence',
+    'throwIfCancelledBeforeNativeDispatch',
+    `return (${sendNativeBody});`
+  )(
+    async () => {
+      cancellationRequested = true;
+      return { ok: true, compatibility: { status: 'ok' } };
+    },
+    {
+      sendNative() {
+        nativeSent = true;
+        return Promise.resolve({ ok: true });
+      }
+    },
+    payload => payload,
+    () => {
+      if (cancellationRequested) {
+        const error = new Error('Codex run was cancelled by the user');
+        error.code = 'codex_cancelled';
+        throw error;
+      }
+    }
+  );
+
+  await assert.rejects(
+    sendNative({ method: 'codex.run', params: { task: 'write' } }),
+    /Codex run was cancelled by the user/
+  );
+  assert.equal(nativeSent, false);
+});
+
 test('read-only native discovery and diagnostics bypass the compatibility run gate', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),

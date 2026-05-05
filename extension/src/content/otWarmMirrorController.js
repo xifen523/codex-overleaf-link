@@ -59,16 +59,6 @@
     };
   }
 
-  function isNativePatchFilesAllowed(nativeCompatibility) {
-    const compatibility = typeof globalThis !== 'undefined'
-      ? globalThis.CodexOverleafCompatibility
-      : null;
-    if (compatibility && typeof compatibility.isNativeMethodAllowed === 'function') {
-      return compatibility.isNativeMethodAllowed('mirror.patchFiles', nativeCompatibility);
-    }
-    return !nativeCompatibility || nativeCompatibility.status === 'ok';
-  }
-
   function shouldPauseOtWarmMirror(state) {
     const reason = getPauseStateName(state);
     if (PAUSE_STATES.has(reason)) {
@@ -177,7 +167,6 @@
     OT_MAX_PATCH_BATCH,
     buildPatchFilesRequest,
     canUseOtWarmStart,
-    isNativePatchFilesAllowed,
     normalizePath,
     normalizePaths,
     shouldPauseOtWarmMirror
