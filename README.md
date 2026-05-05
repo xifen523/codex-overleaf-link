@@ -81,7 +81,7 @@ The v0.4.0 GitHub Release contains:
 
 - `codex-overleaf-link-extension-v0.4.0.zip`: loadable Chrome extension package for unpacked or Web Store inspection.
 - `codex-overleaf-native-host-v0.4.0.tar.gz`: native host runtime files used by the installer and release verification.
-- `install.sh`: version-pinned macOS installer for installing or updating the source checkout and native host.
+- `install.sh`: release-pinned macOS installer that defaults to `v0.4.0` when run directly from the release artifact.
 - `uninstall-native-host.mjs`: native host uninstaller that removes the Chrome Native Messaging manifest, bridge executable, and runtime copy.
 - `SHA256SUMS` and `release-manifest.json`: checksum and artifact metadata for release verification.
 

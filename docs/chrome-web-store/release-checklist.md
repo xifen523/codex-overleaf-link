@@ -7,6 +7,7 @@
 - Run `npm run build:release`.
 - Verify checksums from `dist/releases/v0.4.0/SHA256SUMS`.
 - Inspect extension zip `codex-overleaf-link-extension-v0.4.0.zip` before upload.
+- Confirm the release `install.sh` defaults `CODEX_OVERLEAF_REF` to `v0.4.0`.
 
 ## Store Preparation
 

@@ -53,7 +53,11 @@ export function buildRelease(options = {}) {
 
   const copiedInstallPath = path.join(outputDir, 'install.sh');
   const copiedUninstallPath = path.join(outputDir, 'uninstall-native-host.mjs');
-  copyFile(path.join(rootDir, 'install.sh'), copiedInstallPath);
+  writeVersionPinnedInstallScript({
+    sourcePath: path.join(rootDir, 'install.sh'),
+    targetPath: copiedInstallPath,
+    version
+  });
   copyFile(path.join(rootDir, 'scripts/uninstall-native-host.mjs'), copiedUninstallPath);
 
   const releaseNotes = extractReleaseNotes(
@@ -373,6 +377,21 @@ function copyFile(source, target) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.copyFileSync(source, target);
   fs.chmodSync(target, fs.statSync(source).mode & 0o777);
+}
+
+function writeVersionPinnedInstallScript({ sourcePath, targetPath, version }) {
+  const releaseRef = `v${version}`;
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  const patched = source.replace(
+    'REF="${CODEX_OVERLEAF_REF:-main}"',
+    `REF="\${CODEX_OVERLEAF_REF:-${releaseRef}}"`
+  );
+  if (patched === source) {
+    throw new Error('Unable to pin release install.sh default ref.');
+  }
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, patched, 'utf8');
+  fs.chmodSync(targetPath, fs.statSync(sourcePath).mode & 0o777);
 }
 
 function describeArtifact(filePath, name) {

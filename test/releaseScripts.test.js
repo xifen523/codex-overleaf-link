@@ -678,6 +678,82 @@ test('build-release creates expected artifacts and metadata', (t) => {
   }
 });
 
+test('build-release writes a version-pinned install artifact while root installer stays source-oriented', (t) => {
+  const pkg = readJson(path.join(repoRoot, 'package.json'));
+  const version = pkg.version;
+  const releaseRef = `v${version}`;
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-install-ref-'));
+  const outputDir = path.join(tempDir, 'out');
+  const binDir = path.join(tempDir, 'bin');
+  const installDir = path.join(tempDir, 'source');
+  const visibleExtensionLink = path.join(tempDir, 'Codex Overleaf Link Extension');
+  const nodeLog = path.join(tempDir, 'node-args.txt');
+  const gitLog = path.join(tempDir, 'git-args.txt');
+
+  try {
+    const result = spawnSync(process.execPath, [
+      path.join(repoRoot, 'scripts/build-release.mjs'),
+      '--output',
+      outputDir
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8'
+    });
+
+    if (result.status !== 0 && /required command "zip"|zip is required/i.test(result.stderr)) {
+      t.skip('zip is required to build release artifacts');
+      return;
+    }
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    const rootInstaller = readText(path.join(repoRoot, 'install.sh'));
+    const releaseInstaller = readText(path.join(outputDir, 'install.sh'));
+    assert.match(rootInstaller, /REF="\$\{CODEX_OVERLEAF_REF:-main\}"/);
+    assert.match(releaseInstaller, new RegExp(`REF="\\$\\{CODEX_OVERLEAF_REF:-${releaseRef}\\}"`));
+    assert.doesNotMatch(releaseInstaller, /REF="\$\{CODEX_OVERLEAF_REF:-main\}"/);
+
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.writeFileSync(path.join(binDir, 'git'), [
+      '#!/bin/bash',
+      `printf '%s\\n' "$*" >> "${gitLog}"`,
+      'if [ "$1" = "clone" ]; then',
+      '  target=""',
+      '  for arg in "$@"; do target="$arg"; done',
+      '  mkdir -p "$target/.git"',
+      '  mkdir -p "$target/extension"',
+      `  printf '{"version":"${version}"}\\n' > "$target/package.json"`,
+      'fi',
+      'exit 0'
+    ].join('\n'));
+    fs.writeFileSync(path.join(binDir, 'node'), [
+      '#!/bin/bash',
+      `for arg in "$@"; do printf '%s\\n' "$arg"; done > "${nodeLog}"`,
+      'exit 0'
+    ].join('\n'));
+    for (const command of ['git', 'node']) {
+      fs.chmodSync(path.join(binDir, command), 0o755);
+    }
+
+    const installResult = spawnSync('/bin/bash', [path.join(outputDir, 'install.sh')], {
+      env: {
+        HOME: tempDir,
+        PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+        CODEX_OVERLEAF_REPO_URL: 'https://example.invalid/repo.git',
+        CODEX_OVERLEAF_INSTALL_DIR: installDir,
+        CODEX_OVERLEAF_EXTENSION_LINK: visibleExtensionLink
+      },
+      encoding: 'utf8'
+    });
+
+    assert.equal(installResult.status, 0, installResult.stderr || installResult.stdout);
+    assert.match(installResult.stdout, new RegExp(`CODEX_OVERLEAF_REF: ${releaseRef}`));
+    assert.match(readText(gitLog), new RegExp(`fetch --depth 1 origin ${releaseRef}`));
+    assert.match(readText(nodeLog), /scripts\/install-native-host\.mjs/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('native host tarball includes only runtime categories', (t) => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
   const version = pkg.version;
