@@ -32,6 +32,39 @@ test('package exposes install and uninstall native host commands', () => {
   assert.equal(pkg.scripts['uninstall:native'], 'node scripts/uninstall-native-host.mjs');
 });
 
+test('native install runtime includes package metadata required by bridge ping', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-runtime-test-'));
+  const runtimeRoot = path.join(tempDir, 'runtime');
+  const bridgePath = path.join(tempDir, 'codex-overleaf-bridge');
+  try {
+    const result = spawnSync(process.execPath, [
+      path.join(__dirname, '../scripts/install-native-host.mjs'),
+      '--runtime-root',
+      runtimeRoot,
+      '--bridge-path',
+      bridgePath
+    ], {
+      env: {
+        ...process.env,
+        HOME: tempDir
+      },
+      encoding: 'utf8'
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const runtimePackagePath = path.join(runtimeRoot, 'package.json');
+    assert.equal(fs.existsSync(runtimePackagePath), true);
+    const runtimePackage = JSON.parse(fs.readFileSync(runtimePackagePath, 'utf8'));
+    const { handleRequest } = require(path.join(runtimeRoot, 'native-host/src/taskRunner.js'));
+    const response = await handleRequest({ id: 'runtime-ping', method: 'bridge.ping', params: {} }, {});
+
+    assert.equal(response.ok, true);
+    assert.equal(response.result.version, runtimePackage.version);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('repository ships a one-command macOS installer', () => {
   const installer = fs.readFileSync(path.join(__dirname, '../install.sh'), 'utf8');
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');

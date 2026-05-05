@@ -51,6 +51,7 @@ console.log(`Allowed Chrome extension id: ${extensionId}`);
 
 function installRuntime(targetRoot) {
   fs.rmSync(targetRoot, { recursive: true, force: true });
+  copyFile(path.resolve(__dirname, '../package.json'), path.join(targetRoot, 'package.json'));
   copyDirectory(path.resolve(__dirname, '../native-host/src'), path.join(targetRoot, 'native-host/src'));
   copyDirectory(path.resolve(__dirname, '../extension/src/shared'), path.join(targetRoot, 'extension/src/shared'));
   copyFile(path.resolve(__dirname, './codex-json-agent.mjs'), path.join(targetRoot, 'scripts/codex-json-agent.mjs'));
