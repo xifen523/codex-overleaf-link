@@ -237,18 +237,19 @@ test('malformed skipped apply result entries are not treated as partial writebac
   assert.doesNotMatch(applyTaskBody, /\.\.\.\(applied\.skipped \|\| \[\]\)/);
 });
 
-test('post-write mirror refresh and auto compile return unless save is verified', () => {
+test('post-write mirror refresh waits for verified save but auto compile still delegates to compile bridge', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
   const refreshBody = contentScript.match(/async function refreshProjectMirrorAfterWriteback[\s\S]*?\n  function getAppliedOperationPaths/)?.[0] || '';
   const autoCompileBody = contentScript.match(/async function autoRecompileAfterWriteback[\s\S]*?\n  async function resolveCompileLogContext/)?.[0] || '';
+  const saveWarningBody = contentScript.match(/function appendPostWriteSaveVerificationWarning[\s\S]*?\n  async function refreshProjectMirrorAfterWriteback/)?.[0] || '';
 
   assert.match(refreshBody, /async function refreshProjectMirrorAfterWriteback\(project = \{\}, applied = \{\}, saveVerification = \{\}\)/);
   assert.match(autoCompileBody, /async function autoRecompileAfterWriteback\(writtenPaths = \[\], saveVerification = \{\}\)/);
   assert.match(refreshBody, /saveVerification\?\.state !== 'verified_saved'[\s\S]*?return;/);
-  assert.match(autoCompileBody, /saveVerification\?\.state !== 'verified_saved'[\s\S]*?return;/);
+  assert.doesNotMatch(autoCompileBody, /saveVerification\?\.state !== 'verified_saved'[\s\S]*?return;/);
   assert.ok(
     refreshBody.indexOf("saveVerification?.state !== 'verified_saved'") < refreshBody.indexOf("callPageBridge('invalidateProjectSnapshot'"),
     'mirror refresh checks verified save before invalidating snapshot cache'
@@ -261,10 +262,9 @@ test('post-write mirror refresh and auto compile return unless save is verified'
     refreshBody.indexOf("saveVerification?.state !== 'verified_saved'") < refreshBody.indexOf("method: 'mirror.sync'"),
     'mirror refresh checks verified save before syncing native mirror'
   );
-  assert.ok(
-    autoCompileBody.indexOf("saveVerification?.state !== 'verified_saved'") < autoCompileBody.indexOf("callPageBridge('triggerCompile'"),
-    'auto compile checks verified save before triggering compile'
-  );
+  assert.match(autoCompileBody, /callPageBridge\('triggerCompile', \{[\s\S]*requireVerifiedSave:\s*saveVerification\?\.state === 'verified_saved'/);
+  assert.match(autoCompileBody, /saveVerification\?\.state !== 'verified_saved'[\s\S]*Overleaf save was not verified, but Auto Compile is on/);
+  assert.doesNotMatch(saveWarningBody, /auto compile (?:was|were) skipped/);
 });
 
 test('no-change writeback path does not wait for Overleaf save verification', () => {

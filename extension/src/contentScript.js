@@ -2349,8 +2349,8 @@
     }
     appendRunEvent({
       title: tx(
-        'Files were written or attempted in Overleaf, but Codex could not verify that Overleaf saved them. Local mirror refresh and auto compile were skipped.',
-        '文件已写入或尝试写入 Overleaf，但 Codex 未能确认 Overleaf 已保存；已跳过本地 mirror 刷新和自动编译。'
+        'Files were written or attempted in Overleaf, but Codex could not verify that Overleaf saved them. Local mirror refresh was skipped.',
+        '文件已写入或尝试写入 Overleaf，但 Codex 未能确认 Overleaf 已保存；已跳过本地 mirror 刷新。'
       ),
       status: 'warning'
     });
@@ -2460,7 +2460,6 @@
   }
 
   async function autoRecompileAfterWriteback(writtenPaths = [], saveVerification = {}) {
-    if (saveVerification?.state !== 'verified_saved') return;
     if (state.autoRecompile === false) return;
     if (state.mode === 'ask') return;
 
@@ -2471,17 +2470,23 @@
     if (!hasCompilableFile) return;
 
     appendRunEvent({
-      title: tx(
-        'Post-write compile: LaTeX files were written, triggering Overleaf Recompile.',
-        '正在写后编译：已写入 LaTeX 文件，正在触发 Overleaf Recompile。'
-      ),
+      title: saveVerification?.state !== 'verified_saved'
+        ? tx(
+          'Post-write compile: Overleaf save was not verified, but Auto Compile is on. Triggering Overleaf Recompile and letting Overleaf wait for the latest save.',
+          '正在写后编译：尚未确认 Overleaf 已保存，但已开启自动编译；将触发 Overleaf Recompile，并由 Overleaf 等待最新保存。'
+        )
+        : tx(
+          'Post-write compile: LaTeX files were written, triggering Overleaf Recompile.',
+          '正在写后编译：已写入 LaTeX 文件，正在触发 Overleaf Recompile。'
+        ),
       status: 'running'
     });
 
     try {
       const result = await callPageBridge('triggerCompile', {
         preferUiClick: true,
-        waitForSaveMs: 5000
+        waitForSaveMs: 5000,
+        requireVerifiedSave: saveVerification?.state === 'verified_saved'
       });
       if (result?.ok) {
         const compile = result.compile;
