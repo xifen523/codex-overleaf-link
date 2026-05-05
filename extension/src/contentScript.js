@@ -72,6 +72,7 @@
   let currentOtStatus = 'off';
   let otSyncRequestId = 0;
   let otWarmMirrorProjectId = '';
+  let lastExperimentalOtProjectId = '';
   let mirrorPrefetchState = {
     inFlight: null,
     lastSuccessAt: 0,
@@ -2727,6 +2728,19 @@
     return normalized;
   }
 
+  function syncExperimentalOtToggleForProject(projectId = getCurrentProjectId()) {
+    lastExperimentalOtProjectId = projectId;
+    const enabled = isExperimentalOtEnabledForProject(projectId);
+    const experimentalOtCheckbox = panel?.querySelector('[data-experimental-ot]');
+    if (experimentalOtCheckbox) {
+      experimentalOtCheckbox.checked = enabled;
+    }
+    updateOtStatusDisplay(enabled
+      ? (currentOtStatus === 'off' ? 'starting' : currentOtStatus)
+      : 'off');
+    return enabled;
+  }
+
   async function syncOtWarmMirrorController() {
     const projectId = getCurrentProjectId();
     const requestId = ++otSyncRequestId;
@@ -3063,6 +3077,7 @@
 
   function syncOtWarmMirrorStateForProject() {
     const projectId = getCurrentProjectId();
+    syncExperimentalOtToggleForProject(projectId);
     if (!otWarmMirrorProjectId) {
       otWarmMirrorProjectId = projectId;
       return;
@@ -4298,6 +4313,10 @@
   }
 
   function readPanelInputs() {
+    const projectId = getCurrentProjectId();
+    if (lastExperimentalOtProjectId !== projectId) {
+      syncExperimentalOtToggleForProject(projectId);
+    }
     state = updateActiveSession(state, {
       model: readSelectedModelInput(),
       reasoningEffort: panel.querySelector('[data-reasoning]').value,
@@ -4309,7 +4328,7 @@
     state.autoRecompile = panel.querySelector('[data-auto-recompile]')?.checked !== false;
     const experimentalOtCheckbox = panel.querySelector('[data-experimental-ot]');
     if (experimentalOtCheckbox) {
-      setExperimentalOtEnabled(experimentalOtCheckbox.checked);
+      setExperimentalOtEnabledForProject(projectId, experimentalOtCheckbox.checked);
     }
   }
 
@@ -4733,13 +4752,7 @@
     if (recompileCheckbox) {
       recompileCheckbox.checked = state.autoRecompile !== false;
     }
-    const experimentalOtCheckbox = panel?.querySelector('[data-experimental-ot]');
-    if (experimentalOtCheckbox) {
-      experimentalOtCheckbox.checked = isExperimentalOtEnabled();
-      updateOtStatusDisplay(experimentalOtCheckbox.checked
-        ? (currentOtStatus === 'off' ? 'starting' : currentOtStatus)
-        : 'off');
-    }
+    syncExperimentalOtToggleForProject();
     applyPanelWidth(state.panelWidth || PANEL_DEFAULT_WIDTH, { persist: false });
     renderModelConfigChoices();
     updateModelDisplay();

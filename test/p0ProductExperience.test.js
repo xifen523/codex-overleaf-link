@@ -3,6 +3,29 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
+function extractFunction(source, name) {
+  const markers = [`function ${name}(`, `async function ${name}(`];
+  const start = markers
+    .map(marker => source.indexOf(marker))
+    .filter(index => index !== -1)
+    .sort((a, b) => a - b)[0] ?? -1;
+  assert.notEqual(start, -1, `${name} should exist`);
+  const openBrace = source.indexOf('{', start);
+  assert.notEqual(openBrace, -1, `${name} should have a body`);
+  let depth = 0;
+  for (let index = openBrace; index < source.length; index++) {
+    if (source[index] === '{') {
+      depth++;
+    } else if (source[index] === '}') {
+      depth--;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+  assert.fail(`${name} body should close`);
+}
+
 test('composer defaults to English task modes and keeps Chinese translations available', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -1445,6 +1468,7 @@ test('experimental OT sync ignores stale responses and reverts failed starts to 
   const projectChangeBody = contentScript.match(/function syncOtWarmMirrorStateForProject\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
   assert.match(contentScript, /let otSyncRequestId\s*=\s*0/);
+  assert.match(contentScript, /function syncExperimentalOtToggleForProject\(/);
   assert.match(syncBody, /const projectId = getCurrentProjectId\(\)/);
   assert.match(syncBody, /const requestId = \+\+otSyncRequestId/);
   assert.match(syncBody, /const enabled = isExperimentalOtEnabledForProject\(projectId\)/);
@@ -1458,9 +1482,72 @@ test('experimental OT sync ignores stale responses and reverts failed starts to 
   assert.match(failBody, /updateOtStatusDisplay\('unavailable'\)/);
   assert.match(failBody, /saveStateSoon\(\)/);
   assert.match(projectChangeBody, /otWarmMirrorProjectId = projectId/);
+  assert.match(projectChangeBody, /syncExperimentalOtToggleForProject\(projectId\)/);
   assert.match(projectChangeBody, /otSyncRequestId\+\+/);
   assert.match(projectChangeBody, /callPageBridge\('stopOtObserver',\s*\{\s*\}\)/);
   assert.match(projectChangeBody, /syncOtWarmMirrorController\(\)/);
+});
+
+test('experimental OT input persistence does not leak checked state after project change', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const harness = Function(`
+    let currentProjectId = 'project_a';
+    let currentOtStatus = 'observing';
+    let lastExperimentalOtProjectId = 'project_a';
+    let state = {
+      model: 'gpt-5.4',
+      reasoningEffort: 'high',
+      speedTier: 'standard',
+      mode: 'confirm',
+      task: '',
+      requireReviewing: true,
+      autoRecompile: true,
+      experimentalOtByProject: { project_a: true }
+    };
+    const experimentalOtCheckbox = { checked: true };
+    const controls = {
+      '[data-reasoning]': { value: 'high' },
+      '[data-mode]': { value: 'confirm' },
+      '[data-task]': { value: '' },
+      '[data-require-reviewing]': { checked: true },
+      '[data-auto-recompile]': { checked: true },
+      '[data-experimental-ot]': experimentalOtCheckbox
+    };
+    const panel = {
+      querySelector(selector) {
+        return controls[selector] || null;
+      }
+    };
+    function getCurrentProjectId() { return currentProjectId; }
+    function updateActiveSession(current, patch) { return { ...current, ...patch }; }
+    function readSelectedModelInput() { return state.model; }
+    function readSelectedSpeedInput() { return state.speedTier; }
+    function updateOtStatusDisplay(status) { currentOtStatus = status; }
+    ${extractFunction(contentScript, 'normalizeExperimentalOtByProject')}
+    ${extractFunction(contentScript, 'isExperimentalOtEnabledForProject')}
+    ${extractFunction(contentScript, 'setExperimentalOtEnabledForProject')}
+    ${extractFunction(contentScript, 'syncExperimentalOtToggleForProject')}
+    ${extractFunction(contentScript, 'readPanelInputs')}
+    return {
+      checkbox: experimentalOtCheckbox,
+      getState: () => state,
+      getStatus: () => currentOtStatus,
+      navigate(projectId) { currentProjectId = projectId; },
+      readPanelInputs
+    };
+  `)();
+
+  assert.equal(harness.checkbox.checked, true);
+  harness.navigate('project_b');
+  harness.readPanelInputs();
+
+  assert.equal(harness.checkbox.checked, false);
+  assert.equal(harness.getState().experimentalOtByProject.project_a, true);
+  assert.equal(harness.getState().experimentalOtByProject.project_b, false);
+  assert.equal(harness.getStatus(), 'off');
 });
 
 test('experimental OT stop does not mark off when stop bridge fails', () => {
