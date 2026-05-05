@@ -46,6 +46,7 @@
         "src/content/writebackController.js",
         "src/content/runController.js",
         "src/content/mirrorHealth.js",
+        "src/content/otWarmMirrorController.js",
         "src/contentScript.js"
       ],
       "css": [

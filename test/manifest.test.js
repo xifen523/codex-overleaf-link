@@ -87,3 +87,18 @@ test('content script loads mirror health helper before the panel script', () => 
   assert.ok(scripts.indexOf('src/content/mirrorHealth.js') > -1);
   assert.ok(scripts.indexOf('src/content/mirrorHealth.js') < scripts.indexOf('src/contentScript.js'));
 });
+
+test('content script loads OT warm mirror controller after lower-level helpers and before the panel script', () => {
+  const scripts = extensionManifest.content_scripts[0].js;
+  const controllerIndex = scripts.indexOf('src/content/otWarmMirrorController.js');
+  assert.ok(controllerIndex > -1);
+  for (const helper of [
+    'src/content/nativeChannel.js',
+    'src/content/writebackController.js',
+    'src/content/runController.js',
+    'src/content/mirrorHealth.js'
+  ]) {
+    assert.ok(scripts.indexOf(helper) < controllerIndex);
+  }
+  assert.ok(controllerIndex < scripts.indexOf('src/contentScript.js'));
+});
