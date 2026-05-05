@@ -350,6 +350,50 @@ test('codex.run accepts stale project mirror only for explicitly focused OT-fres
   }
 });
 
+test('codex.run rejects overlays on stale OT warm mirror reuse before mirror mutation', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-stale-ot-overlay-'));
+  const projectId = 'stale-ot-overlay-project';
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  try {
+    await seedStaleOtFreshMirror({ projectId, rootDir });
+    const mirror = getProjectMirror(projectId, { rootDir });
+
+    const response = await handleWithFakeRunner({
+      id: 'codex-stale-ot-overlay',
+      method: 'codex.run',
+      params: {
+        projectId,
+        mode: 'ask',
+        task: '检查 main.tex',
+        useExistingMirror: true,
+        otWarmStart: true,
+        warmStartStrategy: 'ot-warm-mirror',
+        restrictToFocusFiles: true,
+        focusFiles: ['main.tex'],
+        fileOverlays: [{ path: 'refs.bib', content: '@article{mutated}' }],
+        expectedMirrorFreshness: 1
+      }
+    }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
+
+    const baselineAfter = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+    const refsEntry = baselineAfter.files.find(file => file.path === 'refs.bib');
+
+    assert.equal(response.ok, false);
+    assert.equal(response.error.code, 'mirror_stale');
+    assert.match(response.error.message, /OT warm mirror reuse does not accept file overlays/);
+    assert.equal(calls, 0);
+    assert.equal(fs.readFileSync(path.join(mirror.workspacePath, 'refs.bib'), 'utf8'), '@article{old}');
+    assert.equal(refsEntry.content, '@article{old}');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('codex.run rejects stale OT warm mirror reuse without focused fresh coverage', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-stale-ot-reject-'));
   const projectId = 'stale-ot-reject-project';

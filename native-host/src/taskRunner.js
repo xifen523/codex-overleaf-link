@@ -204,6 +204,12 @@ function validateOtFocusedWarmMirrorReuse(params = {}, status = {}) {
   if (!isOtWarmMirrorReuseRequest(params)) {
     return { ok: false };
   }
+  if (Array.isArray(params.fileOverlays) && params.fileOverlays.length) {
+    return {
+      ok: false,
+      message: 'OT warm mirror reuse does not accept file overlays'
+    };
+  }
   if (status?.exists !== true) {
     return {
       ok: false,
