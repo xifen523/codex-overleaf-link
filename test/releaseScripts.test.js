@@ -217,6 +217,85 @@ test('build-release derives the default output directory from version', async ()
   );
 });
 
+test('build-release rejects unsafe output paths before deletion', async () => {
+  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
+  const { assertSafeReleaseOutputDir } = await import(moduleUrl);
+  const unsafePaths = [
+    repoRoot,
+    path.dirname(repoRoot),
+    path.parse(repoRoot).root,
+    os.homedir()
+  ];
+
+  for (const outputDir of unsafePaths) {
+    assert.throws(
+      () => assertSafeReleaseOutputDir({ rootDir: repoRoot, outputDir }),
+      /Refusing to use unsafe release output directory/
+    );
+  }
+
+  assert.doesNotThrow(() => assertSafeReleaseOutputDir({
+    rootDir: repoRoot,
+    outputDir: path.join(os.tmpdir(), `codex-overleaf-fresh-output-${process.pid}`)
+  }));
+});
+
+test('build-release refuses unmarked non-empty custom output directories without deleting them', async () => {
+  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
+  const { buildRelease } = await import(moduleUrl);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-unsafe-output-'));
+  const outputDir = path.join(tempDir, 'existing-output');
+  const sentinelPath = path.join(outputDir, 'keep.txt');
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(sentinelPath, 'keep this file\n');
+
+  try {
+    let error;
+    try {
+      buildRelease({ rootDir: repoRoot, outputDir });
+    } catch (caught) {
+      error = caught;
+    }
+
+    assert.match(error && error.message, /non-empty release output directory/);
+    assert.equal(fs.readFileSync(sentinelPath, 'utf8'), 'keep this file\n');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('build-release argument parser rejects missing values and unknown flags', async () => {
+  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
+  const { parseBuildReleaseArgs } = await import(moduleUrl);
+
+  assert.throws(() => parseBuildReleaseArgs(['--output']), /--output requires a path value/);
+  assert.throws(() => parseBuildReleaseArgs(['--output', '--unknown']), /--output requires a path value/);
+  assert.throws(() => parseBuildReleaseArgs(['--unknown']), /Unknown option: --unknown/);
+});
+
+test('build-release CLI exits non-zero on unknown flags before building', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-bad-args-'));
+  const outputDir = path.join(tempDir, 'out');
+  try {
+    const result = spawnSync(process.execPath, [
+      path.join(repoRoot, 'scripts/build-release.mjs'),
+      '--output',
+      outputDir,
+      '--unknown'
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8'
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Unknown option: --unknown/);
+    assert.match(result.stderr, /Usage: node scripts\/build-release\.mjs/);
+    assert.equal(fs.existsSync(outputDir), false);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('release note extraction fails for missing or empty changelog sections', async () => {
   const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
   const { extractReleaseNotes } = await import(moduleUrl);
@@ -229,6 +308,102 @@ test('release note extraction fails for missing or empty changelog sections', as
     () => extractReleaseNotes('# Changelog\n\n## v1.2.3 - 2026-05-06\n\n## v1.2.2 - 2026-05-05\n\nPrevious notes.\n', '1.2.3'),
     /release section for v1\.2\.3 is empty/
   );
+});
+
+test('top-level copied uninstaller runs from release artifact root', (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-uninstall-'));
+  const outputDir = path.join(tempDir, 'out');
+  const homeDir = path.join(tempDir, 'home');
+  const runtimeRoot = path.join(tempDir, 'runtime');
+  const bridgePath = path.join(tempDir, 'codex-overleaf-bridge');
+
+  try {
+    const build = spawnSync(process.execPath, [
+      path.join(repoRoot, 'scripts/build-release.mjs'),
+      '--output',
+      outputDir
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8'
+    });
+
+    if (build.status !== 0 && /required command "zip"|zip is required/i.test(build.stderr)) {
+      t.skip('zip is required to build release artifacts');
+      return;
+    }
+    assert.equal(build.status, 0, build.stderr || build.stdout);
+
+    fs.mkdirSync(path.dirname(bridgePath), { recursive: true });
+    fs.writeFileSync(bridgePath, '#!/bin/sh\n');
+    fs.mkdirSync(runtimeRoot, { recursive: true });
+
+    const result = spawnSync(process.execPath, [
+      path.join(outputDir, 'uninstall-native-host.mjs'),
+      '--runtime-root',
+      runtimeRoot,
+      '--bridge-path',
+      bridgePath,
+      '--keep-runtime'
+    ], {
+      env: {
+        ...process.env,
+        HOME: homeDir
+      },
+      encoding: 'utf8'
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(fs.existsSync(bridgePath), false);
+    assert.equal(fs.existsSync(runtimeRoot), true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('release archives exclude untracked files under packaged directories', (t) => {
+  const pkg = readJson(path.join(repoRoot, 'package.json'));
+  const version = pkg.version;
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-untracked-'));
+  const outputDir = path.join(tempDir, 'out');
+  const uniqueName = `codex-overleaf-untracked-${process.pid}-${Date.now()}.js`;
+  const extensionUntracked = path.join(repoRoot, 'extension/src/shared', uniqueName);
+  const nativeUntracked = path.join(repoRoot, 'native-host/src', uniqueName);
+  const assetUntrackedName = uniqueName.replace(/\.js$/, '.txt');
+  const assetUntracked = path.join(repoRoot, 'extension/assets', assetUntrackedName);
+
+  try {
+    fs.writeFileSync(extensionUntracked, 'window.__codexOverleafUntracked = true;\n');
+    fs.writeFileSync(nativeUntracked, 'module.exports = true;\n');
+    fs.writeFileSync(assetUntracked, 'untracked asset\n');
+
+    const result = spawnSync(process.execPath, [
+      path.join(repoRoot, 'scripts/build-release.mjs'),
+      '--output',
+      outputDir
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8'
+    });
+
+    if (result.status !== 0 && /required command "zip"|zip is required/i.test(result.stderr)) {
+      t.skip('zip is required to build release artifacts');
+      return;
+    }
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+
+    const zipEntries = listZipEntries(path.join(outputDir, `codex-overleaf-link-extension-v${version}.zip`), t);
+    assert.equal(zipEntries.includes(`src/shared/${uniqueName}`), false);
+    assert.equal(zipEntries.includes(`assets/${assetUntrackedName}`), false);
+
+    const tarEntries = listTarEntries(path.join(outputDir, `codex-overleaf-native-host-v${version}.tar.gz`));
+    assert.equal(tarEntries.includes(`extension/src/shared/${uniqueName}`), false);
+    assert.equal(tarEntries.includes(`native-host/src/${uniqueName}`), false);
+  } finally {
+    fs.rmSync(extensionUntracked, { force: true });
+    fs.rmSync(nativeUntracked, { force: true });
+    fs.rmSync(assetUntracked, { force: true });
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('build-release creates expected artifacts and metadata', (t) => {

@@ -7,10 +7,12 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const RELEASE_OUTPUT_MARKER = '.codex-overleaf-release-output';
+const BUILD_RELEASE_USAGE = 'Usage: node scripts/build-release.mjs [--output <path>]';
 
 function main() {
   try {
-    const args = parseArgs(process.argv.slice(2));
+    const args = parseBuildReleaseArgs(process.argv.slice(2));
     const result = buildRelease({
       rootDir: repoRoot,
       outputDir: args.output
@@ -35,12 +37,12 @@ export function buildRelease(options = {}) {
   const nativeTarballName = `codex-overleaf-native-host-v${version}.tar.gz`;
   const extensionZipPath = path.join(outputDir, extensionZipName);
   const nativeTarballPath = path.join(outputDir, nativeTarballName);
+  const trackedFiles = getGitTrackedFiles(rootDir);
 
-  fs.rmSync(outputDir, { recursive: true, force: true });
-  fs.mkdirSync(outputDir, { recursive: true });
+  prepareReleaseOutputDir({ rootDir, outputDir });
 
-  createExtensionZip({ rootDir, outputPath: extensionZipPath });
-  createNativeTarball({ rootDir, outputPath: nativeTarballPath });
+  createExtensionZip({ rootDir, outputPath: extensionZipPath, trackedFiles });
+  createNativeTarball({ rootDir, outputPath: nativeTarballPath, trackedFiles });
 
   const copiedInstallPath = path.join(outputDir, 'install.sh');
   const copiedUninstallPath = path.join(outputDir, 'uninstall-native-host.mjs');
@@ -113,42 +115,87 @@ export function getDefaultReleaseOutputDir({ rootDir, version }) {
   return path.join(rootDir, 'dist/releases', `v${version}`);
 }
 
-function createExtensionZip({ rootDir, outputPath }) {
+export function assertSafeReleaseOutputDir({ rootDir, outputDir }) {
+  if (!outputDir) {
+    throw new Error('Refusing to use unsafe release output directory: output path is required.');
+  }
+
+  const resolvedRoot = path.resolve(rootDir);
+  const resolvedOutput = path.resolve(outputDir);
+  const filesystemRoot = path.parse(resolvedOutput).root;
+  const homeDir = path.resolve(os.homedir());
+
+  if (
+    resolvedOutput === filesystemRoot ||
+    resolvedOutput === homeDir ||
+    isSamePathOrAncestor(resolvedOutput, resolvedRoot)
+  ) {
+    throw new Error(`Refusing to use unsafe release output directory: ${resolvedOutput}`);
+  }
+
+  if (!fs.existsSync(resolvedOutput)) {
+    return;
+  }
+
+  const outputStats = fs.statSync(resolvedOutput);
+  if (!outputStats.isDirectory()) {
+    throw new Error(`Refusing to use unsafe release output directory because it is not a directory: ${resolvedOutput}`);
+  }
+
+  const entries = fs.readdirSync(resolvedOutput);
+  if (entries.length > 0 && !entries.includes(RELEASE_OUTPUT_MARKER)) {
+    throw new Error(
+      `Refusing to use non-empty release output directory without ${RELEASE_OUTPUT_MARKER}: ${resolvedOutput}`
+    );
+  }
+}
+
+export function parseBuildReleaseArgs(argv) {
+  const parsed = {};
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '--output') {
+      const value = argv[index + 1];
+      if (!value || value.startsWith('--')) {
+        throw new Error(`--output requires a path value.\n${BUILD_RELEASE_USAGE}`);
+      }
+      parsed.output = value;
+      index += 1;
+    } else {
+      throw new Error(`Unknown option: ${arg}\n${BUILD_RELEASE_USAGE}`);
+    }
+  }
+  return parsed;
+}
+
+function prepareReleaseOutputDir({ rootDir, outputDir }) {
+  assertSafeReleaseOutputDir({ rootDir, outputDir });
+  fs.rmSync(outputDir, { recursive: true, force: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(path.join(outputDir, RELEASE_OUTPUT_MARKER), 'codex-overleaf release output\n', 'utf8');
+}
+
+function isSamePathOrAncestor(candidateAncestor, targetPath) {
+  const relative = path.relative(candidateAncestor, targetPath);
+  return relative === '' || (relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function createExtensionZip({ rootDir, outputPath, trackedFiles }) {
   const extensionDir = path.join(rootDir, 'extension');
+  const extensionFiles = getExtensionArchiveFiles(trackedFiles);
   runRequiredCommand('zip', [
     '-qr',
     outputPath,
-    'manifest.json',
-    'popup.html',
-    'src',
-    'styles',
-    'assets',
-    '-x',
-    '*.DS_Store',
-    '*/.DS_Store',
-    '.git/*',
-    '*/.git/*',
-    'dist/*',
-    '*/dist/*',
-    'docs/*',
-    '*/docs/*',
-    'test/*',
-    '*/test/*'
+    ...extensionFiles
   ], { cwd: extensionDir });
 }
 
-function createNativeTarball({ rootDir, outputPath }) {
+function createNativeTarball({ rootDir, outputPath, trackedFiles }) {
   const stagingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-native-release-'));
   try {
-    copyFile(path.join(rootDir, 'package.json'), path.join(stagingRoot, 'package.json'));
-    copyDirectory(path.join(rootDir, 'native-host/src'), path.join(stagingRoot, 'native-host/src'));
-    copyDirectory(path.join(rootDir, 'extension/src/shared'), path.join(stagingRoot, 'extension/src/shared'));
-    copyFile(path.join(rootDir, 'scripts/codex-json-agent.mjs'), path.join(stagingRoot, 'scripts/codex-json-agent.mjs'));
-    copyFile(path.join(rootDir, 'install.sh'), path.join(stagingRoot, 'install.sh'));
-    copyFile(
-      path.join(rootDir, 'scripts/uninstall-native-host.mjs'),
-      path.join(stagingRoot, 'scripts/uninstall-native-host.mjs')
-    );
+    for (const relativePath of getNativeTarballFiles(trackedFiles)) {
+      copyTrackedFile({ rootDir, stagingRoot, relativePath, trackedFiles });
+    }
 
     runRequiredCommand('tar', [
       '-czf',
@@ -166,20 +213,72 @@ function createNativeTarball({ rootDir, outputPath }) {
   }
 }
 
-function copyDirectory(source, target) {
-  fs.mkdirSync(target, { recursive: true });
-  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
-    if (entry.name === '.DS_Store') {
-      continue;
-    }
-    const sourcePath = path.join(source, entry.name);
-    const targetPath = path.join(target, entry.name);
-    if (entry.isDirectory()) {
-      copyDirectory(sourcePath, targetPath);
-    } else if (entry.isFile()) {
-      copyFile(sourcePath, targetPath);
+function getGitTrackedFiles(rootDir) {
+  const result = spawnSync('git', ['ls-files', '-z'], {
+    cwd: rootDir,
+    encoding: 'utf8'
+  });
+  if (result.error && result.error.code === 'ENOENT') {
+    throw new Error('Required command "git" was not found on PATH.');
+  }
+  if (result.status !== 0) {
+    throw new Error(`Unable to list git-tracked files: ${result.stderr || result.stdout}`);
+  }
+  return new Set(result.stdout.split('\0').filter(Boolean).map(validateTrackedRelativePath));
+}
+
+function getExtensionArchiveFiles(trackedFiles) {
+  const files = [...trackedFiles]
+    .filter((relativePath) => (
+      relativePath === 'extension/manifest.json' ||
+      relativePath === 'extension/popup.html' ||
+      relativePath.startsWith('extension/src/') ||
+      relativePath.startsWith('extension/styles/') ||
+      relativePath.startsWith('extension/assets/')
+    ))
+    .map((relativePath) => relativePath.slice('extension/'.length))
+    .sort();
+
+  for (const requiredFile of ['manifest.json', 'popup.html']) {
+    if (!files.includes(requiredFile)) {
+      throw new Error(`Required extension release file is not git-tracked: extension/${requiredFile}`);
     }
   }
+  return files;
+}
+
+function getNativeTarballFiles(trackedFiles) {
+  const files = [
+    'package.json',
+    'install.sh',
+    'scripts/codex-json-agent.mjs',
+    'scripts/uninstall-native-host.mjs',
+    ...[...trackedFiles].filter((relativePath) => (
+      relativePath.startsWith('native-host/src/') ||
+      relativePath.startsWith('extension/src/shared/')
+    ))
+  ];
+  return [...new Set(files.map(validateTrackedRelativePath))].sort();
+}
+
+function copyTrackedFile({ rootDir, stagingRoot, relativePath, trackedFiles }) {
+  const validatedRelativePath = validateTrackedRelativePath(relativePath);
+  if (!trackedFiles.has(validatedRelativePath)) {
+    throw new Error(`Required release file is not git-tracked: ${validatedRelativePath}`);
+  }
+  copyFile(path.join(rootDir, validatedRelativePath), path.join(stagingRoot, validatedRelativePath));
+}
+
+function validateTrackedRelativePath(relativePath) {
+  if (
+    !relativePath ||
+    path.isAbsolute(relativePath) ||
+    relativePath.includes('\0') ||
+    relativePath.split('/').includes('..')
+  ) {
+    throw new Error(`Invalid git-tracked release path: ${relativePath}`);
+  }
+  return relativePath;
 }
 
 function copyFile(source, target) {
@@ -235,18 +334,6 @@ function sha256(filePath) {
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function parseArgs(argv) {
-  const parsed = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index];
-    if (arg === '--output') {
-      parsed.output = argv[index + 1];
-      index += 1;
-    }
-  }
-  return parsed;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

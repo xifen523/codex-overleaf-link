@@ -2,7 +2,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getChromeNativeHostManifestPath } from '../native-host/src/manifest.js';
+
+const HOST_NAME = 'com.codex.overleaf';
 
 const args = parseArgs(process.argv.slice(2));
 const defaultInstallRoot = path.join(os.homedir(), '.codex-overleaf', 'native-host-runtime');
@@ -27,6 +28,14 @@ function removePath(target, label) {
   }
   fs.rmSync(target, { recursive: true, force: true });
   console.log(`Removed ${label}: ${target}`);
+}
+
+function getChromeNativeHostManifestPath() {
+  return path.join(
+    os.homedir(),
+    'Library/Application Support/Google/Chrome/NativeMessagingHosts',
+    `${HOST_NAME}.json`
+  );
 }
 
 function parseArgs(argv) {
