@@ -48,7 +48,7 @@ function makeMirrorStale(projectId, rootDir, ageMs = 10 * 60 * 1000) {
   }, null, 2), 'utf8');
 }
 
-async function seedStaleOtFreshMirror({ projectId, rootDir }) {
+async function seedFreshOtFreshMirror({ projectId, rootDir }) {
   await syncOverleafToMirror({
     projectId,
     rootDir,
@@ -68,6 +68,10 @@ async function seedStaleOtFreshMirror({ projectId, rootDir }) {
     rootDir,
     files: [{ path: 'main.tex', baseHash: mainEntry.hash, nextContent: 'fresh main' }]
   });
+}
+
+async function seedStaleOtFreshMirror({ projectId, rootDir }) {
+  await seedFreshOtFreshMirror({ projectId, rootDir });
   makeMirrorStale(projectId, rootDir);
 }
 
@@ -345,6 +349,90 @@ test('codex.run accepts stale project mirror only for explicitly focused OT-fres
     assert.equal(seenParams.otWarmStart, true);
     assert.equal(seenParams.restrictToFocusFiles, true);
     assert.deepEqual(seenParams.focusFiles, ['@file:/main.tex']);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('codex.run rejects overlays on fresh OT warm mirror reuse before mirror mutation', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-fresh-ot-overlay-'));
+  const projectId = 'fresh-ot-overlay-project';
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  try {
+    await seedFreshOtFreshMirror({ projectId, rootDir });
+    const mirror = getProjectMirror(projectId, { rootDir });
+
+    const response = await handleWithFakeRunner({
+      id: 'codex-fresh-ot-overlay',
+      method: 'codex.run',
+      params: {
+        projectId,
+        mode: 'ask',
+        task: '检查 main.tex',
+        useExistingMirror: true,
+        otWarmStart: true,
+        warmStartStrategy: 'ot-warm-mirror',
+        restrictToFocusFiles: true,
+        focusFiles: ['main.tex'],
+        fileOverlays: [{ path: 'refs.bib', content: '@article{mutated}' }]
+      }
+    }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
+
+    const baselineAfter = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+    const refsEntry = baselineAfter.files.find(file => file.path === 'refs.bib');
+
+    assert.equal(response.ok, false);
+    assert.equal(response.error.code, 'mirror_stale');
+    assert.match(response.error.message, /OT warm mirror reuse does not accept file overlays/);
+    assert.equal(calls, 0);
+    assert.equal(fs.readFileSync(path.join(mirror.workspacePath, 'refs.bib'), 'utf8'), '@article{old}');
+    assert.equal(refsEntry.content, '@article{old}');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('codex.run rejects fresh OT warm mirror reuse without focused result restriction', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-fresh-ot-unrestricted-'));
+  const projectId = 'fresh-ot-unrestricted-project';
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return {
+      status: 'completed',
+      syncChanges: [
+        { path: 'main.tex', content: 'changed main' },
+        { path: 'refs.bib', content: 'changed refs' }
+      ]
+    };
+  });
+
+  try {
+    await seedFreshOtFreshMirror({ projectId, rootDir });
+
+    const response = await handleWithFakeRunner({
+      id: 'codex-fresh-ot-unrestricted',
+      method: 'codex.run',
+      params: {
+        projectId,
+        mode: 'ask',
+        task: '检查 main.tex',
+        useExistingMirror: true,
+        otWarmStart: true,
+        warmStartStrategy: 'ot-warm-mirror',
+        focusFiles: ['main.tex']
+      }
+    }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
+
+    assert.equal(response.ok, false);
+    assert.equal(response.error.code, 'mirror_stale');
+    assert.match(response.error.message, /requires restrictToFocusFiles=true/);
+    assert.equal(calls, 0);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

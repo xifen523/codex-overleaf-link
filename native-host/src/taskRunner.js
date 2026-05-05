@@ -95,8 +95,9 @@ async function handleCodexRun(request, env, emit) {
       const rootDir = env.CODEX_OVERLEAF_MIRROR_ROOT;
       const status = getMirrorStatus(projectKey, { rootDir });
       const maxFreshness = params.expectedMirrorFreshness || 15000;
+      const mirrorMissingOrStale = !status.exists || !Number.isFinite(status.ageMs) || status.ageMs > maxFreshness;
 
-      if (!status.exists || !Number.isFinite(status.ageMs) || status.ageMs > maxFreshness) {
+      if (isOtWarmMirrorReuseRequest(params)) {
         const otWarmMirrorReuse = validateOtFocusedWarmMirrorReuse(params, status);
         if (!otWarmMirrorReuse.ok) {
           return errorResponse(
@@ -105,6 +106,12 @@ async function handleCodexRun(request, env, emit) {
             otWarmMirrorReuse.message || `Mirror is ${status.ageMs}ms old (max ${maxFreshness}ms)`
           );
         }
+      } else if (mirrorMissingOrStale) {
+        return errorResponse(
+          request.id,
+          'mirror_stale',
+          `Mirror is ${status.ageMs}ms old (max ${maxFreshness}ms)`
+        );
       }
 
       if (Array.isArray(params.fileOverlays) && params.fileOverlays.length) {
