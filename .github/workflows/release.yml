@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run tests
+        run: npm test
+
+      - name: Verify release metadata
+        run: npm run verify:release
+
+      - name: Build release artifacts
+        run: npm run build:release
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          name: ${{ github.ref_name }}
+          body_path: dist/releases/${{ github.ref_name }}/release-notes.md
+          files: dist/releases/${{ github.ref_name }}/*
+          fail_on_unmatched_files: true
+          overwrite_files: true

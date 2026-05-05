@@ -13,6 +13,39 @@ function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
+function readText(filePath) {
+  return fs.readFileSync(filePath, 'utf8');
+}
+
+function readReleaseWorkflow() {
+  return readText(path.join(repoRoot, '.github/workflows/release.yml'));
+}
+
+function getTopLevelYamlSection(text, sectionName) {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === `${sectionName}:`);
+  assert.notEqual(start, -1, `Missing top-level ${sectionName}: section`);
+
+  const body = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line.trim() && /^\S/.test(line)) {
+      break;
+    }
+    body.push(line);
+  }
+  return body.join('\n');
+}
+
+function assertContainsInOrder(text, expectedFragments) {
+  let searchFrom = 0;
+  for (const fragment of expectedFragments) {
+    const index = text.indexOf(fragment, searchFrom);
+    assert.notEqual(index, -1, `Expected workflow to contain ${fragment} after offset ${searchFrom}`);
+    searchFrom = index + fragment.length;
+  }
+}
+
 function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
@@ -70,6 +103,51 @@ test('package exposes release verification and artifact build commands', () => {
 
   assert.equal(pkg.scripts['verify:release'], 'node scripts/verify-release.mjs');
   assert.equal(pkg.scripts['build:release'], 'node scripts/build-release.mjs');
+});
+
+test('release workflow only publishes semver-like version tags', () => {
+  const workflow = readReleaseWorkflow();
+  const triggerSection = getTopLevelYamlSection(workflow, 'on');
+
+  assert.match(triggerSection, /^\s+push:\s*$/m);
+  assert.match(triggerSection, /^\s+tags:\s*$/m);
+  assert.match(triggerSection, /^\s+- "v\*\.\*\.\*"\s*$/m);
+  assert.doesNotMatch(triggerSection, /^\s+branches:/m);
+  assert.doesNotMatch(triggerSection, /^\s+pull_request:/m);
+  assert.doesNotMatch(triggerSection, /^\s+workflow_dispatch:/m);
+  assert.doesNotMatch(triggerSection, /^\s+schedule:/m);
+});
+
+test('release workflow grants publish permission and runs release checks before building', () => {
+  const workflow = readReleaseWorkflow();
+  const permissionsSection = getTopLevelYamlSection(workflow, 'permissions');
+
+  assert.match(permissionsSection, /^\s+contents:\s+write\s*$/m);
+  assertContainsInOrder(workflow, [
+    'run: npm test',
+    'run: npm run verify:release',
+    'run: npm run build:release',
+    'uses: softprops/action-gh-release@v2'
+  ]);
+});
+
+test('release workflow publishes generated notes and built artifacts', () => {
+  const workflow = readReleaseWorkflow();
+
+  assert.match(workflow, /uses:\s+softprops\/action-gh-release@v2/);
+  assert.match(workflow, /^\s+draft:\s+false\s*$/m);
+  assert.match(workflow, /^\s+prerelease:\s+false\s*$/m);
+  assert.match(workflow, /^\s+name:\s+\$\{\{ github\.ref_name \}\}\s*$/m);
+  assert.match(
+    workflow,
+    /^\s+body_path:\s+dist\/releases\/\$\{\{ github\.ref_name \}\}\/release-notes\.md\s*$/m
+  );
+  assert.match(
+    workflow,
+    /^\s+files:\s+dist\/releases\/\$\{\{ github\.ref_name \}\}\/\*\s*$/m
+  );
+  assert.match(workflow, /^\s+fail_on_unmatched_files:\s+true\s*$/m);
+  assert.match(workflow, /^\s+overwrite_files:\s+true\s*$/m);
 });
 
 test('release verifier catches package and extension manifest version mismatch', async () => {
