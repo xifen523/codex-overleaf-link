@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.3.0 - 2026-05-05
+
+### Added
+
+- Experimental read-only OT warm mirror toggle.
+- Active-editor observation for known text files.
+- Native `mirror.patchFiles` endpoint for verified per-file mirror patches.
+- Per-file OT freshness metadata in mirror status.
+- OT diagnostics with fallback state and no project content.
+
+### Notes
+
+- OT warm mirror is off by default.
+- Full snapshot sync remains the project-level source of truth.
+- Browser writeback, stale guards, verified save gates, and undo remain unchanged.
+
 ## v0.2.0 - 2026-05-05
 
 Reliability and daily-use update for the macOS + Chrome preview.

@@ -3,7 +3,7 @@
   <h1>Codex Overleaf Link</h1>
   <p><strong>Empower Overleaf with Codex.</strong></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.2.0-blue" alt="version">
+    <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="version">
     <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="platform">
     <img src="https://img.shields.io/badge/chrome-MV3-green" alt="chrome manifest v3">
     <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="node version">
@@ -104,6 +104,9 @@ Remove the extension from `chrome://extensions`. Optionally delete `~/.codex-ove
 - **Model picker** — discover available Codex models locally, then switch model, reasoning effort, and speed from one compact control.
 - **Session history** — multi-session management with rename, resume, and delete.
 - **Isolated Codex home** — plugin sessions stay under `~/.codex-overleaf/codex-home`, not global `~/.codex/sessions`.
+- **Experimental OT warm mirror** - optional read-only observation of active Overleaf text edits to keep focused local mirror files warm. Falls back to full snapshots when unavailable or inconsistent.
+
+> Note: The OT warm mirror is experimental, off by default, and never writes back to Overleaf through realtime collaboration channels.
 
 ## How It Works
 
