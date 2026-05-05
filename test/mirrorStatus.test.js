@@ -192,6 +192,62 @@ test('patchMirrorFiles applies verified text patch without updating lastFullSync
   });
 });
 
+test('patchMirrorFiles treats replayed applied patch as idempotent success', async () => {
+  await syncOverleafToMirror({
+    projectId: 'test-proj',
+    project: { files: [{ path: 'main.tex', content: 'old content' }] },
+    rootDir: tempRoot
+  });
+  const mirror = getProjectMirror('test-proj', { rootDir: tempRoot });
+  const baselineBefore = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+  const entryBefore = baselineBefore.files.find(f => f.path === 'main.tex');
+  const patch = {
+    path: 'main.tex',
+    baseHash: entryBefore.hash,
+    nextContent: 'patched content',
+    observedVersion: 12
+  };
+
+  const firstResult = await patchMirrorFiles({
+    projectId: 'test-proj',
+    rootDir: tempRoot,
+    source: 'ot',
+    files: [patch]
+  });
+  assert.strictEqual(firstResult.appliedCount, 1);
+  assert.strictEqual(firstResult.skippedCount, 0);
+
+  const baselineAfterFirst = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+  const entryAfterFirst = baselineAfterFirst.files.find(f => f.path === 'main.tex');
+  assert.strictEqual(entryAfterFirst.content, 'patched content');
+  assert.strictEqual(fs.readFileSync(path.join(mirror.workspacePath, 'main.tex'), 'utf8'), 'patched content');
+
+  const replayResult = await patchMirrorFiles({
+    projectId: 'test-proj',
+    rootDir: tempRoot,
+    source: 'ot',
+    files: [patch]
+  });
+
+  assert.strictEqual(replayResult.appliedCount, 1);
+  assert.strictEqual(replayResult.skippedCount, 0);
+  assert.deepStrictEqual(replayResult.skippedFiles, []);
+  assert.deepStrictEqual(replayResult.appliedFiles.map(file => ({
+    path: file.path,
+    hash: file.hash,
+    idempotent: file.idempotent
+  })), [{
+    path: 'main.tex',
+    hash: entryAfterFirst.hash,
+    idempotent: true
+  }]);
+  assert.strictEqual(JSON.stringify(replayResult).includes('patched content'), false);
+  assert.strictEqual(fs.readFileSync(path.join(mirror.workspacePath, 'main.tex'), 'utf8'), 'patched content');
+
+  const baselineAfterReplay = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+  assert.deepStrictEqual(baselineAfterReplay, baselineAfterFirst);
+});
+
 test('patchMirrorFiles skips base hash mismatch and unsafe path', async () => {
   await syncOverleafToMirror({
     projectId: 'test-proj',

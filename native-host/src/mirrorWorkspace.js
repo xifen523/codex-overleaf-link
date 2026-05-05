@@ -602,7 +602,32 @@ async function patchMirrorFiles({ projectId, files, rootDir, source = 'ot' }) {
       lastOtErrorCode = 'missing_base_hash';
       continue;
     }
+    const nextHash = hashText(patch.nextContent);
     if (patch.baseHash !== baselineFile.hash) {
+      if (nextHash === baselineFile.hash) {
+        if (baseline.dirty === true) {
+          skippedFiles.push({ path: normalized.path, reason: 'dirty_mirror' });
+          lastOtErrorCode = 'dirty_mirror';
+          continue;
+        }
+        if (!isSafeWorkspaceWriteTarget(mirror.workspacePath, normalized.target)) {
+          skippedFiles.push({ path: normalized.path, reason: 'unsafe_path' });
+          lastOtErrorCode = 'unsafe_path';
+          continue;
+        }
+        if (!workspaceFileMatchesBaseline(normalized.target, baselineFile)) {
+          skippedFiles.push({ path: normalized.path, reason: 'workspace_mismatch' });
+          lastOtErrorCode = 'workspace_mismatch';
+          continue;
+        }
+        appliedFiles.push({
+          path: normalized.path,
+          hash: baselineFile.hash,
+          observedVersion: patch.observedVersion ?? null,
+          idempotent: true
+        });
+        continue;
+      }
       skippedFiles.push({ path: normalized.path, reason: 'base_hash_mismatch' });
       lastOtErrorCode = 'base_hash_mismatch';
       continue;
@@ -627,12 +652,11 @@ async function patchMirrorFiles({ projectId, files, rootDir, source = 'ot' }) {
     lastOtPatchAt = patchBatchAt;
     fs.writeFileSync(normalized.target, patch.nextContent, 'utf8');
 
-    const hash = hashText(patch.nextContent);
     const nextBaselineFile = {
       ...baselineFile,
       path: normalized.path,
       kind: 'text',
-      hash,
+      hash: nextHash,
       content: patch.nextContent,
       freshness: {
         source: patchSource,
@@ -646,7 +670,7 @@ async function patchMirrorFiles({ projectId, files, rootDir, source = 'ot' }) {
     baselineByPath.set(normalized.path, nextBaselineFile);
     appliedFiles.push({
       path: normalized.path,
-      hash,
+      hash: nextHash,
       observedVersion: patch.observedVersion ?? null
     });
   }
