@@ -1356,7 +1356,7 @@ test('page bridge starts, drains, and stops the read-only OT observer', async ()
   assert.equal(drainedEvents.length, 1);
   assert.equal(drainedEvents[0].path, 'main.tex');
   assert.equal(drainedEvents[0].nextContent, 'alpha beta');
-  assert.deepEqual(drainedEvents[0].ops, [{ p: 5, i: ' beta' }]);
+  assert.equal(Object.prototype.hasOwnProperty.call(drainedEvents[0], 'ops'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(drainedEvents[0], 'previousContent'), false);
 
   const empty = await bridge.call('drainOtEvents', {});
@@ -1367,6 +1367,57 @@ test('page bridge starts, drains, and stops the read-only OT observer', async ()
   assert.equal(stopStatus.status, 'off');
   assert.equal(stopStatus.state, 'off');
   assert.equal(stopStatus.running, false);
+});
+
+test('page bridge whitelists OT event fields before posting to content', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'alpha'
+    },
+    realtimeObserverFactory() {
+      return {
+        start() {
+          return { status: 'observing', state: 'observing', running: true };
+        },
+        stop() {
+          return { status: 'off', state: 'off', running: false };
+        },
+        getStatus() {
+          return { status: 'observing', state: 'observing', queuedEventCount: 1 };
+        },
+        drainEvents() {
+          return [{
+            path: 'main.tex',
+            baseHash: 'base-hash',
+            nextHash: 'next-hash',
+            nextContent: 'alpha beta',
+            previousContent: 'alpha secret',
+            ops: [{ p: 5, d: ' secret' }],
+            observedAt: '2026-05-05T00:00:00.000Z',
+            observedVersion: 'doc-version-2',
+            source: 'fake-observer',
+            rawContent: 'raw secret',
+            extraSensitiveField: 'do not expose'
+          }];
+        }
+      };
+    }
+  });
+
+  const drained = await bridge.call('drainOtEvents', {});
+  const drainedEvents = JSON.parse(JSON.stringify(drained.events));
+
+  assert.equal(drained.ok, true);
+  assert.deepEqual(drainedEvents, [{
+    path: 'main.tex',
+    baseHash: 'base-hash',
+    nextHash: 'next-hash',
+    nextContent: 'alpha beta',
+    observedAt: '2026-05-05T00:00:00.000Z',
+    observedVersion: 'doc-version-2',
+    source: 'fake-observer'
+  }]);
 });
 
 
@@ -1388,6 +1439,7 @@ function createPageBridgeHarness({
   saveIndicatorNodes = null,
   dispatchApplies = true,
   trackChangesOnDispatch = false,
+  realtimeObserverFactory = null,
   rerenderTrackedChangeIdsOnReject = false,
   editorUndoTargets = {}
 }) {
@@ -1512,7 +1564,11 @@ function createPageBridgeHarness({
   vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
   vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
   vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });
-  vm.runInContext(overleafRealtimeObserverSource, context, { filename: 'overleafRealtimeObserver.js' });
+  if (realtimeObserverFactory) {
+    window.CodexOverleafRealtimeObserver = { create: realtimeObserverFactory };
+  } else {
+    vm.runInContext(overleafRealtimeObserverSource, context, { filename: 'overleafRealtimeObserver.js' });
+  }
   vm.runInContext(pageBridgeSource, context, { filename: 'pageBridge.js' });
 
   return {

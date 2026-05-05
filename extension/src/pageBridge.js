@@ -132,13 +132,50 @@
     if (method === 'drainOtEvents') {
       return {
         ok: true,
-        events: otObserver.drainEvents()
+        events: otObserver.drainEvents().map(sanitizeOtEventForContent)
       };
     }
     return {
       ok: false,
       error: `Unknown page bridge method: ${method}`
     };
+  }
+
+  function sanitizeOtEventForContent(event = {}) {
+    const sanitized = {};
+    copyOtEventField(sanitized, event, 'path');
+    copyOtEventField(sanitized, event, 'baseHash');
+    copyOtEventField(sanitized, event, 'nextHash');
+    copyOtEventField(sanitized, event, 'nextContent');
+    copyOtEventField(sanitized, event, 'observedAt');
+    copyOtEventField(sanitized, event, 'observedVersion');
+    const source = sanitizeOtEventSource(readOtEventField(event, 'source'));
+    if (source !== undefined) {
+      sanitized.source = source;
+    }
+    return sanitized;
+  }
+
+  function copyOtEventField(target, event, field) {
+    const value = readOtEventField(event, field);
+    if (value !== undefined) {
+      target[field] = value;
+    }
+  }
+
+  function readOtEventField(event, field) {
+    try {
+      return event && typeof event === 'object' ? event[field] : undefined;
+    } catch (_error) {
+      return undefined;
+    }
+  }
+
+  function sanitizeOtEventSource(source) {
+    if (source === null || typeof source === 'string' || typeof source === 'number' || typeof source === 'boolean') {
+      return source;
+    }
+    return undefined;
   }
 
   function createUnavailableOtObserver() {

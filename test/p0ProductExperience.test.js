@@ -1376,19 +1376,27 @@ test('page bridge exposes a read-only realtime OT observer', () => {
     path.join(__dirname, '../extension/src/pageBridge.js'),
     'utf8'
   );
-  const injectedScripts = Array.from(
-    contentScript.matchAll(/injectScriptOnce\('([^']+)'/g),
+  const injectPageBridgeBody = contentScript.match(/async function injectPageBridge\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const optionalOtBody = contentScript.match(/async function injectOptionalOtDependencies\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  const pageBridgeScripts = Array.from(
+    injectPageBridgeBody.matchAll(/injectScriptOnce\('([^']+)'/g),
     match => match[1]
   );
-  const otTextIndex = injectedScripts.indexOf('src/shared/otText.js');
-  const observerIndex = injectedScripts.indexOf('src/page/overleafRealtimeObserver.js');
-  const pageBridgeIndex = injectedScripts.indexOf('src/pageBridge.js');
+  const optionalScripts = Array.from(
+    optionalOtBody.matchAll(/injectScriptOnce\('([^']+)'/g),
+    match => match[1]
+  );
+  const otTextIndex = optionalScripts.indexOf('src/shared/otText.js');
+  const observerIndex = optionalScripts.indexOf('src/page/overleafRealtimeObserver.js');
+  const pageBridgeIndex = pageBridgeScripts.indexOf('src/pageBridge.js');
 
-  assert.ok(otTextIndex > -1, 'content script explicitly injects the OT text helper into the page world');
-  assert.ok(observerIndex > -1, 'content script explicitly injects the realtime observer into the page world');
+  assert.ok(optionalOtBody, 'content script keeps optional OT dependency loading separate from page bridge loading');
+  assert.ok(otTextIndex > -1, 'content script explicitly injects the OT text helper into the page world when available');
+  assert.ok(observerIndex > -1, 'content script explicitly injects the realtime observer into the page world when available');
   assert.ok(pageBridgeIndex > -1, 'content script injects the page bridge');
   assert.ok(otTextIndex < observerIndex, 'OT text helper loads before the realtime observer');
-  assert.ok(observerIndex < pageBridgeIndex, 'realtime observer loads before the page bridge');
+  assert.match(injectPageBridgeBody, /await injectOptionalOtDependencies\(\)[\s\S]*await injectScriptOnce\('src\/pageBridge\.js'/);
+  assert.match(optionalOtBody, /try\s*\{[\s\S]*src\/shared\/otText\.js[\s\S]*src\/page\/overleafRealtimeObserver\.js[\s\S]*\}\s*catch \(_error\) \{/);
   assert.match(pageBridge, /CodexOverleafRealtimeObserver\.create/);
   assert.match(pageBridge, /method === 'startOtObserver'/);
   assert.match(pageBridge, /method === 'stopOtObserver'/);
