@@ -36,6 +36,18 @@
     normalizePath: window.CodexOverleafProjectFiles.normalizePath,
     window
   });
+  const otObserver = window.CodexOverleafRealtimeObserver && typeof window.CodexOverleafRealtimeObserver.create === 'function'
+    ? window.CodexOverleafRealtimeObserver.create({
+        document,
+        window,
+        otText: window.CodexOverleafOtText,
+        getActiveFilePath,
+        readActiveEditorText,
+        getCodeMirrorEditorView,
+        collectDocRecords,
+        now: () => Date.now()
+      })
+    : createUnavailableOtObserver();
 
   window.addEventListener('message', async event => {
     if (event.source !== window
@@ -108,9 +120,59 @@
     if (method === 'waitForSaveState') {
       return waitForSaveState(params);
     }
+    if (method === 'startOtObserver') {
+      return otObserver.start(params);
+    }
+    if (method === 'stopOtObserver') {
+      return otObserver.stop();
+    }
+    if (method === 'getOtStatus') {
+      return otObserver.getStatus();
+    }
+    if (method === 'drainOtEvents') {
+      return {
+        ok: true,
+        events: otObserver.drainEvents()
+      };
+    }
     return {
       ok: false,
       error: `Unknown page bridge method: ${method}`
+    };
+  }
+
+  function createUnavailableOtObserver() {
+    const status = {
+      status: 'unavailable',
+      state: 'unavailable',
+      running: false,
+      strategy: 'active-editor',
+      activePath: '',
+      queuedEventCount: 0,
+      lastEventAt: null,
+      lastErrorCode: 'missing_realtime_observer',
+      reason: 'missing_realtime_observer',
+      channelCandidates: []
+    };
+    return {
+      start() {
+        return { ...status };
+      },
+      stop() {
+        return {
+          ...status,
+          status: 'off',
+          state: 'off',
+          lastErrorCode: '',
+          reason: ''
+        };
+      },
+      getStatus() {
+        return { ...status };
+      },
+      drainEvents() {
+        return [];
+      }
     };
   }
 

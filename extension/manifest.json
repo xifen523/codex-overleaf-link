@@ -68,6 +68,7 @@
         "src/page/compileBridge.js",
         "src/page/overleafEditor.js",
         "src/page/overleafProjectSnapshot.js",
+        "src/page/overleafRealtimeObserver.js",
         "src/pageBridge.js"
       ],
       "matches": [

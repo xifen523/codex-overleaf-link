@@ -1367,6 +1367,36 @@ test('page bridge messages require same-origin responses in both directions', ()
   assert.match(pageBridge, /event\.origin !== window\.location\.origin/);
 });
 
+test('page bridge exposes a read-only realtime OT observer', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const pageBridge = fs.readFileSync(
+    path.join(__dirname, '../extension/src/pageBridge.js'),
+    'utf8'
+  );
+  const injectedScripts = Array.from(
+    contentScript.matchAll(/injectScriptOnce\('([^']+)'/g),
+    match => match[1]
+  );
+  const otTextIndex = injectedScripts.indexOf('src/shared/otText.js');
+  const observerIndex = injectedScripts.indexOf('src/page/overleafRealtimeObserver.js');
+  const pageBridgeIndex = injectedScripts.indexOf('src/pageBridge.js');
+
+  assert.ok(otTextIndex > -1, 'content script explicitly injects the OT text helper into the page world');
+  assert.ok(observerIndex > -1, 'content script explicitly injects the realtime observer into the page world');
+  assert.ok(pageBridgeIndex > -1, 'content script injects the page bridge');
+  assert.ok(otTextIndex < observerIndex, 'OT text helper loads before the realtime observer');
+  assert.ok(observerIndex < pageBridgeIndex, 'realtime observer loads before the page bridge');
+  assert.match(pageBridge, /CodexOverleafRealtimeObserver\.create/);
+  assert.match(pageBridge, /method === 'startOtObserver'/);
+  assert.match(pageBridge, /method === 'stopOtObserver'/);
+  assert.match(pageBridge, /method === 'getOtStatus'/);
+  assert.match(pageBridge, /method === 'drainOtEvents'/);
+  assert.doesNotMatch(pageBridge, /\b(?:writeOt|applyOt|sendOt)\b/);
+});
+
 test('markdown links only allow http and https URLs', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),

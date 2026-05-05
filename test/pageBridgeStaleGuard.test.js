@@ -12,6 +12,10 @@ const pageBridgeSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/pageBridge.js'),
   'utf8'
 );
+const otTextSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/shared/otText.js'),
+  'utf8'
+);
 const overleafCapabilitiesSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/page/overleafCapabilities.js'),
   'utf8'
@@ -26,6 +30,10 @@ const overleafEditorSource = fs.readFileSync(
 );
 const overleafProjectSnapshotSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/page/overleafProjectSnapshot.js'),
+  'utf8'
+);
+const overleafRealtimeObserverSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/overleafRealtimeObserver.js'),
   'utf8'
 );
 
@@ -1319,6 +1327,48 @@ test('page bridge probe reports capabilities for explicit degradation messages',
   assert.ok(Array.isArray(result.capabilities.warnings));
 });
 
+test('page bridge starts, drains, and stops the read-only OT observer', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'alpha'
+    }
+  });
+
+  const startStatus = await bridge.call('startOtObserver', { projectId: 'test-project' });
+
+  assert.equal(startStatus.status, 'observing');
+  assert.equal(startStatus.state, 'observing');
+  assert.equal(startStatus.running, true);
+  assert.equal(startStatus.activePath, 'main.tex');
+
+  bridge.setFile('main.tex', 'alpha beta');
+  bridge.fireDocumentEvent('input');
+
+  const activeStatus = await bridge.call('getOtStatus', {});
+  assert.equal(activeStatus.status, 'observing');
+  assert.equal(activeStatus.state, 'observing');
+  assert.equal(activeStatus.queuedEventCount, 1);
+
+  const drained = await bridge.call('drainOtEvents', {});
+  const drainedEvents = JSON.parse(JSON.stringify(drained.events));
+  assert.equal(drained.ok, true);
+  assert.equal(drainedEvents.length, 1);
+  assert.equal(drainedEvents[0].path, 'main.tex');
+  assert.equal(drainedEvents[0].nextContent, 'alpha beta');
+  assert.deepEqual(drainedEvents[0].ops, [{ p: 5, i: ' beta' }]);
+  assert.equal(Object.prototype.hasOwnProperty.call(drainedEvents[0], 'previousContent'), false);
+
+  const empty = await bridge.call('drainOtEvents', {});
+  assert.equal(empty.ok, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(empty.events)), []);
+
+  const stopStatus = await bridge.call('stopOtObserver', {});
+  assert.equal(stopStatus.status, 'off');
+  assert.equal(stopStatus.state, 'off');
+  assert.equal(stopStatus.running, false);
+});
+
 
 function createPageBridgeHarness({
   activePath,
@@ -1355,8 +1405,20 @@ function createPageBridgeHarness({
   const rejectedChangeIds = [];
   let modeMenuOpen = false;
   let modeOptionClickCount = 0;
+  const documentEventListeners = [];
 
   const document = {
+    addEventListener(type, handler, optionsArg) {
+      documentEventListeners.push({ type, handler, options: optionsArg });
+    },
+    removeEventListener(type, handler) {
+      const index = documentEventListeners.findIndex(listenerItem =>
+        listenerItem.type === type && listenerItem.handler === handler
+      );
+      if (index > -1) {
+        documentEventListeners.splice(index, 1);
+      }
+    },
     body: {
       get innerText() {
         return reviewingActive ? 'Reviewing' : 'Editing';
@@ -1441,13 +1503,16 @@ function createPageBridgeHarness({
     Event: class Event {},
     setTimeout,
     clearTimeout,
-    console
+    console,
+    globalThis: window
   });
 
+  vm.runInContext(otTextSource, context, { filename: 'otText.js' });
   vm.runInContext(overleafCapabilitiesSource, context, { filename: 'overleafCapabilities.js' });
   vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
   vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
   vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });
+  vm.runInContext(overleafRealtimeObserverSource, context, { filename: 'overleafRealtimeObserver.js' });
   vm.runInContext(pageBridgeSource, context, { filename: 'pageBridge.js' });
 
   return {
@@ -1467,6 +1532,13 @@ function createPageBridgeHarness({
         }
       });
       return resultPromise;
+    },
+    fireDocumentEvent(type, event = { target: {} }) {
+      const listenerItems = documentEventListeners.filter(item => item.type === type);
+      assert.ok(listenerItems.length, `${type} document listener should be registered`);
+      for (const listenerItem of listenerItems) {
+        listenerItem.handler(event);
+      }
     },
     getFile(filePath) {
       return fileMap.get(filePath);

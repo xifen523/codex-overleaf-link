@@ -3871,10 +3871,12 @@
     await injectScriptOnce('src/shared/projectFiles.js', 'codex-overleaf-project-files-script');
     await injectScriptOnce('src/shared/staleGuard.js', 'codex-overleaf-stale-guard-script');
     await injectScriptOnce('src/shared/compileAdapter.js', 'codex-overleaf-compile-adapter-script');
+    await injectScriptOnce('src/shared/otText.js', 'codex-overleaf-ot-text-script');
     await injectScriptOnce('src/page/overleafCapabilities.js', 'codex-overleaf-capabilities-script');
     await injectScriptOnce('src/page/compileBridge.js', 'codex-overleaf-compile-bridge-script');
     await injectScriptOnce('src/page/overleafEditor.js', 'codex-overleaf-editor-script');
     await injectScriptOnce('src/page/overleafProjectSnapshot.js', 'codex-overleaf-project-snapshot-script');
+    await injectScriptOnce('src/page/overleafRealtimeObserver.js', 'codex-overleaf-realtime-observer-script');
     await injectScriptOnce('src/pageBridge.js', 'codex-overleaf-page-bridge-script');
   }
 

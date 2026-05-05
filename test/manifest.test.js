@@ -72,13 +72,14 @@ test('content script loads shared model catalog before the panel script', () => 
   assert.ok(scripts.indexOf('src/shared/models.js') < scripts.indexOf('src/contentScript.js'));
 });
 
-test('manifest loads and exposes the shared OT text helper', () => {
+test('manifest loads and exposes read-only OT page dependencies', () => {
   const scripts = extensionManifest.content_scripts[0].js;
   const resources = extensionManifest.web_accessible_resources[0].resources;
 
   assert.ok(scripts.indexOf('src/shared/otText.js') > -1);
   assert.ok(scripts.indexOf('src/shared/otText.js') < scripts.indexOf('src/contentScript.js'));
   assert.ok(resources.includes('src/shared/otText.js'));
+  assert.ok(resources.includes('src/page/overleafRealtimeObserver.js'));
 });
 
 test('content script loads mirror health helper before the panel script', () => {
