@@ -1293,8 +1293,10 @@
       mirrorStatus?.otFreshFileCount,
       Array.isArray(mirrorStatus?.otFreshFiles) ? mirrorStatus.otFreshFiles.length : 0
     );
-    const fallback = !enabled || statusValue !== 'observing' || otFreshFileCount <= 0;
     const bridgeFailed = otStatus?.ok === false;
+    const focusFiles = getActiveFocusFiles();
+    const otWarmStart = otWarmMirrorController?.canUseOtWarmStart?.({ enabled, focusFiles, mirrorStatus }) || { ok: false };
+    const fallback = !enabled || statusValue !== 'observing' || bridgeFailed || otWarmStart?.ok !== true;
 
     return {
       title: tr('diagnosticsOtTitle'),

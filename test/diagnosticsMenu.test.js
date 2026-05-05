@@ -92,6 +92,10 @@ test('experimental OT diagnostics read metadata without draining project content
   assert.match(formatBody, /channelCandidates/);
   assert.match(formatBody, /diagnosticsOtSummaryEnabled/);
   assert.match(formatBody, /diagnosticsOtSummaryDisabled/);
+  assert.match(formatBody, /const focusFiles = getActiveFocusFiles\(\)/);
+  assert.match(formatBody, /otWarmMirrorController\?\.canUseOtWarmStart\?\.\(\{\s*enabled,\s*focusFiles,\s*mirrorStatus\s*\}\)/);
+  assert.match(formatBody, /otWarmStart\?\.ok !== true/);
+  assert.doesNotMatch(formatBody, /otFreshFileCount <= 0/);
   assert.match(technicalBody, /`strategy:/);
   assert.match(technicalBody, /`queuedEventCount:/);
   assert.match(technicalBody, /`lastEventAt:/);
@@ -109,6 +113,7 @@ test('experimental OT diagnostics read metadata without draining project content
   assert.doesNotMatch(technicalBody, /`mirrorAgeMs:/);
   assert.doesNotMatch(technicalBody, /`otFreshFileCount:/);
   assert.doesNotMatch(technicalBody, /`otStaleFileCount:/);
+  assert.doesNotMatch(technicalBody, /focusFiles/);
   assert.doesNotMatch(formatBody, /nextContent/);
   assert.doesNotMatch(formatBody, /previousContent/);
   assert.doesNotMatch(formatBody, /\bops\b/);
