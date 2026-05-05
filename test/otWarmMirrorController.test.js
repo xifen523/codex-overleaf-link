@@ -159,6 +159,10 @@ test('buildPatchFilesRequest caps patch batches while preserving order', () => {
     request.params.files.map(file => file.path),
     events.slice(0, Controller.OT_MAX_PATCH_BATCH).map(event => event.path)
   );
+  assert.deepEqual(
+    request.params.files.map(file => file.baseHash),
+    events.slice(0, Controller.OT_MAX_PATCH_BATCH).map(event => event.baseHash)
+  );
 });
 
 test('shouldPauseOtWarmMirror pauses during local mutation and run states', () => {

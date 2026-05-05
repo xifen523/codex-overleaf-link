@@ -390,6 +390,40 @@ test('warm send verifies a non-invasive current or focus overlay before reusing 
   assert.doesNotMatch(warmStartBody, /fullProjectSnapshot:\s*true[\s\S]*method:\s*'warm-mirror'/);
 });
 
+test('experimental OT warm mirror polls page OT events and patches the native mirror', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const pollBody = extractFunction(contentScript, 'pollOtEvents');
+  const flushBody = extractFunction(contentScript, 'flushOtPatchBatch');
+
+  assert.match(contentScript, /CodexOverleafOtWarmMirrorController/);
+  assert.match(contentScript, /function scheduleOtEventPolling/);
+  assert.match(contentScript, /function clearOtEventPolling/);
+  assert.match(pollBody, /otWarmMirrorController\.shouldPauseOtWarmMirror\(\{\s*running:\s*Boolean\(currentRunView\)\s*\}\)/);
+  assert.match(pollBody, /callPageBridge\('getOtStatus'/);
+  assert.match(pollBody, /callPageBridge\('drainOtEvents'/);
+  assert.match(pollBody, /queueOtPatchEvents/);
+  assert.match(flushBody, /otWarmMirrorController\.buildPatchFilesRequest/);
+  assert.match(flushBody, /method:\s*'mirror\.patchFiles'/);
+  assert.match(flushBody, /sendBackgroundNative\(request\)/);
+  assert.match(contentScript, /flushOtPatchBatch/);
+});
+
+test('invalid native OT patch results mark the warm mirror inconsistent using skippedFiles fields', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const flushBody = extractFunction(contentScript, 'flushOtPatchBatch');
+
+  assert.match(flushBody, /skippedFiles/);
+  assert.match(flushBody, /skippedCount/);
+  assert.match(flushBody, /updateOtStatusDisplay\('inconsistent'\)/);
+  assert.doesNotMatch(flushBody, /result\?\.skipped\b|result\.skipped\b/);
+});
+
 test('warm mirror overlays preserve active file alongside focused files', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),

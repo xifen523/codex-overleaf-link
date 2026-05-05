@@ -52,6 +52,7 @@
   const writebackController = window.CodexOverleafWritebackController;
   const runController = window.CodexOverleafRunController;
   const mirrorHealth = window.CodexOverleafMirrorHealth;
+  const otWarmMirrorController = window.CodexOverleafOtWarmMirrorController;
 
   let panel = null;
   let state = null;
@@ -73,6 +74,16 @@
   let otSyncRequestId = 0;
   let otWarmMirrorProjectId = '';
   let lastExperimentalOtProjectId = '';
+  let otWarmMirrorState = {
+    projectId: '',
+    pollTimer: null,
+    flushTimer: null,
+    flushing: false,
+    patchQueue: [],
+    lastStatus: 'off',
+    lastPatchAt: 0,
+    lastErrorCode: ''
+  };
   let mirrorPrefetchState = {
     inFlight: null,
     lastSuccessAt: 0,
@@ -1376,6 +1387,7 @@
     });
 
     try {
+      await pauseOtWarmMirror('run-start');
       const writeSafety = await preflightWriteSafety({
         mode: submittedMode,
         requireReviewing: submittedRequireReviewing
@@ -1684,6 +1696,9 @@
       nativeChannel.clearActiveRequest();
       currentRunView = null;
       runCancellationRequested = false;
+      if (isExperimentalOtEnabled()) {
+        await resumeOtWarmMirror('run-settled');
+      }
       saveStateSoon();
     }
   }
@@ -2746,8 +2761,18 @@
     const requestId = ++otSyncRequestId;
     const enabled = isExperimentalOtEnabledForProject(projectId);
     otWarmMirrorProjectId = projectId;
+    ensureOtWarmMirrorStateProject(projectId);
     if (enabled) {
+      const pause = otWarmMirrorController?.shouldPauseOtWarmMirror?.({ running: Boolean(currentRunView) }) || { pause: false };
+      if (pause.pause) {
+        clearOtEventPolling({ clearPatchQueue: true });
+        otWarmMirrorState.lastErrorCode = pause.reason || 'paused';
+        updateOtStatusDisplay('stale');
+        return { ok: true, skipped: true, reason: pause.reason || 'paused' };
+      }
       updateOtStatusDisplay('starting');
+    } else {
+      clearOtEventPolling({ clearPatchQueue: true });
     }
     const response = enabled
       ? await callPageBridge('startOtObserver', { projectId })
@@ -2771,7 +2796,13 @@
       handleFailedOtStart(projectId, requestId);
       return response;
     }
+    const pauseAfterStart = otWarmMirrorController?.shouldPauseOtWarmMirror?.({ running: Boolean(currentRunView) }) || { pause: false };
+    if (pauseAfterStart.pause) {
+      await pauseOtWarmMirror(pauseAfterStart.reason || 'paused');
+      return response;
+    }
     updateOtStatusDisplay(status);
+    scheduleOtEventPolling(projectId, { immediate: true });
     return response;
   }
 
@@ -2787,6 +2818,7 @@
     if (isCurrentOtSync(requestId, projectId) && getCurrentProjectId() === projectId) {
       return;
     }
+    clearOtEventPolling({ clearPatchQueue: true });
     await callPageBridge('stopOtObserver', {});
     if (isExperimentalOtEnabled()) {
       await syncOtWarmMirrorController();
@@ -2797,6 +2829,7 @@
     if (!isCurrentOtSync(requestId, projectId) || getCurrentProjectId() !== projectId) {
       return;
     }
+    clearOtEventPolling({ clearPatchQueue: true });
     setExperimentalOtEnabledForProject(projectId, false);
     const experimentalOtCheckbox = panel?.querySelector('[data-experimental-ot]');
     if (experimentalOtCheckbox) {
@@ -2813,9 +2846,277 @@
     return response.state || response.status || response.result?.state || response.result?.status || 'unavailable';
   }
 
+  function ensureOtWarmMirrorStateProject(projectId) {
+    if (!projectId || otWarmMirrorState.projectId === projectId) {
+      return;
+    }
+    clearOtEventPolling({ clearPatchQueue: true });
+    otWarmMirrorState.projectId = projectId;
+    otWarmMirrorState.lastPatchAt = 0;
+    otWarmMirrorState.lastErrorCode = '';
+    otWarmMirrorState.lastStatus = currentOtStatus;
+  }
+
+  function clearOtEventPolling(options = {}) {
+    if (otWarmMirrorState.pollTimer) {
+      window.clearTimeout(otWarmMirrorState.pollTimer);
+      otWarmMirrorState.pollTimer = null;
+    }
+    if (otWarmMirrorState.flushTimer) {
+      window.clearTimeout(otWarmMirrorState.flushTimer);
+      otWarmMirrorState.flushTimer = null;
+    }
+    if (options.clearPatchQueue !== false) {
+      otWarmMirrorState.patchQueue = [];
+    }
+  }
+
+  function scheduleOtEventPolling(projectId = getCurrentProjectId(), options = {}) {
+    if (!canPollOtWarmMirror(projectId)) {
+      return;
+    }
+    ensureOtWarmMirrorStateProject(projectId);
+    if (otWarmMirrorState.pollTimer) {
+      window.clearTimeout(otWarmMirrorState.pollTimer);
+    }
+    const delayMs = options.immediate
+      ? 0
+      : Math.max(0, Number(otWarmMirrorController?.OT_POLL_INTERVAL_MS) || 1000);
+    otWarmMirrorState.pollTimer = window.setTimeout(() => {
+      otWarmMirrorState.pollTimer = null;
+      pollOtEvents(projectId).catch(error => {
+        otWarmMirrorState.lastErrorCode = error?.code || error?.message || 'ot_poll_failed';
+        updateOtStatusDisplay('unavailable');
+      });
+    }, delayMs);
+  }
+
+  function canPollOtWarmMirror(projectId) {
+    return Boolean(projectId
+      && otWarmMirrorController?.shouldPauseOtWarmMirror
+      && otWarmMirrorController?.buildPatchFilesRequest
+      && isExperimentalOtEnabledForProject(projectId)
+      && otWarmMirrorProjectId === projectId
+      && getCurrentProjectId() === projectId);
+  }
+
+  async function pollOtEvents(projectId = otWarmMirrorState.projectId || getCurrentProjectId()) {
+    if (!canPollOtWarmMirror(projectId)) {
+      clearOtEventPolling({ clearPatchQueue: true });
+      return { ok: false, skipped: true, reason: 'not_current_project' };
+    }
+
+    const pause = otWarmMirrorController.shouldPauseOtWarmMirror({ running: Boolean(currentRunView) });
+    if (pause.pause) {
+      otWarmMirrorState.lastErrorCode = pause.reason || 'paused';
+      updateOtStatusDisplay('stale');
+      clearOtEventPolling({ clearPatchQueue: false });
+      return { ok: false, skipped: true, reason: pause.reason || 'paused' };
+    }
+
+    try {
+      const statusResponse = await callPageBridge('getOtStatus', { projectId });
+      if (!canPollOtWarmMirror(projectId)) {
+        return { ok: false, skipped: true, reason: 'project_changed' };
+      }
+      if (!isSuccessfulOtBridgeResponse(statusResponse)) {
+        otWarmMirrorState.lastErrorCode = readOtBridgeErrorCode(statusResponse, 'get_ot_status_failed');
+        updateOtStatusDisplay('unavailable');
+        return statusResponse;
+      }
+      const status = readOtBridgeStatus(statusResponse);
+      if (status) {
+        updateOtStatusDisplay(status);
+      }
+
+      const drainResponse = await callPageBridge('drainOtEvents', { projectId });
+      if (!canPollOtWarmMirror(projectId)) {
+        return { ok: false, skipped: true, reason: 'project_changed' };
+      }
+      if (!isSuccessfulOtBridgeResponse(drainResponse)) {
+        otWarmMirrorState.lastErrorCode = readOtBridgeErrorCode(drainResponse, 'drain_ot_events_failed');
+        updateOtStatusDisplay('unavailable');
+        return drainResponse;
+      }
+      const events = readOtBridgeEvents(drainResponse);
+      if (events.length) {
+        queueOtPatchEvents(events, projectId);
+      }
+      return drainResponse;
+    } catch (error) {
+      otWarmMirrorState.lastErrorCode = error?.code || error?.message || 'ot_poll_failed';
+      updateOtStatusDisplay('unavailable');
+      return { ok: false, error };
+    } finally {
+      if (canPollOtWarmMirror(projectId) && !currentRunView) {
+        scheduleOtEventPolling(projectId);
+      }
+    }
+  }
+
+  function readOtBridgeEvents(response) {
+    if (Array.isArray(response)) {
+      return response;
+    }
+    if (Array.isArray(response?.events)) {
+      return response.events;
+    }
+    if (Array.isArray(response?.result?.events)) {
+      return response.result.events;
+    }
+    return [];
+  }
+
+  function readOtBridgeErrorCode(response, fallback) {
+    const value = response?.lastErrorCode
+      || response?.reason
+      || response?.error?.code
+      || response?.error
+      || fallback;
+    return typeof value === 'string' ? value : fallback;
+  }
+
+  function queueOtPatchEvents(events, projectId = getCurrentProjectId()) {
+    if (!Array.isArray(events) || !events.length || !canPollOtWarmMirror(projectId)) {
+      return;
+    }
+    ensureOtWarmMirrorStateProject(projectId);
+    otWarmMirrorState.patchQueue.push(...events);
+    scheduleOtPatchFlush(projectId);
+  }
+
+  function scheduleOtPatchFlush(projectId = otWarmMirrorState.projectId || getCurrentProjectId(), options = {}) {
+    if (!canPollOtWarmMirror(projectId) || !otWarmMirrorState.patchQueue.length) {
+      return;
+    }
+    if (otWarmMirrorState.flushTimer) {
+      window.clearTimeout(otWarmMirrorState.flushTimer);
+    }
+    const delayMs = options.immediate
+      ? 0
+      : Math.max(0, Number(otWarmMirrorController?.OT_PATCH_DEBOUNCE_MS) || 500);
+    otWarmMirrorState.flushTimer = window.setTimeout(() => {
+      otWarmMirrorState.flushTimer = null;
+      flushOtPatchBatch(projectId).catch(error => {
+        otWarmMirrorState.lastErrorCode = error?.code || error?.message || 'ot_patch_failed';
+        updateOtStatusDisplay('inconsistent');
+      });
+    }, delayMs);
+  }
+
+  async function flushOtPatchBatch(projectId = otWarmMirrorState.projectId || getCurrentProjectId()) {
+    if (otWarmMirrorState.flushing) {
+      return { ok: false, skipped: true, reason: 'ot_patch_in_flight' };
+    }
+    if (!canPollOtWarmMirror(projectId)) {
+      clearOtEventPolling({ clearPatchQueue: true });
+      return { ok: false, skipped: true, reason: 'not_current_project' };
+    }
+
+    const pause = otWarmMirrorController.shouldPauseOtWarmMirror({ running: Boolean(currentRunView) });
+    if (pause.pause) {
+      otWarmMirrorState.lastErrorCode = pause.reason || 'paused';
+      updateOtStatusDisplay('stale');
+      clearOtEventPolling({ clearPatchQueue: false });
+      return { ok: false, skipped: true, reason: pause.reason || 'paused' };
+    }
+
+    const maxBatch = Math.max(1, Number(otWarmMirrorController?.OT_MAX_PATCH_BATCH) || 25);
+    const batch = otWarmMirrorState.patchQueue.splice(0, maxBatch);
+    if (!batch.length) {
+      return { ok: true, skipped: true, reason: 'empty_batch' };
+    }
+
+    otWarmMirrorState.flushing = true;
+    try {
+      const request = {
+        ...otWarmMirrorController.buildPatchFilesRequest({ projectId, events: batch }),
+        method: 'mirror.patchFiles'
+      };
+      if (!Array.isArray(request.params?.files) || request.params.files.length === 0) {
+        return { ok: true, skipped: true, reason: 'empty_filtered_batch' };
+      }
+      if (!canPollOtWarmMirror(projectId)) {
+        return { ok: false, skipped: true, reason: 'project_changed' };
+      }
+
+      const response = await sendBackgroundNative(request);
+      if (!response?.ok) {
+        otWarmMirrorState.lastErrorCode = response?.error?.code || response?.error?.message || 'mirror_patch_failed';
+        updateOtStatusDisplay('inconsistent');
+        return response;
+      }
+
+      const result = response.result || {};
+      const skippedFiles = Array.isArray(result?.skippedFiles) ? result.skippedFiles : [];
+      const skippedCount = Number.isFinite(Number(result?.skippedCount))
+        ? Number(result.skippedCount)
+        : skippedFiles.length;
+      if (skippedFiles.length || skippedCount > 0) {
+        otWarmMirrorState.lastErrorCode = 'mirror_patch_skipped';
+        updateOtStatusDisplay('inconsistent');
+        return response;
+      }
+
+      otWarmMirrorState.lastPatchAt = Date.now();
+      otWarmMirrorState.lastErrorCode = '';
+      if (canPollOtWarmMirror(projectId)) {
+        updateOtStatusDisplay('observing');
+      }
+      return response;
+    } catch (error) {
+      otWarmMirrorState.lastErrorCode = error?.code || error?.message || 'mirror_patch_failed';
+      updateOtStatusDisplay('inconsistent');
+      return { ok: false, error };
+    } finally {
+      otWarmMirrorState.flushing = false;
+      if (otWarmMirrorState.patchQueue.length && canPollOtWarmMirror(projectId) && !currentRunView) {
+        scheduleOtPatchFlush(projectId, { immediate: true });
+      }
+    }
+  }
+
+  async function pauseOtWarmMirror(reason = 'pause') {
+    const projectId = getCurrentProjectId();
+    clearOtEventPolling({ clearPatchQueue: true });
+    if (!isExperimentalOtEnabledForProject(projectId)) {
+      return { ok: true, skipped: true, reason: 'disabled' };
+    }
+    ensureOtWarmMirrorStateProject(projectId);
+    otWarmMirrorState.lastErrorCode = reason;
+    updateOtStatusDisplay('stale');
+    try {
+      const response = await callPageBridge('stopOtObserver', { projectId, reason });
+      if (!isSuccessfulOtBridgeResponse(response)) {
+        otWarmMirrorState.lastErrorCode = readOtBridgeErrorCode(response, 'pause_ot_observer_failed');
+        updateOtStatusDisplay('unavailable');
+      }
+      return response;
+    } catch (error) {
+      otWarmMirrorState.lastErrorCode = error?.code || error?.message || 'pause_ot_observer_failed';
+      updateOtStatusDisplay('unavailable');
+      return { ok: false, error };
+    }
+  }
+
+  async function resumeOtWarmMirror(reason = 'resume') {
+    const projectId = getCurrentProjectId();
+    if (!isExperimentalOtEnabledForProject(projectId)) {
+      return { ok: true, skipped: true, reason: 'disabled' };
+    }
+    try {
+      return await syncOtWarmMirrorController({ reason });
+    } catch (error) {
+      otWarmMirrorState.lastErrorCode = error?.code || error?.message || 'resume_ot_observer_failed';
+      updateOtStatusDisplay('unavailable');
+      return { ok: false, error };
+    }
+  }
+
   function updateOtStatusDisplay(status = currentOtStatus) {
     const normalized = normalizeOtStatus(status);
     currentOtStatus = normalized;
+    otWarmMirrorState.lastStatus = normalized;
     const statusElement = panel?.querySelector('[data-ot-status]');
     if (statusElement) {
       const label = formatOtStatusLabel(normalized);
@@ -3085,6 +3386,7 @@
     if (otWarmMirrorProjectId === projectId) {
       return;
     }
+    clearOtEventPolling({ clearPatchQueue: true });
     otWarmMirrorProjectId = projectId;
     otSyncRequestId++;
     callPageBridge('stopOtObserver', {}).then(response => {
