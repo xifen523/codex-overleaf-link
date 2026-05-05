@@ -1,7 +1,24 @@
+importScripts('shared/compatibility.js');
+
 (function initBackground() {
   'use strict';
 
   const HOST_NAME = 'com.codex.overleaf';
+  const COMPATIBILITY_REQUIRED_METHODS = new Set([
+    'codex.run',
+    'task.run',
+    'task.confirm',
+    'mirror.sync',
+    'mirror.patchFiles',
+    'codex.history.clearPlugin'
+  ]);
+  const RECOVERABLE_COMPATIBILITY_METHODS = new Set([
+    'bridge.ping',
+    'mirror.status',
+    'codex.models',
+    'codex.cancel'
+  ]);
+  const CodexOverleafCompatibility = globalThis.CodexOverleafCompatibility;
   let port = null;
   const pending = new Map();
 
@@ -81,7 +98,15 @@
 
   function sendNativeRequest(payload, sender) {
     const id = payload.id || crypto.randomUUID();
-    const request = { ...payload, id };
+    const requestWithEvidence = { ...payload, id };
+    const compatibilityBlock = getNativeCompatibilityBlock(requestWithEvidence);
+    if (compatibilityBlock) {
+      return Promise.resolve({
+        ok: false,
+        error: compatibilityBlock
+      });
+    }
+    const request = sanitizeNativeRequest(requestWithEvidence);
 
     return new Promise((resolve, reject) => {
       const pendingRequest = {
@@ -104,6 +129,83 @@
         handleNativePostFailure(id, pendingRequest, error);
       }
     });
+  }
+
+  function getNativeCompatibilityBlock(request = {}) {
+    const evidence = getNativeCompatibilityEvidence(request);
+    if (!evidence) {
+      return null;
+    }
+
+    if (isNativeMethodAllowedByCompatibility(request.method, evidence)) {
+      return null;
+    }
+
+    const status = getNativeCompatibilityStatus(evidence);
+    return {
+      code: 'native_incompatible',
+      message: formatNativeCompatibilityBlockMessage(status),
+      status,
+      installCommand: evidence.installCommand
+    };
+  }
+
+  function isNativeMethodAllowedByCompatibility(method, evidence) {
+    if (!CodexOverleafCompatibility || typeof CodexOverleafCompatibility.isNativeMethodAllowed !== 'function') {
+      return true;
+    }
+
+    if (!COMPATIBILITY_REQUIRED_METHODS.has(method) && !RECOVERABLE_COMPATIBILITY_METHODS.has(method)) {
+      return CodexOverleafCompatibility.isNativeMethodAllowed(method, evidence);
+    }
+
+    return CodexOverleafCompatibility.isNativeMethodAllowed(method, evidence);
+  }
+
+  function getNativeCompatibilityEvidence(request = {}) {
+    const params = request.params;
+    if (!params || typeof params !== 'object') {
+      return null;
+    }
+    return params.nativeCompatibility || params.compatibilityStatus || params.compatibility || null;
+  }
+
+  function getNativeCompatibilityStatus(evidence) {
+    if (typeof evidence === 'string') {
+      return evidence;
+    }
+    return evidence?.status || 'native_missing';
+  }
+
+  function sanitizeNativeRequest(request) {
+    if (!request?.params || typeof request.params !== 'object') {
+      return request;
+    }
+    const { nativeCompatibility, compatibilityStatus, compatibility, ...params } = request.params;
+    if (!nativeCompatibility && !compatibilityStatus && !compatibility) {
+      return request;
+    }
+    return {
+      ...request,
+      params
+    };
+  }
+
+  function formatNativeCompatibilityBlockMessage(status) {
+    switch (status) {
+      case 'native_too_old':
+        return 'Native host update required before this request can run. Update the local native host, reload the extension, and try again.';
+      case 'extension_too_old':
+        return 'Extension update required before this request can run. Update the Chrome extension and try again.';
+      case 'protocol_unsupported':
+        return 'Native host protocol mismatch. Update the extension and native host together, then try again.';
+      case 'native_unhealthy':
+        return 'Native host responded, but the local Codex environment is not healthy enough to run this request.';
+      case 'native_missing':
+        return 'Native host is not connected. Install the local native host, reload the extension, and try again.';
+      default:
+        return 'Native host is not compatible with this extension. Update the native host, reload the extension, and try again.';
+    }
   }
 
   function sendNativeCancel(payload) {

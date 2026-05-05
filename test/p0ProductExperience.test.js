@@ -927,6 +927,54 @@ test('write tasks preflight Reviewing or Editing before syncing or starting loca
   assert.match(preflightBody, /finishRunView\(finishTitle, 'failed'\)/);
 });
 
+test('native side-effecting requests are gated on compatibility before dispatch', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const sendNativeBody = extractFunction(contentScript, 'sendNative');
+  const sendBackgroundNativeBody = extractFunction(contentScript, 'sendBackgroundNative');
+  const ensureBody = extractFunction(contentScript, 'ensureNativeCompatibilityForMethod');
+
+  assert.match(contentScript, /NATIVE_COMPATIBILITY_GATED_METHODS/);
+  for (const method of [
+    'codex.run',
+    'task.run',
+    'task.confirm',
+    'mirror.sync',
+    'mirror.patchFiles',
+    'codex.history.clearPlugin'
+  ]) {
+    assert.match(contentScript, new RegExp(method.replace(/[.]/g, '\\.')));
+  }
+  assert.match(ensureBody, /CodexOverleafCompatibility\.buildBridgePingParams/);
+  assert.match(ensureBody, /CodexOverleafCompatibility\.evaluateNativeCompatibility/);
+  assert.match(ensureBody, /CodexOverleafCompatibility\.isNativeMethodAllowed/);
+  assert.match(ensureBody, /native_incompatible/);
+  assert.match(ensureBody, /formatNativeCompatibilityBlockedMessage/);
+  assert.match(sendNativeBody, /await ensureNativeCompatibilityForMethod\(payload\?\.method\)/);
+  assert.match(sendNativeBody, /attachNativeCompatibilityEvidence/);
+  assert.match(sendBackgroundNativeBody, /await ensureNativeCompatibilityForMethod\(payload\?\.method\)/);
+  assert.match(sendBackgroundNativeBody, /attachNativeCompatibilityEvidence/);
+});
+
+test('read-only native discovery and diagnostics bypass the compatibility run gate', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const loadModelBody = extractFunction(contentScript, 'loadModelOptions');
+  const mirrorFreshnessBody = extractFunction(contentScript, 'getMirrorFreshness');
+  const inspectBody = extractFunction(contentScript, 'inspectNativeEnvironment');
+
+  assert.match(loadModelBody, /method:\s*'codex\.models'/);
+  assert.match(mirrorFreshnessBody, /method:\s*'mirror\.status'/);
+  assert.match(inspectBody, /method:\s*'bridge\.ping'/);
+  assert.doesNotMatch(loadModelBody, /ensureNativeCompatibilityForMethod/);
+  assert.doesNotMatch(mirrorFreshnessBody, /ensureNativeCompatibilityForMethod/);
+  assert.doesNotMatch(inspectBody, /ensureNativeCompatibilityForMethod/);
+});
+
 test('write preflight gives natural feedback for automatic Reviewing or Editing activation', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),

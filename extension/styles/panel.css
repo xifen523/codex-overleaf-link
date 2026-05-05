@@ -340,6 +340,10 @@
   background: #171717;
 }
 
+#codex-overleaf-panel .codex-diagnostics-result[data-status="failed"] .codex-install-command {
+  border-color: #6f4f2f;
+}
+
 #codex-overleaf-panel .codex-install-command-label {
   margin-bottom: 6px;
   color: #9da1a6;

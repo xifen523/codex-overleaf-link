@@ -3,6 +3,29 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
+function extractFunction(source, name) {
+  const markers = [`function ${name}(`, `async function ${name}(`];
+  const start = markers
+    .map(marker => source.indexOf(marker))
+    .filter(index => index !== -1)
+    .sort((a, b) => a - b)[0] ?? -1;
+  assert.notEqual(start, -1, `${name} should exist`);
+  const openBrace = source.indexOf('{', start);
+  assert.notEqual(openBrace, -1, `${name} should have a body`);
+  let depth = 0;
+  for (let index = openBrace; index < source.length; index++) {
+    if (source[index] === '{') {
+      depth++;
+    } else if (source[index] === '}') {
+      depth--;
+      if (depth === 0) {
+        return source.slice(start, index + 1);
+      }
+    }
+  }
+  assert.fail(`${name} body should close`);
+}
+
 test('project snapshot action lives in the diagnostics menu instead of the header actions', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -197,4 +220,28 @@ test('diagnostic result floats inside the Codex panel with visible side margins'
   assert.match(resultBlock, /right:\s*12px/);
   assert.match(resultBlock, /width:\s*min\(316px,\s*calc\(var\(--codex-overleaf-panel-width\) - 24px\)\)/);
   assert.doesNotMatch(resultBlock, /position:\s*absolute/);
+});
+
+test('panel native diagnostics sends compatibility metadata and evaluates mismatches before environment details', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const inspectBody = extractFunction(contentScript, 'inspectNativeEnvironment');
+  const formatBody = extractFunction(contentScript, 'formatNativeEnvironmentResult');
+
+  assert.match(contentScript, /CodexOverleafCompatibility/);
+  assert.match(inspectBody, /CodexOverleafCompatibility\.buildBridgePingParams/);
+  assert.doesNotMatch(inspectBody, /method:\s*'bridge\.ping',\s*params:\s*\{\s*\}/);
+  assert.match(formatBody, /CodexOverleafCompatibility\.evaluateNativeCompatibility/);
+  assert.ok(
+    formatBody.indexOf('evaluateNativeCompatibility') < formatBody.indexOf('const environment'),
+    'native compatibility must be evaluated before formatting Codex/LaTeX environment details'
+  );
+  assert.match(contentScript, /native_too_old/);
+  assert.match(contentScript, /protocol_unsupported/);
+  assert.match(contentScript, /extension_too_old/);
+  assert.match(contentScript, /installCommand:\s*compatibility\.installCommand/);
+  assert.match(contentScript, /Native Host Update Required/);
+  assert.match(contentScript, /Protocol Mismatch/);
 });

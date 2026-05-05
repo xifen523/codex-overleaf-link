@@ -13,11 +13,21 @@
   const STREAM_SAVE_DELAY_MS = 1000;
   const MAX_RUN_EVENTS = 300;
   const MAX_SAFE_UNDO_REPLACEALL_CHARS = 2000;
+  const NATIVE_COMPATIBILITY_GATED_METHODS = new Set([
+    'codex.run',
+    'task.run',
+    'task.confirm',
+    'mirror.sync',
+    'mirror.patchFiles',
+    'codex.history.clearPlugin'
+  ]);
   const PANEL_DEFAULT_WIDTH = 380;
   const PANEL_MIN_WIDTH = 340;
   const PANEL_MAX_WIDTH = 760;
   const PAGE_MIN_WIDTH = 520;
-  const INSTALL_COMMAND = 'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash';
+  const CodexOverleafCompatibility = window.CodexOverleafCompatibility;
+  const INSTALL_COMMAND = CodexOverleafCompatibility?.buildInstallCommand?.() ||
+    'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash';
   const pageBridgeReady = injectPageBridge();
   const {
     createSession,
@@ -129,6 +139,14 @@
 
   function tx(en, zh) {
     return getLocale() === 'zh' ? zh : en;
+  }
+
+  function getExtensionCompatibilityMetadata() {
+    return {
+      version: CodexOverleafCompatibility?.BUILD_TARGET_VERSION ||
+        chrome.runtime.getManifest?.().version ||
+        ''
+    };
   }
 
   function listSeparator() {
@@ -1141,11 +1159,21 @@
 
   async function inspectNativeEnvironment() {
     showDiagnosticsLoading(tr('diagnosticsNativeTitle'), tr('diagnosticsNativeLoading'));
-    const response = await sendBackgroundNative({ method: 'bridge.ping', params: {} });
+    const params = CodexOverleafCompatibility?.buildBridgePingParams
+      ? CodexOverleafCompatibility.buildBridgePingParams(getExtensionCompatibilityMetadata())
+      : {};
+    const response = await sendBackgroundNative({ method: 'bridge.ping', params });
     showDiagnosticsResult(formatNativeEnvironmentResult(response));
   }
 
   function formatNativeEnvironmentResult(response) {
+    const compatibility = CodexOverleafCompatibility?.evaluateNativeCompatibility
+      ? CodexOverleafCompatibility.evaluateNativeCompatibility(response, getExtensionCompatibilityMetadata())
+      : fallbackNativeCompatibility(response);
+    if (compatibility.status !== 'ok' && compatibility.status !== 'native_unhealthy') {
+      return formatNativeCompatibilityResult(compatibility, response);
+    }
+
     if (!response?.ok) {
       return {
         title: tx('Local Connection Problem', '本机连接异常'),
@@ -1206,6 +1234,108 @@
         : tx('Make sure codex works in Terminal, then reload the extension.', '请确认终端里可以运行 codex，然后重新加载扩展。'),
       technical: JSON.stringify(environment, null, 2)
     };
+  }
+
+  function fallbackNativeCompatibility(response) {
+    return response?.ok
+      ? { status: 'ok', native: response.result, installCommand: INSTALL_COMMAND }
+      : { status: 'native_missing', native: response, installCommand: INSTALL_COMMAND };
+  }
+
+  function formatNativeCompatibilityResult(compatibility = {}, response = {}) {
+    const statusValue = compatibility.status || 'unknown_native';
+    if (statusValue === 'native_missing') {
+      return {
+        title: tx('Local Connection Problem', '本机连接异常'),
+        subtitle: tx('The extension could not connect to the local service.', '插件没有连上本机服务。'),
+        status: 'failed',
+        summary: tx('The extension is not connected to the local service, so it cannot run local Codex or sync the local workspace yet.', '插件没有连上本机服务，所以暂时不能调用本地 Codex 或同步本地 workspace。'),
+        nextStep: tx('Make sure the native host is installed, reload the Chrome extension, then try again.', '确认 native host 已安装，并重新加载 Chrome 扩展后再试。'),
+        installCommand: INSTALL_COMMAND,
+        technical: response?.error?.message || tx('native host did not respond', 'native host 没有响应')
+      };
+    }
+
+    const messages = getNativeCompatibilityMessages(statusValue);
+    return {
+      title: messages.title,
+      subtitle: messages.subtitle,
+      status: 'failed',
+      summary: messages.summary,
+      bullets: formatNativeCompatibilityBullets(compatibility),
+      nextStep: messages.nextStep,
+      installCommand: compatibility.installCommand,
+      technical: formatNativeCompatibilityTechnicalDetails(compatibility, response)
+    };
+  }
+
+  function getNativeCompatibilityMessages(statusValue) {
+    switch (statusValue) {
+      case 'native_too_old':
+        return {
+          title: tx('Native Host Update Required', '需要更新 Native Host'),
+          subtitle: tx('The local native host is too old for this extension.', '本机 native host 版本太旧。'),
+          summary: tx('The extension reached the native host, but its version or capabilities do not match this extension. Update the native host before running Codex.', '插件已经连上 native host，但版本或能力与当前扩展不匹配。请先更新 native host 再运行 Codex。'),
+          nextStep: tx('Run the installer command below, reload the Chrome extension, then check again.', '运行下面的安装命令，重新加载 Chrome 扩展后再检查。')
+        };
+      case 'protocol_unsupported':
+        return {
+          title: tx('Protocol Mismatch', '协议不匹配'),
+          subtitle: tx('The extension and native host do not support the same bridge protocol.', '扩展和 native host 支持的桥接协议不一致。'),
+          summary: tx('The native host responded, but its protocol range is not compatible with this extension. Update the extension and native host together.', 'Native host 已响应，但协议范围与当前扩展不兼容。请同时更新扩展和 native host。'),
+          nextStep: tx('Run the installer command below and make sure the Chrome extension is the matching release.', '运行下面的安装命令，并确认 Chrome 扩展是匹配的版本。')
+        };
+      case 'extension_too_old':
+        return {
+          title: tx('Extension Update Required', '需要更新扩展'),
+          subtitle: tx('The native host requires a newer Chrome extension.', 'Native host 需要更新的 Chrome 扩展。'),
+          summary: tx('The installed native host is newer than this extension can safely use.', '已安装的 native host 比当前扩展更新，当前扩展不能安全使用。'),
+          nextStep: tx('Update the Chrome extension, reload Overleaf, then check the local connection again.', '更新 Chrome 扩展，重新加载 Overleaf 后再检查本机连接。')
+        };
+      default:
+        return {
+          title: tx('Native Host Not Compatible', 'Native Host 不兼容'),
+          subtitle: tx('The local bridge did not match this extension.', '本机桥接服务与当前扩展不匹配。'),
+          summary: tx('The native host response could not be accepted by this extension.', '当前扩展不能接受 native host 的响应。'),
+          nextStep: tx('Update the native host and Chrome extension, then check again.', '更新 native host 和 Chrome 扩展后再检查。')
+        };
+    }
+  }
+
+  function formatNativeCompatibilityBullets(compatibility = {}) {
+    const native = compatibility.native || {};
+    return [
+      tx(`Status: ${compatibility.status || 'unknown'}`, `状态：${compatibility.status || 'unknown'}`),
+      tx(`Extension version: ${compatibility.extensionVersion || 'unknown'}`, `扩展版本：${compatibility.extensionVersion || 'unknown'}`),
+      tx(`Native version: ${native.version || 'unknown'}`, `Native 版本：${native.version || 'unknown'}`),
+      tx(`Native protocol: ${formatNativeProtocolVersion(native)}`, `Native 协议：${formatNativeProtocolVersion(native)}`)
+    ];
+  }
+
+  function formatNativeProtocolVersion(native = {}) {
+    const protocolVersion = native.protocolVersion ?? 'unknown';
+    const range = native.supportedProtocol;
+    if (range && Number.isInteger(range.min) && Number.isInteger(range.max)) {
+      return `${protocolVersion} (${range.min}-${range.max})`;
+    }
+    return String(protocolVersion);
+  }
+
+  function formatNativeCompatibilityTechnicalDetails(compatibility = {}, response = {}) {
+    const native = compatibility.native || {};
+    const capabilities = native.capabilities && typeof native.capabilities === 'object'
+      ? Object.keys(native.capabilities).sort()
+      : [];
+    return JSON.stringify({
+      status: compatibility.status || 'unknown',
+      extensionVersion: compatibility.extensionVersion || '',
+      nativeVersion: native.version || '',
+      protocolVersion: native.protocolVersion ?? null,
+      supportedProtocol: native.supportedProtocol || null,
+      capabilityKeys: capabilities,
+      errorCode: response?.error?.code || '',
+      errorMessage: response?.error?.message || ''
+    }, null, 2);
   }
 
   async function inspectPageStateDiagnostics() {
@@ -4610,11 +4740,106 @@
   }
 
   function sendNative(payload) {
-    return nativeChannel.sendNative(payload);
+    return (async () => {
+      const compatibilityGate = await ensureNativeCompatibilityForMethod(payload?.method);
+      if (!compatibilityGate.ok) {
+        return compatibilityGate.response;
+      }
+      return nativeChannel.sendNative(attachNativeCompatibilityEvidence(payload, compatibilityGate.compatibility));
+    })();
   }
 
   function sendBackgroundNative(payload) {
-    return nativeChannel.sendBackgroundNative(payload);
+    return (async () => {
+      const compatibilityGate = await ensureNativeCompatibilityForMethod(payload?.method);
+      if (!compatibilityGate.ok) {
+        return compatibilityGate.response;
+      }
+      return nativeChannel.sendBackgroundNative(attachNativeCompatibilityEvidence(payload, compatibilityGate.compatibility));
+    })();
+  }
+
+  async function ensureNativeCompatibilityForMethod(method) {
+    if (!NATIVE_COMPATIBILITY_GATED_METHODS.has(method)) {
+      return { ok: true };
+    }
+
+    const params = CodexOverleafCompatibility?.buildBridgePingParams
+      ? CodexOverleafCompatibility.buildBridgePingParams(getExtensionCompatibilityMetadata())
+      : {};
+    const response = await nativeChannel.sendBackgroundNative({
+      method: 'bridge.ping',
+      params
+    });
+    const compatibility = CodexOverleafCompatibility?.evaluateNativeCompatibility
+      ? CodexOverleafCompatibility.evaluateNativeCompatibility(response, getExtensionCompatibilityMetadata())
+      : fallbackNativeCompatibility(response);
+    const allowed = CodexOverleafCompatibility?.isNativeMethodAllowed
+      ? CodexOverleafCompatibility.isNativeMethodAllowed(method, compatibility)
+      : compatibility.status === 'ok';
+    if (allowed) {
+      return { ok: true, compatibility };
+    }
+
+    const message = formatNativeCompatibilityBlockedMessage(method, compatibility);
+    const error = {
+      code: 'native_incompatible',
+      message,
+      status: compatibility.status || 'unknown_native',
+      installCommand: compatibility.installCommand || INSTALL_COMMAND
+    };
+    notifyNativeCompatibilityBlocked(message);
+    return {
+      ok: false,
+      compatibility,
+      response: {
+        ok: false,
+        error
+      }
+    };
+  }
+
+  function attachNativeCompatibilityEvidence(payload = {}, compatibility) {
+    if (!compatibility || !NATIVE_COMPATIBILITY_GATED_METHODS.has(payload?.method)) {
+      return payload;
+    }
+    return {
+      ...payload,
+      params: {
+        ...(payload.params || {}),
+        nativeCompatibility: compatibility
+      }
+    };
+  }
+
+  function notifyNativeCompatibilityBlocked(message) {
+    if (currentRunView) {
+      appendRunEvent({
+        title: message,
+        status: 'failed'
+      });
+      return;
+    }
+    showPluginToast(message, { status: 'failed', sticky: true });
+  }
+
+  function formatNativeCompatibilityBlockedMessage(method, compatibility = {}) {
+    const statusValue = compatibility.status || 'unknown_native';
+    const params = { method: method || 'native request' };
+    switch (statusValue) {
+      case 'native_too_old':
+        return tr('nativeCompatibilityBlockedNativeTooOld', params);
+      case 'extension_too_old':
+        return tr('nativeCompatibilityBlockedExtensionTooOld', params);
+      case 'protocol_unsupported':
+        return tr('nativeCompatibilityBlockedProtocol', params);
+      case 'native_unhealthy':
+        return tr('nativeCompatibilityBlockedUnhealthy', params);
+      case 'native_missing':
+        return tr('nativeCompatibilityBlockedMissing', params);
+      default:
+        return tr('nativeCompatibilityBlockedGeneric', params);
+    }
   }
 
   async function callPageBridge(method, params) {

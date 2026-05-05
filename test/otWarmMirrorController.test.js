@@ -96,6 +96,45 @@ test('buildPatchFilesRequest sends only native patch fields for valid OT events'
   });
 });
 
+test('buildPatchFilesRequest can carry native compatibility evidence for background run gates', () => {
+  const request = Controller.buildPatchFilesRequest({
+    projectId: 'project-123',
+    nativeCompatibility: {
+      status: 'ok',
+      extensionVersion: '0.4.0'
+    },
+    events: [
+      {
+        path: 'main.tex',
+        baseHash: 'base-hash',
+        nextContent: 'new'
+      }
+    ]
+  });
+
+  assert.deepEqual(request.params.nativeCompatibility, {
+    status: 'ok',
+    extensionVersion: '0.4.0'
+  });
+});
+
+test('controller exposes a mirror.patchFiles compatibility check', () => {
+  const compatibility = require('../extension/src/shared/compatibility');
+  const sandbox = {
+    globalThis: {
+      CodexOverleafCompatibility: compatibility
+    }
+  };
+  vm.runInNewContext(`
+    const compatibility = globalThis.CodexOverleafCompatibility;
+    globalThis.result = (${Controller.isNativePatchFilesAllowed.toString()})({ status: 'native_too_old' });
+  `, sandbox);
+
+  assert.equal(typeof Controller.isNativePatchFilesAllowed, 'function');
+  assert.equal(Controller.isNativePatchFilesAllowed({ status: 'ok' }), true);
+  assert.equal(sandbox.globalThis.result, false);
+});
+
 test('buildPatchFilesRequest omits non-primitive OT metadata', () => {
   const request = Controller.buildPatchFilesRequest({
     projectId: 'project-123',

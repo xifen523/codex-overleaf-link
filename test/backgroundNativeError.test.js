@@ -4,7 +4,22 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
+const compatibility = require('../extension/src/shared/compatibility');
 const backgroundPath = path.join(__dirname, '../extension/src/background.js');
+const COMPATIBILITY_REQUIRED_METHODS = [
+  'codex.run',
+  'task.run',
+  'task.confirm',
+  'mirror.sync',
+  'mirror.patchFiles',
+  'codex.history.clearPlugin'
+];
+const RECOVERABLE_METHODS = [
+  'bridge.ping',
+  'mirror.status',
+  'codex.models',
+  'codex.cancel'
+];
 
 function readBackground() {
   return fs.readFileSync(backgroundPath, 'utf8');
@@ -52,6 +67,31 @@ test('background classifies native request retry safety by method', () => {
   assert.match(background, /case 'task\.run':[\s\S]*?return 'no_silent_retry'/);
 });
 
+test('background loads the shared compatibility helper before handling native requests', () => {
+  const background = readBackground();
+
+  assert.match(background, /importScripts\(['"]shared\/compatibility\.js['"]\)/);
+  assert.match(background, /CodexOverleafCompatibility\.isNativeMethodAllowed/);
+});
+
+test('background uses the compatibility policy for required and recoverable methods', () => {
+  const background = readBackground();
+
+  for (const method of COMPATIBILITY_REQUIRED_METHODS) {
+    assert.equal(compatibility.isNativeMethodAllowed(method, 'native_too_old'), false, `${method} should require compatible native`);
+    assert.equal(compatibility.isNativeMethodAllowed(method, 'ok'), true, `${method} should be allowed when compatible`);
+    assert.match(background, new RegExp(method.replace(/[.]/g, '\\.')));
+  }
+
+  for (const method of RECOVERABLE_METHODS) {
+    const expected = method === 'codex.models'
+      ? compatibility.isNativeMethodAllowed(method, 'native_too_old')
+      : compatibility.isNativeMethodAllowed(method, 'native_missing');
+    assert.equal(expected, true, `${method} should remain available for recovery or read-only fallback`);
+    assert.match(background, new RegExp(method.replace(/[.]/g, '\\.')));
+  }
+});
+
 test('background tracks per-request native retry state and handles disconnect centrally', () => {
   const background = readBackground();
 
@@ -62,6 +102,35 @@ test('background tracks per-request native retry state and handles disconnect ce
   assert.match(background, /pendingRequest\.finalResponseReceived\s*=\s*true/);
   assert.match(background, /function handlePortDisconnect\(errorMessage\)/);
   assert.match(background, /function canRetryNativeRequest\(pendingRequest\)/);
+});
+
+test('background blocks side-effecting native requests with non-ok compatibility evidence before posting', async () => {
+  const harness = loadBackgroundHarness();
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const runResponse = harness.sendNative({
+    id: 'run-incompatible',
+    method: 'codex.run',
+    params: {
+      task: 'write',
+      nativeCompatibility: {
+        status: 'native_too_old',
+        installCommand: compatibility.buildInstallCommand()
+      }
+    }
+  }, sender);
+
+  assert.equal(harness.ports.length, 0);
+
+  const blockedRun = await settleWithin(runResponse);
+  assert.equal(blockedRun.ok, false);
+  assert.equal(blockedRun.error.code, 'native_incompatible');
+  assert.match(blockedRun.error.message, /Native host/i);
 });
 
 test('background retries safe status after disconnect while failing codex.run without restart', async () => {
@@ -581,7 +650,7 @@ function loadBackgroundHarness(options = {}) {
     }
   };
 
-  vm.runInNewContext(readBackground(), {
+  const sandbox = {
     chrome,
     crypto: {
       randomUUID() {
@@ -589,8 +658,20 @@ function loadBackgroundHarness(options = {}) {
         return `uuid-${uuidCounter}`;
       }
     },
+    importScripts(...scriptPaths) {
+      for (const scriptPath of scriptPaths) {
+        if (scriptPath === 'shared/compatibility.js') {
+          sandbox.CodexOverleafCompatibility = compatibility;
+          continue;
+        }
+        throw new Error(`Unexpected importScripts path: ${scriptPath}`);
+      }
+    },
     URL
-  });
+  };
+  sandbox.globalThis = sandbox;
+
+  vm.runInNewContext(readBackground(), sandbox);
 
   assert.equal(typeof onMessageListener, 'function');
 

@@ -12,7 +12,7 @@
   const OT_MAX_PATCH_BATCH = 25;
   const PAUSE_STATES = new Set(['running', 'writing', 'undoing', 'compiling']);
 
-  function buildPatchFilesRequest({ projectId, events } = {}) {
+  function buildPatchFilesRequest({ projectId, events, nativeCompatibility } = {}) {
     const files = [];
     for (const event of Array.isArray(events) ? events : []) {
       if (files.length >= OT_MAX_PATCH_BATCH) {
@@ -44,14 +44,29 @@
       files.push(file);
     }
 
+    const params = {
+      projectId,
+      source: 'ot',
+      files
+    };
+    if (isNativeCompatibilityEvidence(nativeCompatibility)) {
+      params.nativeCompatibility = nativeCompatibility;
+    }
+
     return {
       method: 'mirror.patchFiles',
-      params: {
-        projectId,
-        source: 'ot',
-        files
-      }
+      params
     };
+  }
+
+  function isNativePatchFilesAllowed(nativeCompatibility) {
+    const compatibility = typeof globalThis !== 'undefined'
+      ? globalThis.CodexOverleafCompatibility
+      : null;
+    if (compatibility && typeof compatibility.isNativeMethodAllowed === 'function') {
+      return compatibility.isNativeMethodAllowed('mirror.patchFiles', nativeCompatibility);
+    }
+    return !nativeCompatibility || nativeCompatibility.status === 'ok';
   }
 
   function shouldPauseOtWarmMirror(state) {
@@ -132,6 +147,10 @@
     return ['string', 'number', 'boolean'].includes(typeof value);
   }
 
+  function isNativeCompatibilityEvidence(value) {
+    return value && typeof value === 'object' && typeof value.status === 'string';
+  }
+
   function getPauseStateName(state) {
     if (typeof state === 'string') {
       return state;
@@ -158,6 +177,7 @@
     OT_MAX_PATCH_BATCH,
     buildPatchFilesRequest,
     canUseOtWarmStart,
+    isNativePatchFilesAllowed,
     normalizePath,
     normalizePaths,
     shouldPauseOtWarmMirror
