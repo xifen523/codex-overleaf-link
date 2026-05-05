@@ -5,7 +5,11 @@ const path = require('node:path');
 const test = require('node:test');
 
 const packageJson = require('../package.json');
-const { getProjectMirror } = require('../native-host/src/mirrorWorkspace');
+const {
+  getProjectMirror,
+  patchMirrorFiles,
+  syncOverleafToMirror
+} = require('../native-host/src/mirrorWorkspace');
 const { handleRequest } = require('../native-host/src/taskRunner');
 
 function fixtureAgentEnv(fixtureName, extra = {}) {
@@ -31,6 +35,40 @@ function loadTaskRunnerWithFakeRunner(fakeRunner) {
   require.cache[runnerPath].exports = originalRunner;
   delete require.cache[taskRunnerPath];
   return taskRunner;
+}
+
+function makeMirrorStale(projectId, rootDir, ageMs = 10 * 60 * 1000) {
+  const mirror = getProjectMirror(projectId, { rootDir });
+  const baseline = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+  const staleAt = new Date(Date.now() - ageMs).toISOString();
+  fs.writeFileSync(mirror.baselinePath, JSON.stringify({
+    ...baseline,
+    capturedAt: staleAt,
+    lastFullSyncAt: staleAt
+  }, null, 2), 'utf8');
+}
+
+async function seedStaleOtFreshMirror({ projectId, rootDir }) {
+  await syncOverleafToMirror({
+    projectId,
+    rootDir,
+    project: {
+      capabilities: { fullProjectSnapshot: true },
+      files: [
+        { path: 'main.tex', content: 'old main' },
+        { path: 'refs.bib', content: '@article{old}' }
+      ]
+    }
+  });
+  const mirror = getProjectMirror(projectId, { rootDir });
+  const baseline = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+  const mainEntry = baseline.files.find(file => file.path === 'main.tex');
+  await patchMirrorFiles({
+    projectId,
+    rootDir,
+    files: [{ path: 'main.tex', baseHash: mainEntry.hash, nextContent: 'fresh main' }]
+  });
+  makeMirrorStale(projectId, rootDir);
 }
 
 test('bridge.ping returns bridge metadata', async () => {
@@ -268,6 +306,104 @@ test('codex.run rejects focused partial snapshots with unusable focused file con
   assert.equal(response.ok, false);
   assert.equal(response.error.code, 'codex_run_requires_snapshot_evidence');
   assert.equal(calls, 0);
+});
+
+test('codex.run accepts stale project mirror only for explicitly focused OT-fresh reuse', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-stale-ot-'));
+  const projectId = 'stale-ot-focused-project';
+  let calls = 0;
+  let seenParams = null;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async ({ params }) => {
+    calls++;
+    seenParams = params;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  try {
+    await seedStaleOtFreshMirror({ projectId, rootDir });
+
+    const response = await handleWithFakeRunner({
+      id: 'codex-stale-ot-focused',
+      method: 'codex.run',
+      params: {
+        projectId,
+        mode: 'ask',
+        task: '检查 main.tex',
+        useExistingMirror: true,
+        otWarmStart: true,
+        warmStartStrategy: 'ot-warm-mirror',
+        restrictToFocusFiles: true,
+        focusFiles: ['@file:/main.tex'],
+        expectedMirrorFreshness: 1
+      }
+    }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
+
+    assert.equal(response.ok, true);
+    assert.equal(calls, 1);
+    assert.equal(seenParams.skipMirrorSync, true);
+    assert.equal(seenParams.useExistingMirror, true);
+    assert.equal(seenParams.otWarmStart, true);
+    assert.equal(seenParams.restrictToFocusFiles, true);
+    assert.deepEqual(seenParams.focusFiles, ['@file:/main.tex']);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('codex.run rejects stale OT warm mirror reuse without focused fresh coverage', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-stale-ot-reject-'));
+  const projectId = 'stale-ot-reject-project';
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  try {
+    await seedStaleOtFreshMirror({ projectId, rootDir });
+
+    const noFocusResponse = await handleWithFakeRunner({
+      id: 'codex-stale-ot-no-focus',
+      method: 'codex.run',
+      params: {
+        projectId,
+        mode: 'ask',
+        task: '检查 project',
+        useExistingMirror: true,
+        otWarmStart: true,
+        warmStartStrategy: 'ot-warm-mirror',
+        restrictToFocusFiles: true,
+        focusFiles: [],
+        expectedMirrorFreshness: 1
+      }
+    }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
+
+    const missingCoverageResponse = await handleWithFakeRunner({
+      id: 'codex-stale-ot-missing-focus',
+      method: 'codex.run',
+      params: {
+        projectId,
+        mode: 'ask',
+        task: '检查 refs.bib',
+        useExistingMirror: true,
+        otWarmStart: true,
+        warmStartStrategy: 'ot-warm-mirror',
+        restrictToFocusFiles: true,
+        focusFiles: ['refs.bib'],
+        expectedMirrorFreshness: 1
+      }
+    }, { CODEX_OVERLEAF_MIRROR_ROOT: rootDir });
+
+    assert.equal(noFocusResponse.ok, false);
+    assert.equal(noFocusResponse.error.code, 'mirror_stale');
+    assert.match(noFocusResponse.error.message, /requires focused files/);
+    assert.equal(missingCoverageResponse.ok, false);
+    assert.equal(missingCoverageResponse.error.code, 'mirror_stale');
+    assert.match(missingCoverageResponse.error.message, /not OT-fresh: refs\.bib/);
+    assert.equal(calls, 0);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
 });
 
 test('codex.history.clearPlugin removes only the requested plugin Codex thread history', async () => {

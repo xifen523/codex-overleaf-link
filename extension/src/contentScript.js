@@ -1396,11 +1396,12 @@
         return;
       }
 
-      const focusFiles = getActiveFocusFiles();
-      const warmStart = await resolveWarmRunStart({ focusFiles: getActiveFocusFiles(), mode: submittedMode });
+      let focusFiles = getActiveFocusFiles();
+      const warmStart = await resolveWarmRunStart({ focusFiles, mode: submittedMode });
       let project = warmStart.project || null;
       let useExistingMirror = warmStart.useExistingMirror;
       let fileOverlays = warmStart.fileOverlays || null;
+      let otWarmStart = warmStart.otWarmStart === true;
       if (!useExistingMirror) {
         appendRunEvent({
           title: tx('Syncing the Overleaf project to the local Codex workspace.', '正在同步 Overleaf 项目到本地 Codex workspace。'),
@@ -1447,6 +1448,13 @@
       if (warmMirrorReuse.useExistingMirror) {
         useExistingMirror = true;
         fileOverlays = warmMirrorReuse.fileOverlays;
+        otWarmStart = warmMirrorReuse.otWarmStart === true;
+        if (warmMirrorReuse.otWarmStart) {
+          if (Array.isArray(warmMirrorReuse.focusFiles) && warmMirrorReuse.focusFiles.length) {
+            focusFiles = warmMirrorReuse.focusFiles;
+          }
+          restrictToFocusFiles = true;
+        }
         appendRunEvent({
           title: warmMirrorReuse.warmStart
             ? tr('warmMirrorReuseTitle')
@@ -1500,6 +1508,7 @@
           useExistingMirror,
           fileOverlays,
           focusFiles,
+          otWarmStart,
           restrictToFocusFiles,
           codexThreadId,
           compileLogContext,
@@ -1520,6 +1529,7 @@
         project = staleRetry.project;
         useExistingMirror = false;
         fileOverlays = null;
+        otWarmStart = false;
         restrictToFocusFiles = staleRetry.restrictToFocusFiles;
         response = await sendNative({
           method: 'codex.run',
@@ -1529,6 +1539,7 @@
             useExistingMirror: false,
             fileOverlays: null,
             focusFiles,
+            otWarmStart,
             restrictToFocusFiles,
             codexThreadId,
             compileLogContext,
@@ -1558,6 +1569,7 @@
               useExistingMirror,
               fileOverlays,
               focusFiles,
+              otWarmStart,
               restrictToFocusFiles,
               codexThreadId: '',
               compileLogContext,
@@ -1973,6 +1985,7 @@
     useExistingMirror,
     fileOverlays,
     focusFiles,
+    otWarmStart,
     restrictToFocusFiles,
     codexThreadId,
     compileLogContext,
@@ -1986,6 +1999,7 @@
       useExistingMirror,
       fileOverlays,
       focusFiles,
+      otWarmStart,
       restrictToFocusFiles,
       codexThreadId,
       compileLogContext,
@@ -3285,6 +3299,28 @@
     const focusFiles = taskContext.focusFiles || [];
     const mode = taskContext.mode || state?.mode;
     const mirrorStatus = await getMirrorFreshness();
+    const otWarmStart = otWarmMirrorController.canUseOtWarmStart({
+      enabled: isExperimentalOtEnabled(),
+      focusFiles,
+      mirrorStatus
+    });
+    if (otWarmStart.ok) {
+      return {
+        useExistingMirror: true,
+        warmStart: true,
+        otWarmStart: true,
+        reason: 'ot_focus_fresh',
+        mirrorStatus,
+        focusFiles: otWarmStart.focusFiles,
+        project: {
+          capabilities: {
+            fullProjectSnapshot: false,
+            method: 'ot-warm-mirror'
+          },
+          files: []
+        }
+      };
+    }
     if (!mirrorStatus?.exists || !isMirrorReusable(mirrorStatus)) {
       return { useExistingMirror: false, reason: 'mirror_not_fresh', mirrorStatus };
     }

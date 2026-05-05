@@ -97,7 +97,14 @@ async function handleCodexRun(request, env, emit) {
       const maxFreshness = params.expectedMirrorFreshness || 15000;
 
       if (!status.exists || !Number.isFinite(status.ageMs) || status.ageMs > maxFreshness) {
-        return errorResponse(request.id, 'mirror_stale', `Mirror is ${status.ageMs}ms old (max ${maxFreshness}ms)`);
+        const otWarmMirrorReuse = validateOtFocusedWarmMirrorReuse(params, status);
+        if (!otWarmMirrorReuse.ok) {
+          return errorResponse(
+            request.id,
+            'mirror_stale',
+            otWarmMirrorReuse.message || `Mirror is ${status.ageMs}ms old (max ${maxFreshness}ms)`
+          );
+        }
       }
 
       if (Array.isArray(params.fileOverlays) && params.fileOverlays.length) {
@@ -191,6 +198,55 @@ function hasRunnableProjectSnapshotEvidence(params = {}) {
     evidenceFiles.set(filePath, file);
   }
   return normalizedFocusFiles.every(filePath => evidenceFiles.has(filePath));
+}
+
+function validateOtFocusedWarmMirrorReuse(params = {}, status = {}) {
+  if (!isOtWarmMirrorReuseRequest(params)) {
+    return { ok: false };
+  }
+  if (status?.exists !== true) {
+    return {
+      ok: false,
+      message: 'OT warm mirror reuse requires an existing trusted mirror'
+    };
+  }
+  if (params.restrictToFocusFiles !== true) {
+    return {
+      ok: false,
+      message: 'OT warm mirror reuse requires restrictToFocusFiles=true'
+    };
+  }
+  const normalizedFocusFiles = normalizeSnapshotEvidencePaths(params.focusFiles);
+  if (!normalizedFocusFiles.length) {
+    return {
+      ok: false,
+      message: 'OT warm mirror reuse requires focused files'
+    };
+  }
+
+  const freshFiles = new Set();
+  for (const file of Array.isArray(status.otFreshFiles) ? status.otFreshFiles : []) {
+    if (file?.state !== 'fresh') {
+      continue;
+    }
+    const filePath = normalizeSnapshotEvidencePath(file.path);
+    if (filePath) {
+      freshFiles.add(filePath);
+    }
+  }
+  const missingFiles = normalizedFocusFiles.filter(filePath => !freshFiles.has(filePath));
+  if (missingFiles.length) {
+    return {
+      ok: false,
+      message: `OT warm mirror focused files are not OT-fresh: ${missingFiles.join(', ')}`
+    };
+  }
+
+  return { ok: true };
+}
+
+function isOtWarmMirrorReuseRequest(params = {}) {
+  return params.otWarmStart === true || params.warmStartStrategy === 'ot-warm-mirror';
 }
 
 function isUsableSnapshotEvidenceContent(content) {

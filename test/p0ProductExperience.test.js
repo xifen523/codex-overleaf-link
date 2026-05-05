@@ -390,6 +390,49 @@ test('warm send verifies a non-invasive current or focus overlay before reusing 
   assert.doesNotMatch(warmStartBody, /fullProjectSnapshot:\s*true[\s\S]*method:\s*'warm-mirror'/);
 });
 
+test('focused OT freshness is checked before project-level warm mirror freshness', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const otWarmMirrorController = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/otWarmMirrorController.js'),
+    'utf8'
+  );
+  const warmStartBody = contentScript.match(/async function resolveWarmRunStart[\s\S]*?\n  async function prepareMirrorStaleRetry/)?.[0] || '';
+
+  assert.match(warmStartBody, /otWarmMirrorController\.canUseOtWarmStart/);
+  assert.ok(
+    warmStartBody.indexOf('canUseOtWarmStart') < warmStartBody.indexOf('isMirrorReusable'),
+    'OT per-file freshness must be considered before project-level freshness rejects the mirror'
+  );
+  assert.match(warmStartBody, /enabled:\s*isExperimentalOtEnabled\(\)/);
+  assert.match(warmStartBody, /focusFiles/);
+  assert.match(warmStartBody, /otWarmStart:\s*true/);
+  assert.match(warmStartBody, /reason:\s*'ot_focus_fresh'/);
+  assert.match(warmStartBody, /fullProjectSnapshot:\s*false/);
+  assert.match(warmStartBody, /method:\s*'ot-warm-mirror'/);
+  assert.match(otWarmMirrorController, /reason:\s*'no_focus_files'/);
+  assert.doesNotMatch(warmStartBody, /otFreshFileCount/);
+});
+
+test('OT warm starts force focused run params for initial and thread-resume codex runs', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
+  const runParamBlocks = Array.from(runTaskBody.matchAll(/buildCodexRunParams\(\{[\s\S]*?submittedMode\s*\}/g))
+    .map(match => match[0]);
+
+  assert.match(runTaskBody, /if \(warmMirrorReuse\.otWarmStart\) \{[\s\S]*restrictToFocusFiles\s*=\s*true/);
+  assert.ok(runParamBlocks.length >= 3, 'initial, mirror-stale retry, and thread-resume run params should be visible');
+  for (const block of runParamBlocks) {
+    assert.match(block, /otWarmStart/);
+    assert.match(block, /restrictToFocusFiles/);
+  }
+});
+
 test('experimental OT warm mirror polls page OT events and patches the native mirror', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),

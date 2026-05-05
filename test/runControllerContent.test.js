@@ -144,6 +144,34 @@ test('focused partial runs restrict writeback to focused files', () => {
   assert.deepEqual(params.focusFiles, ['paper.tex']);
 });
 
+test('OT warm mirror runs carry an explicit marker while preserving focused restriction', () => {
+  const params = RunController.buildCodexRunParams({
+    currentProjectId: 'project-123',
+    state: {
+      mode: 'auto',
+      model: 'gpt-5.5',
+      reasoningEffort: 'xhigh',
+      session: { id: 'session-1' }
+    },
+    task: '检查 main.tex',
+    project: {
+      capabilities: { fullProjectSnapshot: false, method: 'ot-warm-mirror' },
+      files: []
+    },
+    useExistingMirror: true,
+    otWarmStart: true,
+    focusFiles: ['main.tex'],
+    restrictToFocusFiles: true
+  });
+
+  assert.equal(params.useExistingMirror, true);
+  assert.equal(params.project, undefined);
+  assert.equal(params.otWarmStart, true);
+  assert.equal(params.warmStartStrategy, 'ot-warm-mirror');
+  assert.equal(params.restrictToFocusFiles, true);
+  assert.deepEqual(params.focusFiles, ['main.tex']);
+});
+
 test('focused full-project runs still restrict writeback to focused files', () => {
   assert.equal(
     RunController.shouldRestrictWritebackToFocus({
