@@ -38,7 +38,10 @@ export function buildRelease(options = {}) {
   const extensionZipPath = path.join(outputDir, extensionZipName);
   const nativeTarballPath = path.join(outputDir, nativeTarballName);
   const trackedFiles = getGitTrackedFiles(rootDir);
+  const releaseInputFiles = getReleaseInputFiles(trackedFiles);
 
+  assertSafeReleaseOutputDir({ rootDir, outputDir });
+  assertCleanTrackedReleaseInputs({ rootDir, relativePaths: releaseInputFiles });
   prepareReleaseOutputDir({ rootDir, outputDir });
 
   createExtensionZip({ rootDir, outputPath: extensionZipPath, trackedFiles });
@@ -168,6 +171,22 @@ export function parseBuildReleaseArgs(argv) {
   return parsed;
 }
 
+export function assertCleanTrackedReleaseInputs({ rootDir, relativePaths }) {
+  const dirtyFiles = getDirtyTrackedFiles({
+    rootDir,
+    relativePaths: [...new Set(relativePaths.map(validateTrackedRelativePath))].sort()
+  });
+  if (dirtyFiles.length === 0) {
+    return;
+  }
+
+  throw new Error([
+    'Tracked release input files have uncommitted changes:',
+    ...dirtyFiles.map((relativePath) => `- ${relativePath}`),
+    'Commit or stash these changes before building release artifacts.'
+  ].join('\n'));
+}
+
 function prepareReleaseOutputDir({ rootDir, outputDir }) {
   assertSafeReleaseOutputDir({ rootDir, outputDir });
   fs.rmSync(outputDir, { recursive: true, force: true });
@@ -225,6 +244,50 @@ function getGitTrackedFiles(rootDir) {
     throw new Error(`Unable to list git-tracked files: ${result.stderr || result.stdout}`);
   }
   return new Set(result.stdout.split('\0').filter(Boolean).map(validateTrackedRelativePath));
+}
+
+function getReleaseInputFiles(trackedFiles) {
+  return [...new Set([
+    'CHANGELOG.md',
+    ...getNativeTarballFiles(trackedFiles),
+    ...getExtensionArchiveFiles(trackedFiles).map((relativePath) => `extension/${relativePath}`)
+  ])].sort();
+}
+
+function getDirtyTrackedFiles({ rootDir, relativePaths }) {
+  if (relativePaths.length === 0) {
+    return [];
+  }
+
+  const result = spawnSync('git', ['status', '--porcelain=v1', '-z', '--', ...relativePaths], {
+    cwd: rootDir,
+    encoding: 'utf8'
+  });
+  if (result.error && result.error.code === 'ENOENT') {
+    throw new Error('Required command "git" was not found on PATH.');
+  }
+  if (result.status !== 0) {
+    throw new Error(`Unable to inspect release input status: ${result.stderr || result.stdout}`);
+  }
+  return parseDirtyTrackedStatus(result.stdout);
+}
+
+function parseDirtyTrackedStatus(output) {
+  const entries = output.split('\0').filter(Boolean);
+  const dirtyFiles = [];
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index];
+    const status = entry.slice(0, 2);
+    const relativePath = entry.slice(3);
+    if (status === '??') {
+      continue;
+    }
+    dirtyFiles.push(validateTrackedRelativePath(relativePath));
+    if (status[0] === 'R' || status[0] === 'C') {
+      index += 1;
+    }
+  }
+  return [...new Set(dirtyFiles)].sort();
 }
 
 function getExtensionArchiveFiles(trackedFiles) {

@@ -406,6 +406,39 @@ test('release archives exclude untracked files under packaged directories', (t) 
   }
 });
 
+test('build-release refuses dirty tracked packaged files before writing artifacts', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-dirty-tracked-'));
+  const outputDir = path.join(tempDir, 'out');
+  const trackedFile = path.join(repoRoot, 'extension/src/shared/summary.js');
+  const originalContent = fs.readFileSync(trackedFile);
+
+  try {
+    fs.writeFileSync(
+      trackedFile,
+      Buffer.concat([originalContent, Buffer.from('\n// codex-overleaf dirty release test\n')])
+    );
+
+    const result = spawnSync(process.execPath, [
+      path.join(repoRoot, 'scripts/build-release.mjs'),
+      '--output',
+      outputDir
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8'
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /tracked release input files have uncommitted changes/i);
+    assert.match(result.stderr, /commit or stash/i);
+    assert.match(result.stderr, /extension\/src\/shared\/summary\.js/);
+    assert.equal(fs.existsSync(path.join(outputDir, 'release-manifest.json')), false);
+    assert.equal(fs.existsSync(path.join(outputDir, 'codex-overleaf-link-extension-v0.3.0.zip')), false);
+  } finally {
+    fs.writeFileSync(trackedFile, originalContent);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('build-release creates expected artifacts and metadata', (t) => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
   const version = pkg.version;
