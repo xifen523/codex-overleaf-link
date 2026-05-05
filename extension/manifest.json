@@ -42,6 +42,7 @@
         "src/shared/storageDb.js",
         "src/shared/storageMigration.js",
         "src/shared/compileAdapter.js",
+        "src/shared/compatibility.js",
         "src/content/nativeChannel.js",
         "src/content/writebackController.js",
         "src/content/runController.js",

@@ -3,6 +3,11 @@
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const { buildOperationSummary, splitDeletePlan } = require('../../extension/src/shared/summary');
+const {
+  BUILD_TARGET_VERSION,
+  REQUIRED_CAPABILITIES,
+  SUPPORTED_NATIVE_PROTOCOL
+} = require('../../extension/src/shared/compatibility');
 const { runCodexSession } = require('./codexSessionRunner');
 const { resolveCodexModels } = require('./codexModels');
 const { clearPluginCodexHistory } = require('./codexHome');
@@ -26,6 +31,9 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
       host: HOST_NAME,
       platform: 'darwin',
       protocolVersion: 1,
+      supportedProtocol: { ...SUPPORTED_NATIVE_PROTOCOL },
+      capabilities: Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true])),
+      minExtensionVersion: BUILD_TARGET_VERSION,
       version: PACKAGE_VERSION,
       environment: summarizeNativeEnvironment(env)
     });

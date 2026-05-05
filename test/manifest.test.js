@@ -74,6 +74,15 @@ test('content script loads shared model catalog before the panel script', () => 
   assert.ok(scripts.indexOf('src/shared/models.js') < scripts.indexOf('src/contentScript.js'));
 });
 
+test('content script loads shared compatibility before native and panel scripts', () => {
+  const scripts = extensionManifest.content_scripts[0].js;
+  const compatibilityIndex = scripts.indexOf('src/shared/compatibility.js');
+
+  assert.ok(compatibilityIndex > -1);
+  assert.ok(compatibilityIndex < scripts.indexOf('src/content/nativeChannel.js'));
+  assert.ok(compatibilityIndex < scripts.indexOf('src/contentScript.js'));
+});
+
 test('manifest loads and exposes read-only OT page dependencies', () => {
   const scripts = extensionManifest.content_scripts[0].js;
   const resources = extensionManifest.web_accessible_resources[0].resources;

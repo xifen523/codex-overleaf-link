@@ -11,6 +11,12 @@ const {
   syncOverleafToMirror
 } = require('../native-host/src/mirrorWorkspace');
 const { handleRequest } = require('../native-host/src/taskRunner');
+const compatibility = require('../extension/src/shared/compatibility');
+const {
+  BUILD_TARGET_VERSION,
+  MIN_NATIVE_VERSION,
+  REQUIRED_CAPABILITIES
+} = compatibility;
 
 function fixtureAgentEnv(fixtureName, extra = {}) {
   return {
@@ -75,6 +81,25 @@ async function seedStaleOtFreshMirror({ projectId, rootDir }) {
   makeMirrorStale(projectId, rootDir);
 }
 
+function isVersionAtLeast(version, minimum) {
+  const left = parseVersion(version);
+  const right = parseVersion(minimum);
+  if (!left || !right) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return left[index] > right[index];
+    }
+  }
+  return true;
+}
+
+function parseVersion(version) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(version));
+  return match ? match.slice(1).map(Number) : null;
+}
+
 test('bridge.ping returns bridge metadata', async () => {
   const response = await handleRequest({ id: '1', method: 'bridge.ping', params: {} }, {
     CODEX_OVERLEAF_CODEX_PATH: '/opt/homebrew/bin/codex',
@@ -86,8 +111,25 @@ test('bridge.ping returns bridge metadata', async () => {
   assert.equal(response.result.host, 'com.codex.overleaf');
   assert.equal(response.result.platform, 'darwin');
   assert.equal(response.result.version, packageJson.version);
+  assert.deepEqual(response.result.supportedProtocol, { min: 1, max: 1 });
+  assert.deepEqual(
+    response.result.capabilities,
+    Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true]))
+  );
+  assert.equal(response.result.minExtensionVersion, '0.4.0');
   assert.equal(response.result.environment.codex.ok, true);
   assert.deepEqual(response.result.environment.latex.available, ['latexmk']);
+});
+
+test('real bridge.ping compatibility follows package version metadata', async () => {
+  const response = await handleRequest({ id: 'compat-real', method: 'bridge.ping', params: {} }, {
+    CODEX_OVERLEAF_CODEX_PATH: '/opt/homebrew/bin/codex'
+  });
+  const result = compatibility.evaluateNativeCompatibility(response, { version: BUILD_TARGET_VERSION });
+  const expectedStatus = isVersionAtLeast(packageJson.version, MIN_NATIVE_VERSION) ? 'ok' : 'native_too_old';
+
+  assert.equal(response.result.version, packageJson.version);
+  assert.equal(result.status, expectedStatus);
 });
 
 test('codex.models returns a usable fallback model list', async () => {
