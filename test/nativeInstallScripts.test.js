@@ -7,6 +7,8 @@ const test = require('node:test');
 
 const { DEFAULT_CHROME_EXTENSION_ID } = require('../native-host/src/manifest');
 
+const CANONICAL_V040_INSTALL_COMMAND = 'CODEX_OVERLEAF_REF=v0.4.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.4.0/install.sh)"';
+
 test('native install script defaults to the committed extension id', () => {
   const source = fs.readFileSync(
     path.join(__dirname, '../scripts/install-native-host.mjs'),
@@ -52,6 +54,7 @@ test('native install runtime includes package metadata required by bridge ping',
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /Runtime package version: 0\.4\.0/);
     const runtimePackagePath = path.join(runtimeRoot, 'package.json');
     assert.equal(fs.existsSync(runtimePackagePath), true);
     const runtimePackage = JSON.parse(fs.readFileSync(runtimePackagePath, 'utf8'));
@@ -70,8 +73,11 @@ test('repository ships a one-command macOS installer', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
 
   assert.match(installer, /CODEX_OVERLEAF_INSTALL_DIR/);
+  assert.match(installer, /CODEX_OVERLEAF_REF/);
   assert.match(installer, /github\.com\/Ghqqqq\/codex-overleaf-link\.git/);
   assert.match(installer, /scripts\/install-native-host\.mjs/);
+  assert.match(installer, /Package version/);
+  assert.match(installer, /Extension path/);
   assert.match(installer, /chrome:\/\/extensions/);
   assert.match(installer, /extension/);
   assert.match(installer, /CODEX_OVERLEAF_EXTENSION_LINK/);
@@ -83,6 +89,22 @@ test('repository ships a one-command macOS installer', () => {
   assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash/);
   assert.match(readme, /~\/Codex Overleaf Link Extension/);
   assert.doesNotMatch(readme, /select `~\/\.codex-overleaf\/source\/extension`/);
+});
+
+test('README documents v0.4 install, update, release artifacts, and Web Store extension id flow', () => {
+  const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
+
+  assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash/);
+  assert.ok(readme.includes(CANONICAL_V040_INSTALL_COMMAND));
+  assert.match(readme, /codex-overleaf-link-extension-v0\.4\.0\.zip/);
+  assert.match(readme, /loadable Chrome extension/i);
+  assert.match(readme, /codex-overleaf-native-host-v0\.4\.0\.tar\.gz/);
+  assert.match(readme, /native host runtime/i);
+  assert.match(readme, /install\.sh/);
+  assert.match(readme, /uninstall-native-host\.mjs/);
+  assert.match(readme, /native host update required/i);
+  assert.match(readme, /CODEX_OVERLEAF_EXTENSION_ID/);
+  assert.match(readme, /allowed_origins/);
 });
 
 test('one-command installer works on macOS Bash 3.2 when extension id is unset', () => {
@@ -101,6 +123,8 @@ test('one-command installer works on macOS Bash 3.2 when extension id is unset',
     '  target=""',
     '  for arg in "$@"; do target="$arg"; done',
     '  mkdir -p "$target/.git"',
+    '  mkdir -p "$target/extension"',
+    '  printf \'{"version":"0.4.0"}\\n\' > "$target/package.json"',
     '  exit 0',
     'fi',
     'exit 0'
@@ -108,6 +132,9 @@ test('one-command installer works on macOS Bash 3.2 when extension id is unset',
   fs.writeFileSync(path.join(binDir, 'node'), [
     '#!/bin/bash',
     `for arg in "$@"; do printf '%s\\n' "$arg"; done > "${nodeLog}"`,
+    'echo "Installed Native Messaging host manifest: $HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.overleaf.json"',
+    'echo "Bridge executable: $HOME/.codex-overleaf/codex-overleaf-bridge"',
+    'echo "Runtime root: $HOME/.codex-overleaf/native-host-runtime"',
     'exit 0'
   ].join('\n'));
   fs.writeFileSync(path.join(binDir, 'open'), [
@@ -136,6 +163,14 @@ test('one-command installer works on macOS Bash 3.2 when extension id is unset',
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /CODEX_OVERLEAF_REF: main/);
+  assert.match(result.stdout, /Package version: 0\.4\.0/);
+  assert.match(result.stdout, /Installed Native Messaging host manifest:/);
+  assert.match(result.stdout, /Bridge executable:/);
+  assert.match(result.stdout, /Runtime root:/);
+  assert.ok(result.stdout.includes(`Extension path: ${path.join(installDir, 'extension')}`));
+  assert.match(result.stdout, /Reload the Chrome extension/);
+  assert.match(result.stdout, /Refresh the Overleaf page/);
   const nodeArgs = fs.readFileSync(nodeLog, 'utf8');
   assert.match(nodeArgs, /scripts\/install-native-host\.mjs/);
   assert.doesNotMatch(nodeArgs, /--extension-id/);

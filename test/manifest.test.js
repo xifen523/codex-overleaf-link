@@ -13,19 +13,18 @@ const {
 } = require('../native-host/src/manifest');
 const extensionManifest = require('../extension/manifest.json');
 
-test('release metadata is prepared for v0.3.0', () => {
+test('release metadata is prepared for v0.4.0', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
   const changelog = fs.readFileSync(path.join(__dirname, '../CHANGELOG.md'), 'utf8');
 
-  assert.equal(packageJson.version, '0.3.0');
+  assert.equal(packageJson.version, '0.4.0');
   assert.equal(extensionManifest.version, packageJson.version);
-  assert.match(readme, /version-0\.3\.0-blue/);
-  assert.match(readme, /The OT warm mirror is experimental, off by default/);
-  assert.match(changelog, /## v0\.3\.0 - 2026-05-06/);
-  assert.match(changelog, /Experimental read-only OT warm mirror for focused Overleaf editor changes/);
-  assert.match(changelog, /verified native `mirror\.patchFiles` updates/);
-  assert.match(changelog, /Moved the experimental OT control out of the composer toolbar/);
-  assert.match(changelog, /Full snapshot sync remains the project-level source of truth and fallback/);
+  assert.match(readme, /version-0\.4\.0-blue/);
+  assert.match(readme, /CODEX_OVERLEAF_REF=v0\.4\.0 bash -c "\$\(curl -fsSL https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/v0\.4\.0\/install\.sh\)"/);
+  assert.match(changelog, /## v0\.4\.0 - 2026-05-06/);
+  assert.match(changelog, /Compatibility diagnostics/);
+  assert.match(changelog, /release artifacts/);
+  assert.match(changelog, /Chrome Web Store preparation/);
 });
 
 test('validates Chrome extension ids', () => {

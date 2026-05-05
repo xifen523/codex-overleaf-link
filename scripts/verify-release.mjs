@@ -52,15 +52,11 @@ export function collectReleaseVerificationErrors(options = {}) {
 
 export function collectChromeWebStoreDocErrors(rootDir) {
   const docsDir = path.join(rootDir, 'docs', 'chrome-web-store');
-  if (!fs.existsSync(docsDir)) {
-    return [];
-  }
-
   const errors = [];
   for (const fileName of CHROME_WEB_STORE_DOCS) {
     const docPath = path.join(docsDir, fileName);
     if (!fs.existsSync(docPath)) {
-      errors.push(`docs/chrome-web-store/${fileName} is required when Chrome Web Store docs are present.`);
+      errors.push(`docs/chrome-web-store/${fileName} is required for v0.4 release verification.`);
     }
   }
   return errors;

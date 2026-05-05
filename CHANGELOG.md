@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.4.0 - 2026-05-06
+
+Distribution and update foundation release. This version keeps the v0.3 sync and writeback behavior intact while adding compatibility diagnostics, release artifacts, installer update guidance, and Chrome Web Store preparation material.
+
+### Added
+
+- Compatibility diagnostics for missing, old, future, protocol-incompatible, or unhealthy native hosts.
+- Native request gates that block execution and mirror mutation when the installed native host is not compatible with the extension.
+- Reproducible GitHub Release artifact generation for the Chrome extension package, native host runtime, installer scripts, checksums, and release manifest.
+- Chrome Web Store preparation docs for permissions, privacy posture, listing copy, and the pre-submission release checklist.
+
+### Changed
+
+- Bumped package and extension metadata to `0.4.0`.
+- Documented the v0.4.0 version-pinned installer command as the canonical update and native mismatch recovery path.
+- Improved installer output with source ref, checked-out package version, extension path, native host paths, and reload/refresh next steps.
+
+### Notes
+
+- Actual Chrome Web Store submission is outside v0.4.
+- Automatic native host updates are not included; updates remain explicit and user-driven.
+- The experimental OT warm mirror remains off by default and continues to fall back to full snapshots.
+
 ## v0.3.0 - 2026-05-06
 
 Experimental OT warm mirror release. This version focuses on reducing startup sync work for focused-file tasks while keeping the normal full snapshot path as the safe source of truth.

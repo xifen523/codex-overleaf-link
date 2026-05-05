@@ -15,6 +15,8 @@ need_command() {
 need_command git
 need_command node
 
+echo "CODEX_OVERLEAF_REF: $REF"
+
 mkdir -p "$(dirname "$INSTALL_DIR")"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
@@ -27,6 +29,11 @@ else
   git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
   git -C "$INSTALL_DIR" fetch --depth 1 origin "$REF"
   git -C "$INSTALL_DIR" checkout --detach FETCH_HEAD >/dev/null
+fi
+
+PACKAGE_VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$INSTALL_DIR/package.json" | head -n 1)"
+if [ -z "$PACKAGE_VERSION" ]; then
+  PACKAGE_VERSION="unknown"
 fi
 
 if [ -n "${CODEX_OVERLEAF_EXTENSION_ID:-}" ]; then
@@ -60,6 +67,8 @@ fi
 
 echo
 echo "Codex Overleaf Link native host is installed."
+echo "Package version: $PACKAGE_VERSION"
+echo "Extension path: $EXTENSION_DIR"
 echo
 echo "Chrome extension setup:"
 echo "  Chrome does not allow scripts to load unpacked extensions automatically."
@@ -69,7 +78,9 @@ if [ "$COPIED_EXTENSION_PATH" = "1" ]; then
   echo "  This folder path has also been copied to your clipboard."
 fi
 echo
-echo "After loading or reloading the extension, refresh the Overleaf page."
+echo "Next steps:"
+echo "  1. Reload the Chrome extension in chrome://extensions."
+echo "  2. Refresh the Overleaf page."
 
 if command -v open >/dev/null 2>&1; then
   open -a "Google Chrome" "chrome://extensions" >/dev/null 2>&1 || open "chrome://extensions" >/dev/null 2>&1 || true

@@ -3,7 +3,7 @@
   <h1>Codex Overleaf Link</h1>
   <p><strong>Empower Overleaf with Codex.</strong></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="version">
+    <img src="https://img.shields.io/badge/version-0.4.0-blue" alt="version">
     <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="platform">
     <img src="https://img.shields.io/badge/chrome-MV3-green" alt="chrome manifest v3">
     <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="node version">
@@ -29,8 +29,16 @@ Codex Overleaf Link bridges the two: it adds a Codex panel directly inside Overl
 
 ## Install
 
+Latest source install:
+
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh?$(date +%s)" | bash
+```
+
+Version-pinned install or update for v0.4.0:
+
+```bash
+CODEX_OVERLEAF_REF=v0.4.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.4.0/install.sh)"
 ```
 
 The installer opens Chrome's extension page, opens Finder to the extension folder, and copies the folder path.
@@ -57,15 +65,25 @@ Then load `extension/` as an unpacked extension in Chrome.
 <details>
 <summary><strong>Update</strong></summary>
 
-Rerun the same install command — it pulls the latest and reinstalls the native host:
+For a deterministic v0.4.0 update, run the pinned command. This is also the native mismatch recovery command shown by the popup and panel when they report **Native host update required**:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh?$(date +%s)" | bash
+CODEX_OVERLEAF_REF=v0.4.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.4.0/install.sh)"
 ```
 
 Then reload the extension in `chrome://extensions` and refresh the Overleaf page.
 
 </details>
+
+## GitHub Release Artifacts
+
+The v0.4.0 GitHub Release contains:
+
+- `codex-overleaf-link-extension-v0.4.0.zip`: loadable Chrome extension package for unpacked or Web Store inspection.
+- `codex-overleaf-native-host-v0.4.0.tar.gz`: native host runtime files used by the installer and release verification.
+- `install.sh`: version-pinned macOS installer for installing or updating the source checkout and native host.
+- `uninstall-native-host.mjs`: native host uninstaller that removes the Chrome Native Messaging manifest, bridge executable, and runtime copy.
+- `SHA256SUMS` and `release-manifest.json`: checksum and artifact metadata for release verification.
 
 <details>
 <summary><strong>Uninstall</strong></summary>
@@ -152,6 +170,8 @@ If Chrome assigns a different id, reinstall the native host with the actual id:
 ```bash
 cd ~/.codex-overleaf/source && npm run install:native -- --extension-id <your-chrome-extension-id>
 ```
+
+For Chrome Web Store builds, record the final Web Store extension id before publishing the native-host installer guidance. Pass that id with `CODEX_OVERLEAF_EXTENSION_ID=<web-store-extension-id>` when running `install.sh`, or with `--extension-id <web-store-extension-id>` when running `scripts/install-native-host.mjs`, so the native manifest `allowed_origins` entry matches the installed extension.
 
 ## Development
 

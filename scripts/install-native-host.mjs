@@ -34,6 +34,7 @@ const manifest = buildHostManifest({
 });
 
 installRuntime(installRoot);
+const runtimePackageVersion = readRuntimePackageVersion(path.join(installRoot, 'package.json'));
 fs.mkdirSync(path.dirname(bridgePath), { recursive: true });
 fs.writeFileSync(bridgePath, buildLauncherScript({
   nodePath: process.execPath,
@@ -47,6 +48,7 @@ fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
 console.log(`Installed Native Messaging host manifest: ${manifestPath}`);
 console.log(`Bridge executable: ${bridgePath}`);
 console.log(`Runtime root: ${installRoot}`);
+console.log(`Runtime package version: ${runtimePackageVersion}`);
 console.log(`Allowed Chrome extension id: ${extensionId}`);
 
 function installRuntime(targetRoot) {
@@ -72,6 +74,15 @@ function copyDirectory(source, target) {
 function copyFile(source, target) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.copyFileSync(source, target);
+}
+
+function readRuntimePackageVersion(packagePath) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+    return typeof pkg.version === 'string' && pkg.version ? pkg.version : 'unknown';
+  } catch {
+    return 'unknown';
+  }
 }
 
 function parseArgs(argv) {

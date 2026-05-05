@@ -98,6 +98,15 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   );
 }
 
+function writeChromeWebStoreDocs(rootDir) {
+  const docsDir = path.join(rootDir, 'docs/chrome-web-store');
+  fs.mkdirSync(docsDir, { recursive: true });
+  fs.writeFileSync(path.join(docsDir, 'permissions.md'), 'nativeMessaging\nstorage\nhttps://www.overleaf.com/project/*\nhttps://overleaf.com/project/*\nno broad host permissions\n');
+  fs.writeFileSync(path.join(docsDir, 'privacy.md'), 'no hosted backend\n~/.codex-overleaf/projects\n~/.codex-overleaf/codex-home\nCodex CLI account\nno default telemetry\ndiagnostics exclude project content\n');
+  fs.writeFileSync(path.join(docsDir, 'listing.md'), 'Short description\nDetailed description\nFeature bullets\nSupport\n128 icon\nscreenshots\nsmall promo image\noptional marquee image\n');
+  fs.writeFileSync(path.join(docsDir, 'release-checklist.md'), 'npm test\nnpm run verify:release\nnpm run build:release\nverify checksums\ninspect extension zip\nWeb Store extension id\noutside v0.4\n');
+}
+
 test('package exposes release verification and artifact build commands', () => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
 
@@ -222,23 +231,23 @@ test('release verifier catches CHANGELOG heading date mismatch', async () => {
   }
 });
 
-test('release verifier checks Chrome Web Store docs only when docs directory exists', async () => {
+test('release verifier requires Chrome Web Store prep docs for v0.4 releases', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-docs-'));
   try {
-    writeReleaseFixture(tempDir);
+    writeReleaseFixture(tempDir, {
+      packageVersion: '0.4.0'
+    });
     const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
     const { collectReleaseVerificationErrors } = await import(moduleUrl);
-
-    assert.deepEqual(collectReleaseVerificationErrors({ rootDir: tempDir, releaseDate: '2026-05-06' }), []);
-
-    const docsDir = path.join(tempDir, 'docs/chrome-web-store');
-    fs.mkdirSync(docsDir, { recursive: true });
-    fs.writeFileSync(path.join(docsDir, 'permissions.md'), 'permissions\n');
 
     const missingDocErrors = collectReleaseVerificationErrors({
       rootDir: tempDir,
       releaseDate: '2026-05-06'
     });
+    assert.ok(
+      missingDocErrors.some((error) => /docs\/chrome-web-store\/permissions\.md/.test(error)),
+      missingDocErrors.join('\n')
+    );
     assert.ok(
       missingDocErrors.some((error) => /docs\/chrome-web-store\/privacy\.md/.test(error)),
       missingDocErrors.join('\n')
@@ -252,13 +261,51 @@ test('release verifier checks Chrome Web Store docs only when docs directory exi
       missingDocErrors.join('\n')
     );
 
-    for (const fileName of ['privacy.md', 'listing.md', 'release-checklist.md']) {
-      fs.writeFileSync(path.join(docsDir, fileName), `${fileName}\n`);
-    }
+    writeChromeWebStoreDocs(tempDir);
     assert.deepEqual(collectReleaseVerificationErrors({ rootDir: tempDir, releaseDate: '2026-05-06' }), []);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('Chrome Web Store prep docs describe current permissions and privacy posture', () => {
+  const docsDir = path.join(repoRoot, 'docs/chrome-web-store');
+  const permissions = readText(path.join(docsDir, 'permissions.md'));
+  const privacy = readText(path.join(docsDir, 'privacy.md'));
+  const listing = readText(path.join(docsDir, 'listing.md'));
+  const checklist = readText(path.join(docsDir, 'release-checklist.md'));
+
+  assert.match(permissions, /nativeMessaging/);
+  assert.match(permissions, /local native bridge/i);
+  assert.match(permissions, /storage/);
+  assert.match(permissions, /local extension preferences/i);
+  assert.match(permissions, /https:\/\/www\.overleaf\.com\/project\/\*/);
+  assert.match(permissions, /https:\/\/overleaf\.com\/project\/\*/);
+  assert.match(permissions, /no broad host permissions/i);
+
+  assert.match(privacy, /no hosted backend/i);
+  assert.match(privacy, /~\/\.codex-overleaf\/projects/);
+  assert.match(privacy, /~\/\.codex-overleaf\/codex-home/);
+  assert.match(privacy, /Codex CLI account/i);
+  assert.match(privacy, /no default telemetry/i);
+  assert.match(privacy, /diagnostics exclude project content/i);
+
+  assert.match(listing, /short description/i);
+  assert.match(listing, /detailed description/i);
+  assert.match(listing, /feature bullets/i);
+  assert.match(listing, /support/i);
+  assert.match(listing, /128 icon/i);
+  assert.match(listing, /screenshots/i);
+  assert.match(listing, /small promo image/i);
+  assert.match(listing, /optional marquee image/i);
+
+  assert.match(checklist, /npm test/);
+  assert.match(checklist, /npm run verify:release/);
+  assert.match(checklist, /npm run build:release/);
+  assert.match(checklist, /verify checksums/i);
+  assert.match(checklist, /inspect extension zip/i);
+  assert.match(checklist, /Web Store extension id/i);
+  assert.match(checklist, /outside v0\.4/i);
 });
 
 test('release verifier CLI exits 1 on metadata mismatch', () => {
@@ -510,7 +557,7 @@ test('build-release refuses dirty tracked packaged files before writing artifact
     assert.match(result.stderr, /commit or stash/i);
     assert.match(result.stderr, /extension\/src\/shared\/summary\.js/);
     assert.equal(fs.existsSync(path.join(outputDir, 'release-manifest.json')), false);
-    assert.equal(fs.existsSync(path.join(outputDir, 'codex-overleaf-link-extension-v0.3.0.zip')), false);
+    assert.equal(fs.existsSync(path.join(outputDir, `codex-overleaf-link-extension-v${readJson(path.join(repoRoot, 'package.json')).version}.zip`)), false);
   } finally {
     fs.writeFileSync(trackedFile, originalContent);
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -546,7 +593,7 @@ test('build-release refuses packaged files staged for deletion from HEAD', () =>
     assert.match(result.stderr, /commit or stash/i);
     assert.match(result.stderr, /extension\/src\/shared\/summary\.js/);
     assert.equal(fs.existsSync(path.join(outputDir, 'release-manifest.json')), false);
-    assert.equal(fs.existsSync(path.join(outputDir, 'codex-overleaf-link-extension-v0.3.0.zip')), false);
+    assert.equal(fs.existsSync(path.join(outputDir, `codex-overleaf-link-extension-v${readJson(path.join(repoRoot, 'package.json')).version}.zip`)), false);
   } finally {
     fs.writeFileSync(trackedFile, originalContent);
     spawnSync('git', ['restore', '--staged', '--', relativePath], {
