@@ -439,6 +439,47 @@ test('build-release refuses dirty tracked packaged files before writing artifact
   }
 });
 
+test('build-release refuses packaged files staged for deletion from HEAD', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-staged-delete-'));
+  const outputDir = path.join(tempDir, 'out');
+  const relativePath = 'extension/src/shared/summary.js';
+  const trackedFile = path.join(repoRoot, relativePath);
+  const originalContent = fs.readFileSync(trackedFile);
+
+  try {
+    const removeResult = spawnSync('git', ['rm', '--cached', relativePath], {
+      cwd: repoRoot,
+      encoding: 'utf8'
+    });
+    assert.equal(removeResult.status, 0, removeResult.stderr || removeResult.stdout);
+    assert.equal(fs.existsSync(trackedFile), true);
+
+    const result = spawnSync(process.execPath, [
+      path.join(repoRoot, 'scripts/build-release.mjs'),
+      '--output',
+      outputDir
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8'
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /tracked release input files have uncommitted changes/i);
+    assert.match(result.stderr, /commit or stash/i);
+    assert.match(result.stderr, /extension\/src\/shared\/summary\.js/);
+    assert.equal(fs.existsSync(path.join(outputDir, 'release-manifest.json')), false);
+    assert.equal(fs.existsSync(path.join(outputDir, 'codex-overleaf-link-extension-v0.3.0.zip')), false);
+  } finally {
+    fs.writeFileSync(trackedFile, originalContent);
+    spawnSync('git', ['restore', '--staged', '--', relativePath], {
+      cwd: repoRoot,
+      encoding: 'utf8'
+    });
+    fs.writeFileSync(trackedFile, originalContent);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('build-release creates expected artifacts and metadata', (t) => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
   const version = pkg.version;

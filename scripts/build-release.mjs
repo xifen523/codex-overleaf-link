@@ -38,7 +38,11 @@ export function buildRelease(options = {}) {
   const extensionZipPath = path.join(outputDir, extensionZipName);
   const nativeTarballPath = path.join(outputDir, nativeTarballName);
   const trackedFiles = getGitTrackedFiles(rootDir);
-  const releaseInputFiles = getReleaseInputFiles(trackedFiles);
+  const headTrackedFiles = getGitHeadTrackedFiles(rootDir);
+  const releaseInputFiles = getReleaseInputFilesForProvenance({
+    headTrackedFiles,
+    indexTrackedFiles: trackedFiles
+  });
 
   assertSafeReleaseOutputDir({ rootDir, outputDir });
   assertCleanTrackedReleaseInputs({ rootDir, relativePaths: releaseInputFiles });
@@ -244,6 +248,27 @@ function getGitTrackedFiles(rootDir) {
     throw new Error(`Unable to list git-tracked files: ${result.stderr || result.stdout}`);
   }
   return new Set(result.stdout.split('\0').filter(Boolean).map(validateTrackedRelativePath));
+}
+
+function getGitHeadTrackedFiles(rootDir) {
+  const result = spawnSync('git', ['ls-tree', '-r', '-z', '--name-only', 'HEAD'], {
+    cwd: rootDir,
+    encoding: 'utf8'
+  });
+  if (result.error && result.error.code === 'ENOENT') {
+    throw new Error('Required command "git" was not found on PATH.');
+  }
+  if (result.status !== 0) {
+    throw new Error(`Unable to list HEAD-tracked files: ${result.stderr || result.stdout}`);
+  }
+  return new Set(result.stdout.split('\0').filter(Boolean).map(validateTrackedRelativePath));
+}
+
+function getReleaseInputFilesForProvenance({ headTrackedFiles, indexTrackedFiles }) {
+  return [...new Set([
+    ...getReleaseInputFiles(headTrackedFiles),
+    ...getReleaseInputFiles(indexTrackedFiles)
+  ])].sort();
 }
 
 function getReleaseInputFiles(trackedFiles) {
