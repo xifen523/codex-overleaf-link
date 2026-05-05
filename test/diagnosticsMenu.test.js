@@ -82,6 +82,9 @@ test('experimental OT diagnostics read metadata without draining project content
   assert.doesNotMatch(inspectBody, /drainOtEvents/);
   assert.match(inspectBody, /showDiagnosticsResult\(formatOtDiagnosticsResult\(\{ otStatus, mirrorStatus \}\)\)/);
   assert.match(inspectBody, /status:\s*'warning'/);
+  assert.doesNotMatch(inspectBody, /'warnings:'/);
+  assert.doesNotMatch(inspectBody, /warnings\.map/);
+  assert.doesNotMatch(inspectBody, /technical:\s*\[[\s\S]*warnings/);
   assert.match(formatBody, /isExperimentalOtEnabled\(\)/);
   assert.match(formatBody, /formatOtStatusLabel/);
   assert.match(formatBody, /lastOtPatchAt/);

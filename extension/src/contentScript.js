@@ -1236,27 +1236,38 @@
     const projectId = getCurrentProjectId();
     let otStatus = null;
     let mirrorStatus = null;
-    const warnings = [];
+    let metadataWarning = false;
 
     try {
       otStatus = await callPageBridge('getOtStatus', { projectId });
       if (otStatus?.ok === false) {
-        warnings.push(formatOtDiagnosticValue(otStatus.error, 'getOtStatus failed'));
+        metadataWarning = true;
+        otStatus = {
+          ...otStatus,
+          lastErrorCode: 'get_ot_status_failed'
+        };
       }
     } catch (error) {
-      warnings.push(error?.message || String(error));
+      metadataWarning = true;
+      otStatus = {
+        ok: false,
+        status: 'unavailable',
+        lastErrorCode: 'get_ot_status_failed'
+      };
     }
 
     try {
       mirrorStatus = await getMirrorFreshness();
       if (!mirrorStatus) {
-        warnings.push(tx('Native mirror status is unavailable.', '本机 mirror 状态暂时不可用。'));
+        metadataWarning = true;
+        mirrorStatus = { lastOtErrorCode: 'mirror_status_unavailable' };
       }
     } catch (error) {
-      warnings.push(error?.message || String(error));
+      metadataWarning = true;
+      mirrorStatus = { lastOtErrorCode: 'mirror_status_failed' };
     }
 
-    if (!warnings.length) {
+    if (!metadataWarning) {
       showDiagnosticsResult(formatOtDiagnosticsResult({ otStatus, mirrorStatus }));
       return;
     }
@@ -1265,12 +1276,7 @@
     showDiagnosticsResult({
       ...result,
       status: 'warning',
-      summary: `${result.summary} ${tx('Some OT diagnostic metadata is unavailable.', '部分 OT 诊断元数据暂时不可用。')}`,
-      technical: [
-        result.technical,
-        'warnings:',
-        ...warnings.map(warning => `- ${formatOtDiagnosticValue(warning, 'unknown')}`)
-      ].filter(Boolean).join('\n')
+      summary: `${result.summary} ${tx('Some OT diagnostic metadata is unavailable.', '部分 OT 诊断元数据暂时不可用。')}`
     });
   }
 
