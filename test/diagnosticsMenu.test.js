@@ -71,6 +71,7 @@ test('experimental OT diagnostics read metadata without draining project content
   const menuBody = contentScript.match(/panel\.querySelector\('\[data-diagnostics-menu\]'\)[\s\S]*?panel\.querySelector\('\[data-language-toggle\]'\)/)?.[0] || '';
   const inspectBody = contentScript.match(/async function inspectOtWarmMirrorDiagnostics\(\) \{[\s\S]*?\n  function formatOtDiagnosticsResult/)?.[0] || '';
   const formatBody = contentScript.match(/function formatOtDiagnosticsResult\(\{ otStatus, mirrorStatus \}\) \{[\s\S]*?\n  function /)?.[0] || '';
+  const technicalBody = contentScript.match(/function formatOtDiagnosticsTechnicalDetails\(metadata = \{\}\) \{[\s\S]*?\n  function formatOtChannelCandidates/)?.[0] || '';
 
   assert.match(menuBody, /\[data-diagnostics-ot\]/);
   assert.match(menuBody, /closeDiagnosticsMenu\(\)/);
@@ -88,6 +89,23 @@ test('experimental OT diagnostics read metadata without draining project content
   assert.match(formatBody, /channelCandidates/);
   assert.match(formatBody, /diagnosticsOtSummaryEnabled/);
   assert.match(formatBody, /diagnosticsOtSummaryDisabled/);
+  assert.match(technicalBody, /`strategy:/);
+  assert.match(technicalBody, /`queuedEventCount:/);
+  assert.match(technicalBody, /`lastEventAt:/);
+  assert.match(technicalBody, /`lastOtPatchAt:/);
+  assert.match(technicalBody, /`lastOtErrorCode:/);
+  assert.match(technicalBody, /`lastErrorCode:/);
+  assert.match(technicalBody, /`channelCandidates:/);
+  assert.doesNotMatch(technicalBody, /`enabled:/);
+  assert.doesNotMatch(technicalBody, /`fallback:/);
+  assert.doesNotMatch(technicalBody, /`status:/);
+  assert.doesNotMatch(technicalBody, /`state:/);
+  assert.doesNotMatch(technicalBody, /`running:/);
+  assert.doesNotMatch(technicalBody, /`activePath:/);
+  assert.doesNotMatch(technicalBody, /`mirrorExists:/);
+  assert.doesNotMatch(technicalBody, /`mirrorAgeMs:/);
+  assert.doesNotMatch(technicalBody, /`otFreshFileCount:/);
+  assert.doesNotMatch(technicalBody, /`otStaleFileCount:/);
   assert.doesNotMatch(formatBody, /nextContent/);
   assert.doesNotMatch(formatBody, /previousContent/);
   assert.doesNotMatch(formatBody, /\bops\b/);

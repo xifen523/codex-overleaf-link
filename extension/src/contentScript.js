@@ -1277,7 +1277,6 @@
   function formatOtDiagnosticsResult({ otStatus, mirrorStatus }) {
     const enabled = isExperimentalOtEnabled();
     const statusValue = normalizeOtStatus(otStatus ? readOtBridgeStatus(otStatus) : currentOtStatus);
-    const stateValue = normalizeOtStatus(otStatus?.state || statusValue);
     const queuedEventCount = normalizeOtDiagnosticsCount(otStatus?.queuedEventCount);
     const lastEventAt = formatOtDiagnosticValue(otStatus?.lastEventAt, tr('noneValue'));
     const lastOtPatchAt = formatOtDiagnosticValue(mirrorStatus?.lastOtPatchAt || otWarmMirrorState.lastPatchAt, tr('noneValue'));
@@ -1288,7 +1287,6 @@
       mirrorStatus?.otFreshFileCount,
       Array.isArray(mirrorStatus?.otFreshFiles) ? mirrorStatus.otFreshFiles.length : 0
     );
-    const otStaleFileCount = normalizeOtDiagnosticsCount(mirrorStatus?.otStaleFileCount);
     const fallback = !enabled || statusValue !== 'observing' || otFreshFileCount <= 0;
     const bridgeFailed = otStatus?.ok === false;
 
@@ -1304,22 +1302,12 @@
       ],
       nextStep: fallback ? tr('diagnosticsOtNextStep') : '',
       technical: formatOtDiagnosticsTechnicalDetails({
-        enabled,
-        fallback,
-        status: statusValue,
-        state: stateValue,
-        running: otStatus?.running === true,
         strategy: formatOtDiagnosticValue(otStatus?.strategy, 'unknown'),
-        activePath: formatOtDiagnosticValue(otStatus?.activePath, tr('noneValue')),
         queuedEventCount,
         lastEventAt,
         lastOtPatchAt,
         lastOtErrorCode,
         lastErrorCode,
-        mirrorExists: mirrorStatus?.exists === true,
-        mirrorAgeMs: formatOtDiagnosticValue(mirrorStatus?.ageMs, tr('noneValue')),
-        otFreshFileCount,
-        otStaleFileCount,
         channelCandidates
       })
     };
@@ -1327,22 +1315,12 @@
 
   function formatOtDiagnosticsTechnicalDetails(metadata = {}) {
     const lines = [
-      `enabled: ${Boolean(metadata.enabled)}`,
-      `fallback: ${Boolean(metadata.fallback)}`,
-      `status: ${metadata.status || 'unknown'}`,
-      `state: ${metadata.state || 'unknown'}`,
-      `running: ${Boolean(metadata.running)}`,
       `strategy: ${metadata.strategy || 'unknown'}`,
-      `activePath: ${metadata.activePath || tr('noneValue')}`,
       `queuedEventCount: ${metadata.queuedEventCount}`,
       `lastEventAt: ${metadata.lastEventAt || tr('noneValue')}`,
       `lastOtPatchAt: ${metadata.lastOtPatchAt || tr('noneValue')}`,
       `lastOtErrorCode: ${metadata.lastOtErrorCode || tr('noneValue')}`,
-      `lastErrorCode: ${metadata.lastErrorCode || tr('noneValue')}`,
-      `mirrorExists: ${Boolean(metadata.mirrorExists)}`,
-      `mirrorAgeMs: ${metadata.mirrorAgeMs || tr('noneValue')}`,
-      `otFreshFileCount: ${metadata.otFreshFileCount}`,
-      `otStaleFileCount: ${metadata.otStaleFileCount}`
+      `lastErrorCode: ${metadata.lastErrorCode || tr('noneValue')}`
     ];
     const candidates = Array.isArray(metadata.channelCandidates) ? metadata.channelCandidates : [];
     lines.push(`channelCandidates: ${candidates.length ? '' : tr('noneValue')}`);
