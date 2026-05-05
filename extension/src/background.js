@@ -64,6 +64,8 @@
         return 'safe_read_retry';
       case 'mirror.sync':
         return 'safe_sync_retry';
+      case 'mirror.patchFiles':
+        return 'safe_sync_retry';
       case 'codex.cancel':
         return 'best_effort';
       case 'codex.run':

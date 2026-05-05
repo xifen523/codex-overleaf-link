@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const packageJson = require('../package.json');
+const { getProjectMirror } = require('../native-host/src/mirrorWorkspace');
 const { handleRequest } = require('../native-host/src/taskRunner');
 
 function fixtureAgentEnv(fixtureName, extra = {}) {
@@ -85,6 +86,55 @@ test('codex.models returns models discovered from the Codex cache', async () => 
     assert.deepEqual(response.result.models.map(model => model.id), ['gpt-taskrunner-cache']);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('mirror.patchFiles applies a baseline-verified text patch without invoking Codex', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-patch-'));
+  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir };
+  let codexCalls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    codexCalls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  try {
+    const projectId = 'patch-files-project';
+    const syncResponse = await handleWithFakeRunner({
+      id: 'patch-sync',
+      method: 'mirror.sync',
+      params: {
+        projectId,
+        project: {
+          capabilities: { fullProjectSnapshot: true },
+          files: [{ path: 'main.tex', content: 'old' }]
+        }
+      }
+    }, env);
+
+    assert.equal(syncResponse.ok, true);
+
+    const mirror = getProjectMirror(projectId, { rootDir });
+    const baseline = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+    const mainTex = baseline.files.find(file => file.path === 'main.tex');
+    assert.ok(mainTex?.hash);
+
+    const patchResponse = await handleWithFakeRunner({
+      id: 'patch-files',
+      method: 'mirror.patchFiles',
+      params: {
+        projectId,
+        source: 'ot',
+        files: [{ path: 'main.tex', baseHash: mainTex.hash, nextContent: 'new' }]
+      }
+    }, env);
+
+    assert.equal(patchResponse.ok, true);
+    assert.equal(patchResponse.result.appliedCount, 1);
+    assert.equal(fs.readFileSync(path.join(mirror.workspacePath, 'main.tex'), 'utf8'), 'new');
+    assert.equal(codexCalls, 0);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
 

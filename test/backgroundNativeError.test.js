@@ -46,6 +46,7 @@ test('background classifies native request retry safety by method', () => {
   assert.match(background, /case 'bridge\.ping':[\s\S]*?return 'safe_read_retry'/);
   assert.match(background, /case 'mirror\.status':[\s\S]*?return 'safe_read_retry'/);
   assert.match(background, /case 'mirror\.sync':[\s\S]*?return 'safe_sync_retry'/);
+  assert.match(background, /case 'mirror\.patchFiles':[\s\S]*?return 'safe_sync_retry'/);
   assert.match(background, /case 'codex\.cancel':[\s\S]*?return 'best_effort'/);
   assert.match(background, /case 'codex\.run':[\s\S]*?return 'no_silent_retry'/);
   assert.match(background, /case 'task\.run':[\s\S]*?return 'no_silent_retry'/);
