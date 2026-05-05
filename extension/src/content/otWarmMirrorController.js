@@ -19,7 +19,11 @@
         break;
       }
       const filePath = normalizePath(event?.path);
-      if (!filePath || typeof event?.baseHash !== 'string' || !event.baseHash.trim()) {
+      if (!isSafeRelativePath(filePath) || typeof event?.baseHash !== 'string') {
+        continue;
+      }
+      const baseHash = event.baseHash.trim();
+      if (!baseHash) {
         continue;
       }
       if (typeof event.nextContent !== 'string') {
@@ -28,13 +32,13 @@
 
       const file = {
         path: filePath,
-        baseHash: event.baseHash,
+        baseHash,
         nextContent: event.nextContent
       };
-      if (Object.prototype.hasOwnProperty.call(event, 'observedVersion')) {
+      if (isPrimitiveMetadata(event.observedVersion)) {
         file.observedVersion = event.observedVersion;
       }
-      if (Object.prototype.hasOwnProperty.call(event, 'observedAt')) {
+      if (isPrimitiveMetadata(event.observedAt)) {
         file.observedAt = event.observedAt;
       }
       files.push(file);
@@ -83,9 +87,14 @@
     }
 
     if (normalizedFocusFiles.every(filePath => freshFiles.has(filePath))) {
-      return { ok: true, reason: 'ot_focus_fresh' };
+      return {
+        ok: true,
+        reason: 'ot_focus_fresh',
+        focusFiles: normalizedFocusFiles,
+        restrictToFocusFiles: true
+      };
     }
-    return { ok: false, reason: 'ot_focus_not_fresh' };
+    return { ok: false, reason: 'missing_ot_fresh_focus' };
   }
 
   function normalizePath(value) {
@@ -110,6 +119,17 @@
       paths.push(filePath);
     }
     return paths;
+  }
+
+  function isSafeRelativePath(filePath) {
+    if (!filePath) {
+      return false;
+    }
+    return !filePath.split('/').some(part => part === '.' || part === '..');
+  }
+
+  function isPrimitiveMetadata(value) {
+    return ['string', 'number', 'boolean'].includes(typeof value);
   }
 
   function getPauseStateName(state) {

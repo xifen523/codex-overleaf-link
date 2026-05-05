@@ -57,7 +57,7 @@ test('buildPatchFilesRequest sends only native patch fields for valid OT events'
     events: [
       {
         path: '@file:/main.tex',
-        baseHash: 'base-hash',
+        baseHash: ' base-hash ',
         nextHash: 'next-hash',
         previousContent: 'old',
         nextContent: 'new',
@@ -68,6 +68,9 @@ test('buildPatchFilesRequest sends only native patch fields for valid OT events'
         diagnostic: 'do not forward'
       },
       { path: '', baseHash: 'base-hash', nextContent: 'skip' },
+      { path: '../outside.tex', baseHash: 'base-hash', nextContent: 'skip' },
+      { path: 'a/../b.tex', baseHash: 'base-hash', nextContent: 'skip' },
+      { path: 'a/./b.tex', baseHash: 'base-hash', nextContent: 'skip' },
       { path: 'empty-base.tex', baseHash: '', nextContent: 'skip' },
       { path: 'blank-base.tex', baseHash: '   ', nextContent: 'skip' },
       { path: 'missing-content.tex', baseHash: 'base-hash' },
@@ -91,6 +94,55 @@ test('buildPatchFilesRequest sends only native patch fields for valid OT events'
       ]
     }
   });
+});
+
+test('buildPatchFilesRequest omits non-primitive OT metadata', () => {
+  const request = Controller.buildPatchFilesRequest({
+    projectId: 'project-123',
+    events: [
+      {
+        path: 'main.tex',
+        baseHash: 'base-hash',
+        nextContent: 'new',
+        observedVersion: ['version', { previousContent: 'raw text' }],
+        observedAt: { source: 'page', previousContent: 'raw text' }
+      },
+      {
+        path: 'appendix.tex',
+        baseHash: 'base-hash-2',
+        nextContent: 'new 2',
+        observedVersion: () => 42,
+        observedAt: Symbol('not-json')
+      },
+      {
+        path: 'valid-metadata.tex',
+        baseHash: 'base-hash-3',
+        nextContent: 'new 3',
+        observedVersion: 44,
+        observedAt: true
+      }
+    ]
+  });
+
+  assert.deepEqual(request.params.files, [
+    {
+      path: 'main.tex',
+      baseHash: 'base-hash',
+      nextContent: 'new'
+    },
+    {
+      path: 'appendix.tex',
+      baseHash: 'base-hash-2',
+      nextContent: 'new 2'
+    },
+    {
+      path: 'valid-metadata.tex',
+      baseHash: 'base-hash-3',
+      nextContent: 'new 3',
+      observedVersion: 44,
+      observedAt: true
+    }
+  ]);
 });
 
 test('buildPatchFilesRequest caps patch batches while preserving order', () => {
@@ -164,10 +216,12 @@ test('canUseOtWarmStart only allows normalized focused files covered by fresh OT
     }
   }), {
     ok: true,
-    reason: 'ot_focus_fresh'
+    reason: 'ot_focus_fresh',
+    focusFiles: ['main.tex', 'sections/intro.tex'],
+    restrictToFocusFiles: true
   });
 
-  assert.equal(Controller.canUseOtWarmStart({
+  assert.deepEqual(Controller.canUseOtWarmStart({
     enabled: true,
     focusFiles: ['main.tex', 'stale.tex'],
     mirrorStatus: {
@@ -177,9 +231,12 @@ test('canUseOtWarmStart only allows normalized focused files covered by fresh OT
         { path: 'stale.tex', state: 'stale' }
       ]
     }
-  }).ok, false);
+  }), {
+    ok: false,
+    reason: 'missing_ot_fresh_focus'
+  });
 
-  assert.equal(Controller.canUseOtWarmStart({
+  assert.deepEqual(Controller.canUseOtWarmStart({
     enabled: true,
     focusFiles: ['main.tex'],
     mirrorStatus: {
@@ -188,5 +245,8 @@ test('canUseOtWarmStart only allows normalized focused files covered by fresh OT
       otStaleFileCount: 0,
       otFreshFiles: []
     }
-  }).ok, false);
+  }), {
+    ok: false,
+    reason: 'missing_ot_fresh_focus'
+  });
 });
