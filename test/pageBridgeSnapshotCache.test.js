@@ -99,6 +99,41 @@ test('context file list falls back to strict project tree when ZIP is unavailabl
   ]);
 });
 
+test('context file list does not cache ZIP fallback as the exact project tree', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'sections/intro.tex': 'Intro',
+      'ref.bib': '@article{x}'
+    },
+    treePaths: [
+      ['main.tex']
+    ],
+    fetchMode: 'hang'
+  });
+
+  const fallback = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    zipTimeoutMs: 5,
+    maxAgeMs: 300000
+  });
+  bridge.setFetchMode('zip');
+  const exact = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    zipTimeoutMs: 5,
+    maxAgeMs: 300000
+  });
+
+  assert.equal(fallback.capabilities.method, 'overleaf-file-tree');
+  assert.deepEqual(Array.from(fallback.files, file => file.path), ['main.tex']);
+  assert.equal(exact.capabilities.method, 'overleaf-zip-file-list');
+  assert.deepEqual(Array.from(exact.files, file => file.path), [
+    'main.tex',
+    'sections/intro.tex',
+    'ref.bib'
+  ]);
+});
+
 test('context file list reconstructs nested folder paths from the Overleaf file tree', async () => {
   const bridge = createSnapshotHarness({
     files: {
@@ -438,6 +473,42 @@ test('run snapshots can include binary project assets for local LaTeX compilatio
   ]);
   assert.equal(result.files[1].contentBase64, Buffer.from('%PDF-test').toString('base64'));
   assert.equal(result.files[1].size, Buffer.byteLength('%PDF-test'));
+});
+
+test('binary asset overwrites are blocked when current Overleaf asset differs from baseline', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\includegraphics{Figures/plot.pdf}',
+      'Figures/plot.pdf': '%PDF-current'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    operations: [
+      {
+        type: 'overwrite-binary',
+        path: 'Figures/plot.pdf',
+        contentBase64: Buffer.from('%PDF-next').toString('base64'),
+        size: Buffer.byteLength('%PDF-next'),
+        previousExists: true
+      }
+    ],
+    baseFiles: [
+      {
+        path: 'Figures/plot.pdf',
+        kind: 'binary',
+        contentBase64: Buffer.from('%PDF-baseline').toString('base64'),
+        size: Buffer.byteLength('%PDF-baseline')
+      }
+    ],
+    requireReviewing: false,
+    requireEditing: false
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.code, 'stale_binary_asset');
 });
 
 test('full run snapshots prefer live active editor text over stale ZIP content', async () => {
@@ -935,9 +1006,20 @@ test('semantically different completed snapshot requests do not evict each other
   assert.equal(lightweightAgain.capabilities.diagnostics.snapshotCache, 'memory');
 });
 
-function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, fetchMode = 'zip', treePaths = null, internalState = {}, windowExtra = {}, onFetch = null, activePathKnown = true }) {
+function createSnapshotHarness({
+  files,
+  zipFiles = null,
+  docFetchFiles = null,
+  fetchMode: initialFetchMode = 'zip',
+  treePaths = null,
+  internalState = {},
+  windowExtra = {},
+  onFetch = null,
+  activePathKnown = true
+}) {
   const fileMap = new Map(Object.entries(files));
   const zipBuffer = createStoredZip(zipFiles || files);
+  let fetchMode = initialFetchMode;
   let listener = null;
   let fetchCount = 0;
   let openClickCount = 0;
@@ -1139,6 +1221,9 @@ function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, f
     },
     setActivePath(path) {
       selectedPath = path;
+    },
+    setFetchMode(mode) {
+      fetchMode = mode;
     }
   };
 
@@ -1171,6 +1256,9 @@ function createSnapshotHarness({ files, zipFiles = null, docFetchFiles = null, f
         textContent: part,
         parentElement,
         getAttribute(attribute) {
+          if (attribute === 'role') {
+            return 'treeitem';
+          }
           if (attribute === 'data-name' || attribute === 'aria-label' || attribute === 'title') {
             return part;
           }

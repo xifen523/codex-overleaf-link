@@ -92,19 +92,159 @@ test('plugin Codex home reuses local Codex skills and plugin config without link
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-home-'));
   const userCodexHome = path.join(home, '.codex');
   try {
-    fs.mkdirSync(path.join(userCodexHome, 'skills'), { recursive: true });
+    fs.mkdirSync(path.join(userCodexHome, 'skills', 'user-skill'), { recursive: true });
     fs.mkdirSync(path.join(userCodexHome, 'plugins'), { recursive: true });
     fs.mkdirSync(path.join(userCodexHome, 'rules'), { recursive: true });
     fs.mkdirSync(path.join(userCodexHome, 'sessions'), { recursive: true });
+    fs.writeFileSync(path.join(userCodexHome, 'skills', 'user-skill', 'SKILL.md'), '# User Skill\n', 'utf8');
 
     preparePluginCodexHome({ HOME: home });
     const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
 
-    assert.equal(fs.lstatSync(path.join(pluginHome, 'skills')).isSymbolicLink(), true);
-    assert.equal(normalizeLinkTarget(fs.readlinkSync(path.join(pluginHome, 'skills'))), path.join(userCodexHome, 'skills'));
+    assert.equal(fs.lstatSync(path.join(pluginHome, 'skills')).isDirectory(), true);
+    assert.equal(fs.lstatSync(path.join(pluginHome, 'skills', 'user-skill')).isSymbolicLink(), true);
+    assert.equal(
+      normalizeLinkTarget(fs.readlinkSync(path.join(pluginHome, 'skills', 'user-skill'))),
+      path.join(userCodexHome, 'skills', 'user-skill')
+    );
     assert.equal(fs.lstatSync(path.join(pluginHome, 'plugins')).isSymbolicLink(), true);
     assert.equal(fs.lstatSync(path.join(pluginHome, 'rules')).isSymbolicLink(), true);
     assert.equal(fs.existsSync(path.join(pluginHome, 'sessions')), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('plugin Codex home composes user and Codex Overleaf skills according to load toggles', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-skill-compose-'));
+  const userCodexHome = path.join(home, '.codex');
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  try {
+    fs.mkdirSync(path.join(userCodexHome, 'skills', 'global-style'), { recursive: true });
+    fs.mkdirSync(path.join(userCodexHome, 'superpowers', 'skills', 'brainstorming'), { recursive: true });
+    fs.mkdirSync(path.join(userCodexHome, 'plugins'), { recursive: true });
+    fs.mkdirSync(path.join(overleafSkillsRoot, 'overleaf-style'), { recursive: true });
+    fs.writeFileSync(path.join(userCodexHome, 'skills', 'global-style', 'SKILL.md'), '# Global Style\n', 'utf8');
+    fs.writeFileSync(path.join(userCodexHome, 'superpowers', 'skills', 'brainstorming', 'SKILL.md'), '# Brainstorming\n', 'utf8');
+    fs.writeFileSync(path.join(overleafSkillsRoot, 'overleaf-style', 'SKILL.md'), '# Overleaf Style\n', 'utf8');
+
+    preparePluginCodexHome({ HOME: home }, {
+      loadCodexLocalSkills: true,
+      loadCodexOverleafSkills: true
+    });
+
+    const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+    assert.equal(fs.lstatSync(path.join(pluginHome, 'skills', 'global-style')).isSymbolicLink(), true);
+    assert.equal(fs.lstatSync(path.join(pluginHome, 'skills', 'overleaf-style')).isSymbolicLink(), true);
+    assert.equal(fs.lstatSync(path.join(pluginHome, 'superpowers')).isSymbolicLink(), true);
+    assert.equal(fs.lstatSync(path.join(pluginHome, 'plugins')).isSymbolicLink(), true);
+    fs.mkdirSync(path.join(pluginHome, '.tmp', 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(pluginHome, '.tmp', 'plugins.sha'), 'old-plugin-cache', 'utf8');
+    fs.writeFileSync(path.join(pluginHome, '.tmp', 'app-server-remote-plugin-sync-v1'), 'old-plugin-cache', 'utf8');
+    fs.mkdirSync(path.join(pluginHome, 'cache', 'codex_apps_tools'), { recursive: true });
+
+    preparePluginCodexHome({ HOME: home }, {
+      loadCodexLocalSkills: false,
+      loadCodexOverleafSkills: true
+    });
+    assert.equal(fs.existsSync(path.join(pluginHome, 'skills', 'global-style')), false);
+    assert.equal(fs.lstatSync(path.join(pluginHome, 'skills', 'overleaf-style')).isSymbolicLink(), true);
+    assert.equal(fs.existsSync(path.join(pluginHome, 'superpowers')), false);
+    assert.equal(fs.existsSync(path.join(pluginHome, 'plugins')), false);
+    assert.equal(fs.existsSync(path.join(pluginHome, '.tmp', 'plugins')), false);
+    assert.equal(fs.existsSync(path.join(pluginHome, '.tmp', 'plugins.sha')), false);
+    assert.equal(fs.existsSync(path.join(pluginHome, '.tmp', 'app-server-remote-plugin-sync-v1')), false);
+    assert.equal(fs.existsSync(path.join(pluginHome, 'cache', 'codex_apps_tools')), false);
+
+    preparePluginCodexHome({ HOME: home }, {
+      loadCodexLocalSkills: false,
+      loadCodexOverleafSkills: false
+    });
+    assert.equal(fs.existsSync(path.join(pluginHome, 'skills')), false);
+    assert.equal(fs.existsSync(path.join(pluginHome, 'superpowers')), false);
+    assert.equal(fs.existsSync(path.join(pluginHome, 'plugins')), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('plugin Codex home strips local plugin config when Codex local skills are disabled', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-config-sanitize-'));
+  const userCodexHome = path.join(home, '.codex');
+  try {
+    fs.mkdirSync(userCodexHome, { recursive: true });
+    fs.writeFileSync(path.join(userCodexHome, 'config.toml'), [
+      'model = "gpt-5.5"',
+      'notify = ["/Users/example/.codex/plugins/cache/notifier", "turn-ended"]',
+      '',
+      '[features]',
+      'multi_agent = true',
+      '',
+      '[[skills.config]]',
+      'name = "superpowers:brainstorming"',
+      'enabled = true',
+      '',
+      '[plugins."github@openai-curated"]',
+      'enabled = true',
+      '',
+      '[mcp_servers.playwright]',
+      'command = "npx"',
+      '',
+      '[projects."/tmp/workspace"]',
+      'trust_level = "trusted"',
+      '',
+      '[marketplaces.openai-bundled]',
+      'source = "/Users/example/.codex/.tmp/bundled-marketplaces/openai-bundled"',
+      '',
+      '[model_providers.openai_official]',
+      'name = "OpenAI Official"'
+    ].join('\n'), 'utf8');
+
+    preparePluginCodexHome({ HOME: home }, {
+      loadCodexLocalSkills: false,
+      loadCodexOverleafSkills: true
+    });
+    const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+    const sanitizedConfig = fs.readFileSync(path.join(pluginHome, 'config.toml'), 'utf8');
+
+    assert.match(sanitizedConfig, /model = "gpt-5\.5"/);
+    assert.match(sanitizedConfig, /\[features\]/);
+    assert.match(sanitizedConfig, /\[projects\."\/tmp\/workspace"\]/);
+    assert.match(sanitizedConfig, /\[model_providers\.openai_official\]/);
+    assert.doesNotMatch(sanitizedConfig, /notify =/);
+    assert.doesNotMatch(sanitizedConfig, /\[\[skills\.config\]\]/);
+    assert.doesNotMatch(sanitizedConfig, /\[plugins\./);
+    assert.doesNotMatch(sanitizedConfig, /\[mcp_servers\./);
+    assert.doesNotMatch(sanitizedConfig, /\[marketplaces\./);
+
+    preparePluginCodexHome({ HOME: home }, {
+      loadCodexLocalSkills: true,
+      loadCodexOverleafSkills: true
+    });
+    const fullConfig = fs.readFileSync(path.join(pluginHome, 'config.toml'), 'utf8');
+    assert.match(fullConfig, /\[plugins\."github@openai-curated"\]/);
+    assert.match(fullConfig, /\[mcp_servers\.playwright\]/);
+    assert.match(fullConfig, /\[marketplaces\.openai-bundled\]/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('plugin Codex home can target persistent Codex Overleaf skills for installer turns', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-skill-install-home-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  try {
+    preparePluginCodexHome(env, {
+      installCodexOverleafSkillsTarget: true,
+      getNativeHostPlatform: () => 'darwin'
+    });
+
+    const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+    const pluginSkills = path.join(pluginHome, 'skills');
+    assert.equal(fs.lstatSync(pluginSkills).isSymbolicLink(), true);
+    assert.equal(normalizeLinkTarget(fs.readlinkSync(pluginSkills)), overleafSkillsRoot);
+    assert.equal(fs.statSync(overleafSkillsRoot).isDirectory(), true);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -119,7 +259,7 @@ test('plugin Codex home reports skipped links while preserving copied auth/confi
   const userCodexHome = path.join(home, '.codex');
   const originalSymlinkSync = fs.symlinkSync;
   try {
-    fs.mkdirSync(path.join(userCodexHome, 'skills'), { recursive: true });
+    fs.mkdirSync(path.join(userCodexHome, 'skills', 'user-skill'), { recursive: true });
     fs.writeFileSync(path.join(userCodexHome, 'auth.json'), '{"token":"user-token"}\n', 'utf8');
     fs.writeFileSync(path.join(userCodexHome, 'config.toml'), 'model = "gpt-5.5"\n', 'utf8');
     fs.symlinkSync = () => {
@@ -134,7 +274,7 @@ test('plugin Codex home reports skipped links while preserving copied auth/confi
     assert.equal(fs.readFileSync(path.join(pluginHome, 'auth.json'), 'utf8'), '{"token":"user-token"}\n');
     assert.equal(fs.readFileSync(path.join(pluginHome, 'config.toml'), 'utf8'), 'model = "gpt-5.5"\n');
     assert.deepEqual(prepared.linked, []);
-    assert.deepEqual(prepared.skippedLinks.map(link => [link.name, link.reason]), [['skills', 'EPERM']]);
+    assert.deepEqual(prepared.skippedLinks.map(link => [link.name, link.reason]), [['skills/user-skill', 'EPERM']]);
   } finally {
     fs.symlinkSync = originalSymlinkSync;
     fs.rmSync(home, { recursive: true, force: true });
@@ -148,7 +288,7 @@ test('Windows plugin Codex directory links request junction semantics', () => {
   const originalSymlinkSync = fs.symlinkSync;
   const calls = [];
   try {
-    fs.mkdirSync(path.join(userCodexHome, 'skills'), { recursive: true });
+    fs.mkdirSync(path.join(userCodexHome, 'skills', 'user-skill'), { recursive: true });
     fs.symlinkSync = (source, target, type) => {
       calls.push({ source, target, type });
     };
@@ -160,8 +300,8 @@ test('Windows plugin Codex directory links request junction semantics', () => {
 
     assert.deepEqual(prepared.linked, ['skills']);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].source, path.join(userCodexHome, 'skills'));
-    assert.equal(calls[0].target, path.join(pluginHome, 'skills'));
+    assert.equal(calls[0].source, path.join(userCodexHome, 'skills', 'user-skill'));
+    assert.equal(calls[0].target, path.join(pluginHome, 'skills', 'user-skill'));
     assert.equal(calls[0].type, 'junction');
   } finally {
     fs.symlinkSync = originalSymlinkSync;

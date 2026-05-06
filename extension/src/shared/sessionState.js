@@ -15,6 +15,8 @@
     locale: 'en',
     requireReviewing: true,
     autoOpen: true,
+    loadCodexLocalSkills: true,
+    loadCodexOverleafSkills: true,
     panelWidth: 380,
     task: '',
     focusFiles: [],
@@ -48,7 +50,8 @@
     historyChars: 1800,
     taskChars: 12000,
     sessionTitleChars: 80,
-    statusTextChars: 800
+    statusTextChars: 800,
+    attachmentPreviewChars: 768 * 1024
   };
   const STORAGE_AGGRESSIVE_LIMITS = {
     maxSessions: 4,
@@ -63,7 +66,8 @@
     historyChars: 400,
     taskChars: 2000,
     sessionTitleChars: 80,
-    statusTextChars: 400
+    statusTextChars: 400,
+    attachmentPreviewChars: 160 * 1024
   };
 
   function normalizePanelState(input = {}, options = {}) {
@@ -86,6 +90,8 @@
     }
     state.requireReviewing = state.requireReviewing !== false;
     state.autoOpen = state.autoOpen !== false;
+    state.loadCodexLocalSkills = state.loadCodexLocalSkills !== false;
+    state.loadCodexOverleafSkills = state.loadCodexOverleafSkills !== false;
     state.panelWidth = normalizePanelWidth(state.panelWidth);
     state.task = typeof state.task === 'string' ? state.task : '';
     state.model = typeof state.model === 'string' && state.model ? state.model : DEFAULT_PANEL_STATE.model;
@@ -498,6 +504,7 @@
       startedAt: typeof run.startedAt === 'string' ? run.startedAt : '',
       finishedAt: shouldStopRestoredRun ? new Date().toISOString() : typeof run.finishedAt === 'string' ? run.finishedAt : '',
       events: events.slice(-MAX_RUN_EVENTS),
+      attachments: normalizeRunAttachments(run.attachments, STORAGE_DEFAULT_LIMITS),
       appliedOperations: Array.isArray(run.appliedOperations) ? run.appliedOperations : [],
       undoOperations: Array.isArray(run.undoOperations) ? run.undoOperations : [],
       undoBaseFiles: normalizeRunFiles(run.undoBaseFiles),
@@ -525,6 +532,50 @@
         streamRole: typeof event.streamRole === 'string' ? event.streamRole : ''
       }))
       .slice(-MAX_RUN_EVENTS);
+  }
+
+  function normalizeRunAttachments(attachments, limits = STORAGE_DEFAULT_LIMITS) {
+    const normalized = [];
+    for (const attachment of Array.isArray(attachments) ? attachments : []) {
+      const name = normalizeAttachmentName(attachment?.name);
+      if (!name) {
+        continue;
+      }
+      const mimeType = normalizeTextField(attachment.mimeType, 120);
+      const size = Number(attachment.size);
+      const previewDataUrl = normalizeAttachmentPreviewDataUrl(attachment.previewDataUrl, limits);
+      const kind = attachment.kind === 'image' || /^image\//i.test(mimeType) || /^data:image\//i.test(previewDataUrl)
+        ? 'image'
+        : 'file';
+      normalized.push({
+        name,
+        mimeType,
+        size: Number.isFinite(size) && size >= 0 ? Math.round(size) : 0,
+        kind,
+        previewDataUrl: kind === 'image' ? previewDataUrl : ''
+      });
+      if (normalized.length >= 8) {
+        break;
+      }
+    }
+    return normalized;
+  }
+
+  function normalizeAttachmentName(value) {
+    return normalizeTextField(String(value || '')
+      .replace(/\0/g, '')
+      .replace(/\\/g, '/')
+      .split('/')
+      .filter(Boolean)
+      .pop() || '', 180);
+  }
+
+  function normalizeAttachmentPreviewDataUrl(value, limits = STORAGE_DEFAULT_LIMITS) {
+    const text = String(value || '').trim();
+    if (!/^data:image\/[a-z0-9.+-]+;base64,/i.test(text)) {
+      return '';
+    }
+    return normalizeTextField(text, limits.attachmentPreviewChars || 0);
   }
 
   function normalizeRunFiles(files) {
@@ -633,6 +684,8 @@
       locale: normalizeLocale(source.locale),
       requireReviewing: active ? active.requireReviewing !== false : source.requireReviewing !== false,
       autoOpen: source.autoOpen !== false,
+      loadCodexLocalSkills: source.loadCodexLocalSkills !== false,
+      loadCodexOverleafSkills: source.loadCodexOverleafSkills !== false,
       panelWidth: normalizePanelWidth(source.panelWidth),
       task: normalizeTextField(active?.task || source.task || '', limits.taskChars),
       focusFiles: normalizeFocusFiles(active?.focusFiles || source.focusFiles),
@@ -753,6 +806,7 @@
       startedAt: typeof run.startedAt === 'string' ? run.startedAt : '',
       finishedAt: typeof run.finishedAt === 'string' ? run.finishedAt : '',
       events: compactRunEvents(run.events, limits),
+      attachments: normalizeRunAttachments(run.attachments, limits),
       appliedOperations: [],
       undoOperations: undoPayload.undoOperations,
       undoBaseFiles: undoPayload.undoBaseFiles,

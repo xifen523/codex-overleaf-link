@@ -20,11 +20,18 @@
     otWarmStart,
     codexThreadId,
     customInstructions,
+    selectedSkillIds,
+    skillLoadingSettings,
+    attachments,
+    skillInvocation,
     compileLogContext,
     submittedMode,
     restrictToFocusFiles
   } = {}) {
     const normalizedCustomInstructions = String(customInstructions || '').trim();
+    const normalizedSelectedSkillIds = normalizeSelectedSkillIds(selectedSkillIds);
+    const normalizedAttachments = normalizeComposerAttachments(attachments);
+    const normalizedSkillInvocation = normalizeSkillInvocation(skillInvocation);
     const params = {
       projectId: currentProjectId,
       mode: submittedMode || state.mode,
@@ -42,7 +49,12 @@
       speedTier: state.speedTier,
       session: state.session,
       threadId: codexThreadId || undefined,
-      customInstructions: normalizedCustomInstructions || undefined
+      customInstructions: normalizedCustomInstructions || undefined,
+      selectedSkillIds: normalizedSelectedSkillIds.length ? normalizedSelectedSkillIds : undefined,
+      loadCodexLocalSkills: skillLoadingSettings?.loadCodexLocalSkills !== false,
+      loadCodexOverleafSkills: skillLoadingSettings?.loadCodexOverleafSkills !== false,
+      skillInvocation: normalizedSkillInvocation || undefined,
+      attachments: normalizedAttachments.length ? normalizedAttachments : undefined
     };
 
     if (compileLogContext?.available) {
@@ -145,6 +157,76 @@
       .replace(/^\/+/, '');
   }
 
+  function normalizeSelectedSkillIds(value) {
+    const seen = new Set();
+    const result = [];
+    for (const item of Array.isArray(value) ? value : []) {
+      const id = String(item || '').trim();
+      if (!id || seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      result.push(id);
+    }
+    return result;
+  }
+
+  function normalizeComposerAttachments(value) {
+    const result = [];
+    for (const item of Array.isArray(value) ? value : []) {
+      const name = normalizeAttachmentName(item?.name);
+      const contentBase64 = normalizeAttachmentBase64(item?.contentBase64);
+      if (!name || !contentBase64) {
+        continue;
+      }
+      const size = Number(item?.size);
+      result.push({
+        name,
+        mimeType: String(item?.mimeType || '').trim().slice(0, 120),
+        size: Number.isFinite(size) && size >= 0 ? size : estimateBase64Size(contentBase64),
+        contentBase64
+      });
+      if (result.length >= 8) {
+        break;
+      }
+    }
+    return result;
+  }
+
+  function normalizeSkillInvocation(value) {
+    const id = String(value?.id || '').trim();
+    if (id !== 'skill-installer') {
+      return null;
+    }
+    const title = String(value?.title || 'Skill Installer').trim().slice(0, 80) || 'Skill Installer';
+    return { id, title };
+  }
+
+  function normalizeAttachmentName(value) {
+    return String(value || '')
+      .replace(/\0/g, '')
+      .replace(/\\/g, '/')
+      .split('/')
+      .filter(Boolean)
+      .pop()
+      ?.trim()
+      .slice(0, 180) || '';
+  }
+
+  function normalizeAttachmentBase64(value) {
+    const clean = String(value || '').replace(/\s+/g, '');
+    if (!clean || !/^[A-Za-z0-9+/]+={0,2}$/.test(clean)) {
+      return '';
+    }
+    return clean;
+  }
+
+  function estimateBase64Size(value) {
+    const clean = String(value || '').replace(/\s+/g, '');
+    const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
+    return Math.max(0, Math.floor(clean.length * 3 / 4) - padding);
+  }
+
   function defaultIsUsableProjectFileContent(content) {
     return String(content || '').trim().length > 0;
   }
@@ -154,6 +236,9 @@
     canUseFocusedPartialSnapshot,
     shouldRestrictWritebackToFocus,
     buildSessionHistoryResult,
-    truncateSessionHistoryText
+    truncateSessionHistoryText,
+    normalizeSelectedSkillIds,
+    normalizeComposerAttachments,
+    normalizeSkillInvocation
   };
 });

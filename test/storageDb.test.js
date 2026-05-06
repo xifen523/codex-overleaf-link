@@ -9,6 +9,7 @@ const {
   buildTurnRecord,
   buildEventRecord,
   buildArtifactRecord,
+  buildAuditLogRecord,
   extractLightweightPrefs,
   buildActiveSessionByProject
 } = require('../extension/src/shared/storageDb');
@@ -23,9 +24,9 @@ test('DB_NAME is codex-overleaf', () => {
   assert.equal(DB_NAME, 'codex-overleaf');
 });
 
-test('STORES has four stores with correct structure', () => {
+test('STORES has auditLogs store with correct structure', () => {
   const storeNames = Object.keys(STORES);
-  assert.deepEqual(storeNames.sort(), ['artifacts', 'events', 'sessions', 'turns']);
+  assert.deepEqual(storeNames.sort(), ['artifacts', 'auditLogs', 'events', 'sessions', 'turns']);
 
   // sessions store
   assert.equal(STORES.sessions.keyPath, 'id');
@@ -50,6 +51,11 @@ test('STORES has four stores with correct structure', () => {
   assert.deepEqual(Object.keys(STORES.artifacts.indexes).sort(), ['turnId', 'type']);
   assert.equal(STORES.artifacts.indexes.turnId.keyPath, 'turnId');
   assert.equal(STORES.artifacts.indexes.type.keyPath, 'type');
+
+  assert.equal(STORES.auditLogs.keyPath, 'id');
+  assert.deepEqual(Object.keys(STORES.auditLogs.indexes).sort(), ['createdAt', 'projectId']);
+  assert.equal(STORES.auditLogs.indexes.projectId.keyPath, 'projectId');
+  assert.equal(STORES.auditLogs.indexes.createdAt.keyPath, 'createdAt');
 });
 
 test('STORES indexes all have unique: false', () => {
@@ -248,6 +254,35 @@ test('buildArtifactRecord generates id when not provided', () => {
   assert.ok(record.id.startsWith('art_'));
 });
 
+test('buildAuditLogRecord normalizes summary-only audit fields', () => {
+  const record = buildAuditLogRecord({
+    id: 'aud_1',
+    projectId: 'proj',
+    sessionId: 'ses',
+    turnId: 'turn',
+    promptSummary: 'Fix intro',
+    focusFiles: ['main.tex'],
+    selectedSkillIds: ['style'],
+    sensitiveFindings: [{ detectorId: 'private-key', path: 'keys.txt', preview: '[REDACTED]' }],
+    changedFiles: [{ path: 'main.tex', content: 'body' }],
+    diffSummary: { filesChanged: 1, additions: 2, deletions: 1 },
+    blockedFiles: [{ path: 'locked.tex', reason: 'readonly', content: 'blocked' }],
+    appliedFiles: ['main.tex'],
+    skippedFiles: [{ path: 'raw.bin', reason: 'unsupported' }],
+    resultStatus: 'blocked',
+    createdAt: '2026-05-06T00:00:00.000Z',
+    completedAt: '2026-05-06T00:01:00.000Z'
+  });
+
+  assert.equal(record.id, 'aud_1');
+  assert.equal(record.projectId, 'proj');
+  assert.equal(record.resultStatus, 'blocked');
+  assert.deepEqual(record.changedFiles, [{ path: 'main.tex' }]);
+  assert.deepEqual(record.blockedFiles, [{ path: 'locked.tex', reason: 'readonly' }]);
+  assert.deepEqual(record.appliedFiles, [{ path: 'main.tex' }]);
+  assert.equal(JSON.stringify(record).includes('body'), false);
+});
+
 test('extractLightweightPrefs extracts correct fields', () => {
   const state = {
     model: 'gpt-5.4',
@@ -257,12 +292,25 @@ test('extractLightweightPrefs extracts correct fields', () => {
     locale: 'zh',
     requireReviewing: true,
     autoRecompile: true,
+    loadCodexLocalSkills: false,
+    loadCodexOverleafSkills: true,
     panelWidth: 512,
     activeSessionByProject: { proj_1: 'ses_1' },
     experimentalOtByProject: { proj_1: true, proj_2: false },
     customInstructionsByProject: {
       proj_1: 'Use project terminology.',
       proj_2: 'Prefer concise edits.'
+    },
+    governanceRulesByProject: {
+      proj_1: {
+        readonlyPatterns: [' locked/** ', 123],
+        writablePatterns: ['main.tex'],
+        sensitiveCheckEnabled: false,
+        sensitiveConfirmAllowed: true
+      }
+    },
+    selectedLocalSkillIdsByProject: {
+      proj_1: ['style', 'style', 'citations', 42]
     },
     extraField: 'should be ignored',
     sessions: [{ id: 'ses_1' }]
@@ -276,12 +324,25 @@ test('extractLightweightPrefs extracts correct fields', () => {
   assert.equal(prefs.locale, 'zh');
   assert.equal(prefs.requireReviewing, true);
   assert.equal(prefs.autoRecompile, true);
+  assert.equal(prefs.loadCodexLocalSkills, false);
+  assert.equal(prefs.loadCodexOverleafSkills, true);
   assert.equal(prefs.panelWidth, 512);
   assert.deepEqual(prefs.activeSessionByProject, { proj_1: 'ses_1' });
   assert.deepEqual(prefs.experimentalOtByProject, { proj_1: true, proj_2: false });
   assert.deepEqual(prefs.customInstructionsByProject, {
     proj_1: 'Use project terminology.',
     proj_2: 'Prefer concise edits.'
+  });
+  assert.deepEqual(prefs.governanceRulesByProject, {
+    proj_1: {
+      readonlyPatterns: ['locked/**'],
+      writablePatterns: ['main.tex'],
+      sensitiveCheckEnabled: false,
+      sensitiveConfirmAllowed: true
+    }
+  });
+  assert.deepEqual(prefs.selectedLocalSkillIdsByProject, {
+    proj_1: ['style', 'citations']
   });
   assert.equal(prefs.extraField, undefined);
   assert.equal(prefs.sessions, undefined);
@@ -351,6 +412,8 @@ test('extractLightweightPrefs defaults missing values', () => {
   assert.equal(prefs.locale, '');
   assert.equal(prefs.requireReviewing, true);
   assert.equal(prefs.autoRecompile, true);
+  assert.equal(prefs.loadCodexLocalSkills, true);
+  assert.equal(prefs.loadCodexOverleafSkills, true);
   assert.equal(prefs.panelWidth, 0);
   assert.deepEqual(prefs.activeSessionByProject, {});
   assert.deepEqual(prefs.experimentalOtByProject, {});

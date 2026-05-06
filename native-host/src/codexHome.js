@@ -6,6 +6,7 @@ const {
   getHomeDir,
   getNativeHostPlatform
 } = require('./nativeHostPlatform');
+const { getCodexOverleafSkillsRoot } = require('./localSkills');
 
 const COPIED_USER_CODEX_FILES = [
   'auth.json',
@@ -17,12 +18,30 @@ const COPIED_USER_CODEX_FILES = [
 ];
 
 const LINKED_USER_CODEX_DIRS = [
-  'skills',
-  'plugins',
-  'superpowers',
   'rules',
   'memories',
   'vendor_imports'
+];
+
+const LOCAL_SKILL_USER_CODEX_DIRS = [
+  'plugins',
+  'superpowers'
+];
+
+const LOCAL_SKILL_PLUGIN_HOME_ENTRIES = [
+  'plugins',
+  'superpowers',
+  path.join('.tmp', 'plugins'),
+  path.join('.tmp', 'plugins.sha'),
+  path.join('.tmp', 'app-server-remote-plugin-sync-v1'),
+  path.join('cache', 'codex_apps_tools')
+];
+
+const LOCAL_SKILL_CONFIG_SECTIONS = [
+  'skills',
+  'plugins',
+  'mcp_servers',
+  'marketplaces'
 ];
 
 const HISTORY_DIRS = [
@@ -44,6 +63,9 @@ function getPluginCodexHome(env = process.env, options = {}) {
 function preparePluginCodexHome(env = process.env, options = {}) {
   const userHome = getUserCodexHome(env, options);
   const pluginHome = getPluginCodexHome(env, options);
+  const loadCodexLocalSkills = options.loadCodexLocalSkills !== false;
+  const loadCodexOverleafSkills = options.loadCodexOverleafSkills !== false;
+  const installCodexOverleafSkillsTarget = options.installCodexOverleafSkillsTarget === true;
 
   fs.mkdirSync(pluginHome, { recursive: true });
   chmodIfPossible(pluginHome, 0o700);
@@ -61,14 +83,23 @@ function preparePluginCodexHome(env = process.env, options = {}) {
       continue;
     }
     fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(source, target);
+    copyUserCodexFile(source, target, fileName, { loadCodexLocalSkills });
     if (fileName === 'auth.json') {
       chmodIfPossible(target, 0o600);
     }
     copied.push(fileName);
   }
 
-  for (const dirName of LINKED_USER_CODEX_DIRS) {
+  if (!loadCodexLocalSkills) {
+    for (const entryName of LOCAL_SKILL_PLUGIN_HOME_ENTRIES) {
+      removePluginHomeEntry(pluginHome, entryName, skippedLinks);
+    }
+  }
+
+  const userDirsToLink = loadCodexLocalSkills
+    ? [...LINKED_USER_CODEX_DIRS, ...LOCAL_SKILL_USER_CODEX_DIRS]
+    : LINKED_USER_CODEX_DIRS;
+  for (const dirName of userDirsToLink) {
     const source = path.join(userHome, dirName);
     const target = path.join(pluginHome, dirName);
     if (!isDirectory(source)) {
@@ -85,17 +116,160 @@ function preparePluginCodexHome(env = process.env, options = {}) {
     linked.push(dirName);
   }
 
+  const skillsResult = composePluginSkillsDirectory({
+    userHome,
+    pluginHome,
+    env,
+    options,
+    loadCodexLocalSkills,
+    loadCodexOverleafSkills,
+    installCodexOverleafSkillsTarget
+  });
+  if (skillsResult.linked) {
+    linked.push('skills');
+  }
+  skippedLinks.push(...skillsResult.skippedLinks);
+
   return { userHome, pluginHome, copied, linked, skippedLinks };
 }
 
-function buildCodexHomeEnv(env = process.env) {
-  const prepared = preparePluginCodexHome(env);
+function copyUserCodexFile(source, target, fileName, options = {}) {
+  if (fileName !== 'config.toml' || options.loadCodexLocalSkills !== false) {
+    fs.copyFileSync(source, target);
+    return;
+  }
+  const content = fs.readFileSync(source, 'utf8');
+  fs.writeFileSync(target, sanitizeCodexConfigForLocalSkillIsolation(content), 'utf8');
+}
+
+function sanitizeCodexConfigForLocalSkillIsolation(content) {
+  const output = [];
+  let skippedSection = false;
+
+  for (const line of String(content || '').split(/\r?\n/)) {
+    const sectionName = parseTomlSectionName(line);
+    if (sectionName) {
+      skippedSection = isLocalSkillConfigSection(sectionName);
+      if (!skippedSection) {
+        output.push(line);
+      }
+      continue;
+    }
+    if (skippedSection || /^\s*notify\s*=/.test(line)) {
+      continue;
+    }
+    output.push(line);
+  }
+
+  return `${output.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`;
+}
+
+function parseTomlSectionName(line) {
+  const match = String(line || '').match(/^\s*\[{1,2}\s*([^\]]+?)\s*\]{1,2}\s*(?:#.*)?$/);
+  return match ? match[1].trim() : '';
+}
+
+function isLocalSkillConfigSection(sectionName) {
+  return LOCAL_SKILL_CONFIG_SECTIONS.some(prefix => sectionName === prefix || sectionName.startsWith(`${prefix}.`));
+}
+
+function removePluginHomeEntry(pluginHome, entryName, skippedLinks) {
+  const target = path.join(pluginHome, entryName);
+  if (!isSafePluginHomePath(target, pluginHome)) {
+    skippedLinks.push({
+      name: entryName,
+      reason: 'unsafe_target'
+    });
+    return;
+  }
+  fs.rmSync(target, { recursive: true, force: true });
+}
+
+function buildCodexHomeEnv(env = process.env, options = {}) {
+  const prepared = preparePluginCodexHome(env, options);
   return {
     ...env,
     CODEX_HOME: prepared.pluginHome,
     CODEX_OVERLEAF_CODEX_HOME: prepared.pluginHome,
     CODEX_OVERLEAF_USER_CODEX_HOME: prepared.userHome
   };
+}
+
+function composePluginSkillsDirectory({
+  userHome,
+  pluginHome,
+  env,
+  options = {},
+  loadCodexLocalSkills = true,
+  loadCodexOverleafSkills = true,
+  installCodexOverleafSkillsTarget = false
+} = {}) {
+  const targetRoot = path.join(pluginHome, 'skills');
+  if (!isSafePluginHomePath(targetRoot, pluginHome)) {
+    return { linked: false, skippedLinks: [{ name: 'skills', reason: 'unsafe_target' }] };
+  }
+  fs.rmSync(targetRoot, { recursive: true, force: true });
+
+  if (installCodexOverleafSkillsTarget) {
+    const overleafSkillsRoot = getCodexOverleafSkillsRoot({ env });
+    fs.mkdirSync(overleafSkillsRoot, { recursive: true });
+    const linkResult = ensureSymlink(overleafSkillsRoot, targetRoot, options);
+    return linkResult.ok
+      ? { linked: true, skippedLinks: [] }
+      : { linked: false, skippedLinks: [{ name: 'skills', reason: linkResult.reason }] };
+  }
+
+  const sources = [];
+  if (loadCodexLocalSkills) {
+    sources.push({
+      name: 'codex-local',
+      root: path.join(userHome, 'skills'),
+      replaceExisting: false
+    });
+  }
+  if (loadCodexOverleafSkills) {
+    sources.push({
+      name: 'codex-overleaf',
+      root: getCodexOverleafSkillsRoot({ env }),
+      replaceExisting: true
+    });
+  }
+
+  let linked = false;
+  const skippedLinks = [];
+  for (const source of sources) {
+    if (!isDirectory(source.root)) {
+      continue;
+    }
+    for (const entry of fs.readdirSync(source.root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !isSafeSkillEntryName(entry.name)) {
+        continue;
+      }
+      const sourcePath = path.join(source.root, entry.name);
+      const targetPath = path.join(targetRoot, entry.name);
+      if (!isSafePluginHomePath(targetPath, pluginHome)) {
+        skippedLinks.push({ name: `skills/${entry.name}`, reason: 'unsafe_target' });
+        continue;
+      }
+      if (source.replaceExisting) {
+        fs.rmSync(targetPath, { recursive: true, force: true });
+      }
+      const linkResult = ensureSymlink(sourcePath, targetPath, options);
+      if (!linkResult.ok) {
+        skippedLinks.push({
+          name: `skills/${entry.name}`,
+          reason: linkResult.reason
+        });
+        continue;
+      }
+      linked = true;
+    }
+  }
+
+  if (!linked && !skippedLinks.length) {
+    fs.rmSync(targetRoot, { recursive: true, force: true });
+  }
+  return { linked, skippedLinks };
 }
 
 function clearPluginCodexHistory(optionsOrEnv = {}, maybeEnv = null) {
@@ -267,6 +441,20 @@ function isDirectory(filePath) {
   }
 }
 
+function isSafeSkillEntryName(value) {
+  const name = String(value || '');
+  return Boolean(name)
+    && name !== '.'
+    && name !== '..'
+    && !name.includes('/')
+    && !name.includes('\\')
+    && !name.includes('\0');
+}
+
+function isSafePluginHomePath(target, pluginHome) {
+  return path.resolve(target) === path.resolve(pluginHome) || isInsideDirectory(target, pluginHome);
+}
+
 function ensureSymlink(source, target, options = {}) {
   try {
     const existing = fs.lstatSync(target);
@@ -313,6 +501,7 @@ function isInsideDirectory(target, parent) {
 module.exports = {
   buildCodexHomeEnv,
   clearPluginCodexHistory,
+  composePluginSkillsDirectory,
   getPluginCodexHome,
   getUserCodexHome,
   preparePluginCodexHome

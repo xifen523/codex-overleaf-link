@@ -10,6 +10,21 @@
   function buildSyncApplyOperations(syncChanges = [], project = {}) {
     const existingPaths = new Set((project.files || []).map(file => file.path));
     return (syncChanges || []).map(change => {
+      if (change.type === 'binary-create' || change.type === 'overwrite-binary') {
+        return {
+          type: change.type,
+          path: change.path,
+          contentBase64: change.contentBase64 || '',
+          size: Number.isFinite(Number(change.size)) ? Number(change.size) : undefined,
+          previousExists: change.previousExists === true,
+          previousKind: change.previousKind || '',
+          previousSize: Number.isFinite(Number(change.previousSize)) ? Number(change.previousSize) : undefined,
+          reasonKey: change.type === 'overwrite-binary' ? 'localWorkspaceBinaryOverwrite' : 'localWorkspaceBinaryCreate',
+          reason: change.type === 'overwrite-binary'
+            ? 'Synced a binary asset replacement from the local Codex workspace.'
+            : 'Synced a new binary asset from the local Codex workspace.'
+        };
+      }
       if (change.type === 'delete') {
         return {
           type: 'delete',

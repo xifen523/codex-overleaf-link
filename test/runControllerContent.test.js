@@ -64,6 +64,88 @@ test('run controller carries trimmed project custom instructions for normal snap
   assert.equal(params.customInstructions, 'Use project terminology. Prefer \\\\cref{} references.');
 });
 
+test('run controller forwards selected local skill ids to codex.run params', () => {
+  const params = RunController.buildCodexRunParams({
+    currentProjectId: 'project-123',
+    state: {
+      mode: 'confirm',
+      model: 'gpt-5.5',
+      reasoningEffort: 'high',
+      speedTier: 'standard',
+      session: { id: 'session-1' }
+    },
+    task: 'use the selected local style guide',
+    project: { files: [{ path: 'main.tex', content: 'hello' }] },
+    selectedSkillIds: ['venue-style', 'latex-macros']
+  });
+
+  assert.deepEqual(params.selectedSkillIds, ['venue-style', 'latex-macros']);
+});
+
+test('run controller forwards sanitized composer attachments as turn context', () => {
+  const pdfBytes = Buffer.from('%PDF attached context');
+  const params = RunController.buildCodexRunParams({
+    currentProjectId: 'project-123',
+    state: {
+      mode: 'ask',
+      model: 'gpt-5.5',
+      reasoningEffort: 'medium',
+      session: { id: 'session-1' }
+    },
+    task: 'read the attached CV',
+    project: { files: [{ path: 'main.tex', content: 'hello' }] },
+    attachments: [
+      {
+        name: '../CV CN.pdf',
+        mimeType: ' application/pdf ',
+        size: pdfBytes.length,
+        contentBase64: pdfBytes.toString('base64'),
+        extra: 'drop-me'
+      },
+      {
+        name: 'empty.txt',
+        mimeType: 'text/plain',
+        size: 0,
+        contentBase64: ''
+      },
+      null
+    ]
+  });
+
+  assert.deepEqual(params.attachments, [
+    {
+      name: 'CV CN.pdf',
+      mimeType: 'application/pdf',
+      size: pdfBytes.length,
+      contentBase64: pdfBytes.toString('base64')
+    }
+  ]);
+});
+
+test('run controller forwards a bounded skill invocation for special composer skill turns', () => {
+  const params = RunController.buildCodexRunParams({
+    currentProjectId: 'project-123',
+    state: {
+      mode: 'ask',
+      model: 'gpt-5.5',
+      reasoningEffort: 'medium',
+      session: { id: 'session-1' }
+    },
+    task: 'install https://github.com/openai/skills/tree/main/skills/.curated/pdf',
+    project: { files: [{ path: 'main.tex', content: 'hello' }] },
+    skillInvocation: {
+      id: 'skill-installer',
+      title: 'Skill Installer',
+      extra: 'drop-me'
+    }
+  });
+
+  assert.deepEqual(params.skillInvocation, {
+    id: 'skill-installer',
+    title: 'Skill Installer'
+  });
+});
+
 test('run controller uses the submitted mode instead of mutable panel state when provided', () => {
   const params = RunController.buildCodexRunParams({
     currentProjectId: 'project-123',

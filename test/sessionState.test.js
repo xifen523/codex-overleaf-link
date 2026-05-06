@@ -24,10 +24,35 @@ test('normalizes missing panel state with defaults and a session id', () => {
   assert.equal(state.reasoningEffort, DEFAULT_PANEL_STATE.reasoningEffort);
   assert.equal(state.speedTier, DEFAULT_PANEL_STATE.speedTier);
   assert.equal(state.locale, 'en');
+  assert.equal(state.loadCodexLocalSkills, true);
+  assert.equal(state.loadCodexOverleafSkills, true);
   assert.deepEqual(state.customInstructionsByProject, {});
   assert.match(state.session.id, /^session_/);
   assert.equal(state.sessions.length, 1);
   assert.equal(state.activeSessionId, state.session.id);
+});
+
+test('normalizes Codex skill loading toggles as global panel preferences', () => {
+  const state = normalizePanelState({
+    loadCodexLocalSkills: false,
+    loadCodexOverleafSkills: false,
+    activeSessionId: 'session_a',
+    sessions: [
+      { id: 'session_a', title: 'A', runs: [] },
+      { id: 'session_b', title: 'B', runs: [] }
+    ]
+  });
+
+  assert.equal(state.loadCodexLocalSkills, false);
+  assert.equal(state.loadCodexOverleafSkills, false);
+
+  const switched = setActiveSession(state, 'session_b');
+  assert.equal(switched.loadCodexLocalSkills, false);
+  assert.equal(switched.loadCodexOverleafSkills, false);
+
+  const compact = prepareStateForStorage(switched);
+  assert.equal(compact.loadCodexLocalSkills, false);
+  assert.equal(compact.loadCodexOverleafSkills, false);
 });
 
 test('normalizes locale as a global panel preference across sessions', () => {
@@ -263,6 +288,54 @@ test('recordSessionResult preserves existing session runs and settings', () => {
   assert.equal(updated.codexThreadId, 'thread_123');
   assert.equal(updated.runs[0].id, 'run_1');
   assert.equal(updated.history.at(-1).result, '已检查并总结');
+});
+
+test('normalizes and stores run attachment preview metadata without raw file content', () => {
+  const state = normalizePanelState({
+    runs: [{
+      id: 'run_attachments',
+      task: '解读下图片',
+      status: 'completed',
+      attachments: [
+        {
+          name: 'image.png',
+          mimeType: 'image/png',
+          size: 1234,
+          kind: 'image',
+          previewDataUrl: 'data:image/png;base64,abc123',
+          contentBase64: 'raw-file-content-must-not-persist'
+        },
+        {
+          name: '../CV_CN.pdf',
+          mimeType: 'application/pdf',
+          size: 4567,
+          kind: 'file',
+          previewDataUrl: 'data:application/pdf;base64,drop'
+        }
+      ]
+    }]
+  });
+
+  assert.deepEqual(state.runs[0].attachments, [
+    {
+      name: 'image.png',
+      mimeType: 'image/png',
+      size: 1234,
+      kind: 'image',
+      previewDataUrl: 'data:image/png;base64,abc123'
+    },
+    {
+      name: 'CV_CN.pdf',
+      mimeType: 'application/pdf',
+      size: 4567,
+      kind: 'file',
+      previewDataUrl: ''
+    }
+  ]);
+
+  const compact = prepareStateForStorage(state);
+  assert.deepEqual(compact.sessions[0].runs[0].attachments, state.runs[0].attachments);
+  assert.equal(JSON.stringify(compact).includes('raw-file-content-must-not-persist'), false);
 });
 
 test('normalizes previously corrupted history-only sessions into clickable runs', () => {

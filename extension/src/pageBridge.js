@@ -7,6 +7,7 @@
   window.__codexOverleafPageBridgeInstalled = true;
 
   const ZIP_FETCH_TIMEOUT_MS = 30000;
+  const TEXT_PATH_EXTENSION_PATTERN = '(?:tex|bib|sty|cls|bst|bbx|cbx|lbx|cfg|def|clo|ist|txt|md|latex)';
   const MAX_BINARY_FILE_BYTES = 10 * 1024 * 1024;
   const MAX_BINARY_TOTAL_BYTES = 80 * 1024 * 1024;
   const compileBridge = window.CodexOverleafCompileBridge.create({
@@ -1215,6 +1216,29 @@
           }
         };
       }
+      if (params.exactOnly === true || params.requireExact === true) {
+        return {
+          ok: false,
+          id: getProjectId(),
+          url: window.location.href,
+          activePath,
+          files: [],
+          reason: zipSnapshot.reason || 'Overleaf source ZIP was unavailable',
+          capabilities: {
+            fullProjectSnapshot: false,
+            method: 'overleaf-zip-file-list-unavailable',
+            skipped: [{
+              path: 'project.zip',
+              reason: zipSnapshot.reason || 'Overleaf source ZIP was unavailable'
+            }],
+            diagnostics: {
+              docRecordCount: internalDocRecords.length,
+              docRecords: internalDocRecords.slice(0, 8)
+            },
+            note: 'The exact Overleaf source ZIP file tree was required, so the page file tree fallback was not used.'
+          }
+        };
+      }
     }
 
     const paths = collectProjectFileListPaths(activePath, internalDocRecords);
@@ -1765,6 +1789,7 @@
     const skipped = [];
     const trackedChanges = [];
     const baseFileLookup = window.CodexOverleafStaleGuard?.buildBaseFileLookup(options.baseFiles);
+    const baseBinaryFileLookup = buildBaseBinaryFileLookup(options.baseFiles);
 
     for (const rawOperation of operations) {
       const operation = normalizeOperationPaths(rawOperation);
@@ -1776,6 +1801,9 @@
         if (result.ok && Array.isArray(result.trackedChanges)) {
           trackedChanges.push(...result.trackedChanges);
         }
+        (result.ok ? applied : skipped).push({ operation, result });
+      } else if (['binary-create', 'overwrite-binary'].includes(operation.type)) {
+        const result = await applyBinaryAssetOperation(operation, { baseFileLookup, baseBinaryFileLookup });
         (result.ok ? applied : skipped).push({ operation, result });
       } else if (['create', 'rename', 'move', 'delete'].includes(operation.type)) {
         const result = await applyFileTreeOperation(operation, { baseFileLookup });
@@ -2472,6 +2500,222 @@
       ok: true,
       patches: normalized
     };
+  }
+
+  async function applyBinaryAssetOperation(operation, options = {}) {
+    const freshness = await checkBinaryAssetFreshness(operation, options);
+    if (!freshness.ok) {
+      return freshness;
+    }
+
+    const bytes = decodeBase64Bytes(operation.contentBase64);
+    if (!bytes.ok) {
+      return bytes;
+    }
+
+    const manager = findFileTreeManager();
+    const file = createAssetFile(operation.path, bytes.bytes);
+    const methodNames = ['uploadFile', 'uploadAsset', 'createBinaryFile', 'createFile', 'addFile'];
+    for (const methodName of methodNames) {
+      const method = manager?.[methodName];
+      if (typeof method !== 'function') {
+        continue;
+      }
+      try {
+        if (operation.type === 'overwrite-binary' && projectPathExists(operation.path)) {
+          await method.call(manager, operation.path, file, { overwrite: true });
+        } else {
+          await method.call(manager, operation.path, file);
+        }
+        await delay(120);
+        if (!projectPathExists(operation.path)) {
+          return {
+            ok: false,
+            code: 'binary_asset_verification_failed',
+            reason: `${operation.path} did not appear in the Overleaf file tree after binary asset upload.`
+          };
+        }
+        return {
+          ok: true,
+          method: `fileTreeManager.${methodName}`,
+          verified: true,
+          binaryAsset: true
+        };
+      } catch (_error) {
+        // Try the next known Overleaf file upload method.
+      }
+    }
+
+    return {
+      ok: false,
+      code: 'binary_asset_write_unsupported',
+      reason: 'No supported Overleaf binary asset upload method was detected. The asset was not written.'
+    };
+  }
+
+  async function checkBinaryAssetFreshness(operation, options = {}) {
+    const baseFileLookup = options.baseFileLookup;
+    const baseBinaryFileLookup = options.baseBinaryFileLookup;
+    if (!operation?.path) {
+      return {
+        ok: false,
+        code: 'missing_operation_path',
+        reason: 'Cannot safely write a binary asset without a target path.'
+      };
+    }
+    if (operation.type === 'binary-create' && projectPathExists(operation.path)) {
+      return {
+        ok: false,
+        code: 'path_created_since_snapshot',
+        reason: `${operation.path} already exists in Overleaf. Codex did not overwrite it as a new asset.`
+      };
+    }
+    if (operation.type === 'overwrite-binary' && baseFileLookup && !baseFileLookup.has(operation.path)) {
+      return {
+        ok: false,
+        code: 'missing_base_file',
+        reason: `${operation.path} was not present in the run baseline. Codex did not overwrite it.`
+      };
+    }
+    if (operation.type === 'overwrite-binary' && !projectPathExists(operation.path)) {
+      return {
+        ok: false,
+        code: 'missing_current_binary_asset',
+        reason: `${operation.path} no longer exists in Overleaf. Codex did not overwrite it.`
+      };
+    }
+    if (operation.type === 'overwrite-binary') {
+      const baseBinaryFile = baseBinaryFileLookup?.get(operation.path);
+      if (!baseBinaryFile) {
+        return {
+          ok: false,
+          code: 'missing_binary_base_content',
+          reason: `${operation.path} did not have binary baseline content. Codex did not overwrite it.`
+        };
+      }
+      const currentBinaryFile = await getCurrentBinaryAssetFile(operation.path);
+      if (!currentBinaryFile.ok) {
+        return currentBinaryFile;
+      }
+      if (!binaryAssetMatchesBaseline(baseBinaryFile, currentBinaryFile.file)) {
+        return {
+          ok: false,
+          code: 'stale_binary_asset',
+          reason: `${operation.path} changed in Overleaf after the baseline. Codex did not overwrite it.`
+        };
+      }
+    }
+    return { ok: true };
+  }
+
+  function buildBaseBinaryFileLookup(files) {
+    if (!Array.isArray(files) || !files.length) {
+      return null;
+    }
+    const lookup = new Map();
+    for (const file of files) {
+      if (!file?.path || typeof file.contentBase64 !== 'string') {
+        continue;
+      }
+      const filePath = window.CodexOverleafProjectFiles.normalizePath(file.path);
+      if (!filePath) {
+        continue;
+      }
+      lookup.set(filePath, {
+        contentBase64: normalizeBase64(file.contentBase64),
+        size: Number.isFinite(Number(file.size)) ? Number(file.size) : null
+      });
+    }
+    return lookup.size ? lookup : null;
+  }
+
+  async function getCurrentBinaryAssetFile(filePath) {
+    try {
+      const project = await projectSnapshotBridge.getProjectSnapshot({
+        zipOnly: true,
+        includeBinaryFiles: true,
+        force: true,
+        maxAgeMs: 0
+      });
+      const normalizedPath = window.CodexOverleafProjectFiles.normalizePath(filePath);
+      const file = (project?.files || []).find(item =>
+        window.CodexOverleafProjectFiles.normalizePath(item?.path) === normalizedPath
+      );
+      if (!file || typeof file.contentBase64 !== 'string') {
+        return {
+          ok: false,
+          code: 'current_binary_asset_unavailable',
+          reason: `${filePath} could not be verified from a fresh Overleaf ZIP snapshot. Codex did not overwrite it.`
+        };
+      }
+      return { ok: true, file };
+    } catch (error) {
+      return {
+        ok: false,
+        code: 'current_binary_asset_unavailable',
+        reason: `${filePath} could not be verified before overwrite: ${error.message}`
+      };
+    }
+  }
+
+  function binaryAssetMatchesBaseline(baseFile, currentFile) {
+    if (!baseFile || !currentFile) {
+      return false;
+    }
+    const baseContent = normalizeBase64(baseFile.contentBase64);
+    const currentContent = normalizeBase64(currentFile.contentBase64);
+    if (!baseContent || baseContent !== currentContent) {
+      return false;
+    }
+    const currentSize = Number.isFinite(Number(currentFile.size)) ? Number(currentFile.size) : null;
+    return baseFile.size == null || currentSize == null || baseFile.size === currentSize;
+  }
+
+  function normalizeBase64(value) {
+    return String(value || '').replace(/\s+/g, '');
+  }
+
+  function decodeBase64Bytes(contentBase64) {
+    try {
+      const binary = window.atob(String(contentBase64 || ''));
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return { ok: true, bytes };
+    } catch (_error) {
+      return {
+        ok: false,
+        code: 'invalid_binary_asset_content',
+        reason: 'Binary asset content was not valid base64.'
+      };
+    }
+  }
+
+  function createAssetFile(filePath, bytes) {
+    const name = String(filePath || '').split('/').filter(Boolean).pop() || 'asset';
+    const type = inferAssetMimeType(filePath);
+    if (typeof File === 'function') {
+      return new File([bytes], name, { type });
+    }
+    return new Blob([bytes], { type });
+  }
+
+  function inferAssetMimeType(filePath) {
+    const normalized = String(filePath || '').toLowerCase();
+    if (normalized.endsWith('.pdf')) {
+      return 'application/pdf';
+    }
+    if (normalized.endsWith('.png')) {
+      return 'image/png';
+    }
+    if (normalized.endsWith('.jpg') || normalized.endsWith('.jpeg')) {
+      return 'image/jpeg';
+    }
+    if (normalized.endsWith('.svg')) {
+      return 'image/svg+xml';
+    }
+    return 'application/octet-stream';
   }
 
   async function applyFileTreeOperation(operation, options = {}) {
@@ -4105,29 +4349,76 @@
     const attrPath = [
       node.getAttribute('data-path'),
       node.getAttribute('data-file-path'),
-      node.getAttribute('data-name'),
-      node.getAttribute('aria-label'),
-      node.getAttribute('title')
-    ].find(value => window.CodexOverleafProjectFiles.isTextProjectPath(value));
+      node.getAttribute('data-name')
+    ].map(normalizeProjectPathCandidate).find(Boolean);
     if (attrPath) {
-      const normalizedAttrPath = window.CodexOverleafProjectFiles.normalizePath(attrPath);
-      if (normalizedAttrPath && !normalizedAttrPath.includes('/')) {
-        return inferPathFromTreeAncestors(node, normalizedAttrPath) || normalizedAttrPath;
+      if (!attrPath.includes('/')) {
+        return inferPathFromTreeAncestors(node, attrPath) || attrPath;
       }
-      return normalizedAttrPath;
+      return attrPath;
     }
 
-    const text = (node.textContent || '').replace(/\s+/g, ' ').trim();
-    const matches = text.match(/[^\s]+?\.(?:tex|bib|sty|cls|bst|bbx|cbx|lbx|cfg|def|clo|ist|txt|md|latex)\b/gi);
-    const match = matches?.find(value => window.CodexOverleafProjectFiles.isTextProjectPath(value));
-    if (!match) {
+    const labelPath = [
+      node.getAttribute('aria-label'),
+      node.getAttribute('title')
+    ].map(normalizeProjectPathCandidate).find(Boolean);
+    if (labelPath) {
+      if (!labelPath.includes('/')) {
+        return inferPathFromTreeAncestors(node, labelPath) || labelPath;
+      }
+      return labelPath;
+    }
+
+    const textPath = normalizeProjectPathCandidate(node.textContent || '');
+    if (!textPath) {
       return '';
     }
-    const normalizedMatch = window.CodexOverleafProjectFiles.normalizePath(match);
-    if (normalizedMatch && !normalizedMatch.includes('/')) {
-      return inferPathFromTreeAncestors(node, normalizedMatch) || normalizedMatch;
+    if (!textPath.includes('/')) {
+      return inferPathFromTreeAncestors(node, textPath) || textPath;
     }
-    return normalizedMatch;
+    return textPath;
+  }
+
+  function normalizeProjectPathCandidate(value) {
+    const text = normalizeDomText(value);
+    if (!text || hasMultipleTextPathExtensions(text)) {
+      return '';
+    }
+    const candidates = [
+      stripOverleafIconAffixes(text),
+      text
+    ];
+    for (const candidate of candidates) {
+      const normalized = window.CodexOverleafProjectFiles.normalizePath(candidate);
+      if (normalized && window.CodexOverleafProjectFiles.isTextProjectPath(normalized)) {
+        return normalized;
+      }
+    }
+    return '';
+  }
+
+  function normalizeDomText(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function hasMultipleTextPathExtensions(value) {
+    const matches = normalizeDomText(value).match(new RegExp(`\\.${TEXT_PATH_EXTENSION_PATTERN}\\b`, 'gi')) || [];
+    return matches.length > 1;
+  }
+
+  function stripOverleafIconAffixes(value) {
+    let text = normalizeDomText(value);
+    for (let index = 0; index < 4; index += 1) {
+      const next = text
+        .replace(/^(?:description|article|book_5|insert_drive_file|draft|text_snippet|note|chevron_right|expand_more|folder_open|folder)+/i, '')
+        .replace(/(?:more_vert\s*Menu|more_vert|Menu)$/i, '')
+        .trim();
+      if (next === text) {
+        break;
+      }
+      text = next;
+    }
+    return text;
   }
 
   function inferPathFromTreeAncestors(node, fileName) {
@@ -4163,8 +4454,17 @@
   }
 
   function normalizeFolderName(value) {
-    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    const text = normalizeDomText(value);
     if (!text || /[\\/]/.test(text) || window.CodexOverleafProjectFiles.isTextProjectPath(text)) {
+      return '';
+    }
+    if (new RegExp(`\\.${TEXT_PATH_EXTENSION_PATTERN}\\b`, 'i').test(text)) {
+      return '';
+    }
+    if (/^(?:description|article|book_5|insert_drive_file|draft|text_snippet|note|chevron_right|expand_more|folder_open|folder|expand|collapse|open|close|menu)\b/i.test(text)) {
+      return '';
+    }
+    if (/(?:more_vert|action menu|Menu)$/i.test(text)) {
       return '';
     }
     if (!/^[\w .@+-]+$/.test(text) || text.length > 80) {

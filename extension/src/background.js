@@ -10,7 +10,11 @@ importScripts('shared/compatibility.js');
     'task.confirm',
     'mirror.sync',
     'mirror.patchFiles',
-    'codex.history.clearPlugin'
+    'mirror.scanSensitive',
+    'codex.history.clearPlugin',
+    'skills.list',
+    'skills.install',
+    'skills.remove'
   ]);
   const RECOVERABLE_COMPATIBILITY_METHODS = new Set([
     'bridge.ping',
@@ -78,6 +82,8 @@ importScripts('shared/compatibility.js');
       case 'bridge.ping':
         return 'safe_read_retry';
       case 'mirror.status':
+        return 'safe_read_retry';
+      case 'mirror.scanSensitive':
         return 'safe_read_retry';
       case 'mirror.sync':
         return 'safe_sync_retry';

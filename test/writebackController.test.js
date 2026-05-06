@@ -127,6 +127,51 @@ test('getAppliedOperationPaths includes rename and move destinations', () => {
   assert.deepEqual(paths, ['old.tex', 'new.tex', 'sections/a.tex', 'appendix/a.tex', 'main.tex']);
 });
 
+test('buildSyncApplyOperations maps binary asset changes without degrading them to text creates', () => {
+  const operations = WritebackController.buildSyncApplyOperations([
+    {
+      type: 'binary-create',
+      path: 'figures/new.png',
+      contentBase64: Buffer.from([0, 1, 2]).toString('base64'),
+      size: 3
+    },
+    {
+      type: 'overwrite-binary',
+      path: 'figures/old.pdf',
+      contentBase64: Buffer.from('%PDF-next').toString('base64'),
+      size: 9,
+      previousExists: true
+    }
+  ], {
+    files: [
+      { path: 'figures/old.pdf', kind: 'binary', size: 7 }
+    ]
+  });
+
+  assert.deepEqual(operations.map(operation => ({
+    type: operation.type,
+    path: operation.path,
+    content: operation.content,
+    contentBase64: operation.contentBase64,
+    size: operation.size
+  })), [
+    {
+      type: 'binary-create',
+      path: 'figures/new.png',
+      content: undefined,
+      contentBase64: Buffer.from([0, 1, 2]).toString('base64'),
+      size: 3
+    },
+    {
+      type: 'overwrite-binary',
+      path: 'figures/old.pdf',
+      content: undefined,
+      contentBase64: Buffer.from('%PDF-next').toString('base64'),
+      size: 9
+    }
+  ]);
+});
+
 test('malformed applied entries do not count as written sync changes or paths', () => {
   const syncChanges = [
     { path: 'main.tex' },

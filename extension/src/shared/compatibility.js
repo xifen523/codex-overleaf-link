@@ -9,8 +9,8 @@
 
   const EXTENSION_PROTOCOL_VERSION = 1;
   const SUPPORTED_NATIVE_PROTOCOL = Object.freeze({ min: 1, max: 1 });
-  const MIN_NATIVE_VERSION = '0.7.0';
-  const BUILD_TARGET_VERSION = '0.7.0';
+  const MIN_NATIVE_VERSION = '0.8.0';
+  const BUILD_TARGET_VERSION = '0.8.0';
   const REQUIRED_CAPABILITIES = Object.freeze([
     'bridgePing',
     'mirrorSync',
@@ -19,7 +19,9 @@
     'codexRun',
     'codexCancel',
     'codexModels',
-    'historyClearPlugin'
+    'historyClearPlugin',
+    'localSkills',
+    'mirrorSensitiveScan'
   ]);
   const ALWAYS_ALLOWED_METHODS = new Set([
     'bridge.ping',
@@ -28,11 +30,15 @@
   ]);
   const OK_ONLY_METHODS = new Set([
     'codex.history.clearPlugin',
+    'mirror.scanSensitive',
     'mirror.sync',
     'mirror.patchFiles',
     'codex.run',
     'task.run',
-    'task.confirm'
+    'task.confirm',
+    'skills.list',
+    'skills.install',
+    'skills.remove'
   ]);
 
   function buildBridgePingParams(metadata = {}) {

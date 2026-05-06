@@ -7,7 +7,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : window, function storageDbFactory() {
   'use strict';
 
-  var TARGET_SCHEMA_VERSION = 1;
+  var TARGET_SCHEMA_VERSION = 2;
   var DB_NAME = 'codex-overleaf';
   var CUSTOM_INSTRUCTIONS_MAX_CHARS = 12000;
   var PROJECT_PREF_KEY_MAX_CHARS = 160;
@@ -39,6 +39,13 @@
       indexes: {
         turnId: { keyPath: 'turnId', unique: false },
         type: { keyPath: 'type', unique: false }
+      }
+    },
+    auditLogs: {
+      keyPath: 'id',
+      indexes: {
+        projectId: { keyPath: 'projectId', unique: false },
+        createdAt: { keyPath: 'createdAt', unique: false }
       }
     }
   };
@@ -249,6 +256,35 @@
     };
   }
 
+  function buildAuditLogRecord(input) {
+    var now = new Date().toISOString();
+    return {
+      id: input.id || generateId('aud'),
+      projectId: typeof input.projectId === 'string' ? input.projectId : '',
+      sessionId: typeof input.sessionId === 'string' ? input.sessionId : '',
+      turnId: typeof input.turnId === 'string' ? input.turnId : '',
+      createdAt: typeof input.createdAt === 'string' ? input.createdAt : now,
+      completedAt: typeof input.completedAt === 'string' ? input.completedAt : '',
+      mode: typeof input.mode === 'string' ? input.mode : '',
+      model: typeof input.model === 'string' ? input.model : '',
+      reasoningEffort: typeof input.reasoningEffort === 'string' ? input.reasoningEffort : '',
+      speedTier: typeof input.speedTier === 'string' ? input.speedTier : '',
+      promptSummary: normalizeTextField(input.promptSummary, 240),
+      focusFiles: normalizeStringList(input.focusFiles),
+      selectedSkillIds: normalizeStringList(input.selectedSkillIds),
+      sensitiveFindings: normalizeSensitiveFindings(input.sensitiveFindings),
+      changedFiles: normalizeFileSummaries(input.changedFiles),
+      diffSummary: normalizeDiffSummary(input.diffSummary),
+      blockedFiles: normalizeFileSummaries(input.blockedFiles),
+      appliedFiles: normalizeFileSummaries(input.appliedFiles),
+      skippedFiles: normalizeFileSummaries(input.skippedFiles),
+      resultStatus: typeof input.resultStatus === 'string' && input.resultStatus ? input.resultStatus : 'draft',
+      saveVerification: input.saveVerification && typeof input.saveVerification === 'object'
+        ? cloneJsonValue(input.saveVerification)
+        : null
+    };
+  }
+
   // --- Helpers ---
 
   function extractLightweightPrefs(state, projectId) {
@@ -261,10 +297,14 @@
       locale: typeof state.locale === 'string' ? state.locale : '',
       requireReviewing: state.requireReviewing !== false,
       autoRecompile: state.autoRecompile !== false,
+      loadCodexLocalSkills: state.loadCodexLocalSkills !== false,
+      loadCodexOverleafSkills: state.loadCodexOverleafSkills !== false,
       panelWidth: Number.isFinite(Number(state.panelWidth)) ? Math.round(Number(state.panelWidth)) : 0,
       activeSessionByProject: state.activeSessionByProject || {},
       experimentalOtByProject: normalizeBooleanMap(state.experimentalOtByProject),
-      customInstructionsByProject: normalizeStringMap(state.customInstructionsByProject)
+      customInstructionsByProject: normalizeStringMap(state.customInstructionsByProject),
+      governanceRulesByProject: normalizeGovernanceRulesMap(state.governanceRulesByProject),
+      selectedLocalSkillIdsByProject: normalizeStringListMap(state.selectedLocalSkillIdsByProject)
     };
     return prefs;
   }
@@ -304,6 +344,122 @@
     return result;
   }
 
+  function normalizeStringListMap(value) {
+    var result = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    var keys = Object.keys(value);
+    for (var i = 0; i < keys.length; i++) {
+      var rawKey = keys[i];
+      var key = normalizeProjectPrefKey(rawKey);
+      if (!key) {
+        continue;
+      }
+      result[key] = normalizeStringList(value[rawKey]);
+    }
+    return result;
+  }
+
+  function normalizeGovernanceRulesMap(value) {
+    var result = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    var keys = Object.keys(value);
+    for (var i = 0; i < keys.length; i++) {
+      var rawKey = keys[i];
+      var key = normalizeProjectPrefKey(rawKey);
+      if (!key) {
+        continue;
+      }
+      var rules = value[rawKey] && typeof value[rawKey] === 'object' && !Array.isArray(value[rawKey])
+        ? value[rawKey]
+        : {};
+      result[key] = {
+        readonlyPatterns: normalizePatternList(rules.readonlyPatterns),
+        writablePatterns: normalizePatternList(rules.writablePatterns),
+        sensitiveCheckEnabled: rules.sensitiveCheckEnabled !== false,
+        sensitiveConfirmAllowed: rules.sensitiveConfirmAllowed === true
+      };
+    }
+    return result;
+  }
+
+  function normalizePatternList(value) {
+    return normalizeStringList(value).map(function (pattern) {
+      return pattern.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+/g, '/');
+    }).filter(Boolean);
+  }
+
+  function normalizeStringList(values) {
+    var result = [];
+    var seen = {};
+    if (!Array.isArray(values)) {
+      return result;
+    }
+    for (var i = 0; i < values.length; i++) {
+      var text = typeof values[i] === 'string' ? values[i].trim() : '';
+      if (!text || seen[text]) {
+        continue;
+      }
+      seen[text] = true;
+      result.push(text);
+    }
+    return result;
+  }
+
+  function normalizeSensitiveFindings(findings) {
+    var result = [];
+    if (!Array.isArray(findings)) {
+      return result;
+    }
+    for (var i = 0; i < findings.length; i++) {
+      var finding = findings[i] || {};
+      result.push(removeEmptyFields({
+        detectorId: typeof finding.detectorId === 'string' ? finding.detectorId : '',
+        path: typeof finding.path === 'string' ? finding.path : '',
+        source: typeof finding.source === 'string' ? finding.source : '',
+        preview: normalizeTextField(finding.preview, 240)
+      }));
+    }
+    return result;
+  }
+
+  function normalizeFileSummaries(files) {
+    var result = [];
+    if (!Array.isArray(files)) {
+      return result;
+    }
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i];
+      if (typeof file === 'string') {
+        result.push({ path: file });
+        continue;
+      }
+      file = file || {};
+      result.push(removeEmptyFields({
+        path: typeof file.path === 'string' ? file.path : '',
+        destinationPath: typeof file.destinationPath === 'string' ? file.destinationPath : '',
+        type: typeof file.type === 'string' ? file.type : '',
+        reason: typeof file.reason === 'string' ? file.reason : '',
+        status: typeof file.status === 'string' ? file.status : '',
+        size: Number.isFinite(Number(file.size)) ? Number(file.size) : undefined
+      }));
+    }
+    return result;
+  }
+
+  function normalizeDiffSummary(summary) {
+    summary = summary && typeof summary === 'object' ? summary : {};
+    return {
+      filesChanged: nonNegativeInteger(summary.filesChanged),
+      additions: nonNegativeInteger(summary.additions),
+      deletions: nonNegativeInteger(summary.deletions),
+      binaryFilesChanged: nonNegativeInteger(summary.binaryFilesChanged)
+    };
+  }
+
   function normalizeProjectPrefKey(value) {
     var key = typeof value === 'string' ? value.trim() : '';
     if (!key) {
@@ -318,6 +474,23 @@
       return text;
     }
     return text.slice(0, Math.max(0, maxChars - 1)) + '…';
+  }
+
+  function nonNegativeInteger(value) {
+    var number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+  }
+
+  function removeEmptyFields(value) {
+    var result = {};
+    var keys = Object.keys(value);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (value[key] !== undefined && value[key] !== '') {
+        result[key] = value[key];
+      }
+    }
+    return result;
   }
 
   function buildActiveSessionByProject(existing, projectId, sessionId) {
@@ -404,6 +577,7 @@
     buildTurnRecord: buildTurnRecord,
     buildEventRecord: buildEventRecord,
     buildArtifactRecord: buildArtifactRecord,
+    buildAuditLogRecord: buildAuditLogRecord,
     extractLightweightPrefs: extractLightweightPrefs,
     buildActiveSessionByProject: buildActiveSessionByProject,
     createEventBuffer: createEventBuffer

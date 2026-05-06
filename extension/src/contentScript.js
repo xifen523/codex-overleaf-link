@@ -7,8 +7,8 @@
   const RUN_SNAPSHOT_ZIP_TIMEOUT_MS = 30000;
   const SNAPSHOT_PAGE_BRIDGE_TIMEOUT_MS = 70000;
   const COMPILE_PAGE_BRIDGE_TIMEOUT_MS = 75000;
-  const CONTEXT_FILE_LIST_ZIP_TIMEOUT_MS = 12000;
-  const CONTEXT_FILE_LIST_PAGE_BRIDGE_TIMEOUT_MS = 20000;
+  const CONTEXT_EXACT_FILE_LIST_ZIP_TIMEOUT_MS = 30000;
+  const CONTEXT_FILE_LIST_PAGE_BRIDGE_TIMEOUT_MS = 35000;
   const STREAM_RENDER_FLUSH_MS = 80;
   const STREAM_SAVE_DELAY_MS = 1000;
   const MAX_RUN_EVENTS = 300;
@@ -21,7 +21,11 @@
     'task.confirm',
     'mirror.sync',
     'mirror.patchFiles',
-    'codex.history.clearPlugin'
+    'mirror.scanSensitive',
+    'codex.history.clearPlugin',
+    'skills.list',
+    'skills.install',
+    'skills.remove'
   ]);
   const PANEL_DEFAULT_WIDTH = 380;
   const PANEL_MIN_WIDTH = 340;
@@ -66,6 +70,12 @@
   const runController = window.CodexOverleafRunController;
   const mirrorHealth = window.CodexOverleafMirrorHealth;
   const otWarmMirrorController = window.CodexOverleafOtWarmMirrorController;
+  const GovernanceRules = window.CodexOverleafGovernanceRules;
+  const SensitiveScan = window.CodexOverleafSensitiveScan;
+  const AuditRecords = window.CodexOverleafAuditRecords;
+  const MAX_COMPOSER_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+  const MAX_COMPOSER_ATTACHMENTS = 8;
+  const MAX_ATTACHMENT_PREVIEW_DATA_URL_CHARS = 768 * 1024;
 
   let panel = null;
   let state = null;
@@ -78,6 +88,9 @@
   let contextProject = null;
   let contextLoadId = 0;
   let contextExpandedFolders = new Set();
+  let composerAttachments = [];
+  let pendingComposerAttachmentKeys = new Set();
+  let composerSkillInvocation = null;
   let customInstructionsEditorProjectId = '';
   let customInstructionsEditorValue = '';
   let logAutoFollow = true;
@@ -193,6 +206,10 @@
                   <span data-i18n="diagnosticsOtTitle">Check Experimental OT Mirror</span>
                   <small data-i18n="diagnosticsOtSubtitle">Status, fresh files, fallback</small>
                 </button>
+                <button type="button" data-diagnostics-export>
+                  <span data-i18n="diagnosticsExportTitle">Export Diagnostics</span>
+                  <small data-i18n="diagnosticsExportSubtitle">Redacted audit and environment bundle</small>
+                </button>
                 <button type="button" data-language-toggle>
                   <span data-i18n="switchLanguage">Switch to Chinese</span>
                   <small data-i18n="switchLanguageHint">Change panel language</small>
@@ -217,17 +234,47 @@
             <button type="button" data-custom-instructions-settings title="Custom Instructions" aria-label="Custom Instructions" aria-expanded="false">⚙</button>
           </div>
         </div>
-        <section class="codex-custom-instructions-panel" data-custom-instructions-panel hidden>
+        <section class="codex-custom-instructions-panel codex-project-settings-panel" data-custom-instructions-panel data-project-settings-panel hidden>
           <div class="codex-custom-instructions-head">
             <div>
-              <div class="codex-custom-instructions-title" data-i18n="customInstructionsTitle">Custom Instructions</div>
-              <div class="codex-custom-instructions-subtitle" data-i18n="customInstructionsSubtitle">Give Codex extra instructions and context for this Overleaf project.</div>
+              <div class="codex-custom-instructions-title" data-i18n="projectSettingsTitle">Project Settings</div>
+              <span data-i18n="customInstructionsTitle" hidden>Custom Instructions</span>
+              <span data-i18n="customInstructionsSubtitle" hidden>Give Codex extra instructions and context for this Overleaf project.</span>
+              <div class="codex-custom-instructions-subtitle" data-i18n="projectSettingsSubtitle">Governance, local skills, and custom instructions for this Overleaf project.</div>
               <a class="codex-custom-instructions-learn-more" data-custom-instructions-learn-more data-i18n="customInstructionsLearnMore" href="https://developers.openai.com/codex/guides/agents-md#create-global-guidance" target="_blank" rel="noopener noreferrer">Learn more</a>
             </div>
             <button type="button" data-custom-instructions-close title="Close" aria-label="Close">×</button>
           </div>
           <label class="codex-custom-instructions-label" for="codex-custom-instructions-input" data-i18n="personalizationConfig">Personalization</label>
           <textarea id="codex-custom-instructions-input" class="codex-custom-instructions-input" data-custom-instructions-input rows="7" placeholder="Style, terminology, venue constraints, and LaTeX conventions for this project."></textarea>
+          <div class="codex-project-settings-section">
+            <div class="codex-project-settings-section-title" data-i18n="governanceRulesTitle">Governance Rules</div>
+            <label class="codex-custom-instructions-label" for="codex-governance-readonly-patterns" data-i18n="governanceReadonlyPatterns">Read-only patterns</label>
+            <textarea id="codex-governance-readonly-patterns" class="codex-project-settings-textarea" data-governance-readonly-patterns rows="3" placeholder="paper/accepted/**&#10;main.tex"></textarea>
+            <label class="codex-custom-instructions-label" for="codex-governance-writable-patterns" data-i18n="governanceWritablePatterns">Writable patterns</label>
+            <textarea id="codex-governance-writable-patterns" class="codex-project-settings-textarea" data-governance-writable-patterns rows="3" placeholder="sections/**&#10;figures/**"></textarea>
+            <label class="codex-project-settings-check">
+              <input type="checkbox" data-sensitive-check-enabled>
+              <span data-i18n="sensitiveCheckEnabled">Check for sensitive content before Codex runs</span>
+            </label>
+            <label class="codex-project-settings-check">
+              <input type="checkbox" data-sensitive-confirm-allowed>
+              <span data-i18n="sensitiveConfirmAllowed">Allow explicit confirmation when sensitive findings exist</span>
+            </label>
+          </div>
+          <div class="codex-project-settings-section">
+            <div class="codex-project-settings-section-title" data-i18n="localSkillsTitle">Local Skills</div>
+            <label class="codex-project-settings-check">
+              <input type="checkbox" data-load-codex-local-skills>
+              <span data-i18n="loadCodexLocalSkills">Load local Codex skills</span>
+            </label>
+            <label class="codex-project-settings-check">
+              <input type="checkbox" data-load-codex-overleaf-skills>
+              <span data-i18n="loadCodexOverleafSkills">Load Codex Overleaf skills</span>
+            </label>
+            <div class="codex-local-skill-list" data-local-skill-list></div>
+            <div class="codex-project-settings-status" data-project-settings-status></div>
+          </div>
           <div class="codex-custom-instructions-actions">
             <button type="button" data-custom-instructions-save data-i18n="save">Save</button>
           </div>
@@ -253,6 +300,12 @@
         <div class="codex-probe-line" data-probe-status>Checking Overleaf state...</div>
 
         <form class="codex-composer" data-composer-form>
+          <div class="codex-attachment-strip codex-attachment-preview-list" data-attachment-strip hidden></div>
+          <div class="codex-composer-skill-context" data-composer-skill-context hidden>
+            <span class="codex-composer-skill-icon" aria-hidden="true">◇</span>
+            <span data-composer-skill-label></span>
+            <button type="button" data-composer-skill-clear title="Clear skill" aria-label="Clear skill">×</button>
+          </div>
           <textarea data-task rows="3" placeholder="Ask Codex anything. Type @ to add context"></textarea>
           <div class="codex-context-summary" data-context-summary hidden></div>
           <div class="codex-mode-row">
@@ -314,6 +367,12 @@
             </div>
             <button type="submit" data-run title="Send" aria-label="Send">↑</button>
           </div>
+          <div class="codex-slash-menu" data-slash-menu hidden>
+            <button type="button" data-slash-command="install-skill">
+              <span data-i18n="slashInstallSkillTitle">Install skill</span>
+              <small data-i18n="slashInstallSkillSubtitle">Add a Codex Overleaf skill under this plugin.</small>
+            </button>
+          </div>
           <div class="codex-context-tray" data-context-tray hidden>
             <div class="codex-context-head">
               <span data-i18n="contextTitle">@ Context</span>
@@ -329,7 +388,7 @@
       document.documentElement.classList.add('codex-overleaf-panel-mounted');
 
       panel.querySelector('[data-new-session]').addEventListener('click', () => startNewSession());
-      panel.querySelector('[data-custom-instructions-settings]').addEventListener('click', () => openCustomInstructionsSettings());
+      panel.querySelector('[data-custom-instructions-settings]').addEventListener('click', () => toggleCustomInstructionsSettings());
       panel.querySelector('[data-custom-instructions-close]').addEventListener('click', () => closeCustomInstructionsSettings());
       panel.querySelector('[data-custom-instructions-save]').addEventListener('click', () => {
         saveCustomInstructionsSettings().catch(error => {
@@ -342,6 +401,10 @@
         event.preventDefault();
         safeRunTask();
       });
+      panel.querySelector('[data-task]').addEventListener('paste', handleComposerPaste);
+      panel.querySelector('[data-composer-form]').addEventListener('dragover', handleComposerDragOver);
+      panel.querySelector('[data-composer-form]').addEventListener('dragleave', handleComposerDragLeave);
+      panel.querySelector('[data-composer-form]').addEventListener('drop', handleComposerDrop);
       panel.querySelector('[data-run]').addEventListener('click', event => {
         event.preventDefault();
         if (currentRunView) {
@@ -351,12 +414,9 @@
         panel.querySelector('[data-composer-form]')?.requestSubmit();
       });
       panel.querySelector('[data-task]').addEventListener('keydown', handleTaskInputKeydown);
-      panel.querySelector('[data-task]').addEventListener('input', () => {
-        scheduleMirrorPrefetch({
-          reason: 'composer-input',
-          delayMs: mirrorHealth?.PREFETCH_DEBOUNCE_MS || 1200
-        });
-      });
+      panel.querySelector('[data-task]').addEventListener('input', handleTaskInput);
+      panel.querySelector('[data-slash-menu]').addEventListener('click', handleSlashMenuClick);
+      panel.querySelector('[data-composer-skill-clear]').addEventListener('click', clearComposerSkillInvocation);
       panel.addEventListener('click', event => event.stopPropagation());
       panel.addEventListener('mousedown', event => event.stopPropagation());
       panel.querySelector('[data-refresh]').addEventListener('click', () => refreshProbe({ userInitiated: true }));
@@ -376,6 +436,10 @@
       panel.querySelector('[data-diagnostics-ot]').addEventListener('click', () => {
         closeDiagnosticsMenu();
         inspectOtWarmMirrorDiagnostics();
+      });
+      panel.querySelector('[data-diagnostics-export]').addEventListener('click', () => {
+        closeDiagnosticsMenu();
+        exportDiagnosticsBundle().catch(error => showPluginToast(tx(`Diagnostics export failed: ${error.message}`, `导出诊断信息失败：${error.message}`), { status: 'failed' }));
       });
       panel.querySelector('[data-language-toggle]').addEventListener('click', () => toggleLanguage());
       panel.querySelector('[data-diagnostics-result-close]').addEventListener('click', () => closeDiagnosticsResult());
@@ -400,7 +464,7 @@
         });
       }
 
-      for (const selector of ['[data-model]', '[data-reasoning]', '[data-speed]', '[data-mode]', '[data-task]', '[data-require-reviewing]', '[data-auto-recompile]']) {
+      for (const selector of ['[data-model]', '[data-reasoning]', '[data-speed]', '[data-mode]', '[data-task]', '[data-require-reviewing]', '[data-auto-recompile]', '[data-governance-readonly-patterns]', '[data-governance-writable-patterns]', '[data-sensitive-check-enabled]', '[data-sensitive-confirm-allowed]', '[data-load-codex-local-skills]', '[data-load-codex-overleaf-skills]']) {
         panel.querySelector(selector).addEventListener('change', persistPanelInputs);
         panel.querySelector(selector).addEventListener('input', persistPanelInputs);
       }
@@ -502,11 +566,32 @@
     closeDiagnosticsResult();
     closeModelConfigPopover();
     closeContextTray();
+    if (typeof closeSlashMenu === 'function') {
+      closeSlashMenu();
+    }
     syncCustomInstructionsEditorForProject(getCurrentProjectId(), { force: true });
+    if (typeof syncProjectSettingsEditorForProject === 'function') {
+      syncProjectSettingsEditorForProject(getCurrentProjectId());
+    }
     settingsPanel.hidden = false;
     button.dataset.active = 'true';
     button.setAttribute('aria-expanded', 'true');
     panel?.querySelector('[data-custom-instructions-input]')?.focus?.();
+    if (typeof refreshLocalSkills === 'function') {
+      refreshLocalSkills().catch(error => setProjectSettingsStatus(tx(`Could not list local skills: ${error.message}`, `无法列出本地技能：${error.message}`), 'failed'));
+    }
+  }
+
+  function toggleCustomInstructionsSettings() {
+    const settingsPanel = panel?.querySelector('[data-custom-instructions-panel]');
+    if (!settingsPanel) {
+      return;
+    }
+    if (settingsPanel.hidden === false) {
+      closeCustomInstructionsSettings();
+      return;
+    }
+    openCustomInstructionsSettings();
   }
 
   function closeCustomInstructionsSettings() {
@@ -526,9 +611,22 @@
       return;
     }
     setCustomInstructionsForProject(getCurrentProjectId(), input.value);
+    if (typeof setGovernanceRulesForCurrentProject === 'function' && typeof readGovernanceRulesFromSettings === 'function') {
+      setGovernanceRulesForCurrentProject(readGovernanceRulesFromSettings());
+    }
+    if (typeof setSelectedLocalSkillIdsForCurrentProject === 'function' && typeof readSelectedLocalSkillIdsFromSettings === 'function') {
+      setSelectedLocalSkillIdsForCurrentProject(readSelectedLocalSkillIdsFromSettings());
+    }
+    if (typeof setSkillLoadingSettings === 'function' && typeof readSkillLoadingSettingsFromSettings === 'function') {
+      setSkillLoadingSettings(readSkillLoadingSettingsFromSettings());
+    }
     syncCustomInstructionsEditorForProject(getCurrentProjectId(), { force: true });
+    if (typeof syncProjectSettingsEditorForProject === 'function') {
+      syncProjectSettingsEditorForProject(getCurrentProjectId());
+    }
     await saveState();
     showPluginToast(tr('customInstructionsSavedToast'), { status: 'completed' });
+    closeCustomInstructionsSettings();
   }
 
   function syncCustomInstructionsEditorForProject(projectId = getCurrentProjectId(), options) {
@@ -556,6 +654,670 @@
     customInstructionsEditorValue = storedValue;
   }
 
+  function normalizeGovernanceRulesByProject(value) {
+    const result = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    for (const rawKey of Object.keys(value)) {
+      const key = normalizeProjectPreferenceKey(rawKey);
+      if (!key) {
+        continue;
+      }
+      result[key] = normalizeGovernanceRules(value[rawKey]);
+    }
+    return result;
+  }
+
+  function normalizeSelectedLocalSkillIdsByProject(value) {
+    const result = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    for (const rawKey of Object.keys(value)) {
+      const key = normalizeProjectPreferenceKey(rawKey);
+      if (!key) {
+        continue;
+      }
+      result[key] = normalizeSelectedLocalSkillIds(value[rawKey]);
+    }
+    return result;
+  }
+
+  function normalizeProjectPreferenceKey(value) {
+    const text = String(value || '').trim();
+    return text.length <= 160 ? text : text.slice(0, 159) + '…';
+  }
+
+  function normalizeGovernanceRules(value = {}) {
+    if (GovernanceRules?.normalizeGovernanceRules) {
+      return GovernanceRules.normalizeGovernanceRules(value);
+    }
+    return {
+      readonlyPatterns: normalizePatternTextList(value.readonlyPatterns),
+      writablePatterns: normalizePatternTextList(value.writablePatterns),
+      sensitiveCheckEnabled: value.sensitiveCheckEnabled !== false,
+      sensitiveConfirmAllowed: value.sensitiveConfirmAllowed === true
+    };
+  }
+
+  function normalizeSelectedLocalSkillIds(value) {
+    if (runController?.normalizeSelectedSkillIds) {
+      return runController.normalizeSelectedSkillIds(value);
+    }
+    const seen = new Set();
+    const result = [];
+    for (const item of Array.isArray(value) ? value : []) {
+      const id = String(item || '').trim();
+      if (!id || seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      result.push(id);
+    }
+    return result;
+  }
+
+  function normalizePatternTextList(value) {
+    if (Array.isArray(value)) {
+      return value.map(item => String(item || '').trim()).filter(Boolean);
+    }
+    return String(value || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean);
+  }
+
+  function getGovernanceRulesForCurrentProject() {
+    const projectId = normalizeProjectPreferenceKey(getCurrentProjectId());
+    return normalizeGovernanceRulesByProject(state?.governanceRulesByProject)[projectId] || normalizeGovernanceRules({});
+  }
+
+  function setGovernanceRulesForCurrentProject(rules) {
+    const projectId = normalizeProjectPreferenceKey(getCurrentProjectId());
+    if (!projectId) {
+      return;
+    }
+    state = {
+      ...state,
+      governanceRulesByProject: {
+        ...normalizeGovernanceRulesByProject(state?.governanceRulesByProject),
+        [projectId]: normalizeGovernanceRules(rules)
+      }
+    };
+  }
+
+  function getSelectedLocalSkillIdsForCurrentProject() {
+    const projectId = normalizeProjectPreferenceKey(getCurrentProjectId());
+    return normalizeSelectedLocalSkillIdsByProject(state?.selectedLocalSkillIdsByProject)[projectId] || [];
+  }
+
+  function setSelectedLocalSkillIdsForCurrentProject(skillIds) {
+    const projectId = normalizeProjectPreferenceKey(getCurrentProjectId());
+    if (!projectId) {
+      return;
+    }
+    state = {
+      ...state,
+      selectedLocalSkillIdsByProject: {
+        ...normalizeSelectedLocalSkillIdsByProject(state?.selectedLocalSkillIdsByProject),
+        [projectId]: normalizeSelectedLocalSkillIds(skillIds)
+      }
+    };
+  }
+
+  function getSkillLoadingSettings() {
+    return {
+      loadCodexLocalSkills: state?.loadCodexLocalSkills !== false,
+      loadCodexOverleafSkills: state?.loadCodexOverleafSkills !== false
+    };
+  }
+
+  function setSkillLoadingSettings(settings = {}) {
+    state = {
+      ...state,
+      loadCodexLocalSkills: settings.loadCodexLocalSkills !== false,
+      loadCodexOverleafSkills: settings.loadCodexOverleafSkills !== false
+    };
+  }
+
+  function readSkillLoadingSettingsFromSettings() {
+    return {
+      loadCodexLocalSkills: panel?.querySelector('[data-load-codex-local-skills]')?.checked !== false,
+      loadCodexOverleafSkills: panel?.querySelector('[data-load-codex-overleaf-skills]')?.checked !== false
+    };
+  }
+
+  function readGovernanceRulesFromSettings() {
+    return normalizeGovernanceRules({
+      readonlyPatterns: normalizePatternTextList(panel?.querySelector('[data-governance-readonly-patterns]')?.value),
+      writablePatterns: normalizePatternTextList(panel?.querySelector('[data-governance-writable-patterns]')?.value),
+      sensitiveCheckEnabled: panel?.querySelector('[data-sensitive-check-enabled]')?.checked !== false,
+      sensitiveConfirmAllowed: panel?.querySelector('[data-sensitive-confirm-allowed]')?.checked === true
+    });
+  }
+
+  function readSelectedLocalSkillIdsFromSettings() {
+    return Array.from(panel?.querySelectorAll('[data-local-skill-selected]') || [])
+      .filter(input => input.checked)
+      .map(input => input.value);
+  }
+
+  function syncProjectSettingsEditorForProject() {
+    const rules = getGovernanceRulesForCurrentProject();
+    const readonly = panel?.querySelector('[data-governance-readonly-patterns]');
+    const writable = panel?.querySelector('[data-governance-writable-patterns]');
+    const sensitiveEnabled = panel?.querySelector('[data-sensitive-check-enabled]');
+    const sensitiveConfirm = panel?.querySelector('[data-sensitive-confirm-allowed]');
+    if (readonly) {
+      readonly.value = (rules.readonlyPatterns || []).join('\n');
+    }
+    if (writable) {
+      writable.value = (rules.writablePatterns || []).join('\n');
+    }
+    if (sensitiveEnabled) {
+      sensitiveEnabled.checked = rules.sensitiveCheckEnabled !== false;
+    }
+    if (sensitiveConfirm) {
+      sensitiveConfirm.checked = rules.sensitiveConfirmAllowed === true;
+    }
+    const skillLoading = getSkillLoadingSettings();
+    const loadCodexLocalSkills = panel?.querySelector('[data-load-codex-local-skills]');
+    const loadCodexOverleafSkills = panel?.querySelector('[data-load-codex-overleaf-skills]');
+    if (loadCodexLocalSkills) {
+      loadCodexLocalSkills.checked = skillLoading.loadCodexLocalSkills !== false;
+    }
+    if (loadCodexOverleafSkills) {
+      loadCodexOverleafSkills.checked = skillLoading.loadCodexOverleafSkills !== false;
+    }
+    renderLocalSkillList();
+  }
+
+  function setProjectSettingsStatus(text, status = 'info') {
+    const element = panel?.querySelector('[data-project-settings-status]');
+    if (!element) {
+      return;
+    }
+    element.textContent = text || '';
+    element.dataset.status = status;
+  }
+
+  async function refreshLocalSkills() {
+    const response = await sendBackgroundNative({
+      method: 'skills.list',
+      params: { projectId: getCurrentProjectId() }
+    });
+    if (!response?.ok) {
+      throw new Error(response?.error?.message || 'native host did not return local skills');
+    }
+    state = {
+      ...state,
+      localSkillsByProject: {
+        ...(state?.localSkillsByProject || {}),
+        [getCurrentProjectId()]: Array.isArray(response.result?.skills) ? response.result.skills : []
+      }
+    };
+    renderLocalSkillList();
+  }
+
+  function getLocalSkillsForCurrentProject() {
+    return Array.isArray(state?.localSkillsByProject?.[getCurrentProjectId()])
+      ? state.localSkillsByProject[getCurrentProjectId()]
+      : [];
+  }
+
+  function renderLocalSkillList() {
+    const list = panel?.querySelector('[data-local-skill-list]');
+    if (!list) {
+      return;
+    }
+    const selected = new Set(getSelectedLocalSkillIdsForCurrentProject());
+    const skills = getLocalSkillsForCurrentProject();
+    list.textContent = '';
+    if (!skills.length) {
+      const empty = document.createElement('div');
+      empty.className = 'codex-project-settings-empty';
+      empty.textContent = tr('localSkillsEmpty');
+      list.append(empty);
+      return;
+    }
+    for (const skill of skills) {
+      const id = String(skill?.id || '').trim();
+      if (!id) {
+        continue;
+      }
+      const row = document.createElement('label');
+      row.className = 'codex-local-skill-row';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = id;
+      checkbox.checked = selected.has(id);
+      checkbox.setAttribute('data-local-skill-selected', '');
+      checkbox.addEventListener('change', () => {
+        setSelectedLocalSkillIdsForCurrentProject(readSelectedLocalSkillIdsFromSettings());
+        saveStateSoon();
+      });
+      const text = document.createElement('span');
+      text.textContent = skill.title ? `${skill.title} (${id})` : id;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = tr('localSkillRemove');
+      remove.addEventListener('click', event => {
+        event.preventDefault();
+        removeLocalSkill(id).catch(error => setProjectSettingsStatus(tx(`Failed to remove local skill: ${error.message}`, `删除本地技能失败：${error.message}`), 'failed'));
+      });
+      row.append(checkbox, text, remove);
+      list.append(row);
+    }
+  }
+
+  async function removeLocalSkill(id) {
+    const response = await sendBackgroundNative({
+      method: 'skills.remove',
+      params: {
+        projectId: getCurrentProjectId(),
+        id
+      }
+    });
+    if (!response?.ok) {
+      throw new Error(response?.error?.message || 'native host did not remove local skill');
+    }
+    setSelectedLocalSkillIdsForCurrentProject(getSelectedLocalSkillIdsForCurrentProject().filter(skillId => skillId !== id));
+    setProjectSettingsStatus(tr('localSkillRemoveDone'), 'completed');
+    await refreshLocalSkills();
+    await saveState();
+  }
+
+  function handleComposerPaste(event) {
+    const files = collectFilesFromDataTransfer(event.clipboardData);
+    if (!files.length) {
+      return;
+    }
+    event.preventDefault();
+    addComposerAttachmentFiles(files).catch(error => {
+      appendPlainLog(tx(`Attachment was not added: ${error.message}`, `附件没有添加：${error.message}`));
+    });
+  }
+
+  function handleComposerDragOver(event) {
+    if (!hasFileDataTransfer(event.dataTransfer)) {
+      return;
+    }
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'copy';
+    }
+    panel?.querySelector('[data-composer-form]')?.setAttribute('data-dragging-attachment', 'true');
+  }
+
+  function handleComposerDragLeave(event) {
+    const composer = panel?.querySelector('[data-composer-form]');
+    if (!composer || (event.relatedTarget && composer.contains(event.relatedTarget))) {
+      return;
+    }
+    composer.removeAttribute('data-dragging-attachment');
+  }
+
+  function handleComposerDrop(event) {
+    const files = collectFilesFromDataTransfer(event.dataTransfer);
+    panel?.querySelector('[data-composer-form]')?.removeAttribute('data-dragging-attachment');
+    if (!files.length) {
+      return;
+    }
+    event.preventDefault();
+    addComposerAttachmentFiles(files).catch(error => {
+      appendPlainLog(tx(`Attachment was not added: ${error.message}`, `附件没有添加：${error.message}`));
+    });
+  }
+
+  function collectFilesFromDataTransfer(dataTransfer) {
+    const addFile = (target, seen, file) => {
+      if (!file) {
+        return;
+      }
+      const key = [
+        normalizeComposerAttachmentName(file.name).toLowerCase(),
+        String(file.type || '').trim().toLowerCase(),
+        Number(file.size) || 0,
+        Number(file.lastModified) || 0
+      ].join('\n');
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      target.push(file);
+    };
+    const itemFiles = [];
+    const seenItemFiles = new Set();
+    for (const item of Array.from(dataTransfer?.items || [])) {
+      if (item?.kind !== 'file' || typeof item.getAsFile !== 'function') {
+        continue;
+      }
+      addFile(itemFiles, seenItemFiles, item.getAsFile());
+    }
+    if (itemFiles.length) {
+      return itemFiles;
+    }
+    const files = [];
+    const seenFiles = new Set();
+    for (const file of Array.from(dataTransfer?.files || [])) {
+      addFile(files, seenFiles, file);
+    }
+    return files;
+  }
+
+  function hasFileDataTransfer(dataTransfer) {
+    return Array.from(dataTransfer?.items || []).some(item => item?.kind === 'file') ||
+      Array.from(dataTransfer?.types || []).includes('Files') ||
+      Array.from(dataTransfer?.files || []).length > 0;
+  }
+
+  async function addComposerAttachmentFiles(files) {
+    for (const file of Array.from(files || [])) {
+      const dedupeKey = buildComposerAttachmentDedupeKey(file);
+      if (isDuplicateComposerAttachmentFile(dedupeKey)) {
+        continue;
+      }
+      if (composerAttachments.length + pendingComposerAttachmentKeys.size >= MAX_COMPOSER_ATTACHMENTS) {
+        appendPlainLog(tx(
+          `Attachment limit reached (${MAX_COMPOSER_ATTACHMENTS}).`,
+          `附件数量已达上限（${MAX_COMPOSER_ATTACHMENTS} 个）。`
+        ));
+        break;
+      }
+      validateComposerAttachmentFile(file);
+      pendingComposerAttachmentKeys.add(dedupeKey);
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        const preview = await buildAttachmentPreviewData(file, dataUrl);
+        const attachment = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          name: normalizeComposerAttachmentName(file.name),
+          mimeType: String(file.type || ''),
+          size: Number(file.size) || 0,
+          kind: preview.kind,
+          previewDataUrl: preview.previewDataUrl,
+          contentBase64: extractBase64FromDataUrl(dataUrl),
+          dedupeKey
+        };
+        if (!composerAttachments.some(existing => buildComposerAttachmentDedupeKey(existing) === dedupeKey)) {
+          composerAttachments.push(attachment);
+        }
+      } finally {
+        pendingComposerAttachmentKeys.delete(dedupeKey);
+      }
+    }
+    renderComposerAttachments();
+  }
+
+  function buildComposerAttachmentDedupeKey(file) {
+    const input = file || {};
+    return [
+      normalizeComposerAttachmentName(input.name).toLowerCase(),
+      String(input.type || input.mimeType || '').trim().toLowerCase(),
+      Number(input.size) || 0
+    ].join('\n');
+  }
+
+  function isDuplicateComposerAttachmentFile(dedupeKey) {
+    const key = String(dedupeKey || '');
+    return pendingComposerAttachmentKeys.has(key) ||
+      composerAttachments.some(attachment => buildComposerAttachmentDedupeKey(attachment) === key);
+  }
+
+  function validateComposerAttachmentFile(file) {
+    if (!file || !normalizeComposerAttachmentName(file.name)) {
+      throw new Error(tx('The selected attachment has no readable file name.', '选择的附件没有可读取的文件名。'));
+    }
+    if (Number(file.size) <= 0) {
+      throw new Error(tx('Empty attachments are not supported.', '不支持空附件。'));
+    }
+    if (Number(file.size) > MAX_COMPOSER_ATTACHMENT_BYTES) {
+      throw new Error(tx('Selected attachment is too large.', '选择的附件太大。'));
+    }
+  }
+
+  function normalizeComposerAttachmentName(name) {
+    return String(name || '')
+      .replace(/\0/g, '')
+      .replace(/\\/g, '/')
+      .split('/')
+      .filter(Boolean)
+      .pop()
+      ?.trim()
+      .slice(0, 180) || '';
+  }
+
+  function getComposerAttachmentsForRun() {
+    return composerAttachments.map(attachment => ({
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+      kind: attachment.kind,
+      previewDataUrl: attachment.previewDataUrl,
+      contentBase64: attachment.contentBase64
+    }));
+  }
+
+  function createRunAttachmentSnapshots(attachments = []) {
+    return Array.from(attachments || []).map(attachment => ({
+      name: normalizeComposerAttachmentName(attachment.name),
+      mimeType: String(attachment.mimeType || '').trim(),
+      size: Number(attachment.size) || 0,
+      kind: attachment.kind === 'image' ? 'image' : 'file',
+      previewDataUrl: attachment.kind === 'image' && /^data:image\//i.test(String(attachment.previewDataUrl || ''))
+        ? String(attachment.previewDataUrl || '').slice(0, MAX_ATTACHMENT_PREVIEW_DATA_URL_CHARS)
+        : ''
+    })).filter(attachment => attachment.name).slice(0, MAX_COMPOSER_ATTACHMENTS);
+  }
+
+  function renderComposerAttachments() {
+    const strip = panel?.querySelector('[data-attachment-strip]');
+    if (!strip) {
+      return;
+    }
+    strip.hidden = composerAttachments.length === 0;
+    renderAttachmentPreviewList(composerAttachments, strip, {
+      removable: true,
+      onRemove: removeComposerAttachment
+    });
+  }
+
+  function renderAttachmentPreviewList(attachments = [], container, options = {}) {
+    if (!container) {
+      return;
+    }
+    container.replaceChildren();
+    const items = Array.isArray(attachments) ? attachments : [];
+    container.hidden = items.length === 0;
+    for (const attachment of items) {
+      const isImage = attachment.kind === 'image' && attachment.previewDataUrl;
+      const card = document.createElement(isImage ? 'button' : 'div');
+      card.className = 'codex-attachment-preview-card';
+      card.dataset.kind = isImage ? 'image' : 'file';
+      if (isImage) {
+        card.type = 'button';
+        card.title = tx(`Open ${attachment.name}`, `打开 ${attachment.name}`);
+        card.addEventListener('click', () => showAttachmentPreviewDialog(attachment));
+        const image = document.createElement('img');
+        image.src = attachment.previewDataUrl;
+        image.alt = attachment.name || tx('Attached image', '已附加图片');
+        card.append(image);
+      } else {
+        const icon = document.createElement('span');
+        icon.className = 'codex-attachment-file-icon';
+        icon.textContent = getAttachmentIconLabel(attachment);
+        card.append(icon);
+      }
+
+      const meta = document.createElement('span');
+      meta.className = 'codex-attachment-preview-meta';
+      const name = document.createElement('span');
+      name.className = 'codex-attachment-preview-name';
+      name.textContent = attachment.name || tx('Attachment', '附件');
+      const size = document.createElement('span');
+      size.className = 'codex-attachment-preview-size';
+      size.textContent = formatFileSize(attachment.size);
+      meta.append(name, size);
+      card.append(meta);
+
+      if (options.removable) {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'codex-attachment-preview-remove';
+        remove.textContent = '×';
+        remove.title = tx('Remove attachment', '移除附件');
+        remove.setAttribute('aria-label', tx(`Remove ${attachment.name}`, `移除 ${attachment.name}`));
+        remove.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopPropagation();
+          options.onRemove?.(attachment.id);
+        });
+        card.append(remove);
+      }
+      container.append(card);
+    }
+  }
+
+  function showAttachmentPreviewDialog(attachment) {
+    if (!attachment?.previewDataUrl) {
+      return;
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'codex-attachment-preview-dialog';
+    overlay.setAttribute('data-attachment-preview-dialog', 'true');
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', attachment.name || tx('Attachment preview', '附件预览'));
+
+    const card = document.createElement('section');
+    card.className = 'codex-attachment-preview-dialog-card';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'codex-attachment-preview-dialog-close';
+    close.textContent = '×';
+    close.title = tr('close');
+    close.setAttribute('aria-label', tr('close'));
+    const image = document.createElement('img');
+    image.src = attachment.previewDataUrl;
+    image.alt = attachment.name || tx('Attached image', '已附加图片');
+    const caption = document.createElement('div');
+    caption.className = 'codex-attachment-preview-dialog-caption';
+    caption.textContent = attachment.name || '';
+    card.append(close, image, caption);
+    overlay.append(card);
+
+    const cleanup = () => {
+      document.removeEventListener('keydown', onKeydown, true);
+      overlay.remove();
+    };
+    const onKeydown = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        cleanup();
+      }
+    };
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay) {
+        cleanup();
+      }
+    });
+    close.addEventListener('click', cleanup);
+    document.addEventListener('keydown', onKeydown, true);
+    (panel || document.body).append(overlay);
+    close.focus();
+  }
+
+  function removeComposerAttachment(id) {
+    composerAttachments = composerAttachments.filter(attachment => attachment.id !== id);
+    renderComposerAttachments();
+  }
+
+  function getAttachmentIconLabel(attachment = {}) {
+    const name = String(attachment.name || '');
+    const extension = name.includes('.') ? name.split('.').pop().slice(0, 4).toUpperCase() : '';
+    if (/pdf/i.test(attachment.mimeType || '') || /\.pdf$/i.test(name)) {
+      return 'PDF';
+    }
+    return extension || 'FILE';
+  }
+
+  function formatFileSize(size) {
+    const bytes = Number(size) || 0;
+    if (bytes >= 1024 * 1024) {
+      return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+    }
+    if (bytes >= 1024) {
+      return `${Math.round(bytes / 1024)} KB`;
+    }
+    return `${bytes} B`;
+  }
+
+  async function buildAttachmentPreviewData(file, dataUrl) {
+    const mimeType = String(file?.type || '');
+    const name = normalizeComposerAttachmentName(file?.name);
+    if (!isImageAttachment({ name, mimeType })) {
+      return { kind: 'file', previewDataUrl: '' };
+    }
+    const scaled = await createScaledImagePreviewDataUrl(dataUrl).catch(() => '');
+    const fallback = String(dataUrl || '').length <= MAX_ATTACHMENT_PREVIEW_DATA_URL_CHARS ? String(dataUrl || '') : '';
+    return {
+      kind: 'image',
+      previewDataUrl: scaled || fallback
+    };
+  }
+
+  function createScaledImagePreviewDataUrl(dataUrl) {
+    return new Promise(resolve => {
+      if (typeof Image === 'undefined' || typeof document === 'undefined' || !/^data:image\//i.test(String(dataUrl || ''))) {
+        resolve('');
+        return;
+      }
+      const image = new Image();
+      image.onload = () => {
+        const width = Number(image.naturalWidth || image.width);
+        const height = Number(image.naturalHeight || image.height);
+        if (!width || !height) {
+          resolve('');
+          return;
+        }
+        const maxEdge = 960;
+        const scale = Math.min(1, maxEdge / Math.max(width, height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const context = canvas.getContext('2d');
+        if (!context) {
+          resolve('');
+          return;
+        }
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        const value = canvas.toDataURL('image/png');
+        resolve(value.length <= MAX_ATTACHMENT_PREVIEW_DATA_URL_CHARS ? value : '');
+      };
+      image.onerror = () => resolve('');
+      image.src = dataUrl;
+    });
+  }
+
+  function isImageAttachment(attachment = {}) {
+    return /^image\//i.test(String(attachment.mimeType || '')) ||
+      /\.(?:png|jpe?g|gif|webp|bmp|svg)$/i.test(String(attachment.name || ''));
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        resolve(String(reader.result || ''));
+      };
+      reader.onerror = () => reject(reader.error || new Error('Could not read selected file'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function extractBase64FromDataUrl(value) {
+    const text = String(value || '');
+    return text.includes(',') ? text.slice(text.indexOf(',') + 1) : text;
+  }
+
   function toggleModelConfigPopover() {
     const popover = panel?.querySelector('[data-model-config-popover]');
     const button = panel?.querySelector('[data-model-config-toggle]');
@@ -568,6 +1330,9 @@
       closeDiagnosticsMenu();
       closeContextTray();
       closeCustomInstructionsSettings();
+      if (typeof closeSlashMenu === 'function') {
+        closeSlashMenu();
+      }
       renderModelConfigChoices();
     }
     popover.hidden = !open;
@@ -902,6 +1667,87 @@
     }
   }
 
+  async function exportDiagnosticsBundle() {
+    if (!AuditRecords?.buildDiagnosticBundle) {
+      throw new Error('Audit diagnostics helper is unavailable');
+    }
+    const [auditLogs, mirror, nativeDiagnostics] = await Promise.all([
+      getRecentAuditLogsForCurrentProject(),
+      getMirrorFreshness().catch(error => ({ status: 'unavailable', errorCode: error.message })),
+      getNativeDiagnosticsSummaryForBundle()
+    ]);
+    const bundle = AuditRecords.buildDiagnosticBundle({
+      excludeContent: true,
+      compatibility: {
+        extension: getExtensionCompatibilityMetadata(),
+        modelDiscovery
+      },
+      platform: nativeDiagnostics.platform,
+      nativeEnvironment: nativeDiagnostics.nativeEnvironment,
+      mirror,
+      auditLogs,
+      run: currentRunView ? {
+        id: currentRunView.recordId || '',
+        status: 'running'
+      } : {},
+      governance: getGovernanceRulesForCurrentProject(),
+      projectId: getCurrentProjectId()
+    });
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `codex-overleaf-diagnostics-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showPluginToast(tr('diagnosticsExportDone'), { status: 'completed' });
+  }
+
+  async function getNativeDiagnosticsSummaryForBundle() {
+    try {
+      const params = CodexOverleafCompatibility?.buildBridgePingParams
+        ? CodexOverleafCompatibility.buildBridgePingParams(getExtensionCompatibilityMetadata())
+        : {};
+      const response = await sendBackgroundNative({ method: 'bridge.ping', params });
+      if (!response?.ok) {
+        const errorCode = response?.error?.code || 'native_unavailable';
+        return {
+          platform: { status: 'unavailable', errorCode },
+          nativeEnvironment: { status: 'unavailable', errorCode }
+        };
+      }
+      return {
+        platform: {
+          host: response.result?.host || '',
+          platform: response.result?.platform || '',
+          version: response.result?.version || '',
+          protocolVersion: response.result?.protocolVersion || ''
+        },
+        nativeEnvironment: response.result?.environment || {}
+      };
+    } catch (error) {
+      const errorCode = error?.message || 'native_unavailable';
+      return {
+        platform: { status: 'unavailable', errorCode },
+        nativeEnvironment: { status: 'unavailable', errorCode }
+      };
+    }
+  }
+
+  async function getRecentAuditLogsForCurrentProject(limit = 12) {
+    const StorageDb = window.CodexOverleafStorageDb;
+    if (!StorageDb?.getAllByIndex) {
+      return [];
+    }
+    const records = await StorageDb.getAllByIndex('auditLogs', 'projectId', getCurrentProjectId());
+    return (records || [])
+      .slice()
+      .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
+      .slice(0, limit);
+  }
+
   function setLogScrollPosition(scroller) {
     scroller.scrollTop = scroller.scrollHeight;
   }
@@ -927,6 +1773,9 @@
       closeModelConfigPopover();
       closeDiagnosticsMenu();
       closeCustomInstructionsSettings();
+      if (typeof closeSlashMenu === 'function') {
+        closeSlashMenu();
+      }
     }
     tray.hidden = !open;
     button.dataset.active = open ? 'true' : 'false';
@@ -953,7 +1802,7 @@
     if (!list) {
       return;
     }
-    if (isContextFileListProject(contextProject) && !options.force) {
+    if (isExactContextFileListProject(contextProject) && !options.force) {
       renderContextFiles(contextProject);
       return;
     }
@@ -963,12 +1812,7 @@
     list.textContent = '';
 
     try {
-      const project = await callPageBridge('getProjectFileList', {
-        preferExact: true,
-        force: Boolean(options.force),
-        maxAgeMs: 300000,
-        zipTimeoutMs: CONTEXT_FILE_LIST_ZIP_TIMEOUT_MS
-      });
+      const project = await requestExactContextFiles({ force: Boolean(options.force) });
       if (!project?.ok) {
         throw new Error(project?.error || project?.reason || tr('unknownReason'));
       }
@@ -985,9 +1829,87 @@
     }
   }
 
+  async function requestExactContextFiles({ force = false } = {}) {
+    const project = await callPageBridge('getProjectSnapshot', {
+      force,
+      preferLightweight: true,
+      allowZipFallback: false,
+      allowEditorNavigation: false,
+      requireFullProject: true,
+      zipOnly: true,
+      includeBinaryFiles: true,
+      includeContent: false,
+      zipTimeoutMs: CONTEXT_EXACT_FILE_LIST_ZIP_TIMEOUT_MS
+    });
+    return normalizeContextFileListFromZipSnapshot(project);
+  }
+
+  function isExactContextFileListProject(project) {
+    return project?.ok && project?.capabilities?.method === 'overleaf-zip-file-list';
+  }
+
   function isContextFileListProject(project) {
     const method = project?.capabilities?.method;
     return method === 'overleaf-zip-file-list' || method === 'overleaf-file-tree';
+  }
+
+  function normalizeContextFileListFromZipSnapshot(project) {
+    const files = Array.isArray(project?.files) ? project.files : [];
+    if (project?.capabilities?.method !== 'overleaf-zip' || !files.length) {
+      return {
+        ok: false,
+        id: project?.id || getCurrentProjectId(),
+        url: project?.url || window.location.href,
+        activePath: project?.activePath || '',
+        files: [],
+        error: getZipSnapshotFailureReason(project),
+        capabilities: {
+          ...(project?.capabilities || {}),
+          method: project?.capabilities?.method || 'overleaf-zip-file-list-unavailable',
+          fullProjectSnapshot: false
+        }
+      };
+    }
+
+    return {
+      ok: true,
+      id: project.id || getCurrentProjectId(),
+      url: project.url || window.location.href,
+      activePath: project.activePath || '',
+      files: files
+        .map(file => normalizeContextFileFromZipSnapshot(file, project.activePath || ''))
+        .filter(Boolean),
+      capabilities: {
+        ...(project.capabilities || {}),
+        method: 'overleaf-zip-file-list',
+        fullProjectSnapshot: true,
+        note: 'Listed Overleaf project files from the exact source ZIP snapshot used by project-read diagnostics.'
+      }
+    };
+  }
+
+  function normalizeContextFileFromZipSnapshot(file, activePath) {
+    const path = window.CodexOverleafProjectFiles?.normalizePath?.(file?.path) || '';
+    if (!path) {
+      return null;
+    }
+    const isText = window.CodexOverleafProjectFiles.isTextProjectPath(path);
+    return {
+      path,
+      active: path === activePath,
+      source: 'overleaf-zip',
+      kind: isText ? 'text' : 'binary',
+      selectable: isText
+    };
+  }
+
+  function getZipSnapshotFailureReason(project) {
+    const skipped = Array.isArray(project?.capabilities?.skipped) ? project.capabilities.skipped : [];
+    const zipFailure = skipped.find(item => item?.path === 'project.zip' && item.reason);
+    return project?.error
+      || project?.reason
+      || zipFailure?.reason
+      || tr('unknownReason');
   }
 
   function renderContextFiles(project) {
@@ -1772,6 +2694,10 @@
     const submittedMode = state.mode;
     const submittedRequireReviewing = state.requireReviewing === true;
     const submittedCustomInstructions = getCustomInstructionsForCurrentProject();
+    const submittedSelectedSkillIds = getSelectedLocalSkillIdsForCurrentProject();
+    const submittedSkillLoadingSettings = getSkillLoadingSettings();
+    const submittedAttachments = getComposerAttachmentsForRun();
+    const submittedSkillInvocation = getComposerSkillInvocationForRun();
 
     const task = state.task.trim();
     if (!task) {
@@ -1786,12 +2712,23 @@
       mode: submittedMode,
       model: state.model,
       reasoningEffort: state.reasoningEffort,
-      speedTier: state.speedTier
+      speedTier: state.speedTier,
+      attachments: submittedAttachments,
+      skillInvocation: submittedSkillInvocation
     });
     const runSessionId = currentRunView.sessionId;
+    let runAuditDraft = await createAuditDraftForRun({
+      task,
+      sessionId: runSessionId,
+      mode: submittedMode,
+      focusFiles: getActiveFocusFiles(),
+      selectedSkillIds: submittedSelectedSkillIds
+    });
     clearTaskComposer();
     appendRunEvent({
-      title: tx('I will first understand your request, then inspect the relevant Overleaf files.', '我会先理解你的请求，再检查相关 Overleaf 文件。'),
+      title: submittedSkillInvocation?.id === 'skill-installer'
+        ? tx('I will use the Codex skill installer for this request.', '我会用 Codex skill installer 处理这个请求。')
+        : tx('I will first understand your request, then inspect the relevant Overleaf files.', '我会先理解你的请求，再检查相关 Overleaf 文件。'),
       status: 'running',
       detail: {
         [tr('mode')]: formatModeLabel(submittedMode),
@@ -1799,24 +2736,43 @@
         [tx('Reasoning effort', '推理强度')]: state.reasoningEffort,
         [tx('Speed', '速度')]: state.speedTier,
         [tx('Track required', '要求留痕')]: submittedRequireReviewing ? tx('yes', '是') : tx('no', '否'),
+        [tx('Skill', '技能')]: submittedSkillInvocation?.title || tr('noneValue'),
+        [tx('Attachments', '附件')]: submittedAttachments.map(attachment => attachment.name).join(listSeparator()) || tr('noneValue'),
         '@context': formatContextItems(getActiveFocusFiles())
       }
     });
-    appendRunEvent({
-      title: tx(
-        `This run will prioritize: ${formatContextItems(getActiveFocusFiles())}`,
-        `这轮会优先参考：${formatContextItems(getActiveFocusFiles())}`
-      ),
-      status: 'completed'
-    });
-
     try {
+      if (submittedSkillInvocation?.id === 'skill-installer') {
+        await runSkillInstallerTask({
+          task,
+          runSessionId,
+          runAuditDraft,
+          submittedMode,
+          submittedCustomInstructions,
+          submittedSkillLoadingSettings,
+          submittedAttachments,
+          submittedSkillInvocation
+        });
+        return;
+      }
+      appendRunEvent({
+        title: tx(
+          `This run will prioritize: ${formatContextItems(getActiveFocusFiles())}`,
+          `这轮会优先参考：${formatContextItems(getActiveFocusFiles())}`
+        ),
+        status: 'completed'
+      });
+
       await pauseOtWarmMirror('run-start');
       const writeSafety = await preflightWriteSafety({
         mode: submittedMode,
         requireReviewing: submittedRequireReviewing
       });
       if (!writeSafety.ok) {
+        await finalizeAuditRecord(runAuditDraft, {
+          resultStatus: 'blocked',
+          blockedFiles: [{ path: 'write-preflight', reason: writeSafety.reason || 'write_safety' }]
+        });
         return;
       }
 
@@ -1864,6 +2820,11 @@
           operations: [],
           applyResults: [],
           nextStep: tx('Reload the Overleaf project or reopen the .tex file you want to process, then retry.', '请刷新 Overleaf 项目或重新打开要处理的 .tex 文件后再试。')
+        });
+        await finalizeAuditRecord(runAuditDraft, {
+          resultStatus: 'blocked',
+          skippedFiles: [],
+          blockedFiles: snapshotWarnings.blocking.map(reason => ({ path: 'project', reason }))
         });
         finishRunView(tx('Blocked: full project was not read', '已阻止：没有读到完整项目'), 'failed');
         return;
@@ -1922,6 +2883,28 @@
         }
       }
 
+      const sensitiveFindings = await runSensitivePreflight({
+        task,
+        project,
+        rules: getGovernanceRulesForCurrentProject(),
+        useExistingMirror
+      });
+      if (sensitiveFindings.blocked) {
+        await finalizeAuditRecord(runAuditDraft, {
+          resultStatus: 'blocked_sensitive',
+          sensitiveFindings: sensitiveFindings.findings,
+          blockedFiles: sensitiveFindings.findings.map(finding => ({
+            path: finding.path || finding.source || 'task',
+            reason: finding.detectorId || 'sensitive'
+          }))
+        });
+        finishRunView(tx('Blocked: sensitive content review required', '已阻止：需要处理敏感内容'), 'failed');
+        return;
+      }
+      if (sensitiveFindings.findings.length) {
+        runAuditDraft = await updateAuditSensitiveFindings(runAuditDraft, sensitiveFindings.findings);
+      }
+
       await settleMirrorPrefetchBeforeRun();
       appendRunEvent({ title: tx('Local Codex session is starting.', '本地 Codex session 开始运行。'), status: 'running' });
       let response = await sendNative({
@@ -1937,6 +2920,10 @@
           codexThreadId,
           compileLogContext,
           customInstructions: submittedCustomInstructions,
+          selectedSkillIds: submittedSelectedSkillIds,
+          skillLoadingSettings: submittedSkillLoadingSettings,
+          attachments: submittedAttachments,
+          skillInvocation: submittedSkillInvocation,
           submittedMode
         })
       });
@@ -1969,6 +2956,10 @@
             codexThreadId,
             compileLogContext,
             customInstructions: submittedCustomInstructions,
+            selectedSkillIds: submittedSelectedSkillIds,
+            skillLoadingSettings: submittedSkillLoadingSettings,
+            attachments: submittedAttachments,
+            skillInvocation: submittedSkillInvocation,
             submittedMode
           })
         });
@@ -2000,11 +2991,16 @@
               codexThreadId: '',
               compileLogContext,
               customInstructions: submittedCustomInstructions,
+              selectedSkillIds: submittedSelectedSkillIds,
+              skillLoadingSettings: submittedSkillLoadingSettings,
+              attachments: submittedAttachments,
+              skillInvocation: submittedSkillInvocation,
               submittedMode
             })
           });
         } else {
           appendRunEvent({ title: tx('Cancelled: user chose not to create a new thread.', '已取消：用户选择不新建线程。'), status: 'rejected' });
+          await finalizeAuditRecord(runAuditDraft, { resultStatus: 'rejected' });
           finishRunView(tx('Cancelled', '已取消'), 'rejected');
           return;
         }
@@ -2013,6 +3009,7 @@
       if (!response.ok) {
         if (runCancellationRequested || isRunCancellationError(response.error)) {
           appendRunCancelledReport();
+          await finalizeAuditRecord(runAuditDraft, { resultStatus: 'cancelled' });
           finishRunView(tx('Cancelled', '已中断'), 'rejected');
           return;
         }
@@ -2037,6 +3034,11 @@
           errorMessage: response.error.message,
           mode: submittedMode
         });
+        await finalizeAuditRecord(runAuditDraft, {
+          resultStatus: 'failed',
+          sensitiveFindings: sensitiveFindings.findings,
+          blockedFiles: [{ path: 'codex.run', reason: response.error?.code || response.error?.message || 'native_error' }]
+        });
         finishRunView(tx('Local Codex error', '本地 Codex 错误'), 'failed');
         return;
       }
@@ -2052,6 +3054,12 @@
         unsupportedChanges: response.result.unsupportedChanges || [],
         mode: submittedMode,
         requireReviewing: submittedRequireReviewing
+      });
+      await finalizeAuditRecord(runAuditDraft, {
+        ...(syncOutcome.audit || {}),
+        sensitiveFindings: sensitiveFindings.findings,
+        selectedSkillIds: submittedSelectedSkillIds,
+        resultStatus: syncOutcome.hasSkippedOperations ? 'completed_with_skips' : 'completed'
       });
 
       finishRunView(
@@ -2101,6 +3109,7 @@
     } catch (error) {
       if (runCancellationRequested || isRunCancellationError(error)) {
         appendRunCancelledReport();
+        await finalizeAuditRecord(runAuditDraft, { resultStatus: 'cancelled' });
         finishRunView(tx('Cancelled', '已中断'), 'rejected');
         return;
       }
@@ -2129,6 +3138,10 @@
         errorMessage: error.message,
         mode: submittedMode
       });
+      await finalizeAuditRecord(runAuditDraft, {
+        resultStatus: 'failed',
+        blockedFiles: [{ path: 'task', reason: error.message }]
+      });
       finishRunView(tx('Task failed', '任务失败'), 'failed');
     } finally {
       setRunning(false);
@@ -2139,6 +3152,112 @@
         await resumeOtWarmMirror('run-settled');
       }
       saveStateSoon();
+    }
+  }
+
+  async function runSkillInstallerTask({
+    task,
+    runSessionId,
+    runAuditDraft,
+    submittedMode,
+    submittedCustomInstructions,
+    submittedSkillLoadingSettings,
+    submittedAttachments,
+    submittedSkillInvocation
+  }) {
+    appendRunEvent({
+      title: tx('Starting the Codex skill installer.', '正在启动 Codex skill installer。'),
+      status: 'running'
+    });
+    const activeSession = findSessionById(runSessionId) || getActiveSession(state);
+    const codexThreadId = activeSession?.codexThreadId || '';
+    const params = {
+      projectId: getCurrentProjectId(),
+      mode: submittedMode,
+      task,
+      model: state.model,
+      reasoningEffort: state.reasoningEffort,
+      speedTier: state.speedTier,
+      session: state.session,
+      threadId: codexThreadId || undefined,
+      customInstructions: submittedCustomInstructions || undefined,
+      loadCodexLocalSkills: submittedSkillLoadingSettings?.loadCodexLocalSkills !== false,
+      loadCodexOverleafSkills: submittedSkillLoadingSettings?.loadCodexOverleafSkills !== false,
+      attachments: submittedAttachments.length ? submittedAttachments : undefined,
+      skillInvocation: submittedSkillInvocation,
+      focusFiles: [],
+      skipMirrorSync: true
+    };
+
+    const response = await sendNative({
+      method: 'codex.run',
+      params
+    });
+
+    if (!response.ok) {
+      if (runCancellationRequested || isRunCancellationError(response.error)) {
+        appendRunCancelledReport();
+        await finalizeAuditRecord(runAuditDraft, { resultStatus: 'cancelled' });
+        finishRunView(tx('Cancelled', '已中断'), 'rejected');
+        return;
+      }
+      const translated = translateRawError(response.error.message, { mode: submittedMode, locale: getLocale() });
+      appendRunEvent({
+        title: translated.conclusion,
+        status: 'failed',
+        technicalDetail: response.error
+      });
+      appendCompletionReport({
+        conclusion: translated.conclusion,
+        status: 'failed',
+        operations: [],
+        applyResults: [],
+        nextStep: translated.nextStep,
+        errorMessage: response.error.message,
+        mode: submittedMode
+      });
+      await finalizeAuditRecord(runAuditDraft, {
+        resultStatus: 'failed',
+        blockedFiles: [{ path: 'skill-installer', reason: response.error?.code || response.error?.message || 'native_error' }]
+      });
+      finishRunView(tx('Skill installer failed', 'Skill installer 失败'), 'failed');
+      return;
+    }
+
+    const assistantMessage = response.result?.assistantMessage || getAssistantAnswerForCurrentRun();
+    appendCompletionReport({
+      conclusion: assistantMessage || tx('Skill installer completed.', 'Skill installer 已完成。'),
+      status: 'completed',
+      operations: [],
+      applyResults: [],
+      nextStep: tx('Restart Codex Overleaf or start a new run if the installed skill is not visible immediately.', '如果新安装的 skill 没有立刻出现，请重启 Codex Overleaf 或开始新一轮运行。'),
+      mode: submittedMode
+    });
+    await finalizeAuditRecord(runAuditDraft, { resultStatus: 'completed' });
+    finishRunView(tx('Skill installer completed', 'Skill installer 已完成'), 'completed');
+
+    const runSessionForHistory = findSessionById(runSessionId) || getActiveSession(state);
+    const updatedSession = recordSessionResult(runSessionForHistory, {
+      task,
+      result: buildSessionHistoryResult({
+        assistantMessage,
+        syncOutcome: { summaryLine: 'skill installer completed' },
+        syncChanges: []
+      })
+    });
+    replaceSessionInState(updatedSession);
+
+    const returnedThreadId = response.result?.threadId || '';
+    if (returnedThreadId && returnedThreadId !== codexThreadId) {
+      updateSessionById(runSessionId, { codexThreadId: returnedThreadId });
+      const StorageDb = window.CodexOverleafStorageDb;
+      if (StorageDb) {
+        const record = await StorageDb.getRecord('sessions', runSessionId);
+        if (record) {
+          record.codexThreadId = returnedThreadId;
+          await StorageDb.putRecord('sessions', record);
+        }
+      }
     }
   }
 
@@ -2417,6 +3536,10 @@
     codexThreadId,
     compileLogContext,
     customInstructions,
+    selectedSkillIds,
+    skillLoadingSettings,
+    attachments,
+    skillInvocation,
     submittedMode
   } = {}) {
     return runController.buildCodexRunParams({
@@ -2433,9 +3556,208 @@
       customInstructions: customInstructions === undefined
         ? getCustomInstructionsForCurrentProject()
         : customInstructions,
+      selectedSkillIds: selectedSkillIds === undefined
+        ? (typeof getSelectedLocalSkillIdsForCurrentProject === 'function'
+          ? getSelectedLocalSkillIdsForCurrentProject()
+          : undefined)
+        : selectedSkillIds,
+      skillLoadingSettings: skillLoadingSettings === undefined
+        ? (typeof getSkillLoadingSettings === 'function'
+          ? getSkillLoadingSettings()
+          : { loadCodexLocalSkills: true, loadCodexOverleafSkills: true })
+        : skillLoadingSettings,
+      attachments,
+      skillInvocation,
       compileLogContext,
       submittedMode
     });
+  }
+
+  async function createAuditDraftForRun(input = {}) {
+    const StorageDb = window.CodexOverleafStorageDb;
+    if (!StorageDb || !AuditRecords) {
+      return null;
+    }
+    const draft = AuditRecords.buildAuditDraftRecord({
+      projectId: getCurrentProjectId(),
+      sessionId: input.sessionId || '',
+      turnId: currentRunView?.recordId || '',
+      mode: input.mode || state?.mode || '',
+      model: state?.model || '',
+      reasoningEffort: state?.reasoningEffort || '',
+      speedTier: state?.speedTier || '',
+      task: input.task || '',
+      focusFiles: input.focusFiles || [],
+      selectedSkillIds: input.selectedSkillIds || []
+    });
+    const record = StorageDb.buildAuditLogRecord
+      ? StorageDb.buildAuditLogRecord(draft)
+      : draft;
+    return StorageDb.putRecord('auditLogs', record).then(() => record).catch(() => null);
+  }
+
+  async function updateAuditSensitiveFindings(draft, findings = []) {
+    if (!draft) {
+      return draft;
+    }
+    return finalizeAuditDraftPartial(draft, {
+      sensitiveFindings: findings,
+      resultStatus: draft.resultStatus || 'draft'
+    });
+  }
+
+  async function finalizeAuditDraftPartial(draft, updates = {}) {
+    const StorageDb = window.CodexOverleafStorageDb;
+    if (!StorageDb || !draft) {
+      return draft;
+    }
+    const record = StorageDb.buildAuditLogRecord
+      ? StorageDb.buildAuditLogRecord({ ...draft, ...updates, id: draft.id, completedAt: updates.completedAt || draft.completedAt || '' })
+      : { ...draft, ...updates };
+    return StorageDb.putRecord('auditLogs', record).then(() => record).catch(() => draft);
+  }
+
+  async function finalizeAuditRecord(draft, updates = {}) {
+    const StorageDb = window.CodexOverleafStorageDb;
+    if (!StorageDb || !AuditRecords || !draft) {
+      return null;
+    }
+    const final = AuditRecords.buildAuditFinalRecord({
+      draft: {
+        ...draft,
+        selectedSkillIds: updates.selectedSkillIds || draft.selectedSkillIds || [],
+        sensitiveFindings: updates.sensitiveFindings || draft.sensitiveFindings || []
+      },
+      changedFiles: updates.changedFiles || [],
+      ['diffSummary']: updates['diffSummary'] || {},
+      blockedFiles: updates.blockedFiles || [],
+      appliedFiles: updates.appliedFiles || [],
+      skippedFiles: updates.skippedFiles || [],
+      resultStatus: updates.resultStatus || 'completed',
+      saveVerification: updates.saveVerification || null
+    });
+    const record = StorageDb.buildAuditLogRecord
+      ? StorageDb.buildAuditLogRecord(final)
+      : final;
+    return StorageDb.putRecord('auditLogs', record).catch(() => null);
+  }
+
+  async function runSensitivePreflight(options) {
+    options = options || {};
+    const { task, project, rules, useExistingMirror = false } = options;
+    const normalizedRules = normalizeGovernanceRules(rules);
+    if (normalizedRules.sensitiveCheckEnabled === false) {
+      return { blocked: false, findings: [] };
+    }
+    if (!SensitiveScan?.scanSensitiveInputs && !useExistingMirror) {
+      return { blocked: false, findings: [] };
+    }
+    let findings = SensitiveScan?.scanSensitiveInputs
+      ? SensitiveScan.scanSensitiveInputs({
+        task,
+        files: (project?.files || []).filter(isTextSnapshotFile)
+      })
+      : [];
+    if (useExistingMirror) {
+      findings = dedupeSensitiveFindings([
+        ...findings,
+        ...await scanNativeMirrorSensitiveFindings()
+      ]);
+    }
+    if (!findings.length) {
+      return { blocked: false, findings: [] };
+    }
+    appendRunEvent({
+      title: tx(
+        `Sensitive content check found ${findings.length} item(s).`,
+        `敏感内容检查发现 ${findings.length} 项。`
+      ),
+      status: 'failed',
+      detail: findings.slice(0, 8).map(finding => ({
+        [tr('detailFile')]: finding.path || finding.source || 'task',
+        [tr('detailReason')]: finding.detectorId,
+        [tx('Preview', '预览')]: finding.preview || '[REDACTED]'
+      }))
+    });
+    if (normalizedRules.sensitiveConfirmAllowed === true) {
+      const approved = await showPluginConfirm({
+        title: tr('sensitiveConfirmTitle'),
+        message: formatSensitiveConfirmMessage(findings),
+        confirmLabel: tr('sensitiveConfirmRun'),
+        cancelLabel: tr('confirmDefaultCancel'),
+        destructive: true
+      });
+      return { blocked: !approved, findings };
+    }
+    appendCompletionReport({
+      conclusion: tx(
+        'This run was blocked before Codex received project context because sensitive content was detected.',
+        '检测到敏感内容，本轮已在向 Codex 发送项目上下文前阻止。'
+      ),
+      status: 'blocked',
+      operations: [],
+      applyResults: [],
+      nextStep: tx(
+        'Remove the sensitive content, narrow @context, or enable explicit sensitive confirmation in Project Settings.',
+        '请移除敏感内容、缩小 @context，或在项目设置里允许敏感内容显式确认。'
+      )
+    });
+    return { blocked: true, findings };
+  }
+
+  function formatSensitiveConfirmMessage(findings = []) {
+    const visible = findings.slice(0, 8).map(finding => {
+      const path = finding.path || finding.source || 'task';
+      return `${path}: ${finding.detectorId || 'sensitive'} (${finding.preview || '[REDACTED]'})`;
+    });
+    return [
+      tr('sensitiveConfirmMessage'),
+      '',
+      ...visible,
+      findings.length > visible.length ? tx(`${findings.length - visible.length} more finding(s).`, `另有 ${findings.length - visible.length} 项。`) : ''
+    ].filter(Boolean).join('\n');
+  }
+
+  async function scanNativeMirrorSensitiveFindings() {
+    try {
+      const response = await sendBackgroundNative({
+        method: 'mirror.scanSensitive',
+        params: { projectId: getCurrentProjectId() }
+      });
+      if (response?.ok) {
+        return Array.isArray(response.result?.findings) ? response.result.findings : [];
+      }
+      return [{
+        detectorId: 'mirror-sensitive-scan-unavailable',
+        source: 'local-mirror',
+        preview: response?.error?.message || 'Could not scan the local mirror before Codex runs.'
+      }];
+    } catch (error) {
+      return [{
+        detectorId: 'mirror-sensitive-scan-unavailable',
+        source: 'local-mirror',
+        preview: error?.message || 'Could not scan the local mirror before Codex runs.'
+      }];
+    }
+  }
+
+  function dedupeSensitiveFindings(findings = []) {
+    const seen = new Set();
+    const deduped = [];
+    for (const finding of findings || []) {
+      const key = [
+        finding?.detectorId || '',
+        finding?.source || '',
+        finding?.path || '',
+        finding?.preview || ''
+      ].join('\u0000');
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      deduped.push(finding);
+    }
+    return deduped;
   }
 
   function appendRunCancelledReport() {
@@ -2453,11 +3775,222 @@
   }
 
   function handleTaskInputKeydown(event) {
+    if (handleSlashMenuKeydown(event)) {
+      return;
+    }
     if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) {
       return;
     }
     event.preventDefault();
     panel.querySelector('[data-composer-form]')?.requestSubmit();
+  }
+
+  function handleTaskInput() {
+    scheduleMirrorPrefetch({
+      reason: 'composer-input',
+      delayMs: mirrorHealth?.PREFETCH_DEBOUNCE_MS || 1200
+    });
+    updateSlashMenuForTaskInput();
+  }
+
+  function getSlashCommands() {
+    return [
+      {
+        id: 'install-skill',
+        title: tr('slashInstallSkillTitle'),
+        subtitle: tr('slashInstallSkillSubtitle')
+      }
+    ];
+  }
+
+  function updateSlashMenuForTaskInput() {
+    const trigger = getSlashTrigger();
+    const menu = panel?.querySelector('[data-slash-menu]');
+    if (!menu) {
+      return;
+    }
+    if (!trigger) {
+      closeSlashMenu();
+      return;
+    }
+    const query = trigger.query.toLowerCase();
+    const commands = getSlashCommands().filter(command => {
+      return !query
+        || command.title.toLowerCase().includes(query)
+        || command.id.toLowerCase().includes(query);
+    });
+    renderSlashMenu(commands);
+  }
+
+  function getSlashTrigger() {
+    const input = panel?.querySelector('[data-task]');
+    if (!input || currentRunView) {
+      return null;
+    }
+    const cursor = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+    const before = input.value.slice(0, cursor);
+    const after = input.value.slice(cursor);
+    const match = /^\/([^\s/]*)$/.exec(before);
+    if (!match || after.trim()) {
+      return null;
+    }
+    return {
+      query: match[1] || '',
+      start: 0,
+      end: cursor
+    };
+  }
+
+  function renderSlashMenu(commands = []) {
+    const menu = panel?.querySelector('[data-slash-menu]');
+    if (!menu) {
+      return;
+    }
+    menu.textContent = '';
+    if (!commands.length) {
+      menu.hidden = true;
+      return;
+    }
+    commands.forEach((command, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.slashCommand = command.id;
+      button.dataset.active = index === 0 ? 'true' : 'false';
+      const title = document.createElement('span');
+      title.textContent = command.title;
+      const subtitle = document.createElement('small');
+      subtitle.textContent = command.subtitle;
+      button.append(title, subtitle);
+      menu.append(button);
+    });
+    menu.dataset.activeIndex = '0';
+    menu.hidden = false;
+  }
+
+  function handleSlashMenuClick(event) {
+    const button = event.target?.closest?.('[data-slash-command]');
+    if (!button) {
+      return;
+    }
+    event.preventDefault();
+    selectSlashCommand(button.dataset.slashCommand);
+  }
+
+  function handleSlashMenuKeydown(event) {
+    const menu = panel?.querySelector('[data-slash-menu]');
+    if (!menu || menu.hidden) {
+      return false;
+    }
+    const buttons = Array.from(menu.querySelectorAll('[data-slash-command]'));
+    if (!buttons.length) {
+      closeSlashMenu();
+      return false;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeSlashMenu();
+      return true;
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const current = Number(menu.dataset.activeIndex || 0);
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      const next = (current + delta + buttons.length) % buttons.length;
+      setSlashMenuActiveIndex(next);
+      return true;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const active = buttons[Number(menu.dataset.activeIndex || 0)] || buttons[0];
+      selectSlashCommand(active.dataset.slashCommand);
+      return true;
+    }
+    return false;
+  }
+
+  function setSlashMenuActiveIndex(index) {
+    const menu = panel?.querySelector('[data-slash-menu]');
+    if (!menu) {
+      return;
+    }
+    const buttons = Array.from(menu.querySelectorAll('[data-slash-command]'));
+    menu.dataset.activeIndex = String(index);
+    buttons.forEach((button, buttonIndex) => {
+      button.dataset.active = buttonIndex === index ? 'true' : 'false';
+    });
+  }
+
+  function selectSlashCommand(commandId) {
+    if (commandId !== 'install-skill') {
+      closeSlashMenu();
+      return;
+    }
+    clearSlashTriggerFromTaskInput();
+    closeSlashMenu();
+    activateSkillInstallerComposerContext();
+  }
+
+  function clearSlashTriggerFromTaskInput() {
+    const input = panel?.querySelector('[data-task]');
+    const trigger = getSlashTrigger();
+    if (!input || !trigger) {
+      return;
+    }
+    input.value = `${input.value.slice(0, trigger.start)}${input.value.slice(trigger.end)}`;
+    state = { ...state, task: input.value };
+  }
+
+  function closeSlashMenu() {
+    const menu = panel?.querySelector('[data-slash-menu]');
+    if (!menu) {
+      return;
+    }
+    menu.hidden = true;
+    menu.dataset.activeIndex = '0';
+  }
+
+  function activateSkillInstallerComposerContext() {
+    composerSkillInvocation = {
+      id: 'skill-installer',
+      title: tr('skillInstallerComposerLabel')
+    };
+    renderComposerSkillInvocation();
+    const input = panel?.querySelector('[data-task]');
+    input?.focus?.();
+  }
+
+  function clearComposerSkillInvocation() {
+    composerSkillInvocation = null;
+    renderComposerSkillInvocation();
+    panel?.querySelector('[data-task]')?.focus?.();
+  }
+
+  function getComposerSkillInvocationForRun() {
+    if (composerSkillInvocation?.id !== 'skill-installer') {
+      return null;
+    }
+    return {
+      id: 'skill-installer',
+      title: tr('skillInstallerComposerLabel')
+    };
+  }
+
+  function renderComposerSkillInvocation() {
+    const context = panel?.querySelector('[data-composer-skill-context]');
+    if (!context) {
+      return;
+    }
+    const active = getComposerSkillInvocationForRun();
+    context.hidden = !active;
+    const label = context.querySelector('[data-composer-skill-label]');
+    if (label) {
+      label.textContent = active?.title || '';
+    }
+    const clear = context.querySelector('[data-composer-skill-clear]');
+    if (clear) {
+      clear.title = tr('skillInstallerComposerClear');
+      clear.setAttribute('aria-label', tr('skillInstallerComposerClear'));
+    }
   }
 
   function createDiffReviewElement(syncChanges, options = {}) {
@@ -3158,31 +4691,58 @@
     if (options.mode === 'ask' && ((syncChanges || []).length || unsupportedChanges.length)) {
       appendRunEvent({
         title: tx(
-          'Local Codex returned file changes during Ask mode. Overleaf was not modified.',
-          'Ask 模式下本地 Codex 返回了文件改动；Overleaf 未被修改。'
+          'Ask mode ignored local file changes. Overleaf was not modified.',
+          'Ask 模式已忽略本地文件改动；Overleaf 未被修改。'
         ),
-        status: 'failed'
+        status: 'warning'
       });
       appendCompletionReport({
         conclusion: assistantMessage || tx(
-          'Ask mode blocked unexpected local file changes before they could be written to Overleaf.',
-          'Ask 模式已阻止意外的本地文件改动写入 Overleaf。'
+          'Codex finished in Ask mode. Any local file changes were ignored and were not synced to Overleaf.',
+          'Codex 已在 Ask 模式完成；本地文件改动已忽略，未同步到 Overleaf。'
         ),
-        status: 'failed',
+        status: tr('modeAsk'),
         operations: [],
         applyResults: [],
         mode: runMode,
         nextStep: tx(
-          'Run again in Suggest or Auto if you want Codex to edit files.',
-          '如果希望 Codex 修改文件，请切换到建议修改或自动写入后重新运行。'
+          'Switch to Suggest or Auto only when you want Codex to edit files.',
+          '只有希望 Codex 修改文件时，才需要切换到建议修改或自动写入。'
         )
       });
       return {
-        summaryLine: tx('Ask mode blocked unexpected file changes', 'Ask 模式已阻止意外文件改动'),
-        hasSkippedOperations: true
+        summaryLine: assistantMessage || tx('Ask mode completed without Overleaf changes', 'Ask 模式已完成，未修改 Overleaf'),
+        hasSkippedOperations: false,
+        audit: buildAuditSummaryFromApply({
+          operations: [],
+          resultStatus: 'ask_ignored_local_changes',
+          blockedFiles: [
+            ...(syncChanges || []).map(change => ({ path: change.path, type: change.type, reason: 'ask_mode' })),
+            ...unsupportedChanges.map(change => ({ path: change.path, type: change.type || 'unsupported', reason: change.reason || 'ask_mode' }))
+          ]
+        })
       };
     }
     let operations = buildSyncApplyOperations(syncChanges, project);
+    let visibleSyncChanges = syncChanges || [];
+    let additionalSkippedEntries = [];
+    let skippedFilesForAudit = additionalSkippedEntries;
+    let appliedFilesForAudit = [];
+    const governed = evaluateGovernedOperations(operations);
+    if (governed.blocked.length) {
+      const governanceSkipped = buildGovernanceSkippedApplyResult(governed.blocked);
+      additionalSkippedEntries.push(...getSkippedEntries(governanceSkipped));
+      appendApplyResult(governanceSkipped);
+      appendRunEvent({
+        title: tx(
+          `Project governance blocked ${governed.blocked.length} write(s) before review.`,
+          `项目治理规则在审核前阻止了 ${governed.blocked.length} 项写入。`
+        ),
+        status: 'failed'
+      });
+      operations = governed.allowed;
+      visibleSyncChanges = filterSyncChangesByOperations(syncChanges, operations);
+    }
     if (!operations.length) {
       appendRunEvent({
         title: tx('Codex did not produce file changes that need to sync back to Overleaf.', 'Codex 没有产生需要同步回 Overleaf 的文件改动。'),
@@ -3201,7 +4761,13 @@
       });
       return {
         summaryLine: assistantMessage || tx('No changes to sync', '没有需要同步的改动'),
-        hasSkippedOperations: false
+        hasSkippedOperations: additionalSkippedEntries.length > 0,
+        audit: buildAuditSummaryFromApply({
+          operations: buildSyncApplyOperations(syncChanges, project),
+          applyResults: additionalSkippedEntries.length ? [{ ok: false, applied: [], skipped: additionalSkippedEntries }] : [],
+          blockedFiles: additionalSkippedEntries.map(item => summarizeOperationForAudit(item.operation, item.result, 'blocked')),
+          resultStatus: additionalSkippedEntries.length ? 'blocked' : 'completed'
+        })
       };
     }
 
@@ -3213,7 +4779,7 @@
         ),
         status: 'running'
       });
-      const accepted = await renderDiffReview(syncChanges);
+      const accepted = await renderDiffReview(visibleSyncChanges);
       if (!accepted.length) {
         appendRunEvent({
           title: tx('Sync cancelled: Overleaf was not modified.', '已取消同步：Overleaf 没有被修改。'),
@@ -3229,7 +4795,13 @@
         });
         return {
           summaryLine: tx('Sync cancelled', '已取消同步'),
-          hasSkippedOperations: false
+          hasSkippedOperations: additionalSkippedEntries.length > 0,
+          audit: buildAuditSummaryFromApply({
+            operations,
+            applyResults: additionalSkippedEntries.length ? [{ ok: false, applied: [], skipped: additionalSkippedEntries }] : [],
+            blockedFiles: additionalSkippedEntries.map(item => summarizeOperationForAudit(item.operation, item.result, 'blocked')),
+            resultStatus: 'rejected'
+          })
         };
       }
       operations = buildSyncApplyOperations(accepted, project);
@@ -3245,9 +4817,27 @@
         destructive: true
       });
       if (!approved) {
+        additionalSkippedEntries.push(...deleteOperations.map(operation => ({
+          operation,
+          result: {
+            ok: false,
+            code: 'delete_confirmation_rejected',
+            reason: tx('Delete requires explicit confirmation and was skipped.', '删除需要显式确认，已跳过。')
+          }
+        })));
         operations = operations.filter(operation => operation.type !== 'delete');
       }
     }
+
+    if (operations.some(operation => operation.type === 'binary-create' || operation.type === 'overwrite-binary')) {
+      appendRunEvent({
+        title: tx('Generated binary asset writeback requires explicit confirmation.', '生成的二进制资源写回需要显式确认。'),
+        status: 'running'
+      });
+    }
+    const binaryDecision = await confirmBinaryOperations(operations);
+    operations = binaryDecision.operations;
+    additionalSkippedEntries.push(...binaryDecision.skipped);
 
     if (!operations.length) {
       appendRunEvent({
@@ -3265,7 +4855,15 @@
       });
       return {
         summaryLine: tx('No changes applied', '没有应用改动'),
-        hasSkippedOperations: false
+        hasSkippedOperations: additionalSkippedEntries.length > 0,
+        audit: buildAuditSummaryFromApply({
+          operations: buildSyncApplyOperations(syncChanges, project),
+          applyResults: additionalSkippedEntries.length ? [{ ok: false, applied: [], skipped: additionalSkippedEntries }] : [],
+          blockedFiles: additionalSkippedEntries
+            .filter(item => item.result?.code === 'governance_blocked')
+            .map(item => summarizeOperationForAudit(item.operation, item.result, 'blocked')),
+          resultStatus: additionalSkippedEntries.length ? 'completed_with_skips' : 'completed'
+        })
       };
     }
 
@@ -3293,17 +4891,25 @@
           'Write blocked: Overleaf Reviewing/Track Changes was not verified',
           '已阻止写入：未确认 Overleaf Reviewing/Track Changes'
         ),
-        hasSkippedOperations: true
+        hasSkippedOperations: true,
+        audit: buildAuditSummaryFromApply({
+          operations,
+          applyResults: [blocked],
+          blockedFiles: additionalSkippedEntries
+            .filter(item => item.result?.code === 'governance_blocked')
+            .map(item => summarizeOperationForAudit(item.operation, item.result, 'blocked')),
+          resultStatus: 'blocked'
+        })
       };
     }
     const applied = operations.length
-      ? await callPageBridge('applyOperations', {
+      ? mergeApplyResultSkipped(await callPageBridge('applyOperations', {
         operations,
         baseFiles: project?.files || [],
         requireReviewing: runRequireReviewing,
         requireEditing: !runRequireReviewing
-      })
-      : { ok: true, applied: [], skipped: [] };
+      }), additionalSkippedEntries)
+      : mergeApplyResultSkipped({ ok: true, applied: [], skipped: [] }, additionalSkippedEntries);
     const hasConfirmedApplyResult = hasApplyResultEntries(applied);
     const saveVerification = hasConfirmedApplyResult
       ? await verifyPostWriteSaveState()
@@ -3326,14 +4932,15 @@
       appendPartialWritebackWarning(applied);
     }
     const appliedPaths = getAppliedOperationPaths(applied);
-    if (appliedPaths.length) {
-      await autoRecompileAfterWriteback(appliedPaths, saveVerification).catch(error => {
+    const compileSummary = appliedPaths.length
+      ? await autoRecompileAfterWriteback(appliedPaths, saveVerification).catch(error => {
         appendRunEvent({
           title: tx(`Post-write compile failed: ${error.message}`, `写后编译出错：${error.message}`),
           status: 'failed'
         });
-      });
-    }
+        return buildPostWriteCompileSummary({ error });
+      })
+      : null;
     const hasSkippedApplyResult = skippedEntries.length > 0;
     const writebackIncomplete = !hasConfirmedApplyResult || hasSkippedApplyResult;
     const summaryLine = appendChangeSummary({
@@ -3362,7 +4969,7 @@
         ? formatWritebackSkippedNextStep(applied)
         : tx('Review the synced file in Overleaf.', '请在 Overleaf 中查看同步后的文件。');
     appendCompletionReport({
-      conclusion: writebackConclusion,
+      conclusion: appendCompileSummaryToConclusion(writebackConclusion, compileSummary),
       status: writebackIncomplete ? 'failed' : 'completed',
       operations,
       applyResults: [applied],
@@ -3372,7 +4979,16 @@
 
     return {
       summaryLine,
-      hasSkippedOperations: writebackIncomplete || hasSkippedApplyOperations([applied])
+      hasSkippedOperations: writebackIncomplete || hasSkippedApplyOperations([applied]),
+      audit: buildAuditSummaryFromApply({
+        operations,
+        applyResults: [applied],
+        blockedFiles: additionalSkippedEntries
+          .filter(item => item.result?.code === 'governance_blocked')
+          .map(item => summarizeOperationForAudit(item.operation, item.result, 'blocked')),
+        resultStatus: writebackIncomplete ? 'completed_with_skips' : 'completed',
+        saveVerification
+      })
     };
   }
 
@@ -3533,14 +5149,14 @@
   }
 
   async function autoRecompileAfterWriteback(writtenPaths = [], saveVerification = {}) {
-    if (state.autoRecompile === false) return;
-    if (state.mode === 'ask') return;
+    if (state.autoRecompile === false) return null;
+    if (state.mode === 'ask') return null;
 
     const CompileAdapter = window.CodexOverleafCompileAdapter;
-    if (!CompileAdapter) return;
+    if (!CompileAdapter) return null;
 
     const hasCompilableFile = writtenPaths.some(filePath => CompileAdapter.isCompilableFile(filePath));
-    if (!hasCompilableFile) return;
+    if (!hasCompilableFile) return null;
 
     appendRunEvent({
       title: saveVerification?.state !== 'verified_saved'
@@ -3562,6 +5178,16 @@
         requireVerifiedSave: saveVerification?.state === 'verified_saved'
       });
       if (result?.ok) {
+        let logResult = null;
+        try {
+          logResult = await callPageBridge('getCompileLog', {
+            triggerIfStale: false,
+            maxAgeMs: 30000,
+            waitForSaveMs: 0
+          });
+        } catch (_error) {
+          logResult = null;
+        }
         const compile = result.compile;
         if (compile?.status === 'success') {
           appendRunEvent({ title: tx('Compile succeeded.', '编译成功。'), status: 'completed' });
@@ -3570,13 +5196,96 @@
         } else {
           appendRunEvent({ title: tx(`Compile finished with status: ${compile?.status || 'unknown'}`, `编译完成，状态：${compile?.status || '未知'}`), status: 'completed' });
         }
+        return buildPostWriteCompileSummary({ result, logResult });
       } else {
         const reason = result?.reason || tx('unknown reason', '未知原因');
         appendRunEvent({ title: tx(`Post-write compile did not succeed: ${reason}`, `写后编译未成功：${reason}`), status: 'failed' });
+        return buildPostWriteCompileSummary({ result });
       }
     } catch (error) {
       appendRunEvent({ title: tx(`Post-write compile failed: ${error.message}`, `写后编译出错：${error.message}`), status: 'failed' });
+      return buildPostWriteCompileSummary({ error });
     }
+  }
+
+  function buildPostWriteCompileSummary({ result = null, logResult = null, error = null } = {}) {
+    const logAvailable = logResult?.ok === true;
+    const errors = logAvailable && Array.isArray(logResult.errors)
+      ? logResult.errors.slice(0, 5).map(formatCompileDiagnosticForSummary)
+      : [];
+    const warnings = logAvailable && Array.isArray(logResult.warnings)
+      ? logResult.warnings.slice(0, 5).map(formatCompileDiagnosticForSummary)
+      : [];
+    if (error) {
+      return {
+        status: 'failed',
+        reason: error?.message || 'Post-write compile failed.',
+        errors,
+        warnings,
+        logAvailable
+      };
+    }
+    if (!result?.ok) {
+      return {
+        status: 'failed',
+        reason: result?.reason || 'Post-write compile did not succeed.',
+        errors,
+        warnings,
+        logAvailable
+      };
+    }
+    return {
+      status: result.compile?.status || 'triggered',
+      reason: result.reason || '',
+      errors,
+      warnings,
+      logAvailable
+    };
+  }
+
+  function appendCompileSummaryToConclusion(conclusion, compileSummary) {
+    if (!compileSummary) {
+      return conclusion;
+    }
+    const errors = compileSummary.errors || [];
+    const warnings = compileSummary.warnings || [];
+    let summary;
+    if (errors.length) {
+      summary = tx(
+        `Post-write compile check: ${errors.length} remaining error(s): ${errors.slice(0, 3).join('; ')}`,
+        `写后编译检查：仍有 ${errors.length} 个错误：${errors.slice(0, 3).join('；')}`
+      );
+    } else if (compileSummary.status === 'success') {
+      summary = warnings.length
+        ? tx(
+          `Post-write compile check succeeded with ${warnings.length} warning(s).`,
+          `写后编译检查已通过，但仍有 ${warnings.length} 个警告。`
+        )
+        : tx('Post-write compile check succeeded with no reported errors.', '写后编译检查已通过，未发现错误。');
+    } else if (compileSummary.status === 'triggered') {
+      summary = warnings.length
+        ? tx(
+          `Post-write compile was triggered; latest log shows ${warnings.length} warning(s).`,
+          `已触发写后编译；最新日志显示 ${warnings.length} 个警告。`
+        )
+        : tx('Post-write compile was triggered; Overleaf may still be updating the result.', '已触发写后编译；Overleaf 可能仍在更新结果。');
+    } else if (compileSummary.status === 'failed') {
+      summary = tx(
+        `Post-write compile check failed: ${compileSummary.reason || 'unknown reason'}`,
+        `写后编译检查失败：${compileSummary.reason || '未知原因'}`
+      );
+    } else {
+      summary = tx(
+        `Post-write compile finished with status: ${compileSummary.status || 'unknown'}.`,
+        `写后编译完成，状态：${compileSummary.status || '未知'}。`
+      );
+    }
+    return [conclusion, '', summary].filter(Boolean).join('\n');
+  }
+
+  function formatCompileDiagnosticForSummary(value) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    return text.length > 180 ? `${text.slice(0, 179)}...` : text;
   }
 
   async function resolveCompileLogContext() {
@@ -3607,6 +5316,145 @@
 
   function buildSyncApplyOperations(syncChanges = [], project = {}) {
     return writebackController.buildSyncApplyOperations(syncChanges, project);
+  }
+
+  function evaluateGovernedOperations(operations = []) {
+    if (!GovernanceRules?.evaluateGovernedOperations) {
+      return { allowed: operations || [], blocked: [], rules: getGovernanceRulesForCurrentProject() };
+    }
+    return GovernanceRules.evaluateGovernedOperations(operations, getGovernanceRulesForCurrentProject());
+  }
+
+  function buildGovernanceSkippedApplyResult(blockedItems = []) {
+    return {
+      ok: blockedItems.length === 0,
+      applied: [],
+      skipped: (blockedItems || []).map(item => ({
+        operation: item.operation,
+        result: {
+          ok: false,
+          code: 'governance_blocked',
+          reason: formatGovernanceBlockedReason(item),
+          reasonKey: item.reason || 'governance_blocked'
+        }
+      }))
+    };
+  }
+
+  function formatGovernanceBlockedReason(item = {}) {
+    if (item.reason === 'readonly') {
+      return tx(
+        'Project governance marked this path read-only, so Codex did not write it.',
+        '项目治理规则将此路径标记为只读，因此 Codex 没有写入。'
+      );
+    }
+    if (item.reason === 'writable_allowlist') {
+      return tx(
+        'Project governance allows writes only to configured writable patterns, and this path is outside that allowlist.',
+        '项目治理规则只允许写入配置的可写路径，此路径不在允许范围内。'
+      );
+    }
+    return tx('Project governance blocked this write.', '项目治理规则阻止了此写入。');
+  }
+
+  function filterSyncChangesByOperations(syncChanges = [], operations = []) {
+    const allowedPaths = new Set((operations || []).map(operation => operation.path).filter(Boolean));
+    return (syncChanges || []).filter(change => allowedPaths.has(change?.path));
+  }
+
+  function mergeApplyResultSkipped(result = {}, skipped = []) {
+    if (!skipped.length) {
+      return result;
+    }
+    return {
+      ...(result || {}),
+      ok: false,
+      applied: Array.isArray(result?.applied) ? result.applied : [],
+      skipped: [
+        ...getSkippedEntries(result),
+        ...skipped
+      ]
+    };
+  }
+
+  async function confirmBinaryOperations(operations = []) {
+    const binaryOperations = (operations || []).filter(operation => operation.type === 'binary-create' || operation.type === 'overwrite-binary');
+    if (!binaryOperations.length) {
+      return { operations, skipped: [] };
+    }
+    const approved = await showPluginConfirm({
+      title: tr('binaryAssetConfirmTitle'),
+      message: tr('binaryAssetConfirmMessage', { files: formatOperationFiles(binaryOperations) }),
+      confirmLabel: tr('binaryAssetConfirm'),
+      cancelLabel: tr('binaryAssetCancel'),
+      destructive: true
+    });
+    if (approved) {
+      return { operations, skipped: [] };
+    }
+    return {
+      operations: operations.filter(operation => operation.type !== 'binary-create' && operation.type !== 'overwrite-binary'),
+      skipped: binaryOperations.map(operation => ({
+        operation,
+        result: {
+          ok: false,
+          code: 'binary_confirmation_rejected',
+          reason: tx('Binary asset writeback requires explicit confirmation and was skipped.', '二进制资源写回需要显式确认，已跳过。')
+        }
+      }))
+    };
+  }
+
+  function buildAuditDiffSummary(operations = []) {
+    const changedFiles = new Set();
+    let binaryFilesChanged = 0;
+    for (const operation of operations || []) {
+      if (operation?.path) {
+        changedFiles.add(operation.path);
+      }
+      if (operation?.type === 'binary-create' || operation?.type === 'overwrite-binary') {
+        binaryFilesChanged++;
+      }
+    }
+    return {
+      filesChanged: changedFiles.size,
+      additions: 0,
+      deletions: 0,
+      binaryFilesChanged
+    };
+  }
+
+  function buildAuditSummaryFromApply({ operations = [], applyResults = [], blockedFiles = [], resultStatus = 'completed', saveVerification = null } = {}) {
+    const appliedFiles = [];
+    const skippedFiles = [];
+    for (const result of applyResults || []) {
+      for (const item of getAppliedEntries(result)) {
+        appliedFiles.push(summarizeOperationForAudit(item.operation, item.result, 'applied'));
+      }
+      for (const item of getSkippedEntries(result)) {
+        skippedFiles.push(summarizeOperationForAudit(item.operation, item.result, 'skipped'));
+      }
+    }
+    return {
+      changedFiles: (operations || []).map(operation => summarizeOperationForAudit(operation, {}, 'changed')),
+      ['diffSummary']: buildAuditDiffSummary(operations),
+      blockedFiles,
+      appliedFiles,
+      skippedFiles,
+      resultStatus,
+      saveVerification
+    };
+  }
+
+  function summarizeOperationForAudit(operation = {}, result = {}, status = '') {
+    return {
+      path: operation.path || operation.from || operation.to || '',
+      destinationPath: operation.destinationPath || operation.to || '',
+      type: operation.type || '',
+      reason: result.reasonKey || result.code || result.reason || operation.reasonKey || operation.reason || '',
+      status,
+      size: operation.size
+    };
   }
 
   function getSyncChangePatches(change = {}) {
@@ -5550,6 +7398,9 @@
     await injectScriptOnce('src/shared/projectFiles.js', 'codex-overleaf-project-files-script');
     await injectScriptOnce('src/shared/staleGuard.js', 'codex-overleaf-stale-guard-script');
     await injectScriptOnce('src/shared/compileAdapter.js', 'codex-overleaf-compile-adapter-script');
+    await injectScriptOnce('src/shared/governanceRules.js', 'codex-overleaf-governance-rules-script');
+    await injectScriptOnce('src/shared/sensitiveScan.js', 'codex-overleaf-sensitive-scan-script');
+    await injectScriptOnce('src/shared/auditRecords.js', 'codex-overleaf-audit-records-script');
     await injectScriptOnce('src/page/overleafCapabilities.js', 'codex-overleaf-capabilities-script');
     await injectScriptOnce('src/page/compileBridge.js', 'codex-overleaf-compile-bridge-script');
     await injectScriptOnce('src/page/overleafEditor.js', 'codex-overleaf-editor-script');
@@ -5615,8 +7466,12 @@
         locale: prefs.locale || '',
         requireReviewing: prefs.requireReviewing !== false,
         autoRecompile: prefs.autoRecompile !== false,
+        loadCodexLocalSkills: prefs.loadCodexLocalSkills !== false,
+        loadCodexOverleafSkills: prefs.loadCodexOverleafSkills !== false,
         experimentalOtByProject: prefs.experimentalOtByProject || {},
         customInstructionsByProject: prefs.customInstructionsByProject || {},
+        governanceRulesByProject: normalizeGovernanceRulesByProject(prefs.governanceRulesByProject),
+        selectedLocalSkillIdsByProject: normalizeSelectedLocalSkillIdsByProject(prefs.selectedLocalSkillIdsByProject),
         panelWidth: prefs.panelWidth || PANEL_DEFAULT_WIDTH,
         sessions: sessions.map(session => ({
           id: session.id,
@@ -5657,8 +7512,12 @@
       const projectId = getCurrentProjectId();
       const compactState = prepareStateForStorage(state);
       compactState.autoRecompile = state.autoRecompile;
+      compactState.loadCodexLocalSkills = state.loadCodexLocalSkills !== false;
+      compactState.loadCodexOverleafSkills = state.loadCodexOverleafSkills !== false;
       compactState.experimentalOtByProject = state.experimentalOtByProject;
       compactState.customInstructionsByProject = state.customInstructionsByProject;
+      compactState.governanceRulesByProject = state.governanceRulesByProject;
+      compactState.selectedLocalSkillIdsByProject = state.selectedLocalSkillIdsByProject;
 
       // Save lightweight prefs to chrome.storage.local
       const latestPrefs = typeof Migration.loadPrefs === 'function'
@@ -5677,6 +7536,20 @@
       prefs.experimentalOtByProject = {
         ...(latestPrefs?.experimentalOtByProject || {}),
         [projectId]: normalizeExperimentalOtByProject(state?.experimentalOtByProject)[projectId] === true
+      };
+      const normalizedGovernanceByProject = typeof normalizeGovernanceRulesByProject === 'function'
+        ? normalizeGovernanceRulesByProject(state?.governanceRulesByProject)
+        : (state?.governanceRulesByProject || {});
+      const normalizedSelectedSkillIdsByProject = typeof normalizeSelectedLocalSkillIdsByProject === 'function'
+        ? normalizeSelectedLocalSkillIdsByProject(state?.selectedLocalSkillIdsByProject)
+        : (state?.selectedLocalSkillIdsByProject || {});
+      prefs.governanceRulesByProject = {
+        ...(latestPrefs?.governanceRulesByProject || {}),
+        ...normalizedGovernanceByProject
+      };
+      prefs.selectedLocalSkillIdsByProject = {
+        ...(latestPrefs?.selectedLocalSkillIdsByProject || {}),
+        ...normalizedSelectedSkillIdsByProject
       };
       const normalizedCustomProject = normalizeCustomInstructionsByProject({ [projectId]: '' });
       const normalizedCustomProjectId = Object.keys(normalizedCustomProject)[0] || '';
@@ -5720,7 +7593,11 @@
       try {
         await chrome.storage.local.set({ [storageKey]: prepareStateForStorage(state) });
       } catch (fallbackError) {
-        appendStorageNoticeOnce('save-failed', tx(`Failed to save session state: ${error.message}`, `保存会话状态失败：${error.message}`));
+        if (typeof appendStorageNoticeOnce === 'function') {
+          appendStorageNoticeOnce('save-failed', tx(`Failed to save session state: ${error.message}`, `保存会话状态失败：${error.message}`));
+        } else {
+          throw fallbackError;
+        }
       }
     }
   }
@@ -5820,6 +7697,11 @@
     const experimentalOtCheckbox = panel.querySelector('[data-experimental-ot]');
     if (experimentalOtCheckbox) {
       setExperimentalOtEnabledForProject(projectId, experimentalOtCheckbox.checked);
+    }
+    if (panel?.querySelector('[data-project-settings-panel]')?.hidden === false) {
+      setGovernanceRulesForCurrentProject(readGovernanceRulesFromSettings());
+      setSelectedLocalSkillIdsForCurrentProject(readSelectedLocalSkillIdsFromSettings());
+      setSkillLoadingSettings(readSkillLoadingSettingsFromSettings());
     }
   }
 
@@ -6219,6 +8101,11 @@
     if (taskInput) {
       taskInput.value = '';
     }
+    composerAttachments = [];
+    pendingComposerAttachmentKeys.clear();
+    composerSkillInvocation = null;
+    renderComposerAttachments();
+    renderComposerSkillInvocation();
     state = updateActiveSession(state, { task: '' });
     saveStateSoon();
   }
@@ -6245,6 +8132,9 @@
     }
     syncExperimentalOtToggleForProject();
     syncCustomInstructionsEditorForProject();
+    if (typeof syncProjectSettingsEditorForProject === 'function') {
+      syncProjectSettingsEditorForProject();
+    }
     applyPanelWidth(state.panelWidth || PANEL_DEFAULT_WIDTH, { persist: false });
     renderModelConfigChoices();
     updateModelDisplay();
@@ -6254,6 +8144,8 @@
     renderRunHistory();
     renderContextSelection();
     renderContextSummary();
+    renderComposerAttachments();
+    renderComposerSkillInvocation();
     applyLocaleToPanel();
     if (!panel.querySelector('[data-context-tray]')?.hidden) {
       renderContextFiles(contextProject);
@@ -6364,6 +8256,10 @@
   }
 
   function startRunView({ task, mode, model, reasoningEffort, speedTier }) {
+    let attachments = [];
+    if (Array.isArray(arguments[0]?.attachments)) {
+      attachments = arguments[0].attachments;
+    }
     logAutoFollow = true;
     userScrollIntentUntil = 0;
     const record = {
@@ -6377,6 +8273,7 @@
       statusText: tr('processing', { elapsed: '' }).trim(),
       startedAt: new Date().toISOString(),
       finishedAt: '',
+      attachments: createRunAttachmentSnapshots(attachments),
       events: [],
       undoOperations: [],
       undoTrackedChanges: [],
@@ -6927,6 +8824,7 @@
     ].filter(Boolean).join(' · ');
     root.innerHTML = `
       <div class="transcript-turn-main">
+        <div class="run-attachments codex-attachment-preview-list" data-run-attachments hidden></div>
         <div class="run-prompt" data-run-task></div>
         <div class="run-turn-meta">
           <button type="button" data-run-undo hidden title="Undo this run's writes to Overleaf">Undo</button>
@@ -6941,6 +8839,7 @@
       </div>
     `;
 
+    renderAttachmentPreviewList(run.attachments, root.querySelector('[data-run-attachments]'), { readonly: true });
     root.querySelector('[data-run-task]').textContent = run.task || '';
     root.querySelector('[data-run-status]').textContent = getRunStatusText(run);
     const process = root.querySelector('[data-run-process]');

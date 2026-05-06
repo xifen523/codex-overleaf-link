@@ -191,6 +191,173 @@ test('codex.models returns models discovered from the Codex cache', async () => 
   }
 });
 
+test('skills.install, skills.list, and skills.remove manage project-local markdown skills', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-skills-'));
+  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir };
+  try {
+    const install = await handleRequest({
+      id: 'skill-install',
+      method: 'skills.install',
+      params: {
+        projectId: 'skills-project',
+        skillId: 'citation-style',
+        content: '# Citation Style\n\nPrefer author-year citations and preserve BibTeX keys.'
+      }
+    }, env);
+
+    assert.equal(install.ok, true);
+    assert.equal(install.result.id, 'citation-style');
+    assert.equal(install.result.size, Buffer.byteLength('# Citation Style\n\nPrefer author-year citations and preserve BibTeX keys.'));
+
+    const list = await handleRequest({
+      id: 'skill-list',
+      method: 'skills.list',
+      params: { projectId: 'skills-project' }
+    }, env);
+
+    assert.equal(list.ok, true);
+    assert.deepEqual(list.result.skills.map(skill => skill.id), ['citation-style']);
+    assert.equal(list.result.skills[0].title, 'Citation Style');
+    assert.match(list.result.skills[0].preview, /Prefer author-year citations/);
+    assert.equal(typeof list.result.skills[0].updatedAt, 'string');
+
+    const remove = await handleRequest({
+      id: 'skill-remove',
+      method: 'skills.remove',
+      params: { projectId: 'skills-project', skillId: 'citation-style' }
+    }, env);
+
+    assert.equal(remove.ok, true);
+    assert.equal(remove.result.removed, true);
+
+    const empty = await handleRequest({
+      id: 'skill-list-empty',
+      method: 'skills.list',
+      params: { projectId: 'skills-project' }
+    }, env);
+    assert.deepEqual(empty.result.skills, []);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('skills.install, skills.list, and skills.remove manage Codex Overleaf plugin skills', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-plugin-skills-'));
+  const pluginSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: pluginSkillsRoot };
+  try {
+    const install = await handleRequest({
+      id: 'plugin-skill-install',
+      method: 'skills.install',
+      params: {
+        scope: 'codex-overleaf',
+        skillId: 'overleaf-style',
+        content: '# Overleaf Style\n\nPrefer concise reviewer-facing LaTeX edits.'
+      }
+    }, env);
+
+    assert.equal(install.ok, true);
+    assert.equal(install.result.id, 'overleaf-style');
+    assert.equal(install.result.scope, 'codex-overleaf');
+    assert.equal(
+      fs.readFileSync(path.join(pluginSkillsRoot, 'overleaf-style', 'SKILL.md'), 'utf8'),
+      '# Overleaf Style\n\nPrefer concise reviewer-facing LaTeX edits.'
+    );
+
+    const list = await handleRequest({
+      id: 'plugin-skill-list',
+      method: 'skills.list',
+      params: { scope: 'codex-overleaf' }
+    }, env);
+
+    assert.equal(list.ok, true);
+    assert.deepEqual(list.result.skills.map(skill => [skill.id, skill.scope]), [
+      ['overleaf-style', 'codex-overleaf']
+    ]);
+    assert.equal(list.result.skills[0].title, 'Overleaf Style');
+
+    const remove = await handleRequest({
+      id: 'plugin-skill-remove',
+      method: 'skills.remove',
+      params: { scope: 'codex-overleaf', skillId: 'overleaf-style' }
+    }, env);
+
+    assert.equal(remove.ok, true);
+    assert.equal(remove.result.removed, true);
+    assert.equal(fs.existsSync(path.join(pluginSkillsRoot, 'overleaf-style')), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('skills.install rejects unsafe ids and non-text content', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-skills-'));
+  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir };
+  try {
+    const unsafe = await handleRequest({
+      id: 'skill-unsafe',
+      method: 'skills.install',
+      params: {
+        projectId: 'skills-project',
+        skillId: '../escape',
+        content: '# Bad'
+      }
+    }, env);
+    assert.equal(unsafe.ok, false);
+    assert.equal(unsafe.error.code, 'skills_install_failed');
+    assert.match(unsafe.error.message, /Invalid skill id/);
+
+    const binary = await handleRequest({
+      id: 'skill-binary',
+      method: 'skills.install',
+      params: {
+        projectId: 'skills-project',
+        skillId: 'binary',
+        contentBase64: Buffer.from('# Binary').toString('base64')
+      }
+    }, env);
+    assert.equal(binary.ok, false);
+    assert.equal(binary.error.code, 'skills_install_failed');
+    assert.match(binary.error.message, /markdown\/text content/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('mirror.scanSensitive reports redacted findings from the local mirror workspace', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-sensitive-'));
+  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir };
+  try {
+    await syncOverleafToMirror({
+      projectId: 'sensitive-project',
+      rootDir,
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [
+          { path: 'main.tex', content: 'token = sk-abcdefghijklmnopqrstuvwxyz1234567890' },
+          { path: 'figure.png', contentBase64: Buffer.from([1, 2, 3]).toString('base64'), size: 3 }
+        ]
+      }
+    });
+
+    const response = await handleRequest({
+      id: 'mirror-sensitive',
+      method: 'mirror.scanSensitive',
+      params: { projectId: 'sensitive-project' }
+    }, env);
+
+    assert.equal(response.ok, true);
+    assert.equal(response.result.findings.length, 1);
+    assert.equal(response.result.findings[0].path, 'main.tex');
+    assert.equal(response.result.findings[0].source, 'mirror-file');
+    assert.equal(response.result.findings[0].detectorId, 'api-token');
+    assert.match(response.result.findings[0].preview, /\[REDACTED\]/);
+    assert.equal(JSON.stringify(response.result).includes('abcdefghijklmnopqrstuvwxyz1234567890'), false);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('mirror.patchFiles applies a baseline-verified text patch without invoking Codex', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-patch-'));
   const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir };
@@ -287,6 +454,40 @@ test('codex.run rejects project snapshots without explicit freshness evidence', 
   assert.equal(response.ok, false);
   assert.equal(response.error.code, 'codex_run_requires_snapshot_evidence');
   assert.equal(calls, 0);
+});
+
+test('codex.run accepts skill installer turns without project snapshot evidence', async () => {
+  let calls = 0;
+  let seenParams = null;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async ({ params }) => {
+    calls++;
+    seenParams = params;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-skill-installer',
+    method: 'codex.run',
+    params: {
+      projectId: 'skill-installer-project',
+      mode: 'ask',
+      task: 'Install the skill from https://github.com/example/skills/tree/main/foo',
+      skipMirrorSync: true,
+      skillInvocation: {
+        id: 'skill-installer',
+        title: 'Skill Installer'
+      },
+      focusFiles: []
+    }
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(calls, 1);
+  assert.equal(seenParams.skipMirrorSync, true);
+  assert.deepEqual(seenParams.skillInvocation, {
+    id: 'skill-installer',
+    title: 'Skill Installer'
+  });
 });
 
 test('codex.run accepts explicit focused partial snapshots', async () => {

@@ -90,6 +90,31 @@ test('diagnostics render in a floating result panel instead of the task transcri
   assert.match(snapshotBody, /showDiagnosticsResult\(formatProjectSnapshotDiagnosticsResult/);
 });
 
+test('diagnostics menu exports a content-redacted audit bundle', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /data-diagnostics-export/);
+  assert.match(contentScript, /function exportDiagnosticsBundle/);
+  assert.match(contentScript, /AuditRecords\.buildDiagnosticBundle/);
+  assert.match(contentScript, /getRecentAuditLogsForCurrentProject/);
+  assert.match(contentScript, /getNativeDiagnosticsSummaryForBundle/);
+  assert.match(contentScript, /platform:\s*nativeDiagnostics\.platform/);
+  assert.match(contentScript, /nativeEnvironment:\s*nativeDiagnostics\.nativeEnvironment/);
+  assert.match(contentScript, /URL\.createObjectURL/);
+  assert.match(contentScript, /download = `codex-overleaf-diagnostics-/);
+  assert.match(contentScript, /excludeContent:\s*true/);
+  assert.doesNotMatch(contentScript.match(/function exportDiagnosticsBundle[\s\S]*?\n  function /)?.[0] || '', /content:\s*project/);
+  assert.match(i18n, /diagnosticsExportTitle/);
+  assert.match(i18n, /diagnosticsExportSubtitle/);
+});
+
 test('experimental OT diagnostics read metadata without draining project content', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),

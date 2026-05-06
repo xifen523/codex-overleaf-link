@@ -29,6 +29,17 @@ function extractFunction(source, name) {
   assert.fail(`${name} body should close`);
 }
 
+function extractOptionalFunction(source, name) {
+  try {
+    return extractFunction(source, name);
+  } catch (error) {
+    if (String(error?.message || '').includes(`${name} should exist`)) {
+      return '';
+    }
+    throw error;
+  }
+}
+
 function createMinimalDocument() {
   class Element {
     constructor(tagName) {
@@ -228,6 +239,291 @@ test('task runs sync the full project only when a Codex run starts', () => {
   assert.match(runTaskBody, /applySyncChangesToOverleaf/);
   assert.doesNotMatch(runTaskBody, /scheduleProjectSync\(/);
   assert.match(contentScript, /async function applySyncChangesToOverleaf/);
+});
+
+test('project settings expose governed rules and local skills without Overleaf asset upload controls', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /data-project-settings-panel/);
+  assert.match(contentScript, /data-governance-readonly-patterns/);
+  assert.match(contentScript, /data-governance-writable-patterns/);
+  assert.match(contentScript, /data-sensitive-check-enabled/);
+  assert.match(contentScript, /data-sensitive-confirm-allowed/);
+  assert.match(contentScript, /data-load-codex-local-skills/);
+  assert.match(contentScript, /data-load-codex-overleaf-skills/);
+  assert.match(contentScript, /data-local-skill-list/);
+  assert.doesNotMatch(contentScript, /data-local-skill-install-id/);
+  assert.doesNotMatch(contentScript, /data-local-skill-install-content/);
+  assert.doesNotMatch(contentScript, /installLocalSkillFromSettings/);
+  assert.doesNotMatch(contentScript, /data-asset-upload/);
+  assert.doesNotMatch(contentScript, /uploadSelectedAssets/);
+  assert.doesNotMatch(contentScript, /getAssetUploadBaseline/);
+  assert.match(contentScript, /function normalizeGovernanceRulesByProject/);
+  assert.match(contentScript, /function normalizeSelectedLocalSkillIdsByProject/);
+  assert.match(contentScript, /function readSkillLoadingSettingsFromSettings/);
+  assert.match(contentScript, /loadCodexLocalSkills/);
+  assert.match(contentScript, /loadCodexOverleafSkills/);
+  assert.match(contentScript, /governanceRulesByProject/);
+  assert.match(contentScript, /selectedLocalSkillIdsByProject/);
+  assert.match(contentScript, /method:\s*'skills\.list'/);
+  assert.match(contentScript, /method:\s*'skills\.remove'/);
+  assert.match(css, /\.codex-project-settings-panel/);
+  assert.match(css, /\.codex-local-skill-list/);
+  assert.doesNotMatch(css, /\.codex-local-skill-install-row/);
+  assert.doesNotMatch(css, /\.codex-asset-upload-row/);
+  assert.match(i18n, /projectSettingsTitle/);
+  assert.match(i18n, /governanceReadonlyPatterns/);
+  assert.match(i18n, /localSkillsTitle/);
+  assert.match(i18n, /loadCodexLocalSkills/);
+  assert.match(i18n, /loadCodexOverleafSkills/);
+  assert.doesNotMatch(i18n, /assetUploadTitle/);
+});
+
+test('composer slash menu offers Codex Overleaf skill installation', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
+  const keydownBody = contentScript.match(/function handleTaskInputKeydown\(event\) \{[\s\S]*?\n  function createDiffReviewElement/)?.[0] || '';
+  const selectBody = extractFunction(contentScript, 'selectSlashCommand');
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
+
+  assert.match(contentScript, /data-slash-menu/);
+  assert.match(contentScript, /data-slash-command="install-skill"/);
+  assert.match(contentScript, /data-composer-skill-context/);
+  assert.match(contentScript, /data-composer-skill-label/);
+  assert.match(contentScript, /data-composer-skill-clear/);
+  assert.match(keydownBody, /handleSlashMenuKeydown\(event\)/);
+  assert.match(contentScript, /function updateSlashMenuForTaskInput/);
+  assert.match(contentScript, /function selectSlashCommand/);
+  assert.match(contentScript, /function activateSkillInstallerComposerContext/);
+  assert.match(contentScript, /function getComposerSkillInvocationForRun/);
+  assert.match(contentScript, /async function runSkillInstallerTask/);
+  assert.match(selectBody, /activateSkillInstallerComposerContext\(\)/);
+  assert.match(runTaskBody, /const submittedSkillInvocation = getComposerSkillInvocationForRun\(\)/);
+  assert.match(runTaskBody, /submittedSkillInvocation\?\.id === 'skill-installer'[\s\S]*runSkillInstallerTask/);
+  assert.match(runTaskBody, /try\s*\{\s*if \(submittedSkillInvocation\?\.id === 'skill-installer'\)[\s\S]*runSkillInstallerTask/);
+  assert.match(runTaskBody, /finally\s*\{[\s\S]*setRunning\(false\)[\s\S]*nativeChannel\.clearActiveRequest\(\)/);
+  assert.match(runTaskBody, /skillInvocation:\s*submittedSkillInvocation/);
+  assert.match(contentScript, /skipMirrorSync:\s*true/);
+  assert.doesNotMatch(contentScript, /function showCodexOverleafSkillInstallDialog/);
+  assert.match(css, /\.codex-slash-menu/);
+  assert.match(css, /\.codex-composer-skill-context/);
+  assert.doesNotMatch(css, /\.codex-skill-install-dialog/);
+  assert.match(i18n, /slashInstallSkillTitle/);
+  assert.match(i18n, /skillInstallerComposerLabel/);
+  assert.match(i18n, /skillInstallerComposerClear/);
+});
+
+test('task runs use sensitive preflight, selected skills, governance gating, binary confirmation, and audit summaries', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
+  const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  async function verifyPostWriteSaveState/)?.[0] || '';
+
+  assert.match(contentScript, /CodexOverleafGovernanceRules/);
+  assert.match(contentScript, /CodexOverleafSensitiveScan/);
+  assert.match(contentScript, /CodexOverleafAuditRecords/);
+  assert.match(runTaskBody, /const submittedSelectedSkillIds = getSelectedLocalSkillIdsForCurrentProject\(\)/);
+  assert.match(runTaskBody, /const submittedSkillLoadingSettings = getSkillLoadingSettings\(\)/);
+  assert.match(runTaskBody, /createAuditDraftForRun/);
+  assert.match(runTaskBody, /runSensitivePreflight\(\{\s*task,\s*project/);
+  assert.match(runTaskBody, /runSensitivePreflight\(\{[\s\S]*useExistingMirror/);
+  assert.match(runTaskBody, /selectedSkillIds:\s*submittedSelectedSkillIds/);
+  assert.match(runTaskBody, /skillLoadingSettings:\s*submittedSkillLoadingSettings/);
+  assert.match(runTaskBody, /finalizeAuditRecord/);
+  assert.match(runTaskBody, /sensitiveFindings/);
+  assert.match(applyBody, /evaluateGovernedOperations/);
+  assert.match(applyBody, /buildGovernanceSkippedApplyResult/);
+  assert.match(applyBody, /confirmBinaryOperations/);
+  assert.match(applyBody, /binary-create|overwrite-binary/);
+  assert.match(applyBody, /blockedFiles/);
+  assert.match(applyBody, /skippedFiles/);
+  assert.match(applyBody, /appliedFiles/);
+  assert.match(contentScript, /buildAuditDiffSummary/);
+  assert.doesNotMatch(contentScript, /fullDiff\s*:/);
+  assert.doesNotMatch(contentScript, /compileLog\s*:/);
+});
+
+test('composer supports pasted or dropped turn attachments without Overleaf asset writeback', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
+  const clearBody = extractFunction(contentScript, 'clearTaskComposer');
+
+  assert.match(contentScript, /data-attachment-strip/);
+  assert.match(contentScript, /\[data-task\]'\)\.addEventListener\('paste', handleComposerPaste\)/);
+  assert.match(contentScript, /\[data-composer-form\]'\)\.addEventListener\('dragover', handleComposerDragOver\)/);
+  assert.match(contentScript, /\[data-composer-form\]'\)\.addEventListener\('drop', handleComposerDrop\)/);
+  assert.match(contentScript, /function addComposerAttachmentFiles/);
+  assert.match(contentScript, /function renderComposerAttachments/);
+  assert.match(runTaskBody, /const submittedAttachments = getComposerAttachmentsForRun\(\)/);
+  assert.match(runTaskBody, /attachments:\s*submittedAttachments/);
+  assert.match(clearBody, /composerAttachments = \[\]/);
+  assert.doesNotMatch(contentScript, /User-selected asset upload/);
+  assert.doesNotMatch(contentScript, /asset_upload_rejected/);
+  assert.doesNotMatch(contentScript, /mode:\s*'asset-upload'/);
+});
+
+test('composer paste collects clipboard file items once when files and items both expose the same paste', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const collectFilesFromDataTransfer = vm.runInNewContext(`
+    function normalizeComposerAttachmentName(name) {
+      return String(name || '').replace(/\\0/g, '').replace(/\\\\/g, '/').split('/').filter(Boolean).pop()?.trim().slice(0, 180) || '';
+    }
+    (${extractFunction(contentScript, 'collectFilesFromDataTransfer')})
+  `);
+  const filesEntry = { name: 'image.png', type: 'image/png', size: 128, lastModified: 1 };
+  const itemEntry = { name: 'clipboard-image.png', type: 'image/png', size: 128, lastModified: 2 };
+
+  const files = collectFilesFromDataTransfer({
+    files: [filesEntry],
+    items: [
+      { kind: 'string', getAsFile: () => null },
+      { kind: 'file', getAsFile: () => itemEntry }
+    ]
+  });
+
+  assert.equal(files.length, 1);
+  assert.equal(files[0], itemEntry);
+});
+
+test('composer attachment adds dedupe the same file while async reads are pending', async () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const harness = vm.runInNewContext(`
+    let composerAttachments = [];
+    let pendingComposerAttachmentKeys = new Set();
+    const MAX_COMPOSER_ATTACHMENTS = 8;
+    const MAX_COMPOSER_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+    const pendingReads = [];
+    function tx(en) { return en; }
+    function appendPlainLog() {}
+    function renderComposerAttachments() {}
+    function readFileAsDataUrl() {
+      return new Promise(resolve => pendingReads.push(() => resolve('data:image/png;base64,aGVsbG8=')));
+    }
+    async function buildAttachmentPreviewData() {
+      return { kind: 'image', previewDataUrl: 'data:image/png;base64,aGVsbG8=' };
+    }
+    function extractBase64FromDataUrl(value) {
+      const text = String(value || '');
+      return text.includes(',') ? text.slice(text.indexOf(',') + 1) : text;
+    }
+    ${extractFunction(contentScript, 'normalizeComposerAttachmentName')}
+    ${extractFunction(contentScript, 'validateComposerAttachmentFile')}
+    ${extractOptionalFunction(contentScript, 'buildComposerAttachmentDedupeKey')}
+    ${extractOptionalFunction(contentScript, 'isDuplicateComposerAttachmentFile')}
+    ${extractFunction(contentScript, 'addComposerAttachmentFiles')}
+    ({
+      addComposerAttachmentFiles,
+      attachments: () => composerAttachments,
+      flushReads: () => {
+        for (const resolve of pendingReads.splice(0)) {
+          resolve();
+        }
+      }
+    })
+  `);
+  const file = { name: 'image.png', type: 'image/png', size: 128 };
+
+  const first = harness.addComposerAttachmentFiles([file]);
+  const second = harness.addComposerAttachmentFiles([file]);
+  harness.flushReads();
+  await Promise.all([first, second]);
+
+  assert.equal(harness.attachments().length, 1);
+});
+
+test('composer and run history render image previews and file attachment icons', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const composerMarkup = contentScript.match(/<form class="codex-composer" data-composer-form>[\s\S]*?<\/form>/)?.[0] || '';
+  const startRunBody = contentScript.match(/function startRunView\(\{[\s\S]*?\n  function finishRunView/)?.[0] || '';
+  const renderCardBody = contentScript.match(/function renderRunCard\(run\) \{[\s\S]*?\n  function getRunStatusText/)?.[0] || '';
+  const renderAttachmentsBody = contentScript.match(/function renderAttachmentPreviewList[\s\S]*?\n  function showAttachmentPreviewDialog/)?.[0] || '';
+
+  assert.ok(
+    composerMarkup.indexOf('data-attachment-strip') < composerMarkup.indexOf('<textarea data-task'),
+    'attachment previews render above the composer textarea'
+  );
+  assert.match(contentScript, /function buildAttachmentPreviewData/);
+  assert.match(contentScript, /function createRunAttachmentSnapshots/);
+  assert.match(startRunBody, /attachments = \[\]/);
+  assert.match(startRunBody, /attachments:\s*createRunAttachmentSnapshots\(attachments\)/);
+  assert.match(renderCardBody, /data-run-attachments/);
+  assert.match(renderCardBody, /renderAttachmentPreviewList\(run\.attachments/);
+  assert.match(renderAttachmentsBody, /document\.createElement\('img'\)/);
+  assert.match(renderAttachmentsBody, /codex-attachment-file-icon/);
+  assert.match(renderAttachmentsBody, /showAttachmentPreviewDialog\(attachment\)/);
+  assert.match(contentScript, /function showAttachmentPreviewDialog\(attachment\)/);
+  assert.match(contentScript, /data-attachment-preview-dialog/);
+  assert.match(css, /\.codex-attachment-preview-list/);
+  assert.match(css, /\.codex-attachment-preview-card/);
+  assert.match(css, /\.codex-attachment-preview-dialog/);
+});
+
+test('reused mirror sensitive preflight scans native mirror before Codex dispatch', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const preflightBody = extractFunction(contentScript, 'runSensitivePreflight');
+
+  assert.match(preflightBody, /useExistingMirror/);
+  assert.match(preflightBody, /scanNativeMirrorSensitiveFindings/);
+  assert.doesNotMatch(preflightBody, /sensitiveCheckEnabled === false \|\| !SensitiveScan/);
+  assert.match(contentScript, /method:\s*'mirror\.scanSensitive'/);
+  assert.match(contentScript, /mirror-sensitive-scan-unavailable/);
+});
+
+test('post-write compile summaries are included in the final completion report', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  async function verifyPostWriteSaveState/)?.[0] || '';
+  const compileBody = contentScript.match(/async function autoRecompileAfterWriteback[\s\S]*?\n  async function resolveCompileLogContext/)?.[0] || '';
+
+  assert.match(applyBody, /const compileSummary = appliedPaths\.length/);
+  assert.match(applyBody, /appendCompileSummaryToConclusion\(writebackConclusion,\s*compileSummary\)/);
+  assert.match(compileBody, /return buildPostWriteCompileSummary/);
+  assert.match(compileBody, /callPageBridge\('getCompileLog'/);
+  assert.match(contentScript, /function appendCompileSummaryToConclusion/);
 });
 
 test('task run snapshots request binary assets so local LaTeX can see Figures directories', () => {
@@ -650,7 +946,7 @@ test('ask mode is not blocked by write-safety preconditions', () => {
   assert.match(codexSessionRunner, /approvalPolicy: 'never'/);
 });
 
-test('ask mode hard-blocks unexpected local Codex writeback changes', () => {
+test('ask mode ignores unexpected local Codex writeback changes without failing the answer', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -661,12 +957,15 @@ test('ask mode hard-blocks unexpected local Codex writeback changes', () => {
 
   assert.match(applySyncBody, /const runMode = options\.mode \|\| state\.mode/);
   assert.match(applySyncBody, /options\.mode === 'ask'/);
-  assert.match(applySyncBody, /Local Codex returned file changes during Ask mode/);
+  assert.match(applySyncBody, /Ask mode ignored local file changes/);
   assert.match(contentScript, /mode:\s*submittedMode/);
   assert.match(contentScript, /resolveWarmMirrorReuse\(project,[\s\S]*mode:\s*submittedMode/);
   assert.doesNotMatch(contentScript, /mode:\s*state\.mode,[\s\S]*unsupportedChanges: response\.result\.unsupportedChanges/);
   assert.ok(applySyncBody.indexOf("options.mode === 'ask'") < applySyncBody.indexOf('buildSyncApplyOperations'));
   assert.match(guardBody, /return \{/);
+  assert.match(guardBody, /hasSkippedOperations:\s*false/);
+  assert.match(guardBody, /resultStatus:\s*'ask_ignored_local_changes'/);
+  assert.doesNotMatch(guardBody, /status:\s*'failed'/);
   assert.doesNotMatch(guardBody, /callPageBridge\('applyOperations'/);
 });
 
@@ -2422,10 +2721,12 @@ test('project custom instructions editor saves and restores by project', async (
     ${extractFunction(contentScript, 'setCustomInstructionsForProject')}
     ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
     ${extractFunction(contentScript, 'openCustomInstructionsSettings')}
+    ${extractFunction(contentScript, 'closeCustomInstructionsSettings')}
     ${extractFunction(contentScript, 'saveCustomInstructionsSettings')}
     return {
       input: customInstructionsInput,
       settingsPanel: customInstructionsPanel,
+      settingsButton,
       getState: () => state,
       getSavedCount: () => savedCount,
       getToast: () => lastToast,
@@ -2451,12 +2752,81 @@ test('project custom instructions editor saves and restores by project', async (
   );
   assert.equal(harness.getSavedCount(), 1);
   assert.equal(harness.getToast(), 'customInstructionsSavedToast');
+  assert.equal(harness.settingsPanel.hidden, true);
+  assert.equal(harness.settingsButton.dataset.active, 'false');
+  assert.equal(harness.settingsButton['aria-expanded'], 'false');
 
   harness.navigate('project_b');
   assert.equal(harness.input.value, '');
 
   harness.navigate('project_a');
   assert.equal(harness.input.value, 'Use NeurIPS style and \\\\cref{}.');
+});
+
+test('project settings gear toggles the settings panel closed when already open', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const harness = Function(`
+    let currentProjectId = 'project_a';
+    let focused = false;
+    let customInstructionsEditorProjectId = '';
+    let customInstructionsEditorValue = '';
+    let state = {
+      customInstructionsByProject: {}
+    };
+    const customInstructionsInput = {
+      value: '',
+      placeholder: '',
+      focus() { focused = true; }
+    };
+    const customInstructionsPanel = {
+      hidden: true
+    };
+    const settingsButton = {
+      dataset: {},
+      setAttribute(name, value) { this[name] = value; }
+    };
+    const controls = {
+      '[data-custom-instructions-input]': customInstructionsInput,
+      '[data-custom-instructions-panel]': customInstructionsPanel,
+      '[data-custom-instructions-settings]': settingsButton
+    };
+    const panel = {
+      querySelector(selector) {
+        return controls[selector] || null;
+      }
+    };
+    function getCurrentProjectId() { return currentProjectId; }
+    function closeDiagnosticsMenu() {}
+    function closeDiagnosticsResult() {}
+    function closeModelConfigPopover() {}
+    function closeContextTray() {}
+    function tr(key) { return key; }
+    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
+    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
+    ${extractFunction(contentScript, 'openCustomInstructionsSettings')}
+    ${extractFunction(contentScript, 'closeCustomInstructionsSettings')}
+    ${extractFunction(contentScript, 'toggleCustomInstructionsSettings')}
+    return {
+      settingsPanel: customInstructionsPanel,
+      settingsButton,
+      wasFocused: () => focused,
+      toggleCustomInstructionsSettings
+    };
+  `)();
+
+  harness.toggleCustomInstructionsSettings();
+  assert.equal(harness.settingsPanel.hidden, false);
+  assert.equal(harness.settingsButton.dataset.active, 'true');
+  assert.equal(harness.settingsButton['aria-expanded'], 'true');
+  assert.equal(harness.wasFocused(), true);
+
+  harness.toggleCustomInstructionsSettings();
+  assert.equal(harness.settingsPanel.hidden, true);
+  assert.equal(harness.settingsButton.dataset.active, 'false');
+  assert.equal(harness.settingsButton['aria-expanded'], 'false');
 });
 
 test('mirror prefetch state sync preserves unsaved custom instructions for same project', () => {

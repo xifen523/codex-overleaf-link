@@ -64,32 +64,21 @@ test('context picker preserves project folder hierarchy instead of flattening by
   assert.match(contentScript, /file\.path\.split\('\/'\)/);
 });
 
-test('context picker uses only dedicated file-list results, not task snapshots', () => {
+test('context picker uses the same exact ZIP source as project-read diagnostics', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
   const loadContextFilesBody = contentScript.match(/async function loadContextFiles\(options = \{\}\) \{[\s\S]*?\n  function renderContextFiles/)?.[0] || '';
+  const requestExactContextFilesBody = contentScript.match(/async function requestExactContextFiles\(\{ force = false \} = \{\}\) \{[\s\S]*?\n  function isExactContextFileListProject/)?.[0] || '';
   const getRunProjectSnapshotBody = contentScript.match(/async function getRunProjectSnapshot\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
-  assert.match(contentScript, /function isContextFileListProject\(/);
-  assert.match(loadContextFilesBody, /isContextFileListProject\(contextProject\)/);
+  assert.match(loadContextFilesBody, /isExactContextFileListProject\(contextProject\)/);
+  assert.match(requestExactContextFilesBody, /callPageBridge\('getProjectSnapshot'/);
+  assert.match(requestExactContextFilesBody, /zipOnly:\s*true/);
+  assert.match(requestExactContextFilesBody, /includeContent:\s*false/);
+  assert.match(requestExactContextFilesBody, /normalizeContextFileListFromZipSnapshot\(project\)/);
   assert.doesNotMatch(getRunProjectSnapshotBody, /contextProject\s*=\s*project/);
-});
-
-test('context picker waits for its own file-list request instead of timing out before ZIP fallback', () => {
-  const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
-    'utf8'
-  );
-  const loadContextFilesBody = contentScript.match(/async function loadContextFiles\(options = \{\}\) \{[\s\S]*?\n  function renderContextFiles/)?.[0] || '';
-  const getPageBridgeTimeoutBody = contentScript.match(/function getPageBridgeTimeoutMs\(method\) \{[\s\S]*?\n  async function injectPageBridge/)?.[0] || '';
-
-  assert.match(contentScript, /const CONTEXT_FILE_LIST_ZIP_TIMEOUT_MS\s*=\s*12000/);
-  assert.match(contentScript, /const CONTEXT_FILE_LIST_PAGE_BRIDGE_TIMEOUT_MS\s*=\s*20000/);
-  assert.match(loadContextFilesBody, /zipTimeoutMs:\s*CONTEXT_FILE_LIST_ZIP_TIMEOUT_MS/);
-  assert.match(loadContextFilesBody, /if \(!project\?\.ok\) \{/);
-  assert.match(getPageBridgeTimeoutBody, /method === 'getProjectFileList'[\s\S]*CONTEXT_FILE_LIST_PAGE_BRIDGE_TIMEOUT_MS/);
 });
 
 test('context picker renders folders as collapsed expandable tree controls', () => {

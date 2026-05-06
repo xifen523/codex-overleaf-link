@@ -7,6 +7,7 @@ const { getHomeDir } = require('./nativeHostPlatform');
 
 const BASELINE_FILE = 'baseline.json';
 const MAX_BINARY_FILE_BYTES = 10 * 1024 * 1024;
+const TURN_ATTACHMENTS_DIR = '.codex-overleaf-attachments';
 
 function getProjectMirror(projectId, options = {}) {
   const rootDir = path.resolve(options.rootDir || getDefaultMirrorRoot(options));
@@ -107,14 +108,61 @@ async function collectMirrorChangesDetailed({ projectId, rootDir }) {
 
   for (const filePath of currentPaths) {
     const previous = baselineByPath.get(filePath);
-    if (previous?.kind === 'binary') {
-      continue;
-    }
-    if (!previous && isGeneratedArtifactPath(filePath)) {
+    const target = resolveWorkspacePath(mirror.workspacePath, filePath);
+    const stat = fs.statSync(target);
+    if (!previous && isGeneratedArtifactPath(filePath, baselineByPath)) {
       unsupportedChanges.push({
         type: 'unsupported-local-file',
         path: filePath,
-        reason: 'generated_artifact'
+        reason: 'generated_artifact',
+        size: stat.size
+      });
+      continue;
+    }
+    if (isSupportedBinaryAssetPath(filePath)) {
+      if (stat.size > MAX_BINARY_FILE_BYTES) {
+        unsupportedChanges.push({
+          type: 'unsupported-local-file',
+          path: filePath,
+          reason: 'binary_file_too_large',
+          size: stat.size,
+          previousExists: Boolean(previous),
+          previousKind: previous?.kind || ''
+        });
+        continue;
+      }
+      if (previous?.kind === 'binary') {
+        const bytes = fs.readFileSync(target);
+        if (hashBytes(bytes) === previous.hash) {
+          continue;
+        }
+        currentByPath.set(filePath, {
+          binary: true,
+          bytes,
+          size: stat.size,
+          previous
+        });
+        continue;
+      }
+      if (!previous) {
+        currentByPath.set(filePath, {
+          binary: true,
+          bytes: fs.readFileSync(target),
+          size: stat.size,
+          previous
+        });
+        continue;
+      }
+    }
+    if (previous?.kind === 'binary') {
+      unsupportedChanges.push({
+        type: 'unsupported-local-file',
+        path: filePath,
+        reason: 'unsupported_non_text_file',
+        size: stat.size,
+        previousExists: true,
+        previousKind: 'binary',
+        previousSize: previous.size
       });
       continue;
     }
@@ -122,17 +170,31 @@ async function collectMirrorChangesDetailed({ projectId, rootDir }) {
       unsupportedChanges.push({
         type: 'unsupported-local-file',
         path: filePath,
-        reason: 'unsupported_non_text_file'
+        reason: 'unsupported_non_text_file',
+        size: stat.size
       });
       continue;
     }
-    const content = fs.readFileSync(resolveWorkspacePath(mirror.workspacePath, filePath), 'utf8');
+    const content = fs.readFileSync(target, 'utf8');
     currentByPath.set(filePath, content);
   }
 
   const changes = [];
-  for (const [filePath, content] of currentByPath) {
+  for (const [filePath, contentOrBinary] of currentByPath) {
     const previous = baselineByPath.get(filePath);
+    if (contentOrBinary && typeof contentOrBinary === 'object' && contentOrBinary.binary === true) {
+      changes.push({
+        type: previous ? 'overwrite-binary' : 'binary-create',
+        path: filePath,
+        contentBase64: contentOrBinary.bytes.toString('base64'),
+        previousExists: Boolean(previous),
+        previousKind: previous?.kind || '',
+        previousSize: previous?.size,
+        size: contentOrBinary.size
+      });
+      continue;
+    }
+    const content = contentOrBinary;
     if (!previous || previous.content !== content) {
       changes.push({
         type: 'write',
@@ -146,6 +208,16 @@ async function collectMirrorChangesDetailed({ projectId, rootDir }) {
 
   for (const [filePath, previous] of baselineByPath) {
     if (previous.kind === 'binary') {
+      if (!currentByPath.has(filePath) && !currentPaths.includes(filePath)) {
+        unsupportedChanges.push({
+          type: 'unsupported-local-file',
+          path: filePath,
+          reason: 'binary_delete_unsupported',
+          previousExists: true,
+          previousKind: 'binary',
+          previousSize: previous.size
+        });
+      }
       continue;
     }
     if (!currentByPath.has(filePath)) {
@@ -334,7 +406,7 @@ function listWorkspaceFiles(workspacePath) {
 
   function walk(dir, prefix) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name === '.DS_Store') {
+      if (entry.name === '.DS_Store' || entry.name === TURN_ATTACHMENTS_DIR) {
         continue;
       }
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
@@ -381,7 +453,7 @@ function compareSyncChanges(left, right) {
   return left.path.localeCompare(right.path);
 }
 
-function isGeneratedArtifactPath(filePath) {
+function isGeneratedArtifactPath(filePath, baselineByPath) {
   const normalized = normalizeRelativePath(filePath).toLowerCase();
   const basename = path.posix.basename(normalized);
   if (basename === '.latexmkrc') {
@@ -390,7 +462,22 @@ function isGeneratedArtifactPath(filePath) {
   if (/^(?:\.|__latexindent_temp)/.test(basename)) {
     return true;
   }
-  return /\.(aux|bbl|bcf|blg|brf|fdb_latexmk|fls|lof|log|lot|out|pdf|run\.xml|synctex(?:\.gz)?|toc|xdv)$/i.test(normalized);
+  if (/\.pdf$/i.test(normalized)) {
+    return !normalized.includes('/') && hasMatchingRootSourceFile(normalized, baselineByPath);
+  }
+  return /\.(aux|bbl|bcf|blg|brf|fdb_latexmk|fls|lof|log|lot|out|run\.xml|synctex(?:\.gz)?|toc|xdv)$/i.test(normalized);
+}
+
+function hasMatchingRootSourceFile(normalizedPdfPath, baselineByPath) {
+  if (!baselineByPath || typeof baselineByPath.has !== 'function') {
+    return true;
+  }
+  const stem = normalizedPdfPath.replace(/\.pdf$/i, '');
+  return baselineByPath.has(`${stem}.tex`) || stem === 'main' || stem === 'output';
+}
+
+function isSupportedBinaryAssetPath(filePath) {
+  return /\.(?:pdf|png|jpe?g|svg)$/i.test(normalizeRelativePath(filePath));
 }
 
 function isTextMirrorPath(filePath) {

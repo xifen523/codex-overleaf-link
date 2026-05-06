@@ -12,7 +12,11 @@ const COMPATIBILITY_REQUIRED_METHODS = [
   'task.confirm',
   'mirror.sync',
   'mirror.patchFiles',
-  'codex.history.clearPlugin'
+  'mirror.scanSensitive',
+  'codex.history.clearPlugin',
+  'skills.list',
+  'skills.install',
+  'skills.remove'
 ];
 const RECOVERABLE_METHODS = [
   'bridge.ping',

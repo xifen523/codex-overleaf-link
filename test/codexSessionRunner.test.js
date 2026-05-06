@@ -8,12 +8,13 @@ const {
   buildCodexTurnPrompt,
   buildCodexAppServerArgs,
   buildFinalAssistantMessage,
+  applyCodexSkillIsolation,
   buildThreadStartParams,
   decideCommandApproval,
   runCodexAppServerSession,
   runCodexSession
 } = require('../native-host/src/codexSessionRunner');
-const { getMirrorStatus } = require('../native-host/src/mirrorWorkspace');
+const { getMirrorStatus, getProjectMirror } = require('../native-host/src/mirrorWorkspace');
 
 const codexSessionRunnerSource = fs.readFileSync(
   path.join(__dirname, '../native-host/src/codexSessionRunner.js'),
@@ -183,6 +184,76 @@ test('passes Codex mode, model, and reasoning settings to the runner boundary', 
   }
 });
 
+test('ask mode never returns local mirror changes for Overleaf writeback', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  try {
+    const result = await runCodexSession({
+      params: {
+        projectId: 'project-ask-readonly-result',
+        task: '只分析，不改文件',
+        mode: 'ask',
+        project: { files: [{ path: 'main.tex', content: 'Before' }] }
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async ({ workspacePath }) => {
+        fs.writeFileSync(path.join(workspacePath, 'main.tex'), 'After', 'utf8');
+        fs.writeFileSync(path.join(workspacePath, 'scratch.txt'), 'local note', 'utf8');
+      }
+    });
+
+    assert.equal(result.status, 'completed');
+    assert.deepEqual(result.syncChanges, []);
+    assert.deepEqual(result.unsupportedChanges, []);
+    const status = getMirrorStatus('project-ask-readonly-result', { rootDir });
+    assert.equal(status.dirty, true);
+    assert.equal(status.dirtyReason, 'ask_mode_local_changes');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('materializes composer attachments for the Codex turn and ignores them during writeback collection', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  const pdfBytes = Buffer.from('%PDF attached context');
+  let received = null;
+  try {
+    const result = await runCodexSession({
+      params: {
+        projectId: 'project-attachments',
+        task: '参考粘贴的 PDF',
+        mode: 'ask',
+        project: {
+          files: [{ path: 'main.tex', content: '\\documentclass{article}\n' }]
+        },
+        attachments: [
+          {
+            name: '../CV CN.pdf',
+            mimeType: 'application/pdf',
+            size: pdfBytes.length,
+            contentBase64: pdfBytes.toString('base64')
+          }
+        ]
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async input => {
+        received = input;
+        const attachmentPath = path.join(input.workspacePath, '.codex-overleaf-attachments', 'CV CN.pdf');
+        assert.equal(fs.readFileSync(attachmentPath).equals(pdfBytes), true);
+      }
+    });
+
+    assert.match(received.task, /Attachments for this turn:/);
+    assert.match(received.task, /\.codex-overleaf-attachments\/CV CN\.pdf/);
+    assert.match(received.task, /user-provided context for this turn only/i);
+    assert.deepEqual(result.syncChanges, []);
+    assert.deepEqual(result.unsupportedChanges, []);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('passes project custom instructions into the Codex turn prompt', () => {
   const prompt = buildCodexTurnPrompt({
     projectId: 'project-custom-instructions',
@@ -239,6 +310,125 @@ test('runCodexSession passes project custom instructions to executeCodex', async
 
     assert.match(received.task, /Project custom instructions:\n```text\nUse venue-specific terminology\.\n```/);
     assert.match(received.task, /Current user request:\n检查摘要/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession injects selected project-local skills and lists missing selections', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  let received = null;
+  try {
+    const mirror = getProjectMirror('project-local-skills', { rootDir });
+    const skillsDir = path.join(mirror.projectRoot, '.codex-overleaf', 'skills');
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillsDir, 'citations.md'),
+      '# Citation Rules\n\nUse existing citation keys and do not invent references.',
+      'utf8'
+    );
+
+    const events = [];
+    await runCodexSession({
+      params: {
+        projectId: 'project-local-skills',
+        task: '检查引用',
+        mode: 'ask',
+        selectedSkillIds: ['citations', 'missing-skill'],
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      emit: event => events.push(event),
+      executeCodex: async input => {
+        received = input;
+      }
+    });
+
+    const skillsIndex = received.task.indexOf('Project local skills:');
+    assert.notEqual(skillsIndex, -1);
+    assert.ok(skillsIndex < received.task.indexOf('Mode for this turn:'));
+    assert.match(received.task, /## citations: Citation Rules/);
+    assert.match(received.task, /Use existing citation keys/);
+    assert.match(received.task, /Missing selected local skills:\n- missing-skill/);
+    assert.match(received.task, /Current user request:\n检查引用/);
+    assert.deepEqual(events.filter(event => event.type === 'codex.local_skills.missing').map(event => ({
+      title: event.title,
+      status: event.status,
+      missing: event.detail.missingSkillIds
+    })), [
+      {
+        title: 'Selected project-local skills were missing',
+        status: 'failed',
+        missing: ['missing-skill']
+      }
+    ]);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession carries Codex skill loading toggles to the app-server boundary', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  let received = null;
+  try {
+    await runCodexSession({
+      params: {
+        projectId: 'skill-loading-toggles',
+        task: '检查技能加载',
+        mode: 'ask',
+        loadCodexLocalSkills: false,
+        loadCodexOverleafSkills: true,
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      executeCodex: async input => {
+        received = input;
+      }
+    });
+
+    assert.equal(received.loadCodexLocalSkills, false);
+    assert.equal(received.loadCodexOverleafSkills, true);
+    assert.match(received.task, /Codex skill loading:\n- Codex local skills: disabled\n- Codex Overleaf skills: enabled/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession treats skill installer invocations as Codex Overleaf skill-install turns', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  let received = null;
+  try {
+    await runCodexSession({
+      params: {
+        projectId: 'skill-installer-turn',
+        task: '安装 https://github.com/openai/skills/tree/main/skills/.curated/pdf',
+        mode: 'ask',
+        skillInvocation: {
+          id: 'skill-installer',
+          title: 'Skill Installer'
+        },
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      executeCodex: async input => {
+        received = input;
+        return {
+          assistantMessage: 'Installed the pdf skill.',
+          threadId: 'thread-skill-install'
+        };
+      }
+    });
+
+    assert.equal(received.sandboxMode, 'danger-full-access');
+    assert.equal(received.approvalPolicy, 'never');
+    assert.equal(received.installCodexOverleafSkillsTarget, true);
+    assert.deepEqual(received.skillInvocation, {
+      id: 'skill-installer',
+      title: 'Skill Installer'
+    });
+    assert.match(received.task, /Selected Codex skill:\n- skill-installer \(Skill Installer\)/);
+    assert.match(received.task, /Install skills into the Codex Overleaf plugin skill home/);
+    assert.match(received.task, /Current user request:\n安装 https:\/\/github\.com\/openai\/skills/);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
@@ -474,6 +664,110 @@ test('Codex app-server spawn args enable fast mode only for fast speed runs', ()
   ]);
 });
 
+test('Codex app-server spawn args disable plugins when Codex local skills are disabled', () => {
+  assert.deepEqual(buildCodexAppServerArgs({
+    speedTier: 'standard',
+    loadCodexLocalSkills: false
+  }), [
+    '--disable',
+    'fast_mode',
+    '--disable',
+    'plugins',
+    'app-server',
+    '--listen',
+    'stdio://'
+  ]);
+});
+
+test('Codex skill isolation disables system and real-user skills while keeping Codex Overleaf skills', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-skill-isolation-'));
+  const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const realOverleafSkillsRoot = path.join(home, 'real-overleaf-skills');
+  const realUserSkillPath = path.join(home, '.codex', 'superpowers', 'skills', 'brainstorming', 'SKILL.md');
+  const writes = [];
+  try {
+    fs.mkdirSync(realOverleafSkillsRoot, { recursive: true });
+    fs.mkdirSync(path.join(realOverleafSkillsRoot, 'overleaf-target'), { recursive: true });
+    fs.writeFileSync(path.join(realOverleafSkillsRoot, 'overleaf-target', 'SKILL.md'), '# Overleaf Target\n', 'utf8');
+    fs.mkdirSync(path.dirname(overleafSkillsRoot), { recursive: true });
+    fs.symlinkSync(realOverleafSkillsRoot, overleafSkillsRoot, 'dir');
+    await applyCodexSkillIsolation({
+      input: {
+        workspacePath: '/tmp/project',
+        loadCodexLocalSkills: false,
+        loadCodexOverleafSkills: true
+      },
+      childEnv: {
+        HOME: home,
+        CODEX_HOME: pluginHome,
+        CODEX_OVERLEAF_CODEX_HOME: pluginHome,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
+      request: async (method, params) => {
+        if (method === 'skills/list') {
+          assert.deepEqual(params, {
+            cwd: '/tmp/project',
+            includeDisabled: true
+          });
+          return {
+            data: [
+              {
+                cwd: '/tmp/project',
+                skills: [
+                  {
+                    name: 'imagegen',
+                    scope: 'system',
+                    enabled: true,
+                    path: path.join(pluginHome, 'skills', '.system', 'imagegen', 'SKILL.md')
+                  },
+                  {
+                    name: 'skill-installer',
+                    scope: 'system',
+                    enabled: true,
+                    path: path.join(pluginHome, 'skills', '.system', 'skill-installer', 'SKILL.md')
+                  },
+                  {
+                    name: 'superpowers:brainstorming',
+                    scope: 'user',
+                    enabled: true,
+                    path: realUserSkillPath
+                  },
+                  {
+                    name: 'overleaf-style',
+                    scope: 'user',
+                    enabled: true,
+                    path: path.join(pluginHome, 'skills', 'overleaf-style', 'SKILL.md')
+                  },
+                  {
+                    name: 'overleaf-target',
+                    scope: 'user',
+                    enabled: true,
+                    path: path.join(realOverleafSkillsRoot, 'overleaf-target', 'SKILL.md')
+                  }
+                ]
+              }
+            ]
+          };
+        }
+        if (method === 'skills/config/write') {
+          writes.push(params);
+          return { effectiveEnabled: false };
+        }
+        throw new Error(`unexpected method: ${method}`);
+      }
+    });
+
+    assert.deepEqual(writes, [
+      { name: 'imagegen', enabled: false },
+      { name: 'skill-installer', enabled: false },
+      { path: realUserSkillPath, enabled: false }
+    ]);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('Codex app-server sessions do not impose a default wall-clock timeout', () => {
   assert.doesNotMatch(codexSessionRunnerSource, /10\s*\*\s*60\s*\*\s*1000/);
   assert.doesNotMatch(codexSessionRunnerSource, /Codex app-server timed out after/);
@@ -486,6 +780,14 @@ test('Codex app-server runs with plugin-isolated CODEX_HOME', () => {
   assert.match(codexSessionRunnerSource, /buildCodexHomeEnv/);
   assert.match(codexSessionRunnerSource, /env:\s*childEnv/);
   assert.doesNotMatch(codexSessionRunnerSource, /env:\s*input\.env \|\| process\.env/);
+});
+
+test('skill installer command approval accepts commands even when the visible mode is ask', () => {
+  assert.deepEqual(decideCommandApproval({
+    mode: 'ask',
+    skillInvocation: { id: 'skill-installer' },
+    params: { command: 'python scripts/install-skill-from-github.py --url https://github.com/openai/skills/tree/main/skills/.curated/pdf' }
+  }), { decision: 'accept' });
 });
 
 test('command execution approvals only allow known local inspection and LaTeX commands', () => {

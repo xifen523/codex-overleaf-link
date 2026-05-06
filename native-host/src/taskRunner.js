@@ -52,6 +52,10 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
     return handleMirrorStatus(request, env);
   }
 
+  if (request.method === 'mirror.scanSensitive') {
+    return handleMirrorScanSensitive(request, env);
+  }
+
   if (request.method === 'codex.models') {
     return okResponse(request.id, resolveCodexModels(request.params || {}, env));
   }
@@ -66,6 +70,18 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
 
   if (request.method === 'codex.history.clearPlugin') {
     return handleCodexHistoryClear(request, env);
+  }
+
+  if (request.method === 'skills.list') {
+    return handleSkillsList(request, env);
+  }
+
+  if (request.method === 'skills.install') {
+    return handleSkillsInstall(request, env);
+  }
+
+  if (request.method === 'skills.remove') {
+    return handleSkillsRemove(request, env);
   }
 
   if (request.method === 'task.run') {
@@ -126,7 +142,7 @@ async function handleCodexRun(request, env, emit) {
       if (Array.isArray(params.fileOverlays) && params.fileOverlays.length) {
         await applyFileOverlays({ projectId: projectKey, overlays: params.fileOverlays, rootDir });
       }
-    } else if (!hasRunnableProjectSnapshotEvidence(params)) {
+    } else if (!isSnapshotlessSkillInstallerRun(params) && !hasRunnableProjectSnapshotEvidence(params)) {
       return errorResponse(
         request.id,
         'codex_run_requires_snapshot_evidence',
@@ -201,6 +217,61 @@ function handleCodexHistoryClear(request, env) {
   }
 }
 
+function handleSkillsList(request, env) {
+  try {
+    const { CODEX_OVERLEAF_SKILL_SCOPE, listCodexOverleafSkills, listProjectSkills } = require('./localSkills');
+    if (request.params?.scope === CODEX_OVERLEAF_SKILL_SCOPE) {
+      return okResponse(request.id, listCodexOverleafSkills({ env }));
+    }
+    return okResponse(request.id, listProjectSkills({
+      projectId: request.params?.projectId,
+      rootDir: env.CODEX_OVERLEAF_MIRROR_ROOT
+    }));
+  } catch (error) {
+    return errorResponse(request.id, 'skills_list_failed', error.message);
+  }
+}
+
+function handleSkillsInstall(request, env) {
+  try {
+    const { CODEX_OVERLEAF_SKILL_SCOPE, installCodexOverleafSkill, installProjectSkill } = require('./localSkills');
+    if (request.params?.scope === CODEX_OVERLEAF_SKILL_SCOPE) {
+      return okResponse(request.id, installCodexOverleafSkill({
+        skillId: request.params?.skillId || request.params?.id,
+        content: request.params?.content,
+        env
+      }));
+    }
+    return okResponse(request.id, installProjectSkill({
+      projectId: request.params?.projectId,
+      skillId: request.params?.skillId || request.params?.id,
+      content: request.params?.content,
+      rootDir: env.CODEX_OVERLEAF_MIRROR_ROOT
+    }));
+  } catch (error) {
+    return errorResponse(request.id, 'skills_install_failed', error.message);
+  }
+}
+
+function handleSkillsRemove(request, env) {
+  try {
+    const { CODEX_OVERLEAF_SKILL_SCOPE, removeCodexOverleafSkill, removeProjectSkill } = require('./localSkills');
+    if (request.params?.scope === CODEX_OVERLEAF_SKILL_SCOPE) {
+      return okResponse(request.id, removeCodexOverleafSkill({
+        skillId: request.params?.skillId || request.params?.id,
+        env
+      }));
+    }
+    return okResponse(request.id, removeProjectSkill({
+      projectId: request.params?.projectId,
+      skillId: request.params?.skillId || request.params?.id,
+      rootDir: env.CODEX_OVERLEAF_MIRROR_ROOT
+    }));
+  } catch (error) {
+    return errorResponse(request.id, 'skills_remove_failed', error.message);
+  }
+}
+
 function hasRunnableProjectSnapshotEvidence(params = {}) {
   if (params.project?.capabilities?.fullProjectSnapshot === true) {
     return true;
@@ -224,6 +295,11 @@ function hasRunnableProjectSnapshotEvidence(params = {}) {
     evidenceFiles.set(filePath, file);
   }
   return normalizedFocusFiles.every(filePath => evidenceFiles.has(filePath));
+}
+
+function isSnapshotlessSkillInstallerRun(params = {}) {
+  return params.skipMirrorSync === true
+    && String(params.skillInvocation?.id || '').trim() === 'skill-installer';
 }
 
 function validateOtFocusedWarmMirrorReuse(params = {}, status = {}) {
@@ -406,6 +482,19 @@ function handleMirrorStatus(request, env) {
   const rootDir = env.CODEX_OVERLEAF_MIRROR_ROOT;
   const status = getMirrorStatus(projectId, { rootDir });
   return okResponse(request.id, status);
+}
+
+function handleMirrorScanSensitive(request, env) {
+  try {
+    const { scanMirrorSensitiveFiles } = require('./mirrorSensitiveScan');
+    const params = request.params || {};
+    return okResponse(request.id, scanMirrorSensitiveFiles({
+      projectId: params.projectId || 'unknown',
+      rootDir: env.CODEX_OVERLEAF_MIRROR_ROOT
+    }));
+  } catch (error) {
+    return errorResponse(request.id, 'mirror_sensitive_scan_failed', error.message);
+  }
 }
 
 async function handleTaskRun(request, env, emit) {

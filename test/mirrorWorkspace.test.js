@@ -199,9 +199,121 @@ test('syncs binary Overleaf assets to the mirror without treating them as editab
     fs.writeFileSync(path.join(mirror.workspacePath, 'Figures/plot.pdf'), Buffer.from([0x00, 0x01]));
 
     const changes = await collectMirrorChanges({ projectId: 'project-assets', rootDir });
-    assert.deepEqual(changes.map(change => [change.type, change.path]), [
+    assert.deepEqual(changes.map(change => [change.type, change.path]).sort(), [
+      ['overwrite-binary', 'Figures/plot.pdf'],
       ['write', 'main.tex']
+    ].sort());
+    const binaryChange = changes.find(change => change.path === 'Figures/plot.pdf');
+    assert.equal(binaryChange.contentBase64, Buffer.from([0x00, 0x01]).toString('base64'));
+    assert.equal(binaryChange.previousExists, true);
+    assert.equal(binaryChange.previousKind, 'binary');
+    assert.equal(binaryChange.previousSize, binary.length);
+    assert.equal(binaryChange.size, 2);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('reports deleted binary assets instead of silently ignoring them', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-delete-binary',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: '\\includegraphics{figures/old.png}' },
+          {
+            path: 'figures/old.png',
+            kind: 'binary',
+            contentBase64: Buffer.from([1, 2, 3]).toString('base64')
+          }
+        ]
+      }
+    });
+
+    fs.rmSync(path.join(mirror.workspacePath, 'figures/old.png'));
+
+    const detailed = await collectMirrorChangesDetailed({ projectId: 'project-delete-binary', rootDir });
+
+    assert.deepEqual(detailed.unsupportedChanges.map(change => [
+      change.type,
+      change.path,
+      change.reason,
+      change.previousKind
+    ]), [
+      ['unsupported-local-file', 'figures/old.png', 'binary_delete_unsupported', 'binary']
     ]);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('collects new supported binary assets while leaving generated PDFs unsupported', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-new-assets',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: '\\documentclass{article}\n' }
+        ]
+      }
+    });
+
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const pdf = Buffer.from('%PDF-1.7 user attachment');
+    fs.mkdirSync(path.join(mirror.workspacePath, 'figures'), { recursive: true });
+    fs.mkdirSync(path.join(mirror.workspacePath, 'appendix'), { recursive: true });
+    fs.writeFileSync(path.join(mirror.workspacePath, 'figures', 'diagram.png'), png);
+    fs.writeFileSync(path.join(mirror.workspacePath, 'appendix', 'supplement.pdf'), pdf);
+    fs.writeFileSync(path.join(mirror.workspacePath, 'supplement-root.pdf'), pdf);
+    fs.writeFileSync(path.join(mirror.workspacePath, 'main.pdf'), '%PDF-1.7 generated', 'utf8');
+
+    const result = await collectMirrorChangesDetailed({ projectId: 'project-new-assets', rootDir });
+
+    assert.deepEqual(result.changes.map(change => [change.type, change.path]), [
+      ['binary-create', 'appendix/supplement.pdf'],
+      ['binary-create', 'figures/diagram.png'],
+      ['binary-create', 'supplement-root.pdf']
+    ]);
+    const pngChange = result.changes.find(change => change.path === 'figures/diagram.png');
+    assert.equal(pngChange.contentBase64, png.toString('base64'));
+    assert.equal(pngChange.previousExists, false);
+    assert.equal(pngChange.size, png.length);
+    assert.deepEqual(result.unsupportedChanges.map(change => [change.path, change.reason, change.size]), [
+      ['main.pdf', 'generated_artifact', Buffer.byteLength('%PDF-1.7 generated')]
+    ]);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('ignores turn attachment context files in mirror change collection and status checks', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-turn-attachments',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: '\\documentclass{article}\n' }
+        ]
+      }
+    });
+
+    const attachmentDir = path.join(mirror.workspacePath, '.codex-overleaf-attachments');
+    fs.mkdirSync(attachmentDir, { recursive: true });
+    fs.writeFileSync(path.join(attachmentDir, 'CV_CN.pdf'), Buffer.from('%PDF context'));
+
+    const result = await collectMirrorChangesDetailed({ projectId: 'project-turn-attachments', rootDir });
+    const status = getMirrorStatus('project-turn-attachments', { rootDir });
+
+    assert.deepEqual(result.changes, []);
+    assert.deepEqual(result.unsupportedChanges, []);
+    assert.equal(status.exists, true);
+    assert.equal(status.dirty, false);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
@@ -460,15 +572,15 @@ test('reports local files that cannot be synchronized back to Overleaf', async (
       }
     });
 
-    fs.writeFileSync(path.join(mirror.workspacePath, 'diagram.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    fs.writeFileSync(path.join(mirror.workspacePath, 'data.bin'), Buffer.from([0x00, 0x01]));
     fs.writeFileSync(path.join(mirror.workspacePath, 'main.pdf'), '%PDF-1.7 generated', 'utf8');
 
     const result = await collectMirrorChangesDetailed({ projectId: 'project-unsupported-local-files', rootDir });
 
     assert.deepEqual(result.changes, []);
-    assert.deepEqual(result.unsupportedChanges.map(change => [change.path, change.reason]), [
-      ['diagram.png', 'unsupported_non_text_file'],
-      ['main.pdf', 'generated_artifact']
+    assert.deepEqual(result.unsupportedChanges.map(change => [change.path, change.reason, change.size]), [
+      ['data.bin', 'unsupported_non_text_file', 2],
+      ['main.pdf', 'generated_artifact', Buffer.byteLength('%PDF-1.7 generated')]
     ]);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });

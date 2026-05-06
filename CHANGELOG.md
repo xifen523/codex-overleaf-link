@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.8.0 - 2026-05-06
+
+Governed attachment, binary asset, and local skill release. This version completes the remaining v0.7 turn-scoped attachment and local skill workflows, then adds the v0.8 collaboration governance layer for safer shared Overleaf projects.
+
+### Added
+
+- Composer paste/drop attachments for PDFs, images, and files as turn-scoped Codex context without writing them to Overleaf.
+- Binary asset change collection for Codex-created PDFs and images, with explicit confirmation before create or overwrite writeback.
+- Project-local skill install, list, enable, remove, and prompt injection through the native host without touching the user's global Codex configuration.
+- Local audit records for Codex runs, including prompt metadata, selected files, summaries, skipped changes, governance decisions, and result status.
+- Project-level writable and read-only file rules that block matching writeback operations before browser mutation.
+- Sensitive-content preflight checks before sending project context to Codex.
+- Exportable diagnostic bundles that redact project content by default while preserving platform, native host, compatibility, audit, and failure metadata.
+
+### Changed
+
+- Bumped package, extension, README, release artifact, and native compatibility metadata to `0.8.0`.
+- Native compatibility now requires the `localSkills` capability so older native hosts cannot silently miss v0.8 project skill requests.
+- Writeback mapping now preserves binary create and overwrite operations through the extension and reports unsupported browser binary paths instead of downgrading them to empty text files.
+- Root-level PDFs are treated as user assets unless they match known generated output names or a matching root TeX source.
+
+### Fixed
+
+- Binary deletions from the local mirror are reported as unsupported changes instead of disappearing from the final summary.
+- Sensitive scanning now catches modern `sk-...` OpenAI-style API tokens as well as older secret formats.
+- Governance move and rename checks now evaluate the destination path when applying read-only and writable rules.
+- Missing selected local skills now produce explicit run timeline events and prompt context.
+
+### Notes
+
+- Native protocol remains `1`; this release uses the capability and version compatibility gate because extension and native host must both understand governed assets and local skills.
+- Diagnostics, audit logs, rules, and selected skills are local browser/native state only; this release adds no hosted telemetry.
+
 ## v0.7.0 - 2026-05-06
 
 Project personalization release. This version adds project-scoped custom instructions that are injected into Codex runs while keeping the v0.6 hunk review workflow intact.

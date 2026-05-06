@@ -1,14 +1,20 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 const { collectMirrorChangesDetailed, getProjectMirror, markMirrorDirty, syncOverleafToMirror } = require('./mirrorWorkspace');
 const { computeLineDiff } = require('./diffEngine');
 const { computeTextPatches } = require('./textPatch');
 const { buildCodexHomeEnv } = require('./codexHome');
 const { buildCodexSpeedArgs } = require('./codexArgs');
 const { truncateText } = require('./debugLog');
+const { getCodexOverleafSkillsRoot, loadSelectedProjectSkills } = require('./localSkills');
 
 const PROJECT_CUSTOM_INSTRUCTIONS_MAX_CHARS = 12000;
+const TURN_ATTACHMENTS_DIR = '.codex-overleaf-attachments';
+const MAX_TURN_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+const MAX_TURN_ATTACHMENTS = 8;
 
 async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex, signal } = {}) {
   throwIfAborted(signal);
@@ -38,11 +44,21 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     }, 'completed');
   }
 
+  const projectLocalSkills = loadProjectLocalSkillsContext(params, mirror);
+  if (projectLocalSkills.missing.length) {
+    emitCodexEvent(emit, 'codex.local_skills.missing', 'Selected project-local skills were missing', {
+      missingSkillIds: projectLocalSkills.missing
+    }, 'failed');
+  }
+  const turnAttachments = materializeTurnAttachments(params.attachments, mirror.workspacePath);
   const settings = buildCodexSettings(params);
+  const skillLoading = normalizeSkillLoadingSettings(params);
+  const skillInvocation = normalizeSkillInvocation(params.skillInvocation);
+  const skillInstallTurn = isSkillInstallerInvocation(skillInvocation);
   const runner = executeCodex || runCodexAppServerSession;
   const runnerResult = await runner({
     workspacePath: mirror.workspacePath,
-    task: buildCodexTurnPrompt(params, mirror),
+    task: buildCodexTurnPrompt(params, mirror, projectLocalSkills, turnAttachments),
     userTask: String(params.task || ''),
     session: params.session || null,
     threadId: params.threadId || '',
@@ -50,6 +66,10 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     model: params.model || '',
     reasoningEffort: params.reasoningEffort || '',
     speedTier: normalizeSpeedTier(params.speedTier),
+    loadCodexLocalSkills: skillLoading.loadCodexLocalSkills,
+    loadCodexOverleafSkills: skillLoading.loadCodexOverleafSkills,
+    skillInvocation,
+    installCodexOverleafSkillsTarget: skillInstallTurn,
     sandboxMode: settings.sandboxMode,
     approvalPolicy: settings.approvalPolicy,
     env,
@@ -57,6 +77,18 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     signal
   });
   throwIfAborted(signal);
+
+  if (skillInstallTurn) {
+    return {
+      status: 'completed',
+      projectId: mirror.projectKey,
+      workspacePath: mirror.workspacePath,
+      assistantMessage: cleanAssistantMessage(runnerResult?.assistantMessage),
+      threadId: runnerResult?.threadId || '',
+      syncChanges: [],
+      unsupportedChanges: []
+    };
+  }
 
   const collected = await collectMirrorChangesDetailed({
     projectId,
@@ -76,10 +108,30 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     markMirrorDirty({
       projectId,
       rootDir,
-      reason: 'codex_run_local_changes'
+      reason: params.mode === 'ask' ? 'ask_mode_local_changes' : 'codex_run_local_changes'
     });
   }
   throwIfAborted(signal);
+
+  if (params.mode === 'ask') {
+    emitCodexEvent(emit, 'overleaf.sync.changes', 'Ask mode finished without Overleaf writeback', {
+      changedCount: 0,
+      files: [],
+      unsupportedCount: 0,
+      unsupportedFiles: [],
+      ignoredChangedCount: rawSyncChanges.length,
+      ignoredUnsupportedCount: unsupportedChanges.length
+    }, rawSyncChanges.length || unsupportedChanges.length ? 'warning' : 'completed');
+    return {
+      status: 'completed',
+      projectId: mirror.projectKey,
+      workspacePath: mirror.workspacePath,
+      assistantMessage: cleanAssistantMessage(runnerResult?.assistantMessage),
+      threadId: runnerResult?.threadId || '',
+      syncChanges: [],
+      unsupportedChanges: []
+    };
+  }
 
   const syncChanges = rawSyncChanges.map(change => {
     if (change.type === 'write' && typeof change.previousContent === 'string') {
@@ -110,7 +162,7 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
   };
 }
 
-function buildCodexTurnPrompt(params = {}, mirror = {}) {
+function buildCodexTurnPrompt(params = {}, mirror = {}, projectLocalSkills, turnAttachments = []) {
   const userTask = String(params.task || '').trim();
   const mode = params.mode || 'auto';
   const session = params.session || {};
@@ -138,20 +190,144 @@ function buildCodexTurnPrompt(params = {}, mirror = {}) {
     'Project custom instructions:',
     formatCustomInstructionsContext(params),
     '',
+    'Project local skills:',
+    formatProjectLocalSkillsContext(params, mirror, projectLocalSkills),
+    '',
+    'Codex skill loading:',
+    formatCodexSkillLoadingContext(params),
+    '',
+    'Selected Codex skill:',
+    formatSkillInvocationContext(params),
+    '',
+    'Attachments for this turn:',
+    formatTurnAttachmentsContext(turnAttachments),
+    '',
     'Mode for this turn:',
     `- ${mode}`,
     '- ask: inspect and explain only; do not edit files.',
     '- confirm/auto: edit the local workspace directly when the request calls for changes. The browser bridge handles review, confirmation, deletion approval, and syncing back to Overleaf.',
     '',
     'Write expectation for this turn:',
-    formatWriteExpectation({ mode, task: userTask }),
+    formatWriteExpectation({ mode, task: userTask, skillInvocation: params.skillInvocation }),
     '',
     'Current user request:',
     userTask || '(empty request)'
   ].join('\n');
 }
 
-function formatWriteExpectation({ mode = 'auto', task = '' } = {}) {
+function materializeTurnAttachments(attachments = [], workspacePath = '') {
+  if (!workspacePath) {
+    return [];
+  }
+  const attachmentDir = path.join(workspacePath, TURN_ATTACHMENTS_DIR);
+  fs.rmSync(attachmentDir, { recursive: true, force: true });
+
+  const normalized = normalizeTurnAttachments(attachments);
+  if (!normalized.length) {
+    return [];
+  }
+
+  fs.mkdirSync(attachmentDir, { recursive: true });
+  const usedNames = new Set();
+  return normalized.map(attachment => {
+    const fileName = dedupeAttachmentFileName(attachment.name, usedNames);
+    const target = path.join(attachmentDir, fileName);
+    const resolvedTarget = path.resolve(target);
+    const resolvedDir = path.resolve(attachmentDir);
+    if (!resolvedTarget.startsWith(resolvedDir + path.sep)) {
+      throw new Error('Unsafe attachment path');
+    }
+    fs.writeFileSync(target, attachment.bytes);
+    return {
+      name: fileName,
+      path: `${TURN_ATTACHMENTS_DIR}/${fileName}`,
+      mimeType: attachment.mimeType,
+      size: attachment.bytes.length
+    };
+  });
+}
+
+function normalizeTurnAttachments(value) {
+  const result = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    const name = sanitizeAttachmentFileName(item?.name);
+    const contentBase64 = String(item?.contentBase64 || '').replace(/\s+/g, '');
+    if (!name || !contentBase64) {
+      continue;
+    }
+    const bytes = Buffer.from(contentBase64, 'base64');
+    if (!bytes.length) {
+      continue;
+    }
+    if (bytes.length > MAX_TURN_ATTACHMENT_BYTES) {
+      throw new Error(`Attachment is too large: ${name}`);
+    }
+    result.push({
+      name,
+      mimeType: String(item?.mimeType || '').trim().slice(0, 120),
+      bytes
+    });
+    if (result.length >= MAX_TURN_ATTACHMENTS) {
+      break;
+    }
+  }
+  return result;
+}
+
+function sanitizeAttachmentFileName(value) {
+  const basename = String(value || '')
+    .replace(/\0/g, '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+    .pop()
+    ?.trim()
+    .slice(0, 180) || '';
+  return basename.replace(/[/:]/g, '-');
+}
+
+function dedupeAttachmentFileName(name, usedNames) {
+  let candidate = name || 'attachment';
+  if (!usedNames.has(candidate)) {
+    usedNames.add(candidate);
+    return candidate;
+  }
+  const parsed = path.parse(candidate);
+  let index = 2;
+  do {
+    candidate = `${parsed.name}-${index}${parsed.ext}`;
+    index += 1;
+  } while (usedNames.has(candidate));
+  usedNames.add(candidate);
+  return candidate;
+}
+
+function formatTurnAttachmentsContext(attachments = []) {
+  if (!attachments.length) {
+    return '- none provided.';
+  }
+  return [
+    '- These files are user-provided context for this turn only.',
+    '- Read them if relevant. Do not edit them, do not include them in writeback, and do not write them to Overleaf.',
+    ...attachments.map(attachment => {
+      const details = [
+        attachment.mimeType || 'application/octet-stream',
+        `${attachment.size} bytes`
+      ].join(', ');
+      return `- ${attachment.path} (${details})`;
+    })
+  ].join('\n');
+}
+
+function formatWriteExpectation({ mode = 'auto', task = '', skillInvocation = null } = {}) {
+  if (isSkillInstallerInvocation(skillInvocation)) {
+    return [
+      '- This is a skill-install turn.',
+      '- You may use network and local commands needed to install or list Codex skills.',
+      '- Only install into $CODEX_HOME/skills, which is mapped to Codex Overleaf plugin skills for this turn.',
+      '- Do not edit Overleaf project files.'
+    ].join('\n');
+  }
   if (mode === 'ask') {
     return '- This is read-only. Inspect and explain; do not edit files.';
   }
@@ -270,6 +446,88 @@ function formatCustomInstructionsContext(params = {}) {
   return fencedBlock(instructions);
 }
 
+function loadProjectLocalSkillsContext(params = {}, mirror = {}) {
+  const selectedSkillIds = Array.isArray(params.selectedSkillIds) ? params.selectedSkillIds : [];
+  if (!selectedSkillIds.length) {
+    return { skills: [], missing: [], selected: [] };
+  }
+  const projectId = mirror.projectKey || params.projectId || params.project?.id || params.project?.projectId;
+  return loadSelectedProjectSkills({
+    projectId,
+    selectedSkillIds,
+    rootDir: params.rootDir,
+    projectRoot: mirror.projectRoot
+  });
+}
+
+function formatProjectLocalSkillsContext(params = {}, mirror = {}, projectLocalSkills) {
+  const selectedSkillIds = Array.isArray(params.selectedSkillIds) ? params.selectedSkillIds : [];
+  if (!selectedSkillIds.length) {
+    return '- none selected.';
+  }
+  const loaded = projectLocalSkills || loadProjectLocalSkillsContext(params, mirror);
+  const sections = [];
+  for (const skill of loaded.skills) {
+    sections.push([
+      `## ${skill.id}: ${skill.title || skill.id}`,
+      fencedBlock(skill.content)
+    ].join('\n'));
+  }
+  if (loaded.missing.length) {
+    sections.push([
+      'Missing selected local skills:',
+      loaded.missing.map(id => `- ${id}`).join('\n')
+    ].join('\n'));
+  }
+  return sections.length ? sections.join('\n\n') : '- none loaded.';
+}
+
+function normalizeSkillLoadingSettings(params = {}) {
+  return {
+    loadCodexLocalSkills: params.loadCodexLocalSkills !== false,
+    loadCodexOverleafSkills: params.loadCodexOverleafSkills !== false
+  };
+}
+
+function formatCodexSkillLoadingContext(params = {}) {
+  const settings = normalizeSkillLoadingSettings(params);
+  return [
+    `- Codex local skills: ${settings.loadCodexLocalSkills ? 'enabled' : 'disabled'}`,
+    `- Codex Overleaf skills: ${settings.loadCodexOverleafSkills ? 'enabled' : 'disabled'}`
+  ].join('\n');
+}
+
+function normalizeSkillInvocation(value) {
+  const id = String(value?.id || '').trim();
+  if (id !== 'skill-installer') {
+    return null;
+  }
+  const title = String(value?.title || 'Skill Installer').trim().slice(0, 80) || 'Skill Installer';
+  return { id, title };
+}
+
+function isSkillInstallerInvocation(value) {
+  return normalizeSkillInvocation(value)?.id === 'skill-installer';
+}
+
+function formatSkillInvocationContext(params = {}) {
+  const invocation = normalizeSkillInvocation(params.skillInvocation);
+  if (!invocation) {
+    return '- none.';
+  }
+  if (isSkillInstallerInvocation(invocation)) {
+    return [
+      `- ${invocation.id} (${invocation.title})`,
+      '- Use the Codex skill-installer behavior for this turn.',
+      '- Install skills into the Codex Overleaf plugin skill home; this bridge maps $CODEX_HOME/skills to that persistent plugin skills directory.',
+      '- Accept natural-language requests, curated skill names, GitHub repo paths, or GitHub URLs.',
+      '- If the request does not name a skill or location, list installable curated skills and ask which one to install.',
+      '- Do not edit the Overleaf project workspace or write installed skill files into the project mirror.'
+    ].join('\n');
+  }
+  return `- ${invocation.id} (${invocation.title})`;
+}
+
 function normalizeCompileMessages(value) {
   const messages = Array.isArray(value) ? value : [];
   return messages
@@ -298,6 +556,12 @@ function formatSessionHistory(history) {
 }
 
 function buildCodexSettings(params = {}) {
+  if (isSkillInstallerInvocation(params.skillInvocation)) {
+    return {
+      sandboxMode: 'danger-full-access',
+      approvalPolicy: 'never'
+    };
+  }
   if (params.mode === 'ask') {
     return {
       sandboxMode: 'read-only',
@@ -331,12 +595,126 @@ function buildThreadResumeParams(input = {}) {
 }
 
 function buildCodexAppServerArgs(input = {}) {
-  return [
-    ...buildCodexSpeedArgs(normalizeSpeedTier(input.speedTier)),
+  const args = [
+    ...buildCodexSpeedArgs(normalizeSpeedTier(input.speedTier))
+  ];
+  if (input.loadCodexLocalSkills === false) {
+    args.push('--disable', 'plugins');
+  }
+  args.push(
     'app-server',
     '--listen',
     'stdio://'
+  );
+  return [
+    ...args
   ];
+}
+
+async function applyCodexSkillIsolation({ input = {}, childEnv = process.env, request, emit = () => {} } = {}) {
+  if (input.loadCodexLocalSkills !== false) {
+    return { disabled: [] };
+  }
+  if (typeof request !== 'function') {
+    throw new Error('Codex skill isolation requires an app-server request function');
+  }
+
+  const listResult = await request('skills/list', {
+    cwd: input.workspacePath,
+    includeDisabled: true
+  });
+  const skills = flattenCodexSkillsList(listResult);
+  const disabled = [];
+  for (const skill of skills) {
+    if (skill?.enabled === false || !shouldDisableCodexSkillForIsolation(skill, input, childEnv)) {
+      continue;
+    }
+    const params = buildSkillDisableParams(skill);
+    if (!params) {
+      continue;
+    }
+    await request('skills/config/write', params);
+    disabled.push(String(skill.name || skill.path || '').trim());
+  }
+  if (disabled.length) {
+    emitCodexEvent(emit, 'codex.skill_isolation.applied', 'Disabled non-Overleaf Codex skills for this turn', {
+      disabledSkillNames: disabled.filter(Boolean)
+    }, 'completed');
+  }
+  return { disabled };
+}
+
+function flattenCodexSkillsList(listResult = {}) {
+  const data = Array.isArray(listResult?.data) ? listResult.data : [];
+  return data.flatMap(entry => Array.isArray(entry?.skills) ? entry.skills : []);
+}
+
+function shouldDisableCodexSkillForIsolation(skill = {}, input = {}, childEnv = process.env) {
+  if (isCodexSystemSkill(skill)) {
+    return !isAllowedSystemSkillForIsolation(skill, input);
+  }
+  return !isAllowedCodexOverleafSkillPath(skill.path, input, childEnv);
+}
+
+function isCodexSystemSkill(skill = {}) {
+  return String(skill.scope || '') === 'system' || isSystemSkillPath(skill.path);
+}
+
+function isAllowedSystemSkillForIsolation(skill = {}, input = {}) {
+  return input.installCodexOverleafSkillsTarget === true && String(skill.name || '') === 'skill-installer';
+}
+
+function isAllowedCodexOverleafSkillPath(skillPath, input = {}, childEnv = process.env) {
+  if (input.loadCodexOverleafSkills === false && input.installCodexOverleafSkillsTarget !== true) {
+    return false;
+  }
+  const pathText = String(skillPath || '');
+  if (!pathText || !path.isAbsolute(pathText) || isSystemSkillPath(pathText)) {
+    return false;
+  }
+  const roots = [
+    path.join(String(childEnv.CODEX_HOME || ''), 'skills'),
+    getCodexOverleafSkillsRoot({ env: childEnv })
+  ].filter(Boolean);
+  return roots.some(root => isInsideOrSamePath(pathText, root));
+}
+
+function isSystemSkillPath(skillPath) {
+  return String(skillPath || '').split(path.sep).includes('.system');
+}
+
+function buildSkillDisableParams(skill = {}) {
+  const name = String(skill.name || '').trim();
+  if (isCodexSystemSkill(skill) && name) {
+    return { name, enabled: false };
+  }
+  const skillPath = String(skill.path || '').trim();
+  if (path.isAbsolute(skillPath)) {
+    return { path: skillPath, enabled: false };
+  }
+  if (name) {
+    return { name, enabled: false };
+  }
+  return null;
+}
+
+function isInsideOrSamePath(target, root) {
+  const targetPaths = comparablePaths(target);
+  const rootPaths = comparablePaths(root);
+  return targetPaths.some(targetPath => rootPaths.some(rootPath => (
+    targetPath === rootPath || targetPath.startsWith(rootPath + path.sep)
+  )));
+}
+
+function comparablePaths(value) {
+  const resolved = path.resolve(String(value || ''));
+  const candidates = [resolved];
+  try {
+    candidates.push(fs.realpathSync.native(resolved));
+  } catch (_) {
+    // Fall back to the lexical path when the file is not present yet.
+  }
+  return Array.from(new Set(candidates));
 }
 
 function buildTurnStartParams(input = {}, threadId = input.threadId || '') {
@@ -369,7 +747,11 @@ function runCodexAppServerSession(input) {
       reject(getAbortReason(input.signal));
       return;
     }
-    const childEnv = buildCodexHomeEnv(input.env || process.env);
+    const childEnv = buildCodexHomeEnv(input.env || process.env, {
+      loadCodexLocalSkills: input.loadCodexLocalSkills !== false,
+      loadCodexOverleafSkills: input.loadCodexOverleafSkills !== false,
+      installCodexOverleafSkillsTarget: input.installCodexOverleafSkillsTarget === true
+    });
     const codexCommand = resolveCodexCommand(childEnv);
     if (!codexCommand) {
       reject(new Error('Codex CLI was not found. Install Codex or make sure the `codex` command is available in your login shell.'));
@@ -432,6 +814,12 @@ function runCodexAppServerSession(input) {
         capabilities: null
       });
       notify('initialized');
+      await applyCodexSkillIsolation({
+        input,
+        childEnv,
+        request,
+        emit: input.emit
+      });
 
       if (input.threadId) {
         try {
@@ -547,11 +935,19 @@ function runCodexAppServerSession(input) {
       }, 'running');
 
       if (/fileChange\/requestApproval/.test(message.method)) {
+        if (isSkillInstallerInvocation(input.skillInvocation)) {
+          response(message.id, { decision: 'decline', reason: 'Skill installation must not edit Overleaf workspace files.' });
+          return;
+        }
         response(message.id, { decision: input.mode === 'ask' ? 'decline' : 'accept' });
         return;
       }
       if (/commandExecution\/requestApproval/.test(message.method)) {
-        response(message.id, decideCommandApproval({ mode: input.mode, params: message.params || {} }));
+        response(message.id, decideCommandApproval({
+          mode: input.mode,
+          skillInvocation: input.skillInvocation,
+          params: message.params || {}
+        }));
         return;
       }
       response(message.id, { decision: 'decline' });
@@ -616,7 +1012,10 @@ function runCodexAppServerSession(input) {
   });
 }
 
-function decideCommandApproval({ mode = 'auto', params = {} } = {}) {
+function decideCommandApproval({ mode = 'auto', params = {}, skillInvocation = null } = {}) {
+  if (isSkillInstallerInvocation(skillInvocation)) {
+    return { decision: 'accept' };
+  }
   if (mode === 'ask') {
     return { decision: 'decline' };
   }
@@ -910,6 +1309,7 @@ function cleanAssistantMessage(value) {
 }
 
 module.exports = {
+  applyCodexSkillIsolation,
   buildCodexTurnPrompt,
   buildCodexAppServerArgs,
   buildFinalAssistantMessage,

@@ -74,9 +74,14 @@
       const pending = deps.buildProjectFileList(params)
         .then(fileList => {
           const capturedAt = Date.now();
-          fileListCache.key = cacheKey;
-          fileListCache.value = fileList;
-          fileListCache.capturedAt = capturedAt;
+          if (shouldCacheProjectFileList(fileList, params)) {
+            fileListCache.key = cacheKey;
+            fileListCache.value = fileList;
+            fileListCache.capturedAt = capturedAt;
+          } else if (fileListCache.key === cacheKey) {
+            fileListCache.value = null;
+            fileListCache.capturedAt = 0;
+          }
           return withFileListCacheMetadata(fileList, 'fresh', capturedAt);
         })
         .finally(() => {
@@ -115,11 +120,12 @@
       ].join(':');
     }
 
-    function getProjectFileListCacheKey(params = {}) {
+  function getProjectFileListCacheKey(params = {}) {
       return [
         pageWindow.location.origin,
         deps.getProjectId?.() || pageWindow.location.pathname || pageWindow.location.href,
-        params.preferExact === false ? 'tree' : 'exact'
+        params.preferExact === false ? 'tree' : 'exact',
+        params.exactOnly === true || params.requireExact === true ? 'required' : 'fallback'
       ].join(':');
     }
 
@@ -128,6 +134,13 @@
       getProjectSnapshot,
       invalidateProjectSnapshot
     };
+  }
+
+  function shouldCacheProjectFileList(fileList, params = {}) {
+    if (params.preferExact === false) {
+      return true;
+    }
+    return fileList?.capabilities?.method === 'overleaf-zip-file-list';
   }
 
   function createCache() {
