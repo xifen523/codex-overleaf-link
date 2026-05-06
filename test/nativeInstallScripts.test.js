@@ -8,7 +8,9 @@ const test = require('node:test');
 const { DEFAULT_CHROME_EXTENSION_ID } = require('../native-host/src/manifest');
 const { getDefaultBridgePath } = require('../native-host/src/nativeHostPlatform');
 
-const CANONICAL_V050_INSTALL_COMMAND = 'CODEX_OVERLEAF_REF=v0.5.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.5.0/install.sh)"';
+const CURRENT_PACKAGE_VERSION = require('../package.json').version;
+const CURRENT_RELEASE_REF = `v${CURRENT_PACKAGE_VERSION}`;
+const CANONICAL_RELEASE_INSTALL_COMMAND = `CODEX_OVERLEAF_REF=${CURRENT_RELEASE_REF} bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${CURRENT_RELEASE_REF}/install.sh)"`;
 
 function writeFakeRegistryCommand(tempDir, options = {}) {
   const scriptPath = path.join(tempDir, 'fake-reg.js');
@@ -124,7 +126,7 @@ test('native install runtime includes package metadata required by bridge ping',
     });
 
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /Runtime package version: 0\.5\.0/);
+    assert.match(result.stdout, new RegExp(`Runtime package version: ${escapeRegExp(CURRENT_PACKAGE_VERSION)}`));
     const runtimePackagePath = path.join(runtimeRoot, 'package.json');
     assert.equal(fs.existsSync(runtimePackagePath), true);
     const runtimePackage = JSON.parse(fs.readFileSync(runtimePackagePath, 'utf8'));
@@ -477,18 +479,18 @@ test('repository ships a one-command macOS installer', () => {
   assert.doesNotMatch(readme, /select `~\/\.codex-overleaf\/source\/extension`/);
 });
 
-test('README documents v0.5 cross-platform install, uninstall, release artifacts, and Web Store extension id flow', () => {
+test('README documents current cross-platform install, uninstall, release artifacts, and Web Store extension id flow', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
 
   assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash/);
-  assert.ok(readme.includes(CANONICAL_V050_INSTALL_COMMAND));
-  assert.match(readme, /iwr\s+https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/v0\.5\.0\/install\.ps1/i);
+  assert.ok(readme.includes(CANONICAL_RELEASE_INSTALL_COMMAND));
+  assert.match(readme, new RegExp(`iwr\\s+https://raw\\.githubusercontent\\.com/Ghqqqq/codex-overleaf-link/${escapeRegExp(CURRENT_RELEASE_REF)}/install\\.ps1`, 'i'));
   assert.match(readme, /powershell\s+-ExecutionPolicy\s+Bypass\s+-File\s+install\.ps1/i);
   assert.match(readme, /macOS\s+\/\s+Linux/i);
   assert.match(readme, /Windows/i);
-  assert.match(readme, /codex-overleaf-link-extension-v0\.5\.0\.zip/);
+  assert.match(readme, new RegExp(`codex-overleaf-link-extension-${escapeRegExp(CURRENT_RELEASE_REF)}\\.zip`));
   assert.match(readme, /loadable Chrome extension/i);
-  assert.match(readme, /codex-overleaf-native-host-v0\.5\.0\.tar\.gz/);
+  assert.match(readme, new RegExp(`codex-overleaf-native-host-${escapeRegExp(CURRENT_RELEASE_REF)}\\.tar\\.gz`));
   assert.match(readme, /native host runtime/i);
   assert.match(readme, /install\.sh/);
   assert.match(readme, /install\.ps1/);
@@ -523,7 +525,7 @@ test('one-command installer works on macOS Bash 3.2 when extension id is unset',
     '  for arg in "$@"; do target="$arg"; done',
     '  mkdir -p "$target/.git"',
     '  mkdir -p "$target/extension"',
-    '  printf \'{"version":"0.5.0"}\\n\' > "$target/package.json"',
+    `  printf '{"version":"${CURRENT_PACKAGE_VERSION}"}\\n' > "$target/package.json"`,
     '  exit 0',
     'fi',
     'exit 0'
@@ -563,7 +565,7 @@ test('one-command installer works on macOS Bash 3.2 when extension id is unset',
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /CODEX_OVERLEAF_REF: main/);
-  assert.match(result.stdout, /Package version: 0\.5\.0/);
+  assert.match(result.stdout, new RegExp(`Package version: ${escapeRegExp(CURRENT_PACKAGE_VERSION)}`));
   assert.match(result.stdout, /Installed Native Messaging host manifest:/);
   assert.match(result.stdout, /Bridge executable:/);
   assert.match(result.stdout, /Runtime root:/);
