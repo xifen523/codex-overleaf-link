@@ -1493,6 +1493,37 @@ test('large diff review initially limits hunks and long hunk lines with explicit
   assert.equal(review.container.querySelectorAll('[data-diff-review-hunk]').length, 22);
 });
 
+test('large diff review applies initial hunk budget globally across files', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const buildChange = pathName => {
+    const patches = Array.from({ length: 12 }, (_, index) => ({
+      from: index * 10,
+      to: index * 10 + 1,
+      expected: `${pathName}-old-${index}`,
+      insert: `${pathName}-new-${index}`
+    }));
+    return {
+      type: 'write',
+      path: pathName,
+      patches,
+      diff: patches.map(patch => ({
+        lines: [{ type: 'add', text: patch.insert }]
+      }))
+    };
+  };
+
+  const review = createDiffReviewElement([
+    buildChange('main.tex'),
+    buildChange('sections/intro.tex')
+  ]);
+
+  assert.equal(review.container.querySelectorAll('[data-diff-review-hunk]').length, 20);
+  assert.equal(review.container.querySelectorAll('[data-diff-show-more-hunks]').length, 1);
+
+  review.container.querySelector('[data-diff-show-more-hunks]').click();
+  assert.equal(review.container.querySelectorAll('[data-diff-review-hunk]').length, 24);
+});
+
 test('diff review keyboard shortcuts are scoped and only prevent handled keys', () => {
   const createDiffReviewElement = loadCreateDiffReviewElementForTest();
   const syncChanges = [

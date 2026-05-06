@@ -2326,6 +2326,7 @@
     const hunkViews = new Map();
     const decisionListeners = new Set();
     let focusedHunkKey = null;
+    let remainingInitialReviewHunks = MAX_INITIAL_REVIEW_HUNKS;
 
     function notifyDecisionChanged() {
       for (const listener of decisionListeners) {
@@ -2724,6 +2725,8 @@
         const body = document.createElement('div');
         body.className = 'codex-diff-body';
         const hunkCount = fileModel?.reviewable ? Math.max(diffHunks.length, fileModel.hunks.length) : diffHunks.length;
+        const initialHunkCount = Math.min(hunkCount, remainingInitialReviewHunks);
+        remainingInitialReviewHunks -= initialHunkCount;
         function renderHunks(visibleCount) {
           const children = [];
           for (let hunkIndex = 0; hunkIndex < visibleCount; hunkIndex += 1) {
@@ -2744,7 +2747,7 @@
           }
           body.replaceChildren(...children);
         }
-        renderHunks(Math.min(hunkCount, MAX_INITIAL_REVIEW_HUNKS));
+        renderHunks(initialHunkCount);
         card.append(body);
       }
 
