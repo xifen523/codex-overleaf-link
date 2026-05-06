@@ -293,10 +293,17 @@ test('release workflow publishes generated notes and built artifacts', () => {
     workflow,
     /^\s+body_path:\s+dist\/releases\/\$\{\{ github\.ref_name \}\}\/release-notes\.md\s*$/m
   );
-  assert.match(
-    workflow,
-    /^\s+files:\s+dist\/releases\/\$\{\{ github\.ref_name \}\}\/\*\s*$/m
-  );
+  const filesSection = workflow.match(/^\s+files:\s+\|\s*$([\s\S]*?)^\s+fail_on_unmatched_files:/m)?.[1] || '';
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/codex-overleaf-link-extension-\$\{\{ github\.ref_name \}\}\.zip/);
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/codex-overleaf-native-host-\$\{\{ github\.ref_name \}\}\.tar\.gz/);
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/install\.sh/);
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/install\.ps1/);
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/uninstall-native-host\.mjs/);
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/release-manifest\.json/);
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/release-notes\.md/);
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/SHA256SUMS/);
+  assert.doesNotMatch(filesSection, /\*/);
+  assert.doesNotMatch(filesSection, /codex-overleaf-release-output/);
   assert.match(workflow, /^\s+fail_on_unmatched_files:\s+true\s*$/m);
   assert.match(workflow, /^\s+overwrite_files:\s+true\s*$/m);
 });

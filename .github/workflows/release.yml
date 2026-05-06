@@ -54,6 +54,14 @@ jobs:
           prerelease: false
           name: ${{ github.ref_name }}
           body_path: dist/releases/${{ github.ref_name }}/release-notes.md
-          files: dist/releases/${{ github.ref_name }}/*
+          files: |
+            dist/releases/${{ github.ref_name }}/codex-overleaf-link-extension-${{ github.ref_name }}.zip
+            dist/releases/${{ github.ref_name }}/codex-overleaf-native-host-${{ github.ref_name }}.tar.gz
+            dist/releases/${{ github.ref_name }}/install.sh
+            dist/releases/${{ github.ref_name }}/install.ps1
+            dist/releases/${{ github.ref_name }}/uninstall-native-host.mjs
+            dist/releases/${{ github.ref_name }}/release-manifest.json
+            dist/releases/${{ github.ref_name }}/release-notes.md
+            dist/releases/${{ github.ref_name }}/SHA256SUMS
           fail_on_unmatched_files: true
           overwrite_files: true
