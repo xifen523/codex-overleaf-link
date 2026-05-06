@@ -2161,7 +2161,9 @@
 
   async function applyEditOperation(operation, options = {}) {
     const currentPath = getActiveFilePath();
+    let openedEditorText = null;
     if (operation.path && currentPath && operation.path !== currentPath) {
+      const previousEditorSignature = contentSignature(readActiveEditorText());
       const opened = await openFileByPath(operation.path);
       if (!opened.ok) {
         return {
@@ -2169,13 +2171,24 @@
           reason: `Cannot edit ${operation.path}; active file is ${currentPath}; ${opened.reason}`
         };
       }
+      const ready = await waitForActiveEditorText(operation.path, 2500, {
+        notSignature: previousEditorSignature
+      });
+      if (!ready.ok) {
+        return {
+          ok: false,
+          code: 'editor_content_not_ready',
+          reason: `Cannot edit ${operation.path}; Overleaf selected the file but the editor content did not finish loading. Please retry after the file finishes opening.`
+        };
+      }
+      openedEditorText = ready.text;
     }
 
     const trackReviewingChanges = options.trackReviewingChanges === true;
     const trackedBefore = trackReviewingChanges
       ? collectTrackedChangeRefsForPaths(collectOperationPaths([operation]))
       : [];
-    const current = readActiveEditorText();
+    const current = openedEditorText ?? readActiveEditorText();
     const freshness = window.CodexOverleafStaleGuard?.checkOperationFreshness(
       operation,
       current,

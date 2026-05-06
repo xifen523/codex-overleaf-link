@@ -327,6 +327,38 @@ test('page bridge applies edit patches as local CodeMirror changes', async () =>
   ]);
 });
 
+test('page bridge waits for editor document after opening target file before stale guarding patches', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorSwitchDelayMs: 360,
+    files: {
+      'main.tex': 'main file content that must not receive checklist edits',
+      'checklist.tex': 'alpha beta gamma'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'main file content that must not receive checklist edits' },
+      { path: 'checklist.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'checklist.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.applied.length, 1);
+  assert.equal(bridge.getFile('main.tex'), 'main file content that must not receive checklist edits');
+  assert.equal(bridge.getFile('checklist.tex'), 'alpha delta gamma');
+});
+
 test('page bridge rejects stale patch expected text before editing', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -1472,11 +1504,13 @@ function createPageBridgeHarness({
   trackChangesOnDispatch = false,
   realtimeObserverFactory = null,
   rerenderTrackedChangeIdsOnReject = false,
-  editorUndoTargets = {}
+  editorUndoTargets = {},
+  editorSwitchDelayMs = 0
 }) {
   const fileMap = new Map(Object.entries(files));
   const trackedChanges = [];
   let selectedPath = activePath;
+  let editorPath = activePath;
   let listener = null;
   let pendingResult = null;
   let lastDispatchChanges = null;
@@ -1665,10 +1699,10 @@ function createPageBridgeHarness({
   function createEditorView() {
     const doc = {
       toString() {
-        return fileMap.get(selectedPath) || '';
+        return fileMap.get(editorPath) || '';
       },
       get length() {
-        return (fileMap.get(selectedPath) || '').length;
+        return (fileMap.get(editorPath) || '').length;
       }
     };
     return {
@@ -1677,14 +1711,14 @@ function createPageBridgeHarness({
         dispatchCount += 1;
         lastDispatchChanges = transaction.changes;
         if (dispatchApplies) {
-          const before = fileMap.get(selectedPath) || '';
-          fileMap.set(selectedPath, applyEditorChanges(fileMap.get(selectedPath) || '', transaction.changes));
+          const before = fileMap.get(editorPath) || '';
+          fileMap.set(editorPath, applyEditorChanges(fileMap.get(editorPath) || '', transaction.changes));
           if (reviewingActive && trackChangesOnDispatch) {
             trackedChanges.push({
               id: `change-${trackedChanges.length + 1}`,
-              path: selectedPath,
+              path: editorPath,
               before,
-              after: fileMap.get(selectedPath) || ''
+              after: fileMap.get(editorPath) || ''
             });
           }
         }
@@ -1715,6 +1749,9 @@ function createPageBridgeHarness({
         fileMap.set(to, content || '');
         if (selectedPath === filePath) {
           selectedPath = to;
+        }
+        if (editorPath === filePath) {
+          editorPath = to;
         }
       },
       moveEntity(filePath, to) {
@@ -2012,6 +2049,13 @@ function createPageBridgeHarness({
       },
       dispatchEvent() {
         selectedPath = filePath;
+        if (editorSwitchDelayMs > 0) {
+          setTimeout(() => {
+            editorPath = filePath;
+          }, editorSwitchDelayMs);
+        } else {
+          editorPath = filePath;
+        }
         return true;
       }
     };
