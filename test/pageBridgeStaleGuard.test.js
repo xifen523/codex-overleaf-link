@@ -401,6 +401,29 @@ test('page bridge jumpToPosition waits for delayed editor document switch before
   assert.equal(bridge.getLastSelection(), null);
 });
 
+test('page bridge jumpToPosition succeeds after delayed switch when target content matches previous file', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorSwitchDelayMs: 360,
+    files: {
+      'main.tex': 'identical content',
+      'refs.bib': 'identical content'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'refs.bib',
+    from: 0,
+    to: 9
+  });
+
+  assert.equal(result.ok, true, result.reason || JSON.stringify(result));
+  assert.equal(result.path, 'refs.bib');
+  assert.equal(bridge.getEditorPath(), 'refs.bib');
+  assert.deepEqual(bridge.getLastSelection(), { anchor: 0, head: 9 });
+  assert.equal(bridge.getLastDispatchChanges(), null);
+});
+
 test('editor adapter contenteditable fallback does not hard-bound range by rendered DOM text length', () => {
   let focused = false;
   const adapter = overleafEditor.create({
@@ -1783,6 +1806,9 @@ function createPageBridgeHarness({
     getDispatchCount() {
       return dispatchCount;
     },
+    getEditorPath() {
+      return editorPath;
+    },
     getReviewingClickCount() {
       return reviewingClickCount;
     },
@@ -1807,16 +1833,25 @@ function createPageBridgeHarness({
   };
 
   function createEditorView() {
-    const doc = {
-      toString() {
-        return fileMap.get(editorPath) || '';
-      },
-      get length() {
-        return (fileMap.get(editorPath) || '').length;
+    const stateByPath = new Map();
+    function getState(filePath) {
+      if (!stateByPath.has(filePath)) {
+        const doc = {
+          toString() {
+            return fileMap.get(filePath) || '';
+          },
+          get length() {
+            return (fileMap.get(filePath) || '').length;
+          }
+        };
+        stateByPath.set(filePath, { doc });
       }
-    };
+      return stateByPath.get(filePath);
+    }
     return {
-      state: { doc },
+      get state() {
+        return getState(editorPath);
+      },
       focus() {},
       dispatch(transaction) {
         dispatchCount += 1;

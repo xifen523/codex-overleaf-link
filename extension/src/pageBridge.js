@@ -354,11 +354,10 @@
       };
     }
 
-    const previousEditorSignature = getActiveFilePath() !== filePath
-      ? contentSignature(readActiveEditorText())
-      : '';
+    const navigating = getActiveFilePath() !== filePath;
+    const previousEditorIdentity = navigating ? getActiveEditorIdentity() : null;
 
-    if (getActiveFilePath() !== filePath) {
+    if (navigating) {
       const opened = await openFileByPath(filePath);
       if (!opened.ok) {
         return {
@@ -370,9 +369,9 @@
       }
     }
 
-    const ready = await waitForActiveEditorText(filePath, 7000, previousEditorSignature
-      ? { notSignature: previousEditorSignature }
-      : {});
+    const ready = navigating
+      ? await waitForActiveEditorAfterNavigation(filePath, previousEditorIdentity, 7000)
+      : await waitForActiveEditorText(filePath, 7000);
     if (!ready.ok) {
       return {
         ok: false,
@@ -397,6 +396,84 @@
       from: params.from,
       to: params.to
     };
+  }
+
+  async function waitForActiveEditorAfterNavigation(filePath, previousEditorIdentity, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let lastText = '';
+    while (Date.now() < deadline) {
+      const activeFileMatches = getActiveFilePath() === filePath;
+      const text = readActiveEditorText();
+      lastText = text;
+      if (activeFileMatches
+        && window.CodexOverleafProjectFiles.isUsableProjectFileContent(text)
+        && activeEditorIdentityChanged(previousEditorIdentity)) {
+        return {
+          ok: true,
+          text
+        };
+      }
+      await delay(150);
+    }
+    return {
+      ok: false,
+      text: lastText,
+      reason: `Editor content was not ready for ${filePath || 'active file'}; last length ${String(lastText || '').length}`
+    };
+  }
+
+  function getActiveEditorIdentity() {
+    const editorView = getCodeMirrorEditorView();
+    if (editorView) {
+      return {
+        type: 'codemirror-view',
+        view: editorView,
+        state: editorView.state || null,
+        doc: editorView.state?.doc || null
+      };
+    }
+
+    const active = getDeepActiveElement();
+    if (active && active.tagName === 'TEXTAREA' && !isInsideCodexPanel(active)) {
+      return {
+        type: 'textarea',
+        node: active
+      };
+    }
+
+    const textarea = findEditorTextArea();
+    if (textarea) {
+      return {
+        type: 'textarea',
+        node: textarea
+      };
+    }
+
+    const editable = findEditorContentNode('.cm-content') || findEditorContentNode('[contenteditable="true"]');
+    if (editable) {
+      return {
+        type: 'contenteditable',
+        node: editable
+      };
+    }
+
+    return null;
+  }
+
+  function activeEditorIdentityChanged(previous) {
+    if (!previous) {
+      return true;
+    }
+    const current = getActiveEditorIdentity();
+    if (!current || current.type !== previous.type) {
+      return true;
+    }
+    if (current.type === 'codemirror-view') {
+      return current.view !== previous.view
+        || current.state !== previous.state
+        || current.doc !== previous.doc;
+    }
+    return current.node !== previous.node;
   }
 
   function getReviewingState(params = {}) {
