@@ -72,7 +72,7 @@ test('file-level changes without reviewable hunks use file decision keys', () =>
   ]);
 });
 
-test('truncated display diffs with valid patches remain hunk-reviewable', () => {
+test('truncated display diffs with valid patches fall back to file-level review', () => {
   const syncChanges = [
     {
       type: 'write',
@@ -86,15 +86,41 @@ test('truncated display diffs with valid patches remain hunk-reviewable', () => 
   ];
   const model = ReviewHunks.buildReviewModel(syncChanges);
   const accepted = ReviewHunks.buildAcceptedSyncChanges(syncChanges, {
+    [model.files[0].decisionKey]: 'accepted'
+  });
+
+  assert.equal(model.files[0].reviewable, false);
+  assert.equal(model.files[0].hunks.length, 0);
+  assert.deepEqual(accepted, [syncChanges[0]]);
+  assert.notEqual(accepted[0], syncChanges[0]);
+});
+
+test('accepted truncated display diffs keep whole-file write changes', () => {
+  const syncChanges = [
+    {
+      type: 'write',
+      path: 'large.tex',
+      content: 'full replacement content',
+      replaceAll: true,
+      diff: [{ truncated: true, lines: [{ type: 'context', text: 'large diff' }] }],
+      patches: [
+        { from: 0, to: 5, expected: 'alpha', insert: 'ALPHA' },
+        { from: 20, to: 24, expected: 'beta', insert: 'BETA' }
+      ]
+    }
+  ];
+  const model = ReviewHunks.buildReviewModel(syncChanges);
+  const accepted = ReviewHunks.buildAcceptedSyncChanges(syncChanges, {
+    [model.files[0].decisionKey]: 'accepted',
     [ReviewHunks.normalizeReviewDecisionKey('large.tex', 'large.tex:hunk:1')]: 'accepted'
   });
 
-  assert.equal(model.files[0].reviewable, true);
-  assert.equal(model.files[0].hunks.length, 2);
-  assert.equal(model.files[0].hunks[0].id, 'large.tex:hunk:0');
-  assert.deepEqual(accepted[0].patches, [
-    { from: 20, to: 24, expected: 'beta', insert: 'BETA' }
-  ]);
+  assert.equal(model.files[0].reviewable, false);
+  assert.equal(model.files[0].hunks.length, 0);
+  assert.equal(accepted.length, 1);
+  assert.deepEqual(accepted[0].patches, syncChanges[0].patches);
+  assert.equal(accepted[0].replaceAll, true);
+  assert.equal(accepted[0].content, 'full replacement content');
 });
 
 test('invalid patched writes fall back to file-level decisions', () => {

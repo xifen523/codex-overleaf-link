@@ -112,11 +112,21 @@
     if (change.type !== 'write') {
       return false;
     }
+    if (hasTruncatedDisplayDiff(change)) {
+      return false;
+    }
     const patches = Array.isArray(change.patches) ? change.patches : [];
     if (!patches.length) {
       return false;
     }
     return normalizePatches(patches).length === patches.length;
+  }
+
+  function hasTruncatedDisplayDiff(change = {}) {
+    if (!Array.isArray(change.diff)) {
+      return false;
+    }
+    return change.diff.some(hunk => hunk?.truncated === true);
   }
 
   function normalizePatches(patches = []) {
