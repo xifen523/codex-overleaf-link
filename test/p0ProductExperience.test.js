@@ -2,6 +2,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
+
+const ReviewHunks = require('../extension/src/content/reviewHunks');
 
 function extractFunction(source, name) {
   const markers = [`function ${name}(`, `async function ${name}(`];
@@ -24,6 +27,97 @@ function extractFunction(source, name) {
     }
   }
   assert.fail(`${name} body should close`);
+}
+
+function createMinimalDocument() {
+  class Element {
+    constructor(tagName) {
+      this.tagName = tagName.toUpperCase();
+      this.children = [];
+      this.dataset = {};
+      this.attributes = {};
+      this.listeners = {};
+      this.className = '';
+      this.textContent = '';
+      this.title = '';
+      this.type = '';
+    }
+
+    append(...children) {
+      this.children.push(...children);
+    }
+
+    appendChild(child) {
+      this.append(child);
+      return child;
+    }
+
+    replaceChildren(...children) {
+      this.children = children;
+    }
+
+    setAttribute(name, value) {
+      this.attributes[name] = String(value);
+    }
+
+    addEventListener(type, listener) {
+      this.listeners[type] = this.listeners[type] || [];
+      this.listeners[type].push(listener);
+    }
+
+    click() {
+      for (const listener of this.listeners.click || []) {
+        listener({ currentTarget: this });
+      }
+    }
+
+    querySelector(selector) {
+      return this.querySelectorAll(selector)[0] || null;
+    }
+
+    querySelectorAll(selector) {
+      const matches = [];
+      const attr = selector.match(/^\[([^\]]+)\]$/)?.[1];
+      if (!attr) {
+        return matches;
+      }
+      const visit = node => {
+        if (Object.prototype.hasOwnProperty.call(node.attributes, attr)) {
+          matches.push(node);
+        }
+        for (const child of node.children || []) {
+          visit(child);
+        }
+      };
+      visit(this);
+      return matches;
+    }
+  }
+
+  return {
+    createElement(tagName) {
+      return new Element(tagName);
+    }
+  };
+}
+
+function loadCreateDiffReviewElementForTest() {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const source = contentScript
+    .match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderDiffReview/)?.[0]
+    ?.replace(/\n  function renderDiffReview$/, '');
+  assert.ok(source, 'createDiffReviewElement should be extractable for behavior tests');
+  return vm.runInNewContext(`(${source})`, {
+    document: createMinimalDocument(),
+    ReviewHunks,
+    window: { CodexOverleafReviewHunks: ReviewHunks },
+    tr(key) {
+      return key;
+    }
+  });
 }
 
 test('composer defaults to English task modes and keeps Chinese translations available', () => {
@@ -1253,6 +1347,34 @@ test('confirm diff review renders hunk controls and resolves accepted hunk patch
   assert.match(createDiffBody, /buildAcceptedSyncChanges\(syncChanges,\s*decisions\)/);
   assert.match(renderDiffBody, /review\.getAcceptedChanges\(\)/);
   assert.match(renderDiffBody, /buildAcceptedSyncChanges/);
+});
+
+test('file-level hunk review action overrides previous hunk decisions for that file', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const syncChanges = [
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches: [
+        { from: 0, to: 5, expected: 'alpha', insert: 'ALPHA' },
+        { from: 6, to: 10, expected: 'beta', insert: 'BETA' }
+      ],
+      diff: [
+        { lines: [{ type: 'remove', text: 'alpha' }, { type: 'add', text: 'ALPHA' }] },
+        { lines: [{ type: 'remove', text: 'beta' }, { type: 'add', text: 'BETA' }] }
+      ]
+    }
+  ];
+
+  const review = createDiffReviewElement(syncChanges);
+  review.container.querySelector('[data-diff-hunk-reject]').click();
+  review.decideFileChange('main.tex', true);
+
+  assert.equal(review.getPendingCount(), 0);
+  assert.deepEqual(
+    review.getAcceptedChanges()[0]?.patches,
+    syncChanges[0].patches
+  );
 });
 
 test('auto recompile is based on successfully applied Overleaf writes', () => {

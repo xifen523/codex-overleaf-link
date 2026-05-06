@@ -2384,13 +2384,11 @@
       const fileModel = view.fileModel;
       if (fileModel?.reviewable) {
         for (const hunk of fileModel.hunks) {
-          if (hunkStates.get(hunk.decisionKey) === null) {
-            hunkStates.set(hunk.decisionKey, accepted);
-            const hunkView = hunkViews.get(hunk.decisionKey);
-            if (hunkView) {
-              hunkView.hunkEl.dataset.decision = accepted ? 'accepted' : 'rejected';
-              setHunkDecisionStatus(hunkView.actions, accepted);
-            }
+          hunkStates.set(hunk.decisionKey, accepted);
+          const hunkView = hunkViews.get(hunk.decisionKey);
+          if (hunkView) {
+            hunkView.hunkEl.dataset.decision = accepted ? 'accepted' : 'rejected';
+            setHunkDecisionStatus(hunkView.actions, accepted);
           }
         }
         updateReviewableFileDecision(view, fileModel);
