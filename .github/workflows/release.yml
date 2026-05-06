@@ -44,6 +44,16 @@ jobs:
       - name: Verify release metadata
         run: npm run verify:release
 
+      - name: Verify release tag matches package version
+        shell: bash
+        run: |
+          package_version="$(node -p "require('./package.json').version")"
+          expected_tag="v${package_version}"
+          if [ "${GITHUB_REF_NAME}" != "${expected_tag}" ]; then
+            echo "Release tag ${GITHUB_REF_NAME} does not match package version ${expected_tag}."
+            exit 1
+          fi
+
       - name: Build release artifacts
         run: npm run build:release
 

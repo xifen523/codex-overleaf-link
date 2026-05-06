@@ -254,8 +254,23 @@ test('release workflow grants publish permission and runs release checks before 
   assertContainsInOrder(workflow, [
     'run: npm test',
     'run: npm run verify:release',
+    'name: Verify release tag matches package version',
     'run: npm run build:release',
     'uses: softprops/action-gh-release@v2'
+  ]);
+});
+
+test('release workflow fails early when tag and package version differ', () => {
+  const workflow = readReleaseWorkflow();
+
+  assert.match(workflow, /package_version="\$\(node -p "require\('\.\/package\.json'\)\.version"\)"/);
+  assert.match(workflow, /expected_tag="v\$\{package_version\}"/);
+  assert.match(workflow, /\[ "\$\{GITHUB_REF_NAME\}" != "\$\{expected_tag\}" \]/);
+  assert.match(workflow, /Release tag \$\{GITHUB_REF_NAME\} does not match package version \$\{expected_tag\}\./);
+  assertContainsInOrder(workflow, [
+    'run: npm run verify:release',
+    'name: Verify release tag matches package version',
+    'run: npm run build:release'
   ]);
 });
 
@@ -480,6 +495,7 @@ test('Chrome Web Store prep docs describe current permissions and privacy postur
 
   assert.match(permissions, /nativeMessaging/);
   assert.match(permissions, /local native bridge/i);
+  assert.match(permissions, /macOS, Windows, or Linux/i);
   assert.match(permissions, /storage/);
   assert.match(permissions, /local extension preferences/i);
   assert.match(permissions, /https:\/\/www\.overleaf\.com\/project\/\*/);
@@ -495,6 +511,7 @@ test('Chrome Web Store prep docs describe current permissions and privacy postur
 
   assert.match(listing, /short description/i);
   assert.match(listing, /detailed description/i);
+  assert.match(listing, /macOS, Windows, or Linux/i);
   assert.match(listing, /feature bullets/i);
   assert.match(listing, /support/i);
   assert.match(listing, /128 icon/i);
@@ -514,6 +531,7 @@ test('Chrome Web Store prep docs describe current permissions and privacy postur
   assert.doesNotMatch(checklist, /v0\.5\.0/);
   assert.doesNotMatch(checklist, /v0\.4\.0/);
   assert.doesNotMatch(checklist, /outside v0\.4/i);
+  assert.doesNotMatch(`${permissions}\n${listing}`, /user's Mac/i);
 });
 
 test('release verifier CLI exits 1 on metadata mismatch', () => {

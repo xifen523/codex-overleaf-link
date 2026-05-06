@@ -6,7 +6,7 @@ Use Codex from inside Overleaf with local project mirroring, guarded browser wri
 
 ## Detailed Description
 
-Codex Overleaf Link connects an Overleaf project page to a local Codex bridge on macOS. The extension injects a focused panel into Overleaf project pages, mirrors the active project into `~/.codex-overleaf/projects`, runs Codex through the user's local Codex CLI account, and writes accepted changes back through the browser with freshness checks and undo support.
+Codex Overleaf Link connects an Overleaf project page to a local Codex bridge on macOS, Windows, or Linux. The extension injects a focused panel into Overleaf project pages, mirrors the active project into `~/.codex-overleaf/projects`, runs Codex through the user's local Codex CLI account, and writes accepted changes back through the browser with freshness checks and undo support.
 
 The extension is designed for explicit, local control. It has no hosted backend, uses Chrome Native Messaging for the local bridge, and scopes host permissions to Overleaf project pages.
 

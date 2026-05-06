@@ -2,7 +2,7 @@
 
 ## Current Permissions
 
-`nativeMessaging` connects the extension to the local native bridge only. The bridge runs on the user's Mac and is required for local project mirroring, Codex CLI execution, and native diagnostics.
+`nativeMessaging` connects the extension to the local native bridge only. The bridge runs on the user's own macOS, Windows, or Linux machine and is required for local project mirroring, Codex CLI execution, and native diagnostics.
 
 `storage` stores local extension preferences and session UI state, including panel settings, selected model options, project-scoped feature preferences, and task list metadata.
 
