@@ -11,9 +11,18 @@ Editor-native review UX release. This version adds hunk-level review controls an
 
 ### Changed
 
+- Review decisions now collapse completed hunks and advance focus to the next pending hunk for faster keyboard and button review.
+- Bulk accept/reject actions now fill only pending hunks while preserving manual hunk choices, including file-level hunk actions.
 - Bumped package and extension metadata to `0.6.0`.
 - Updated install, update, README badge, and release artifact references for `v0.6.0`.
 - Release verification now derives the required release reference from `package.json` instead of a stale fixed v0.5 value.
+- Release workflow now fails early when the pushed tag does not match the package version.
+- Chrome Web Store preparation copy now reflects macOS, Windows, and Linux native host support.
+
+### Fixed
+
+- Patch-backed review hunks now render their own diff text when a display diff has fewer hunks than the underlying text patches, preventing later hunks from appearing blank.
+- Truncated or unsafe hunk mappings fall back to file-level review instead of exposing misleading per-hunk choices.
 
 ### Notes
 
