@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.6.0 - 2026-05-06
+
+Editor-native review UX release. This version adds hunk-level review controls and editor jump support while preserving the v0.5 cross-platform native host packaging and guarded browser writeback model.
+
+### Added
+
+- Hunk-level diff review metadata and panel controls for accepting, rejecting, and jumping to individual text edits.
+- Editor jump plumbing for review hunks, with large-diff rendering safeguards and scoped keyboard review shortcuts.
+
+### Changed
+
+- Bumped package and extension metadata to `0.6.0`.
+- Updated install, update, README badge, and release artifact references for `v0.6.0`.
+- Release verification now derives the required release reference from `package.json` instead of a stale fixed v0.5 value.
+
+### Notes
+
+- Native protocol remains `1`; this release does not require a protocol bump.
+- The v0.5 macOS / Windows / Linux packaging and installer notes remain historically intact below.
+
 ## v0.5.0 - 2026-05-06
 
 Cross-platform native host release. This version extends the native installer, runtime paths, and release packaging beyond the original macOS-only preview while preserving the v0.4 user workflow and release safeguards.

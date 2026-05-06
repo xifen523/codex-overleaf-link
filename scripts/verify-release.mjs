@@ -4,7 +4,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULT_RELEASE_DATE = '2026-05-06';
-const REQUIRED_RELEASE_VERSION = '0.5.0';
 const CHROME_WEB_STORE_DOCS = [
   'permissions.md',
   'privacy.md',
@@ -28,10 +27,6 @@ export function collectReleaseVerificationErrors(options = {}) {
   const version = pkg.version;
   if (!version) {
     errors.push('package.json must define a release version.');
-    return errors;
-  }
-  if (version !== REQUIRED_RELEASE_VERSION) {
-    errors.push(`package.json version ${formatValue(version)} must be ${REQUIRED_RELEASE_VERSION} for v0.5 release verification.`);
   }
 
   if (manifest.version !== version) {
@@ -40,18 +35,24 @@ export function collectReleaseVerificationErrors(options = {}) {
     );
   }
 
-  const expectedBadge = `version-${version}-blue`;
-  if (!readme.includes(expectedBadge)) {
-    errors.push(`README.md must contain the release badge fragment "${expectedBadge}".`);
-  }
+  if (version) {
+    const expectedBadge = `version-${version}-blue`;
+    if (!readme.includes(expectedBadge)) {
+      errors.push(`README.md must contain the release badge fragment "${expectedBadge}".`);
+    }
 
-  const expectedHeading = `## v${version} - ${releaseDate}`;
-  if (!changelog.includes(expectedHeading)) {
-    errors.push(`CHANGELOG.md must contain the release heading "${expectedHeading}".`);
+    const expectedHeading = `## v${version} - ${releaseDate}`;
+    if (!changelog.includes(expectedHeading)) {
+      errors.push(`CHANGELOG.md must contain the release heading "${expectedHeading}".`);
+    }
   }
 
   errors.push(...collectInstallerArtifactErrors(rootDir));
-  errors.push(...collectChromeWebStoreDocErrors(rootDir));
+  if (version) {
+    errors.push(...collectChromeWebStoreDocErrors(rootDir, version));
+  } else {
+    errors.push(...collectChromeWebStoreDocErrors(rootDir));
+  }
   return errors;
 }
 
@@ -59,32 +60,32 @@ export function collectInstallerArtifactErrors(rootDir) {
   const errors = [];
   for (const relativePath of ['install.sh', 'install.ps1', 'scripts/install-native-host.mjs']) {
     if (!fs.existsSync(path.join(rootDir, relativePath))) {
-      errors.push(`${relativePath} is required for v0.5 release verification.`);
+      errors.push(`${relativePath} is required for release verification.`);
     }
   }
   return errors;
 }
 
-export function collectChromeWebStoreDocErrors(rootDir) {
+export function collectChromeWebStoreDocErrors(rootDir, version = '') {
   const docsDir = path.join(rootDir, 'docs', 'chrome-web-store');
   const errors = [];
   for (const fileName of CHROME_WEB_STORE_DOCS) {
     const docPath = path.join(docsDir, fileName);
     if (!fs.existsSync(docPath)) {
-      errors.push(`docs/chrome-web-store/${fileName} is required for v0.5 release verification.`);
+      errors.push(`docs/chrome-web-store/${fileName} is required for release verification.`);
     }
   }
-  if (errors.length === 0) {
-    errors.push(...collectReleaseChecklistErrors(docsDir));
+  if (errors.length === 0 && version) {
+    errors.push(...collectReleaseChecklistErrors(docsDir, version));
   }
   return errors;
 }
 
-function collectReleaseChecklistErrors(docsDir) {
+function collectReleaseChecklistErrors(docsDir, version) {
   const errors = [];
   const relativePath = 'docs/chrome-web-store/release-checklist.md';
   const checklist = fs.readFileSync(path.join(docsDir, 'release-checklist.md'), 'utf8');
-  const releaseRef = `v${REQUIRED_RELEASE_VERSION}`;
+  const releaseRef = `v${version}`;
   const requiredFragments = [
     `dist/releases/${releaseRef}/SHA256SUMS`,
     `codex-overleaf-link-extension-${releaseRef}.zip`,

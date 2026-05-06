@@ -128,11 +128,11 @@ function releaseBuildEnv(overrides = {}) {
 
 function writeMinimalReleaseBuildFixture(rootDir, { untracked = [] } = {}) {
   const files = {
-    'package.json': `${JSON.stringify({ version: '0.5.0' }, null, 2)}\n`,
-    'CHANGELOG.md': '# Changelog\n\n## v0.5.0 - 2026-05-06\n\nFixture release notes.\n',
+    'package.json': `${JSON.stringify({ version: '0.6.0' }, null, 2)}\n`,
+    'CHANGELOG.md': '# Changelog\n\n## v0.6.0 - 2026-05-06\n\nFixture release notes.\n',
     'install.sh': '#!/usr/bin/env bash\nREF="${CODEX_OVERLEAF_REF:-main}"\n',
     'install.ps1': "$DefaultRef = 'main'\n",
-    'extension/manifest.json': `${JSON.stringify({ version: '0.5.0' }, null, 2)}\n`,
+    'extension/manifest.json': `${JSON.stringify({ version: '0.6.0' }, null, 2)}\n`,
     'extension/popup.html': '<!doctype html>\n',
     'extension/src/shared/compatibility.js': 'module.exports = {};\n',
     'native-host/src/nativeHostPlatform.js': 'module.exports = {};\n',
@@ -169,10 +169,10 @@ function writeMinimalReleaseBuildFixture(rootDir, { untracked = [] } = {}) {
 }
 
 function writeReleaseFixture(rootDir, overrides = {}) {
-  const packageVersion = overrides.packageVersion || '0.5.0';
-  const manifestVersion = overrides.manifestVersion || packageVersion;
-  const readmeVersion = overrides.readmeVersion || packageVersion;
-  const changelogVersion = overrides.changelogVersion || packageVersion;
+  const packageVersion = Object.hasOwn(overrides, 'packageVersion') ? overrides.packageVersion : '0.6.0';
+  const manifestVersion = Object.hasOwn(overrides, 'manifestVersion') ? overrides.manifestVersion : packageVersion;
+  const readmeVersion = Object.hasOwn(overrides, 'readmeVersion') ? overrides.readmeVersion : packageVersion;
+  const changelogVersion = Object.hasOwn(overrides, 'changelogVersion') ? overrides.changelogVersion : packageVersion;
   const changelogDate = overrides.changelogDate || '2026-05-06';
   const changelogBody = Object.hasOwn(overrides, 'changelogBody')
     ? overrides.changelogBody
@@ -213,9 +213,9 @@ function writeChromeWebStoreDocs(rootDir) {
       'npm test',
       'npm run verify:release',
       'npm run build:release',
-      'dist/releases/v0.5.0/SHA256SUMS',
-      'codex-overleaf-link-extension-v0.5.0.zip',
-      'codex-overleaf-native-host-v0.5.0.tar.gz',
+      'dist/releases/v0.6.0/SHA256SUMS',
+      'codex-overleaf-link-extension-v0.6.0.zip',
+      'codex-overleaf-native-host-v0.6.0.tar.gz',
       'install.ps1',
       'Web Store extension id',
       'current release scope'
@@ -332,11 +332,11 @@ test('release verifier catches package and extension manifest version mismatch',
   }
 });
 
-test('release verifier requires v0.5 package metadata and Windows installer source', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-v050-'));
+test('release verifier follows package metadata and requires Windows installer source', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-current-'));
   try {
     writeReleaseFixture(tempDir, {
-      packageVersion: '0.4.0'
+      packageVersion: ''
     });
     fs.rmSync(path.join(tempDir, 'install.ps1'));
     const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
@@ -347,7 +347,7 @@ test('release verifier requires v0.5 package metadata and Windows installer sour
       releaseDate: '2026-05-06'
     });
 
-    assert.ok(errors.some((error) => /package\.json version .*0\.5\.0/i.test(error)), errors.join('\n'));
+    assert.ok(errors.some((error) => /package\.json must define a release version/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /install\.ps1 is required/i.test(error)), errors.join('\n'));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -402,11 +402,11 @@ test('release verifier catches CHANGELOG heading date mismatch', async () => {
   }
 });
 
-test('release verifier requires Chrome Web Store prep docs for v0.5 releases', async () => {
+test('release verifier requires Chrome Web Store prep docs for current releases', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-docs-'));
   try {
     writeReleaseFixture(tempDir, {
-      packageVersion: '0.5.0'
+      packageVersion: '0.6.0'
     });
     const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
     const { collectReleaseVerificationErrors } = await import(moduleUrl);
@@ -443,7 +443,7 @@ test('release verifier rejects stale Chrome Web Store release checklist instruct
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-stale-checklist-'));
   try {
     writeReleaseFixture(tempDir, {
-      packageVersion: '0.5.0'
+      packageVersion: '0.6.0'
     });
     writeChromeWebStoreDocs(tempDir);
     fs.writeFileSync(
@@ -459,7 +459,7 @@ test('release verifier rejects stale Chrome Web Store release checklist instruct
     });
 
     assert.ok(
-      errors.some((error) => /release-checklist\.md.*v0\.5\.0/i.test(error)),
+      errors.some((error) => /release-checklist\.md.*v0\.6\.0/i.test(error)),
       errors.join('\n')
     );
     assert.ok(

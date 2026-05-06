@@ -19,19 +19,19 @@ const {
 } = require('../native-host/src/nativeHostPlatform');
 const extensionManifest = require('../extension/manifest.json');
 
-test('release metadata is prepared for v0.5.0', () => {
-  assert.equal(packageJson.version, '0.5.0');
+test('release metadata is prepared for v0.6.0', () => {
+  assert.equal(packageJson.version, '0.6.0');
   assert.equal(extensionManifest.version, packageJson.version);
 });
 
-test('release docs carry exact v0.5.0 badge and changelog heading', () => {
+test('release docs carry exact v0.6.0 badge and changelog heading', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
   const changelog = fs.readFileSync(path.join(__dirname, '../CHANGELOG.md'), 'utf8');
 
-  assert.match(readme, /version-0\.5\.0-blue/);
-  assert.doesNotMatch(readme, /version-0\.4\.0-blue/);
-  assert.match(changelog, /^## v0\.5\.0 - 2026-05-06$/m);
-  assert.doesNotMatch(changelog, /^## v0\.4\.0 - 2026-05-06[\s\S]*version-0\.5\.0-blue/m);
+  assert.match(readme, /version-0\.6\.0-blue/);
+  assert.doesNotMatch(readme, /version-0\.5\.0-blue/);
+  assert.match(changelog, /^## v0\.6\.0 - 2026-05-06$/m);
+  assert.doesNotMatch(changelog, /^## v0\.5\.0 - 2026-05-06[\s\S]*version-0\.6\.0-blue/m);
 });
 
 test('validates Chrome extension ids', () => {
