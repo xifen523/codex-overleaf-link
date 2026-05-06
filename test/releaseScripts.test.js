@@ -505,12 +505,13 @@ test('Chrome Web Store prep docs describe current permissions and privacy postur
   assert.match(checklist, /npm test/);
   assert.match(checklist, /npm run verify:release/);
   assert.match(checklist, /npm run build:release/);
-  assert.match(checklist, /dist\/releases\/v0\.5\.0\/SHA256SUMS/);
-  assert.match(checklist, /codex-overleaf-link-extension-v0\.5\.0\.zip/);
-  assert.match(checklist, /codex-overleaf-native-host-v0\.5\.0\.tar\.gz/);
+  assert.match(checklist, /dist\/releases\/v0\.6\.0\/SHA256SUMS/);
+  assert.match(checklist, /codex-overleaf-link-extension-v0\.6\.0\.zip/);
+  assert.match(checklist, /codex-overleaf-native-host-v0\.6\.0\.tar\.gz/);
   assert.match(checklist, /install\.ps1/);
-  assert.match(checklist, /v0\.5\.0/);
+  assert.match(checklist, /v0\.6\.0/);
   assert.match(checklist, /Web Store extension id/i);
+  assert.doesNotMatch(checklist, /v0\.5\.0/);
   assert.doesNotMatch(checklist, /v0\.4\.0/);
   assert.doesNotMatch(checklist, /outside v0\.4/i);
 });

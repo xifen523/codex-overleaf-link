@@ -20,11 +20,11 @@ function compatibleNative(overrides = {}) {
     result: {
       host: 'com.codex.overleaf',
       platform: 'darwin',
-      version: '0.5.0',
+      version: '0.6.0',
       protocolVersion: 1,
       supportedProtocol: { min: 1, max: 1 },
       capabilities: Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true])),
-      minExtensionVersion: '0.5.0',
+      minExtensionVersion: '0.6.0',
       environment: {
         codex: { ok: true }
       },
@@ -33,17 +33,20 @@ function compatibleNative(overrides = {}) {
   };
 }
 
-function statusFor(response, metadata = { version: '0.5.0' }) {
+function statusFor(response, metadata = { version: '0.6.0' }) {
   return compatibility.evaluateNativeCompatibility(response, metadata).status;
 }
 
 function canonicalInstallCommand() {
-  return 'CODEX_OVERLEAF_REF=v0.5.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.5.0/install.sh)"';
+  return 'CODEX_OVERLEAF_REF=v0.6.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.6.0/install.sh)"';
 }
 
-test('buildBridgePingParams returns v0.5 extension protocol metadata', () => {
-  assert.deepEqual(compatibility.buildBridgePingParams({ version: '0.5.0' }), {
-    extensionVersion: '0.5.0',
+test('buildBridgePingParams returns v0.6 extension protocol metadata', () => {
+  assert.equal(compatibility.MIN_NATIVE_VERSION, '0.6.0');
+  assert.equal(compatibility.BUILD_TARGET_VERSION, '0.6.0');
+  assert.equal(compatibility.EXTENSION_PROTOCOL_VERSION, 1);
+  assert.deepEqual(compatibility.buildBridgePingParams({ version: '0.6.0' }), {
+    extensionVersion: '0.6.0',
     extensionProtocolVersion: 1,
     supportedNativeProtocol: { min: 1, max: 1 },
     requiredCapabilities: REQUIRED_CAPABILITIES
@@ -72,8 +75,8 @@ test('evaluateNativeCompatibility classifies malformed native versions as too ol
   assert.equal(statusFor(compatibleNative({ version: 'next' })), 'native_too_old');
 });
 
-test('evaluateNativeCompatibility classifies native versions below v0.5 as too old', () => {
-  assert.equal(statusFor(compatibleNative({ version: '0.4.0' })), 'native_too_old');
+test('evaluateNativeCompatibility classifies native versions below v0.6 as too old', () => {
+  assert.equal(statusFor(compatibleNative({ version: '0.5.0' })), 'native_too_old');
 });
 
 test('evaluateNativeCompatibility classifies missing required capabilities as too old', () => {
@@ -100,7 +103,7 @@ test('evaluateNativeCompatibility classifies missing required capabilities as to
 });
 
 test('evaluateNativeCompatibility classifies extension versions below native minimum as too old', () => {
-  assert.equal(statusFor(compatibleNative({ minExtensionVersion: '0.6.0' })), 'extension_too_old');
+  assert.equal(statusFor(compatibleNative({ minExtensionVersion: '0.7.0' })), 'extension_too_old');
 });
 
 test('evaluateNativeCompatibility returns a structured status for malformed extension versions', () => {
@@ -131,26 +134,26 @@ test('evaluateNativeCompatibility allows compatible metadata without Codex envir
   assert.equal(statusFor(compatibleNative({ environment: {} })), 'ok');
 });
 
-test('evaluateNativeCompatibility allows healthy v0.5 native metadata', () => {
+test('evaluateNativeCompatibility allows healthy v0.6 native metadata', () => {
   assert.equal(statusFor(compatibleNative()), 'ok');
 });
 
 test('buildInstallCommand returns the canonical version-pinned installer', () => {
   assert.equal(
-    compatibility.buildInstallCommand('0.5.0'),
+    compatibility.buildInstallCommand('0.6.0'),
     canonicalInstallCommand()
   );
-  assert.equal(compatibility.buildInstallCommand('v0.5.0'), canonicalInstallCommand());
+  assert.equal(compatibility.buildInstallCommand('v0.6.0'), canonicalInstallCommand());
 });
 
 test('buildInstallCommand falls back to the canonical target for unsafe versions', () => {
   for (const version of [
-    '0.5.0; touch /tmp/pwned',
-    '0.5.0 && touch /tmp/pwned',
-    ' 0.5.0',
-    '0.5.0 ',
-    '0.5.0/bad',
-    'v0.5.0$(id)',
+    '0.6.0; touch /tmp/pwned',
+    '0.6.0 && touch /tmp/pwned',
+    ' 0.6.0',
+    '0.6.0 ',
+    '0.6.0/bad',
+    'v0.6.0$(id)',
     '',
     null
   ]) {
