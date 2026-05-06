@@ -1502,6 +1502,41 @@ test('bulk hunk decisions preserve already decided hunks and fill only pending h
   ]);
 });
 
+test('file hunk decisions preserve already decided hunks and fill only pending file hunks', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const syncChanges = [
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches: [
+        { from: 0, to: 5, expected: 'alpha', insert: 'ALPHA' },
+        { from: 6, to: 10, expected: 'beta', insert: 'BETA' },
+        { from: 11, to: 16, expected: 'gamma', insert: 'GAMMA' }
+      ],
+      diff: [
+        { lines: [{ type: 'remove', text: 'alpha' }, { type: 'add', text: 'ALPHA' }] },
+        { lines: [{ type: 'remove', text: 'beta' }, { type: 'add', text: 'BETA' }] },
+        { lines: [{ type: 'remove', text: 'gamma' }, { type: 'add', text: 'GAMMA' }] }
+      ]
+    }
+  ];
+
+  const acceptRest = createDiffReviewElement(syncChanges);
+  acceptRest.container.querySelector('[data-diff-hunk-reject]').click();
+  acceptRest.decideFileChange('main.tex', true);
+  assert.deepEqual(acceptRest.getAcceptedChanges()[0]?.patches, [
+    syncChanges[0].patches[1],
+    syncChanges[0].patches[2]
+  ]);
+
+  const rejectRest = createDiffReviewElement(syncChanges);
+  rejectRest.container.querySelector('[data-diff-hunk-accept]').click();
+  rejectRest.decideFileChange('main.tex', false);
+  assert.deepEqual(rejectRest.getAcceptedChanges()[0]?.patches, [
+    syncChanges[0].patches[0]
+  ]);
+});
+
 test('hunk review renders patch text when display diff has fewer hunks than patches', () => {
   const createDiffReviewElement = loadCreateDiffReviewElementForTest();
   const syncChanges = [
@@ -1754,7 +1789,7 @@ test('diff review keyboard shortcuts are scoped and only prevent handled keys', 
   assert.deepEqual(review.getAcceptedChanges()[0]?.patches, [syncChanges[0].patches[0]]);
 });
 
-test('file-level hunk review action overrides previous hunk decisions for that file', () => {
+test('file-level hunk review action preserves previous hunk decisions for that file', () => {
   const createDiffReviewElement = loadCreateDiffReviewElementForTest();
   const syncChanges = [
     {
@@ -1778,7 +1813,7 @@ test('file-level hunk review action overrides previous hunk decisions for that f
   assert.equal(review.getPendingCount(), 0);
   assert.deepEqual(
     review.getAcceptedChanges()[0]?.patches,
-    syncChanges[0].patches
+    [syncChanges[0].patches[1]]
   );
 });
 

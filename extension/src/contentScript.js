@@ -2432,8 +2432,9 @@
         return false;
       }
       const startIndex = hunks.findIndex(view => view.reviewHunk.decisionKey === decisionKey);
+      const anchorIndex = startIndex >= 0 ? startIndex : -1;
       for (let offset = 1; offset <= hunks.length; offset += 1) {
-        const index = (Math.max(0, startIndex) + offset) % hunks.length;
+        const index = (anchorIndex + offset) % hunks.length;
         const view = hunks[index];
         if (hunkStates.get(view.reviewHunk.decisionKey) === null) {
           const focused = focusHunkByIndex(index);
@@ -2585,6 +2586,19 @@
       notifyDecisionChanged();
     }
 
+    function decideReviewableFilePendingHunks(fileModel, accepted) {
+      let changed = false;
+      for (const hunk of fileModel.hunks) {
+        if (hunkStates.get(hunk.decisionKey) !== null) {
+          continue;
+        }
+        hunkStates.set(hunk.decisionKey, accepted);
+        setHunkDecisionView(hunk, accepted, { collapse: true });
+        changed = true;
+      }
+      return changed;
+    }
+
     function decidePendingChanges(accepted) {
       if (readonly) {
         return false;
@@ -2607,14 +2621,7 @@
         if (!fileModel.reviewable) {
           continue;
         }
-        for (const hunk of fileModel.hunks) {
-          if (hunkStates.get(hunk.decisionKey) !== null) {
-            continue;
-          }
-          hunkStates.set(hunk.decisionKey, accepted);
-          setHunkDecisionView(hunk, accepted, { collapse: true });
-          changed = true;
-        }
+        changed = decideReviewableFilePendingHunks(fileModel, accepted) || changed;
         const fileView = fileViews.get(fileModel.path);
         if (fileView) {
           updateReviewableFileDecision(fileView, fileModel);
@@ -2637,12 +2644,12 @@
       }
       const fileModel = view.fileModel;
       if (fileModel?.reviewable) {
-        for (const hunk of fileModel.hunks) {
-          hunkStates.set(hunk.decisionKey, accepted);
-          setHunkDecisionView(hunk, accepted, { collapse: true });
-        }
+        const changed = decideReviewableFilePendingHunks(fileModel, accepted);
         updateReviewableFileDecision(view, fileModel);
-        notifyDecisionChanged();
+        focusNextPendingHunkAfter(focusedHunkKey);
+        if (changed) {
+          notifyDecisionChanged();
+        }
         return;
       }
       if (fileStates.get(path) !== null) {
