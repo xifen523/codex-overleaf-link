@@ -354,6 +354,10 @@
       };
     }
 
+    const previousEditorSignature = getActiveFilePath() !== filePath
+      ? contentSignature(readActiveEditorText())
+      : '';
+
     if (getActiveFilePath() !== filePath) {
       const opened = await openFileByPath(filePath);
       if (!opened.ok) {
@@ -366,7 +370,9 @@
       }
     }
 
-    const ready = await waitForActiveEditorText(filePath, 7000);
+    const ready = await waitForActiveEditorText(filePath, 7000, previousEditorSignature
+      ? { notSignature: previousEditorSignature }
+      : {});
     if (!ready.ok) {
       return {
         ok: false,

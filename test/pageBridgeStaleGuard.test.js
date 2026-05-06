@@ -5,6 +5,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const projectFiles = require('../extension/src/shared/projectFiles');
+const overleafEditor = require('../extension/src/page/overleafEditor');
 const reviewing = require('../extension/src/shared/reviewing');
 const staleGuard = require('../extension/src/shared/staleGuard');
 
@@ -374,6 +375,62 @@ test('page bridge jumpToPosition rejects out-of-range offsets without modifying 
   assert.equal(bridge.getFile('main.tex'), 'alpha');
   assert.equal(bridge.getDispatchCount(), 0);
   assert.equal(bridge.getLastSelection(), null);
+});
+
+test('page bridge jumpToPosition waits for delayed editor document switch before range validation', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorSwitchDelayMs: 360,
+    files: {
+      'main.tex': 'main file content is long enough for a stale selection',
+      'refs.bib': 'short'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'refs.bib',
+    from: 0,
+    to: 10
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'range_out_of_bounds');
+  assert.equal(result.path, 'refs.bib');
+  assert.equal(result.length, 5);
+  assert.equal(bridge.getDispatchCount(), 0);
+  assert.equal(bridge.getLastSelection(), null);
+});
+
+test('editor adapter contenteditable fallback does not hard-bound range by rendered DOM text length', () => {
+  let focused = false;
+  const adapter = overleafEditor.create({
+    findEditorContentNode(selector) {
+      if (selector === '.cm-content') {
+        return {
+          innerText: 'visible',
+          focus() {
+            focused = true;
+          }
+        };
+      }
+      return null;
+    },
+    findEditorTextArea() {
+      return null;
+    },
+    getCodeMirrorEditorView() {
+      return null;
+    },
+    getDeepActiveElement() {
+      return null;
+    }
+  });
+
+  const result = adapter.focusActiveEditorRange(0, 99);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'selection-fallback');
+  assert.equal(focused, true);
 });
 
 test('page bridge waits for editor document after opening target file before stale guarding patches', async () => {

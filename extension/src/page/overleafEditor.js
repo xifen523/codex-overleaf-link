@@ -213,11 +213,6 @@
 
       const editable = deps.findEditorContentNode?.('.cm-content') || deps.findEditorContentNode?.('[contenteditable="true"]');
       if (editable) {
-        const text = editable.innerText || editable.textContent || '';
-        const length = typeof text === 'string' ? text.length : null;
-        if (Number.isInteger(length) && !isSelectionRangeInBounds(range, length)) {
-          return rangeOutOfBounds(range, length);
-        }
         editable.focus();
         return {
           ok: true,
