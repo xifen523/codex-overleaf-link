@@ -7,7 +7,7 @@
   "type": "commonjs",
   "scripts": {
     "agent:codex": "node scripts/codex-json-agent.mjs",
-    "test": "node --test test/*.test.js",
+    "test": "node scripts/run-tests.mjs",
     "smoke:extension": "node scripts/smoke-extension.mjs",
     "verify:release": "node scripts/verify-release.mjs",
     "build:release": "node scripts/build-release.mjs",

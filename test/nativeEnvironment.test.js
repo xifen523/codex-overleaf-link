@@ -44,6 +44,7 @@ test('native runtime env falls back to standard macOS developer paths without us
     HOME: '/Users/example',
     PATH: '/usr/bin:/bin'
   }, {
+    platform: 'darwin',
     readLoginShellEnv: () => null
   });
 

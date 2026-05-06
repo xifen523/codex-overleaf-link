@@ -226,6 +226,7 @@ function writeChromeWebStoreDocs(rootDir) {
 test('package exposes release verification and artifact build commands', () => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
 
+  assert.equal(pkg.scripts.test, 'node scripts/run-tests.mjs');
   assert.equal(pkg.scripts['verify:release'], 'node scripts/verify-release.mjs');
   assert.equal(pkg.scripts['build:release'], 'node scripts/build-release.mjs');
 });
