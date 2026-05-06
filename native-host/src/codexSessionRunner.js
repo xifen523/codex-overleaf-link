@@ -362,6 +362,7 @@ function runCodexAppServerSession(input) {
 
     const child = spawn(codexCommand, buildCodexAppServerArgs(input), {
       env: childEnv,
+      shell: shouldUseShellForCommand(codexCommand, childEnv),
       stdio: ['pipe', 'pipe', 'pipe']
     });
     const pending = new Map();
@@ -822,6 +823,15 @@ function resolveCodexCommand(env = process.env) {
     return env.CODEX_OVERLEAF_CODEX_PATH || '';
   }
   return 'codex';
+}
+
+function shouldUseShellForCommand(command, env = process.env) {
+  const platform = env.CODEX_OVERLEAF_PLATFORM || process.platform;
+  if (platform !== 'win32') {
+    return false;
+  }
+  const text = String(command || '');
+  return text === 'codex' || /\.(?:cmd|bat)$/i.test(text);
 }
 
 function buildFinalAssistantMessage(messages = new Map(), order = []) {

@@ -101,9 +101,7 @@ test('runCodexSession marks mirror dirty when local changes are collected for wr
 test('codex app-server exit before turn completion rejects instead of hanging', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-exit-'));
   try {
-    const fakeCodex = path.join(tempDir, 'codex');
-    fs.writeFileSync(fakeCodex, '#!/usr/bin/env node\nprocess.exit(0);\n', 'utf8');
-    fs.chmodSync(fakeCodex, 0o755);
+    const fakeCodex = writeFakeCodexExit(tempDir, 0);
 
     const result = await Promise.race([
       runCodexAppServerSession({
@@ -127,6 +125,29 @@ test('codex app-server exit before turn completion rejects instead of hanging', 
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+function writeFakeCodexExit(tempDir, code) {
+  const scriptPath = path.join(tempDir, 'fake-codex.js');
+  fs.writeFileSync(scriptPath, `process.exit(${code});\n`, 'utf8');
+  if (process.platform === 'win32') {
+    const commandPath = path.join(tempDir, 'codex.cmd');
+    fs.writeFileSync(commandPath, [
+      '@echo off',
+      `"${process.execPath}" "${scriptPath}" %*`,
+      ''
+    ].join('\r\n'), 'utf8');
+    return commandPath;
+  }
+
+  const commandPath = path.join(tempDir, 'codex');
+  fs.writeFileSync(commandPath, [
+    '#!/usr/bin/env node',
+    `process.exit(${code});`,
+    ''
+  ].join('\n'), 'utf8');
+  fs.chmodSync(commandPath, 0o755);
+  return commandPath;
+}
 
 test('passes Codex mode, model, and reasoning settings to the runner boundary', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));

@@ -26,7 +26,7 @@ test('debug log path uses USERPROFILE fallback when HOME is absent', () => {
   const userProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'debug-log-profile-'));
   try {
     assert.equal(
-      getDebugLogPath({ env: { USERPROFILE: userProfile } }),
+      getDebugLogPath({ platform: 'darwin', env: { USERPROFILE: userProfile } }),
       path.join(userProfile, '.codex-overleaf', 'native-host.log')
     );
   } finally {
@@ -46,7 +46,11 @@ test('Windows debug log path uses the native host local data root', () => {
   );
 });
 
-test('exported LOG_PATH reflects HOME changes after module load', () => {
+test('exported LOG_PATH reflects HOME changes after module load', t => {
+  if (process.platform === 'win32') {
+    t.skip('HOME is not the default native host log root on Windows');
+    return;
+  }
   const originalHome = process.env.HOME;
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'debug-log-dynamic-home-'));
   try {

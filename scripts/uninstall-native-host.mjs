@@ -115,13 +115,18 @@ function isUnderHostTempDir(targetRoot) {
 }
 
 function deleteWindowsRegistryValue(registryKey) {
-  const result = spawnSync('reg.exe', [
+  const registryCommand = getWindowsRegistryCommand();
+  const result = spawnSync(registryCommand.file, [
+    ...registryCommand.args,
     'delete',
     registryKey,
     '/f'
   ], {
     encoding: 'utf8'
   });
+  if (result.error) {
+    throw new Error(`Failed to run ${registryCommand.file}: ${result.error.message}`);
+  }
   if (result.status !== 0) {
     const output = `${result.stderr || ''}\n${result.stdout || ''}`;
     if (/unable to find the specified registry key or value/i.test(output)) {
@@ -130,6 +135,24 @@ function deleteWindowsRegistryValue(registryKey) {
     throw new Error(result.stderr || result.stdout || `reg.exe delete failed with status ${result.status}`);
   }
   return true;
+}
+
+function getWindowsRegistryCommand() {
+  return {
+    file: process.env.CODEX_OVERLEAF_REG_EXE || 'reg.exe',
+    args: parseStringArrayEnv(process.env.CODEX_OVERLEAF_REG_EXE_ARGS_JSON)
+  };
+}
+
+function parseStringArrayEnv(value) {
+  if (!value) {
+    return [];
+  }
+  const parsed = JSON.parse(value);
+  if (!Array.isArray(parsed) || !parsed.every(item => typeof item === 'string')) {
+    throw new Error('CODEX_OVERLEAF_REG_EXE_ARGS_JSON must be a JSON array of strings');
+  }
+  return parsed;
 }
 
 function parseArgs(argv) {

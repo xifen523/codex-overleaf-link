@@ -30,11 +30,11 @@ test('composer keeps the send button in an explicit fixed toolbar column', () =>
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
-  );
+  ).replace(/\r\n/g, '\n');
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
-  );
+  ).replace(/\r\n/g, '\n');
   const toolbarBlock = css.match(/#codex-overleaf-panel \.codex-composer-toolbar\s*\{[\s\S]*?\n\}/)?.[0] || '';
 
   assert.match(contentScript, /data-run title="Send" aria-label="Send"/);
@@ -207,11 +207,11 @@ test('composer run toggles are self-contained pills without ambiguous visible ch
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
-  );
+  ).replace(/\r\n/g, '\n');
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
-  );
+  ).replace(/\r\n/g, '\n');
   const hiddenInputsBlock = css.match(/#codex-overleaf-panel \.codex-review-toggle input,\n#codex-overleaf-panel \.codex-recompile-toggle input\s*\{[\s\S]*?\n\}/)?.[0] || '';
 
   assert.match(contentScript, /<input type="checkbox" data-require-reviewing>/);

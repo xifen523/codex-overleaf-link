@@ -10,6 +10,42 @@ const { getDefaultBridgePath } = require('../native-host/src/nativeHostPlatform'
 
 const CANONICAL_V050_INSTALL_COMMAND = 'CODEX_OVERLEAF_REF=v0.5.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.5.0/install.sh)"';
 
+function writeFakeRegistryCommand(tempDir, options = {}) {
+  const scriptPath = path.join(tempDir, 'fake-reg.js');
+  const exitCode = Number.isInteger(options.exitCode) ? options.exitCode : 0;
+  fs.writeFileSync(scriptPath, [
+    'const fs = require("node:fs");',
+    'const args = process.argv.slice(2);',
+    'fs.appendFileSync(process.env.REG_LOG, `${args.join("\\n")}\\n`);',
+    options.stderr ? `process.stderr.write(${JSON.stringify(options.stderr)});` : '',
+    `process.exit(${exitCode});`,
+    ''
+  ].filter(Boolean).join('\n'), 'utf8');
+
+  return {
+    CODEX_OVERLEAF_REG_EXE: process.execPath,
+    CODEX_OVERLEAF_REG_EXE_ARGS_JSON: JSON.stringify([scriptPath])
+  };
+}
+
+function getTestWindowsLocalAppData(tempDir) {
+  if (process.platform === 'win32') {
+    return path.win32.join(tempDir, 'LocalAppData');
+  }
+  return 'C:\\Users\\Alice\\AppData\\Local';
+}
+
+function getWindowsSimulationFilePath(tempDir, targetPath) {
+  if (process.platform === 'win32') {
+    return targetPath;
+  }
+  return path.join(tempDir, targetPath);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 test('native install script defaults to the committed extension id', () => {
   const source = fs.readFileSync(
     path.join(__dirname, '../scripts/install-native-host.mjs'),
@@ -102,7 +138,11 @@ test('native install runtime includes package metadata required by bridge ping',
   }
 });
 
-test('native install script writes Linux Chrome manifest under injected HOME', () => {
+test('native install script writes Linux Chrome manifest under injected HOME', t => {
+  if (process.platform === 'win32') {
+    t.skip('Linux install path behavior is covered on POSIX runners');
+    return;
+  }
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-linux-chrome-test-'));
   try {
     const result = spawnSync(process.execPath, [
@@ -123,13 +163,17 @@ test('native install script writes Linux Chrome manifest under injected HOME', (
     const manifestPath = path.join(tempDir, '.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json');
     assert.equal(fs.existsSync(manifestPath), true);
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    assert.equal(manifest.path, path.join(tempDir, '.codex-overleaf/codex-overleaf-bridge'));
+    assert.equal(manifest.path, path.posix.join(tempDir, '.codex-overleaf/codex-overleaf-bridge'));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
-test('native install script writes Linux Chromium manifest under injected HOME', () => {
+test('native install script writes Linux Chromium manifest under injected HOME', t => {
+  if (process.platform === 'win32') {
+    t.skip('Linux install path behavior is covered on POSIX runners');
+    return;
+  }
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-linux-chromium-test-'));
   try {
     const result = spawnSync(process.execPath, [
@@ -150,7 +194,7 @@ test('native install script writes Linux Chromium manifest under injected HOME',
     const manifestPath = path.join(tempDir, '.config/chromium/NativeMessagingHosts/com.codex.overleaf.json');
     assert.equal(fs.existsSync(manifestPath), true);
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    assert.equal(manifest.path, path.join(tempDir, '.codex-overleaf/codex-overleaf-bridge'));
+    assert.equal(manifest.path, path.posix.join(tempDir, '.codex-overleaf/codex-overleaf-bridge'));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -158,15 +202,10 @@ test('native install script writes Linux Chromium manifest under injected HOME',
 
 test('native install script registers Windows Chrome host with reg.exe add', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-win-install-test-'));
-  const binDir = path.join(tempDir, 'bin');
   const regLog = path.join(tempDir, 'reg.log');
-  fs.mkdirSync(binDir, { recursive: true });
-  fs.writeFileSync(path.join(binDir, 'reg.exe'), [
-    '#!/bin/sh',
-    'printf "%s\\n" "$@" >> "$REG_LOG"',
-    'exit 0'
-  ].join('\n'));
-  fs.chmodSync(path.join(binDir, 'reg.exe'), 0o755);
+  const registryEnv = writeFakeRegistryCommand(tempDir);
+  const localAppData = getTestWindowsLocalAppData(tempDir);
+  const expectedManifestPath = path.win32.join(localAppData, 'CodexOverleaf', 'native-host-runtime', 'com.codex.overleaf.json');
 
   try {
     const result = spawnSync(process.execPath, [
@@ -179,9 +218,9 @@ test('native install script registers Windows Chrome host with reg.exe add', () 
       cwd: tempDir,
       env: {
         ...process.env,
+        ...registryEnv,
         HOME: tempDir,
-        LOCALAPPDATA: 'C:\\Users\\Alice\\AppData\\Local',
-        PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+        LOCALAPPDATA: localAppData,
         REG_LOG: regLog
       },
       encoding: 'utf8'
@@ -191,7 +230,7 @@ test('native install script registers Windows Chrome host with reg.exe add', () 
     const regArgs = fs.readFileSync(regLog, 'utf8');
     assert.match(regArgs, /^add\n/);
     assert.match(regArgs, /HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com\.codex\.overleaf/);
-    assert.match(regArgs, /\/d\nC:\\Users\\Alice\\AppData\\Local\\CodexOverleaf\\native-host-runtime\\com\.codex\.overleaf\.json/);
+    assert.match(regArgs, new RegExp(`/d\\n${escapeRegExp(expectedManifestPath)}`));
     assert.match(result.stdout, /Registered Native Messaging host registry key:/);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -200,15 +239,11 @@ test('native install script registers Windows Chrome host with reg.exe add', () 
 
 test('native install script uses a .cmd Windows bridge path by default', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-win-cmd-bridge-test-'));
-  const binDir = path.join(tempDir, 'bin');
   const regLog = path.join(tempDir, 'reg.log');
-  fs.mkdirSync(binDir, { recursive: true });
-  fs.writeFileSync(path.join(binDir, 'reg.exe'), [
-    '#!/bin/sh',
-    'printf "%s\\n" "$@" >> "$REG_LOG"',
-    'exit 0'
-  ].join('\n'));
-  fs.chmodSync(path.join(binDir, 'reg.exe'), 0o755);
+  const registryEnv = writeFakeRegistryCommand(tempDir);
+  const localAppData = getTestWindowsLocalAppData(tempDir);
+  const expectedBridgePath = path.win32.join(localAppData, 'CodexOverleaf', 'codex-overleaf-bridge.cmd');
+  const expectedManifestPath = path.win32.join(localAppData, 'CodexOverleaf', 'native-host-runtime', 'com.codex.overleaf.json');
 
   try {
     const result = spawnSync(process.execPath, [
@@ -221,9 +256,9 @@ test('native install script uses a .cmd Windows bridge path by default', () => {
       cwd: tempDir,
       env: {
         ...process.env,
+        ...registryEnv,
         HOME: tempDir,
-        LOCALAPPDATA: 'C:\\Users\\Alice\\AppData\\Local',
-        PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
+        LOCALAPPDATA: localAppData,
         REG_LOG: regLog
       },
       encoding: 'utf8'
@@ -234,14 +269,13 @@ test('native install script uses a .cmd Windows bridge path by default', () => {
       getDefaultBridgePath({
         platform: 'win32',
         env: {
-          LOCALAPPDATA: 'C:\\Users\\Alice\\AppData\\Local'
+          LOCALAPPDATA: localAppData
         }
       }),
-      'C:\\Users\\Alice\\AppData\\Local\\CodexOverleaf\\codex-overleaf-bridge.cmd'
+      expectedBridgePath
     );
-    const manifestPath = 'C:\\Users\\Alice\\AppData\\Local\\CodexOverleaf\\native-host-runtime\\com.codex.overleaf.json';
-    const manifest = JSON.parse(fs.readFileSync(path.join(tempDir, manifestPath), 'utf8'));
-    assert.equal(manifest.path, 'C:\\Users\\Alice\\AppData\\Local\\CodexOverleaf\\codex-overleaf-bridge.cmd');
+    const manifest = JSON.parse(fs.readFileSync(getWindowsSimulationFilePath(tempDir, expectedManifestPath), 'utf8'));
+    assert.equal(manifest.path, expectedBridgePath);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -277,15 +311,8 @@ test('native install script rejects unsafe runtime roots before deleting them', 
 
 test('native uninstall script removes Windows Chrome host with reg.exe delete', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-win-uninstall-test-'));
-  const binDir = path.join(tempDir, 'bin');
   const regLog = path.join(tempDir, 'reg.log');
-  fs.mkdirSync(binDir, { recursive: true });
-  fs.writeFileSync(path.join(binDir, 'reg.exe'), [
-    '#!/bin/sh',
-    'printf "%s\\n" "$@" >> "$REG_LOG"',
-    'exit 0'
-  ].join('\n'));
-  fs.chmodSync(path.join(binDir, 'reg.exe'), 0o755);
+  const registryEnv = writeFakeRegistryCommand(tempDir);
 
   try {
     const result = spawnSync(process.execPath, [
@@ -298,9 +325,9 @@ test('native uninstall script removes Windows Chrome host with reg.exe delete', 
       cwd: tempDir,
       env: {
         ...process.env,
+        ...registryEnv,
         HOME: tempDir,
         LOCALAPPDATA: 'C:\\Users\\Alice\\AppData\\Local',
-        PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
         REG_LOG: regLog
       },
       encoding: 'utf8'
@@ -345,7 +372,11 @@ test('native uninstall script rejects unsafe runtime roots before deleting them'
   }
 });
 
-test('native uninstall script refuses to recursively delete a bridge directory', () => {
+test('native uninstall script refuses to recursively delete a bridge directory', t => {
+  if (process.platform === 'win32') {
+    t.skip('Linux uninstall path behavior is covered on POSIX runners');
+    return;
+  }
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-bridge-dir-guard-test-'));
   const bridgePath = path.join(tempDir, 'bridge-dir');
   const markerPath = path.join(bridgePath, 'marker.txt');
@@ -380,21 +411,16 @@ test('native uninstall script refuses to recursively delete a bridge directory',
 
 test('native uninstall script continues when Windows registry key is already missing', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-win-uninstall-missing-reg-test-'));
-  const binDir = path.join(tempDir, 'bin');
   const regLog = path.join(tempDir, 'reg.log');
   const runtimeRoot = path.join(tempDir, 'runtime');
   const bridgePath = path.join(tempDir, 'codex-overleaf-bridge.cmd');
-  fs.mkdirSync(binDir, { recursive: true });
   fs.mkdirSync(runtimeRoot, { recursive: true });
   fs.writeFileSync(path.join(runtimeRoot, 'marker.txt'), 'remove');
   fs.writeFileSync(bridgePath, '@echo off\r\n');
-  fs.writeFileSync(path.join(binDir, 'reg.exe'), [
-    '#!/bin/sh',
-    'printf "%s\\n" "$@" >> "$REG_LOG"',
-    'printf "ERROR: The system was unable to find the specified registry key or value.\\n" >&2',
-    'exit 1'
-  ].join('\n'));
-  fs.chmodSync(path.join(binDir, 'reg.exe'), 0o755);
+  const registryEnv = writeFakeRegistryCommand(tempDir, {
+    exitCode: 1,
+    stderr: 'ERROR: The system was unable to find the specified registry key or value.\n'
+  });
 
   try {
     const result = spawnSync(process.execPath, [
@@ -411,9 +437,9 @@ test('native uninstall script continues when Windows registry key is already mis
       cwd: tempDir,
       env: {
         ...process.env,
+        ...registryEnv,
         HOME: tempDir,
         LOCALAPPDATA: 'C:\\Users\\Alice\\AppData\\Local',
-        PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
         REG_LOG: regLog
       },
       encoding: 'utf8'
@@ -476,7 +502,11 @@ test('README documents v0.5 cross-platform install, uninstall, release artifacts
   assert.doesNotMatch(readme, /platform-macOS-lightgrey/);
 });
 
-test('one-command installer works on macOS Bash 3.2 when extension id is unset', () => {
+test('one-command installer works on macOS Bash 3.2 when extension id is unset', t => {
+  if (process.platform === 'win32') {
+    t.skip('macOS shell installer behavior is covered on POSIX runners');
+    return;
+  }
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-install-test-'));
   const binDir = path.join(tempDir, 'bin');
   const installDir = path.join(tempDir, 'source');

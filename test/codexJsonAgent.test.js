@@ -7,9 +7,7 @@ const test = require('node:test');
 
 test('codex-json-agent removes its temporary project workspace after a run', async () => {
   const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-fake-bin-'));
-  const fakeCodexPath = path.join(binDir, 'codex');
-  fs.writeFileSync(fakeCodexPath, [
-    '#!/usr/bin/env node',
+  const fakeCodexPath = writeFakeCodex(binDir, [
     'const fs = require("node:fs");',
     'const outputIndex = process.argv.indexOf("--output-last-message");',
     'const outputPath = process.argv[outputIndex + 1];',
@@ -18,12 +16,12 @@ test('codex-json-agent removes its temporary project workspace after a run', asy
     '  fs.writeFileSync(outputPath, JSON.stringify({ status: "completed", notes: "ok", operations: [] }));',
     '});',
     ''
-  ].join('\n'), { mode: 0o755 });
+  ]);
 
   let tempDir = '';
   try {
     const result = await runAgent({
-      PATH: `${binDir}${path.delimiter}${process.env.PATH || ''}`
+      CODEX_OVERLEAF_CODEX_PATH: fakeCodexPath
     });
     tempDir = extractTempDir(result.stderr);
 
@@ -40,9 +38,7 @@ test('codex-json-agent removes its temporary project workspace after a run', asy
 
 test('codex-json-agent forwards Codex JSONL agent messages and commands as realtime events', async () => {
   const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-fake-bin-'));
-  const fakeCodexPath = path.join(binDir, 'codex');
-  fs.writeFileSync(fakeCodexPath, [
-    '#!/usr/bin/env node',
+  const fakeCodexPath = writeFakeCodex(binDir, [
     'const fs = require("node:fs");',
     'const outputIndex = process.argv.indexOf("--output-last-message");',
     'const outputPath = process.argv[outputIndex + 1];',
@@ -55,11 +51,11 @@ test('codex-json-agent forwards Codex JSONL agent messages and commands as realt
     '  fs.writeFileSync(outputPath, JSON.stringify({ status: "completed", notes: "ok", operations: [] }));',
     '});',
     ''
-  ].join('\n'), { mode: 0o755 });
+  ]);
 
   try {
     const result = await runAgent({
-      PATH: `${binDir}${path.delimiter}${process.env.PATH || ''}`
+      CODEX_OVERLEAF_CODEX_PATH: fakeCodexPath
     });
     const events = extractEvents(result.stderr);
 
@@ -106,6 +102,27 @@ function runAgent(envPatch) {
       }
     }));
   });
+}
+
+function writeFakeCodex(binDir, lines) {
+  const scriptPath = path.join(binDir, 'fake-codex.js');
+  fs.writeFileSync(scriptPath, lines.join('\n'), 'utf8');
+  if (process.platform === 'win32') {
+    const commandPath = path.join(binDir, 'codex.cmd');
+    fs.writeFileSync(commandPath, [
+      '@echo off',
+      `"${process.execPath}" "${scriptPath}" %*`,
+      ''
+    ].join('\r\n'), 'utf8');
+    return commandPath;
+  }
+
+  const commandPath = path.join(binDir, 'codex');
+  fs.writeFileSync(commandPath, [
+    '#!/usr/bin/env node',
+    ...lines
+  ].join('\n'), { mode: 0o755 });
+  return commandPath;
 }
 
 function extractTempDir(stderr) {

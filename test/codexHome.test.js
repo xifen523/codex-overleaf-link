@@ -73,6 +73,11 @@ test('plugin Codex home and copied auth use restrictive permissions', () => {
     fs.writeFileSync(path.join(userCodexHome, 'auth.json'), '{"token":"user-token"}\n', 'utf8');
 
     const prepared = preparePluginCodexHome({ HOME: home });
+    if (process.platform === 'win32') {
+      assert.equal(fs.existsSync(prepared.pluginHome), true);
+      assert.equal(fs.existsSync(path.join(prepared.pluginHome, 'auth.json')), true);
+      return;
+    }
     const pluginHomeMode = fs.statSync(prepared.pluginHome).mode & 0o777;
     const authMode = fs.statSync(path.join(prepared.pluginHome, 'auth.json')).mode & 0o777;
 
@@ -96,7 +101,7 @@ test('plugin Codex home reuses local Codex skills and plugin config without link
     const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
 
     assert.equal(fs.lstatSync(path.join(pluginHome, 'skills')).isSymbolicLink(), true);
-    assert.equal(fs.readlinkSync(path.join(pluginHome, 'skills')), path.join(userCodexHome, 'skills'));
+    assert.equal(normalizeLinkTarget(fs.readlinkSync(path.join(pluginHome, 'skills'))), path.join(userCodexHome, 'skills'));
     assert.equal(fs.lstatSync(path.join(pluginHome, 'plugins')).isSymbolicLink(), true);
     assert.equal(fs.lstatSync(path.join(pluginHome, 'rules')).isSymbolicLink(), true);
     assert.equal(fs.existsSync(path.join(pluginHome, 'sessions')), false);
@@ -104,6 +109,10 @@ test('plugin Codex home reuses local Codex skills and plugin config without link
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+function normalizeLinkTarget(target) {
+  return String(target).replace(/[\\/]+$/, '');
+}
 
 test('plugin Codex home reports skipped links while preserving copied auth/config', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-link-failure-'));

@@ -120,12 +120,14 @@ function shouldUseLoginFlag(shell) {
 }
 
 function getDefaultPathSegments(env = process.env, options = {}) {
+  const platform = getNativeRuntimePlatform(options);
+  const platformPath = platform === 'win32' ? path.win32 : path.posix;
   const home = env.HOME || os.homedir();
   const commonSegments = [
     path.dirname(process.execPath),
-    path.join(home, '.local/bin'),
-    path.join(home, '.npm-global/bin'),
-    path.join(home, 'bin'),
+    platformPath.join(home, '.local/bin'),
+    platformPath.join(home, '.npm-global/bin'),
+    platformPath.join(home, 'bin'),
     '/usr/local/bin',
     '/usr/local/sbin',
     '/usr/bin',
@@ -133,8 +135,6 @@ function getDefaultPathSegments(env = process.env, options = {}) {
     '/usr/sbin',
     '/sbin'
   ];
-  const platform = getNativeRuntimePlatform(options);
-
   if (platform === 'linux') {
     return [
       ...commonSegments.slice(0, 4),
@@ -233,7 +233,7 @@ function getPathDelimiter(options = {}) {
   if (options.delimiter) {
     return options.delimiter;
   }
-  return getNativeRuntimePlatform(options) === 'win32' ? ';' : path.delimiter;
+  return getNativeRuntimePlatform(options) === 'win32' ? ';' : ':';
 }
 
 function getPathValues(env, options = {}) {

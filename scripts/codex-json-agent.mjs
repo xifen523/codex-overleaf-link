@@ -91,7 +91,8 @@ function writeSnapshotFiles(root, files) {
 
 function runCodexExec({ cwd, prompt, schemaPath, outputPath, model, reasoningEffort, speedTier }) {
   return new Promise((resolve, reject) => {
-    const child = spawn('codex', buildCodexExecArgs({
+    const codexCommand = process.env.CODEX_OVERLEAF_CODEX_PATH || 'codex';
+    const child = spawn(codexCommand, buildCodexExecArgs({
       cwd,
       schemaPath,
       outputPath,
@@ -99,6 +100,7 @@ function runCodexExec({ cwd, prompt, schemaPath, outputPath, model, reasoningEff
       reasoningEffort,
       speedTier
     }), {
+      shell: shouldUseShellForCommand(codexCommand),
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
@@ -150,6 +152,14 @@ function runCodexExec({ cwd, prompt, schemaPath, outputPath, model, reasoningEff
     });
     child.stdin.end(prompt);
   });
+}
+
+function shouldUseShellForCommand(command) {
+  if (process.platform !== 'win32') {
+    return false;
+  }
+  const text = String(command || '');
+  return text === 'codex' || /\.(?:cmd|bat)$/i.test(text);
 }
 
 function parseCodexJsonLines(text) {

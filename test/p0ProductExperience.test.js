@@ -30,7 +30,7 @@ test('composer defaults to English task modes and keeps Chinese translations ava
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
-  );
+  ).replace(/\r\n/g, '\n');
 
   const i18n = fs.readFileSync(
     path.join(__dirname, '../extension/src/shared/i18n.js'),
@@ -294,7 +294,7 @@ test('no-change writeback path does not wait for Overleaf save verification', ()
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
-  );
+  ).replace(/\r\n/g, '\n');
   const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
   const noChangeBlock = applyBody.match(/if \(!operations\.length\) \{[\s\S]*?return \{[\s\S]*?\n      \};\n    \}/)?.[0] || '';
 
