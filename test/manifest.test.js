@@ -211,3 +211,13 @@ test('content script loads OT warm mirror controller after lower-level helpers a
   }
   assert.ok(controllerIndex < scripts.indexOf('src/contentScript.js'));
 });
+
+test('content script loads review hunks helper after writeback and before run and panel scripts', () => {
+  const scripts = extensionManifest.content_scripts[0].js;
+  const reviewHunksIndex = scripts.indexOf('src/content/reviewHunks.js');
+
+  assert.ok(reviewHunksIndex > -1);
+  assert.ok(scripts.indexOf('src/content/writebackController.js') < reviewHunksIndex);
+  assert.ok(reviewHunksIndex < scripts.indexOf('src/content/runController.js'));
+  assert.ok(reviewHunksIndex < scripts.indexOf('src/contentScript.js'));
+});

@@ -45,6 +45,7 @@
         "src/shared/compatibility.js",
         "src/content/nativeChannel.js",
         "src/content/writebackController.js",
+        "src/content/reviewHunks.js",
         "src/content/runController.js",
         "src/content/mirrorHealth.js",
         "src/content/otWarmMirrorController.js",
