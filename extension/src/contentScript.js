@@ -2349,6 +2349,24 @@
       actions.replaceChildren(status);
     }
 
+    function setHunkCollapsed(view, collapsed) {
+      if (view?.hunkEl) {
+        view.hunkEl.dataset.collapsed = collapsed ? 'true' : 'false';
+      }
+    }
+
+    function setHunkDecisionView(hunk, accepted, options = {}) {
+      const hunkView = hunkViews.get(hunk.decisionKey);
+      if (!hunkView) {
+        return;
+      }
+      hunkView.hunkEl.dataset.decision = accepted ? 'accepted' : 'rejected';
+      setHunkDecisionStatus(hunkView.actions, accepted);
+      if (options.collapse) {
+        setHunkCollapsed(hunkView, true);
+      }
+    }
+
     function setHunkJumpStatus(view, status, message = '') {
       if (!view) {
         return;
@@ -2406,6 +2424,31 @@
         focusHunkByIndex(0);
       }
       return hunkViews.get(focusedHunkKey)?.reviewHunk || null;
+    }
+
+    function focusNextPendingHunkAfter(decisionKey) {
+      const hunks = getFocusableHunks();
+      if (!hunks.length) {
+        return false;
+      }
+      const startIndex = hunks.findIndex(view => view.reviewHunk.decisionKey === decisionKey);
+      for (let offset = 1; offset <= hunks.length; offset += 1) {
+        const index = (Math.max(0, startIndex) + offset) % hunks.length;
+        const view = hunks[index];
+        if (hunkStates.get(view.reviewHunk.decisionKey) === null) {
+          const focused = focusHunkByIndex(index);
+          view.hunkEl.scrollIntoView?.({ block: 'nearest' });
+          return focused;
+        }
+      }
+      if (focusedHunkKey) {
+        const previous = hunkViews.get(focusedHunkKey);
+        if (previous) {
+          setHunkFocused(previous.hunkEl, false);
+        }
+        focusedHunkKey = null;
+      }
+      return false;
     }
 
     function getHunkJumpRange(reviewHunk) {
@@ -2532,17 +2575,56 @@
         return;
       }
       hunkStates.set(hunk.decisionKey, accepted);
-      const hunkView = hunkViews.get(hunk.decisionKey);
-      if (hunkView) {
-        hunkView.hunkEl.dataset.decision = accepted ? 'accepted' : 'rejected';
-        setHunkDecisionStatus(hunkView.actions, accepted);
-      }
+      setHunkDecisionView(hunk, accepted, { collapse: true });
+      focusNextPendingHunkAfter(hunk.decisionKey);
       const fileView = fileViews.get(hunk.path);
       const fileModel = reviewModel.files.find(file => file.path === hunk.path);
       if (fileView && fileModel) {
         updateReviewableFileDecision(fileView, fileModel);
       }
       notifyDecisionChanged();
+    }
+
+    function decidePendingChanges(accepted) {
+      if (readonly) {
+        return false;
+      }
+      let changed = false;
+      for (const [path, value] of fileStates.entries()) {
+        if (value !== null) {
+          continue;
+        }
+        fileStates.set(path, accepted);
+        const view = fileViews.get(path);
+        if (view) {
+          view.card.dataset.accepted = accepted ? 'true' : 'false';
+          view.card.dataset.decision = accepted ? 'accepted' : 'rejected';
+          setDecisionStatus(view.actions, accepted);
+        }
+        changed = true;
+      }
+      for (const fileModel of reviewModel.files) {
+        if (!fileModel.reviewable) {
+          continue;
+        }
+        for (const hunk of fileModel.hunks) {
+          if (hunkStates.get(hunk.decisionKey) !== null) {
+            continue;
+          }
+          hunkStates.set(hunk.decisionKey, accepted);
+          setHunkDecisionView(hunk, accepted, { collapse: true });
+          changed = true;
+        }
+        const fileView = fileViews.get(fileModel.path);
+        if (fileView) {
+          updateReviewableFileDecision(fileView, fileModel);
+        }
+      }
+      focusNextPendingHunkAfter(focusedHunkKey);
+      if (changed) {
+        notifyDecisionChanged();
+      }
+      return changed;
     }
 
     function decideFileChange(path, accepted) {
@@ -2557,11 +2639,7 @@
       if (fileModel?.reviewable) {
         for (const hunk of fileModel.hunks) {
           hunkStates.set(hunk.decisionKey, accepted);
-          const hunkView = hunkViews.get(hunk.decisionKey);
-          if (hunkView) {
-            hunkView.hunkEl.dataset.decision = accepted ? 'accepted' : 'rejected';
-            setHunkDecisionStatus(hunkView.actions, accepted);
-          }
+          setHunkDecisionView(hunk, accepted, { collapse: true });
         }
         updateReviewableFileDecision(view, fileModel);
         notifyDecisionChanged();
@@ -2685,6 +2763,9 @@
       if (reviewHunk) {
         const hunkDecision = hunkStates.get(reviewHunk.decisionKey);
         hunkEl.dataset.decision = readonly ? 'accepted' : (hunkDecision === true ? 'accepted' : hunkDecision === false ? 'rejected' : 'pending');
+        if (!readonly && (hunkDecision === true || hunkDecision === false)) {
+          hunkEl.dataset.collapsed = 'true';
+        }
         setHunkFocused(hunkEl, focusedHunkKey === reviewHunk.decisionKey);
         const hunkActions = document.createElement('div');
         hunkActions.className = 'codex-diff-hunk-actions';
@@ -2817,6 +2898,7 @@
       container,
       fileStates,
       decideFileChange,
+      decidePendingChanges,
       getPendingCount,
       getDecisions,
       getAcceptedChanges,
@@ -2869,10 +2951,12 @@
       }
 
       acceptAllBtn.addEventListener('click', () => {
-        finish(syncChanges);
+        review.decidePendingChanges(true);
+        finishIfAllDecided();
       });
       rejectAllBtn.addEventListener('click', () => {
-        finish([]);
+        review.decidePendingChanges(false);
+        finishIfAllDecided();
       });
       review.onDecision(finishIfAllDecided);
 

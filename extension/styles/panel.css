@@ -1645,6 +1645,10 @@
   background: rgba(79, 156, 255, 0.08);
 }
 
+#codex-overleaf-panel .codex-diff-hunk[data-collapsed="true"] .codex-diff-hunk-lines {
+  display: none;
+}
+
 #codex-overleaf-panel .codex-diff-hunk:first-child {
   border-top: 0;
 }

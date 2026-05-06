@@ -1357,6 +1357,10 @@ test('confirm diff review uses immediate per-file decisions and batch accept rej
   assert.match(createDiffBody, /status\.textContent = accepted \? tr\('diffAccepted'\) : tr\('diffRejected'\)/);
   assert.match(renderDiffBody, /acceptAllBtn\.textContent = tr\('diffAcceptAll'\)/);
   assert.match(renderDiffBody, /rejectAllBtn\.textContent = tr\('diffRejectAll'\)/);
+  assert.match(renderDiffBody, /review\.decidePendingChanges\(true\)/);
+  assert.match(renderDiffBody, /review\.decidePendingChanges\(false\)/);
+  assert.doesNotMatch(renderDiffBody, /finish\(syncChanges\)/);
+  assert.doesNotMatch(renderDiffBody, /finish\(\[\]\)/);
   assert.doesNotMatch(renderDiffBody, /应用选中/);
   assert.match(renderDiffBody, /finishIfAllDecided/);
   assert.match(css, /\.codex-diff-file\[data-decision="accepted"\]/);
@@ -1434,6 +1438,67 @@ test('hunk review buttons return only the accepted patch subset', () => {
       ...syncChanges[0],
       patches: [syncChanges[0].patches[0]]
     }
+  ]);
+});
+
+test('hunk decision collapses the decided hunk and advances focus to the next pending hunk', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const syncChanges = [
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches: [
+        { from: 0, to: 5, expected: 'alpha', insert: 'ALPHA' },
+        { from: 6, to: 10, expected: 'beta', insert: 'BETA' }
+      ],
+      diff: [
+        { lines: [{ type: 'remove', text: 'alpha' }, { type: 'add', text: 'ALPHA' }] },
+        { lines: [{ type: 'remove', text: 'beta' }, { type: 'add', text: 'BETA' }] }
+      ]
+    }
+  ];
+
+  const review = createDiffReviewElement(syncChanges);
+  review.container.querySelector('[data-diff-hunk-accept]').click();
+  const hunks = review.container.querySelectorAll('[data-diff-review-hunk]');
+
+  assert.equal(hunks[0].dataset.collapsed, 'true');
+  assert.equal(hunks[0].dataset.focused, 'false');
+  assert.equal(hunks[1].dataset.focused, 'true');
+});
+
+test('bulk hunk decisions preserve already decided hunks and fill only pending hunks', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const syncChanges = [
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches: [
+        { from: 0, to: 5, expected: 'alpha', insert: 'ALPHA' },
+        { from: 6, to: 10, expected: 'beta', insert: 'BETA' },
+        { from: 11, to: 16, expected: 'gamma', insert: 'GAMMA' }
+      ],
+      diff: [
+        { lines: [{ type: 'remove', text: 'alpha' }, { type: 'add', text: 'ALPHA' }] },
+        { lines: [{ type: 'remove', text: 'beta' }, { type: 'add', text: 'BETA' }] },
+        { lines: [{ type: 'remove', text: 'gamma' }, { type: 'add', text: 'GAMMA' }] }
+      ]
+    }
+  ];
+
+  const acceptRest = createDiffReviewElement(syncChanges);
+  acceptRest.container.querySelector('[data-diff-hunk-reject]').click();
+  acceptRest.decidePendingChanges(true);
+  assert.deepEqual(acceptRest.getAcceptedChanges()[0]?.patches, [
+    syncChanges[0].patches[1],
+    syncChanges[0].patches[2]
+  ]);
+
+  const rejectRest = createDiffReviewElement(syncChanges);
+  rejectRest.container.querySelector('[data-diff-hunk-accept]').click();
+  rejectRest.decidePendingChanges(false);
+  assert.deepEqual(rejectRest.getAcceptedChanges()[0]?.patches, [
+    syncChanges[0].patches[0]
   ]);
 });
 
