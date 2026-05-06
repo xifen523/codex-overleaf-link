@@ -327,6 +327,55 @@ test('page bridge applies edit patches as local CodeMirror changes', async () =>
   ]);
 });
 
+test('page bridge jumpToPosition opens target file and records CodeMirror selection', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'main file content',
+      'refs.bib': '@book{key,\n  title = {Old}\n}'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'refs.bib',
+    from: 7,
+    to: 10
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'codemirror-view-selection');
+  assert.equal(result.path, 'refs.bib');
+  assert.equal(result.from, 7);
+  assert.equal(result.to, 10);
+  assert.equal(bridge.getFile('main.tex'), 'main file content');
+  assert.equal(bridge.getFile('refs.bib'), '@book{key,\n  title = {Old}\n}');
+  assert.deepEqual(bridge.getLastSelection(), { anchor: 7, head: 10 });
+  assert.equal(bridge.getLastDispatchChanges(), null);
+});
+
+test('page bridge jumpToPosition rejects out-of-range offsets without modifying content', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'alpha'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'main.tex',
+    from: 0,
+    to: 99
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'range_out_of_bounds');
+  assert.match(result.reason, /out of range/i);
+  assert.equal(result.path, 'main.tex');
+  assert.equal(bridge.getFile('main.tex'), 'alpha');
+  assert.equal(bridge.getDispatchCount(), 0);
+  assert.equal(bridge.getLastSelection(), null);
+});
+
 test('page bridge waits for editor document after opening target file before stale guarding patches', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -1514,6 +1563,7 @@ function createPageBridgeHarness({
   let listener = null;
   let pendingResult = null;
   let lastDispatchChanges = null;
+  let lastSelection = null;
   let dispatchCount = 0;
   let reviewingActive = reviewingOk;
   let reviewingClickCount = 0;
@@ -1668,7 +1718,10 @@ function createPageBridgeHarness({
       fileMap.set(filePath, content);
     },
     getLastDispatchChanges() {
-      return JSON.parse(JSON.stringify(lastDispatchChanges));
+      return lastDispatchChanges == null ? null : JSON.parse(JSON.stringify(lastDispatchChanges));
+    },
+    getLastSelection() {
+      return lastSelection == null ? null : JSON.parse(JSON.stringify(lastSelection));
     },
     getDispatchCount() {
       return dispatchCount;
@@ -1707,10 +1760,17 @@ function createPageBridgeHarness({
     };
     return {
       state: { doc },
+      focus() {},
       dispatch(transaction) {
         dispatchCount += 1;
         lastDispatchChanges = transaction.changes;
+        if (transaction.selection) {
+          lastSelection = transaction.selection;
+        }
         if (dispatchApplies) {
+          if (!transaction.changes) {
+            return;
+          }
           const before = fileMap.get(editorPath) || '';
           fileMap.set(editorPath, applyEditorChanges(fileMap.get(editorPath) || '', transaction.changes));
           if (reviewingActive && trackChangesOnDispatch) {

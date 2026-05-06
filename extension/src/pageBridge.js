@@ -114,6 +114,9 @@
         requireEditing: params.requireEditing === true
       });
     }
+    if (method === 'jumpToPosition') {
+      return jumpToPosition(params);
+    }
     if (method === 'rejectTrackedChanges') {
       return rejectTrackedChanges(params);
     }
@@ -330,6 +333,63 @@
         ? 'Codex clicked the Overleaf mode control, but Overleaf still did not clearly report Editing mode.'
         : 'Overleaf Editing mode was not clearly confirmed, and Codex could not find a mode control to switch to Editing.',
       reviewing: switched.reviewing || initial.reviewing
+    };
+  }
+
+  async function jumpToPosition(params = {}) {
+    const filePath = window.CodexOverleafProjectFiles.normalizePath(params.path);
+    if (!filePath) {
+      return {
+        ok: false,
+        code: 'invalid_path',
+        reason: 'jumpToPosition requires a non-empty file path'
+      };
+    }
+    if (!projectPathExists(filePath)) {
+      return {
+        ok: false,
+        code: 'path_not_found',
+        reason: `Could not find ${filePath} in the Overleaf project`,
+        path: filePath
+      };
+    }
+
+    if (getActiveFilePath() !== filePath) {
+      const opened = await openFileByPath(filePath);
+      if (!opened.ok) {
+        return {
+          ok: false,
+          code: 'file_open_failed',
+          reason: opened.reason || `Could not open ${filePath}`,
+          path: filePath
+        };
+      }
+    }
+
+    const ready = await waitForActiveEditorText(filePath, 7000);
+    if (!ready.ok) {
+      return {
+        ok: false,
+        code: 'editor_not_ready',
+        reason: ready.reason || `Editor content was not ready for ${filePath}`,
+        path: filePath
+      };
+    }
+
+    const focused = editorAdapter.focusActiveEditorRange(params.from, params.to);
+    if (!focused.ok) {
+      return {
+        ...focused,
+        path: filePath
+      };
+    }
+
+    return {
+      ok: true,
+      method: focused.method,
+      path: filePath,
+      from: params.from,
+      to: params.to
     };
   }
 
