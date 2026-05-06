@@ -27,7 +27,7 @@ test('debug log path uses USERPROFILE fallback when HOME is absent', () => {
   try {
     assert.equal(
       getDebugLogPath({ platform: 'darwin', env: { USERPROFILE: userProfile } }),
-      path.join(userProfile, '.codex-overleaf', 'native-host.log')
+      path.posix.join(userProfile, '.codex-overleaf', 'native-host.log')
     );
   } finally {
     fs.rmSync(userProfile, { recursive: true, force: true });

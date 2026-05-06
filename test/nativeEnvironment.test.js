@@ -48,9 +48,10 @@ test('native runtime env falls back to standard macOS developer paths without us
     readLoginShellEnv: () => null
   });
 
-  assert.equal(env.PATH.split(path.delimiter).includes('/Library/TeX/texbin'), true);
-  assert.equal(env.PATH.split(path.delimiter).includes('/opt/homebrew/bin'), true);
-  assert.equal(env.PATH.split(path.delimiter).includes('/Users/example/.local/bin'), true);
+  const segments = env.PATH.split(':');
+  assert.equal(segments.includes('/Library/TeX/texbin'), true);
+  assert.equal(segments.includes('/opt/homebrew/bin'), true);
+  assert.equal(segments.includes('/Users/example/.local/bin'), true);
 });
 
 test('native runtime env merges Windows Path and PATH while resolving PATHEXT executables', () => {
