@@ -17,6 +17,10 @@ Distribution and update foundation release. This version keeps the v0.3 sync and
 - Documented the v0.4.0 version-pinned installer command as the canonical update and native mismatch recovery path.
 - Improved installer output with source ref, checked-out package version, extension path, native host paths, and reload/refresh next steps.
 
+### Fixed
+
+- Browser writeback now waits for the target file's editor document to finish loading after file-tree navigation before running stale guards or applying patches, preventing false stale conflicts during multi-file writes.
+
 ### Notes
 
 - Actual Chrome Web Store submission is outside v0.4.
