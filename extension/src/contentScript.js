@@ -2620,6 +2620,37 @@
       return lineEl;
     }
 
+    function createPatchDiffLines(patch = {}) {
+      const lines = [];
+      appendPatchDiffText(lines, 'remove', patch.expected);
+      appendPatchDiffText(lines, 'add', patch.insert);
+      return lines;
+    }
+
+    function appendPatchDiffText(lines, type, text) {
+      const value = String(text ?? '');
+      if (!value) {
+        return;
+      }
+      for (const line of value.split('\n')) {
+        lines.push({ type, text: line });
+      }
+    }
+
+    function getReviewDisplayHunk(change, diffHunks, fileModel, hunkIndex) {
+      const diffHunk = diffHunks[hunkIndex] || { lines: [] };
+      if (!fileModel?.reviewable) {
+        return diffHunk;
+      }
+      if (diffHunks.length === fileModel.hunks.length && Array.isArray(diffHunk.lines) && diffHunk.lines.length) {
+        return diffHunk;
+      }
+      const patchIndex = fileModel.hunks[hunkIndex]?.patchIndexes?.[0] ?? hunkIndex;
+      const patch = Array.isArray(change.patches) ? change.patches[patchIndex] : null;
+      const patchLines = createPatchDiffLines(patch);
+      return patchLines.length ? { ...diffHunk, lines: patchLines } : diffHunk;
+    }
+
     function appendHunkLines(hunkEl, lines = []) {
       const lineWrap = document.createElement('div');
       lineWrap.className = 'codex-diff-hunk-lines';
@@ -2755,8 +2786,8 @@
         function renderHunks(visibleCount) {
           const children = [];
           for (let hunkIndex = 0; hunkIndex < visibleCount; hunkIndex += 1) {
-            const hunk = diffHunks[hunkIndex] || { lines: [] };
             const reviewHunk = fileModel?.reviewable ? fileModel.hunks[hunkIndex] : null;
+            const hunk = getReviewDisplayHunk(change, diffHunks, fileModel, hunkIndex);
             children.push(createDiffHunkElement(hunk, reviewHunk, fileModel, hunkIndex));
           }
           if (visibleCount < hunkCount) {

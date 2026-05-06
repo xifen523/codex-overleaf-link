@@ -1437,6 +1437,39 @@ test('hunk review buttons return only the accepted patch subset', () => {
   ]);
 });
 
+test('hunk review renders patch text when display diff has fewer hunks than patches', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const syncChanges = [
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches: [
+        { from: 0, to: 5, expected: 'alpha', insert: 'ALPHA' },
+        { from: 20, to: 24, expected: 'beta', insert: 'BETA' },
+        { from: 40, to: 45, expected: 'gamma', insert: 'GAMMA' }
+      ],
+      diff: [
+        { lines: [{ type: 'remove', text: 'alpha' }, { type: 'add', text: 'ALPHA' }] }
+      ]
+    }
+  ];
+
+  const review = createDiffReviewElement(syncChanges);
+  const lineTexts = review.container
+    .querySelectorAll('[data-diff-line]')
+    .map(line => line.textContent);
+
+  assert.equal(review.container.querySelectorAll('[data-diff-review-hunk]').length, 3);
+  assert.deepEqual(lineTexts, [
+    'alpha',
+    'ALPHA',
+    'beta',
+    'BETA',
+    'gamma',
+    'GAMMA'
+  ]);
+});
+
 test('hunk jump button calls page bridge with path and offset metadata', () => {
   const createDiffReviewElement = loadCreateDiffReviewElementForTest();
   const syncChanges = [
