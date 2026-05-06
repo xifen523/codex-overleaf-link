@@ -2344,8 +2344,24 @@
     function setHunkDecisionStatus(actions, accepted) {
       const status = document.createElement('span');
       status.className = 'codex-diff-hunk-status';
+      status.setAttribute('data-diff-hunk-status', '');
       status.textContent = accepted ? tr('diffHunkAccepted') : tr('diffHunkRejected');
       actions.replaceChildren(status);
+    }
+
+    function setHunkJumpStatus(view, status, message = '') {
+      if (!view) {
+        return;
+      }
+      view.hunkEl.dataset.jumpStatus = status;
+      let statusEl = view.hunkEl.querySelector?.('[data-diff-hunk-jump-status]');
+      if (!statusEl) {
+        statusEl = document.createElement('span');
+        statusEl.className = 'codex-diff-hunk-jump-status';
+        statusEl.setAttribute('data-diff-hunk-jump-status', '');
+        view.actions.append(statusEl);
+      }
+      statusEl.textContent = message;
     }
 
     function setHunkFocused(hunkEl, focused) {
@@ -2408,30 +2424,38 @@
       }
       const { path, from, to } = getHunkJumpRange(reviewHunk);
       const view = hunkViews.get(reviewHunk.decisionKey);
-      if (view) {
-        view.hunkEl.dataset.jumpStatus = 'pending';
-      }
+      setHunkJumpStatus(view, 'pending', '');
       try {
         const result = await callPageBridge('jumpToPosition', { path, from, to });
-        if (view) {
-          view.hunkEl.dataset.jumpStatus = result?.ok === false ? 'failed' : 'done';
+        if (result?.ok === false) {
+          setHunkJumpStatus(view, 'failed', result.reason || tr('diffHunkJumpFailed'));
+        } else {
+          setHunkJumpStatus(view, 'done', '');
         }
       } catch (error) {
-        if (view) {
-          view.hunkEl.dataset.jumpStatus = 'failed';
-        }
+        setHunkJumpStatus(view, 'failed', error?.message || tr('diffHunkJumpFailed'));
       }
     }
 
     function isDiffReviewEditableTarget(target) {
       const tagName = String(target?.tagName || '').toUpperCase();
-      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') {
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' ||
+          tagName === 'BUTTON' || tagName === 'SUMMARY') {
+        return true;
+      }
+      if (tagName === 'A' && target?.getAttribute?.('href')) {
+        return true;
+      }
+      const role = String(target?.getAttribute?.('role') || '').toLowerCase();
+      if (['button', 'link', 'menuitem', 'checkbox', 'radio', 'switch', 'tab'].includes(role)) {
         return true;
       }
       if (target?.isContentEditable || target?.getAttribute?.('contenteditable') === 'true') {
         return true;
       }
-      return Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
+      return Boolean(target?.closest?.(
+        'input, textarea, select, button, summary, a[href], [contenteditable="true"], [role="button"], [role="link"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"]'
+      ));
     }
 
     function handleDiffReviewKeydown(event) {
@@ -2628,12 +2652,13 @@
       hunkEl.setAttribute('data-diff-review-hunk', '');
       hunkEl.dataset.hunkIndex = String(hunkIndex);
       if (reviewHunk) {
-        hunkEl.dataset.decision = readonly ? 'accepted' : (hunkStates.get(reviewHunk.decisionKey) === true ? 'accepted' : hunkStates.get(reviewHunk.decisionKey) === false ? 'rejected' : 'pending');
+        const hunkDecision = hunkStates.get(reviewHunk.decisionKey);
+        hunkEl.dataset.decision = readonly ? 'accepted' : (hunkDecision === true ? 'accepted' : hunkDecision === false ? 'rejected' : 'pending');
         setHunkFocused(hunkEl, focusedHunkKey === reviewHunk.decisionKey);
         const hunkActions = document.createElement('div');
         hunkActions.className = 'codex-diff-hunk-actions';
-        if (readonly) {
-          setHunkDecisionStatus(hunkActions, true);
+        if (readonly || hunkDecision === true || hunkDecision === false) {
+          setHunkDecisionStatus(hunkActions, readonly ? true : hunkDecision);
         } else {
           const acceptHunkBtn = document.createElement('button');
           acceptHunkBtn.type = 'button';

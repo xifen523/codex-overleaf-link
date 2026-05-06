@@ -1677,9 +1677,14 @@
 }
 
 #codex-overleaf-panel .codex-diff-hunk-status,
+#codex-overleaf-panel .codex-diff-hunk-jump-status,
 #codex-overleaf-panel .codex-diff-fallback-label {
   color: #858585;
   font-size: 11px;
+}
+
+#codex-overleaf-panel .codex-diff-hunk[data-jump-status="failed"] .codex-diff-hunk-jump-status {
+  color: #f48771;
 }
 
 #codex-overleaf-panel .codex-diff-hunk[data-decision="accepted"] .codex-diff-hunk-status {

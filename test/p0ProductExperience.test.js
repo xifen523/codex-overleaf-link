@@ -61,6 +61,10 @@ function createMinimalDocument() {
       this.attributes[name] = String(value);
     }
 
+    getAttribute(name) {
+      return this.attributes[name];
+    }
+
     addEventListener(type, listener) {
       this.listeners[type] = this.listeners[type] || [];
       this.listeners[type].push(listener);
@@ -83,9 +87,11 @@ function createMinimalDocument() {
     }
 
     click() {
+      const results = [];
       for (const listener of this.listeners.click || []) {
-        listener({ currentTarget: this });
+        results.push(listener({ currentTarget: this, target: this }));
       }
+      return Promise.all(results);
     }
 
     querySelector(selector) {
@@ -118,7 +124,7 @@ function createMinimalDocument() {
   };
 }
 
-function loadCreateDiffReviewElementForTest() {
+function loadCreateDiffReviewElementForTest(options = {}) {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -136,7 +142,7 @@ function loadCreateDiffReviewElementForTest() {
     window: { CodexOverleafReviewHunks: ReviewHunks },
     callPageBridge(method, params) {
       pageBridgeCalls.push({ method, params });
-      return Promise.resolve({ ok: true });
+      return Promise.resolve(options.pageBridgeResult || { ok: true });
     },
     tr(key) {
       return key;
@@ -1522,6 +1528,90 @@ test('large diff review applies initial hunk budget globally across files', () =
 
   review.container.querySelector('[data-diff-show-more-hunks]').click();
   assert.equal(review.container.querySelectorAll('[data-diff-review-hunk]').length, 24);
+});
+
+test('large diff review preserves decided hunk status after show more rerender', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const patches = Array.from({ length: 22 }, (_, index) => ({
+    from: index * 10,
+    to: index * 10 + 1,
+    expected: `old-${index}`,
+    insert: `new-${index}`
+  }));
+  const review = createDiffReviewElement([
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches,
+      diff: patches.map(patch => ({
+        lines: [{ type: 'add', text: patch.insert }]
+      }))
+    }
+  ]);
+
+  review.container.querySelector('[data-diff-hunk-accept]').click();
+  review.container.querySelector('[data-diff-show-more-hunks]').click();
+
+  assert.equal(review.container.querySelectorAll('[data-diff-hunk-status]').length, 1);
+  assert.equal(review.container.querySelectorAll('[data-diff-hunk-accept]').length, 21);
+  assert.equal(review.container.querySelectorAll('[data-diff-hunk-reject]').length, 21);
+  assert.equal(review.container.querySelectorAll('[data-diff-hunk-jump]').length, 21);
+});
+
+test('diff review shortcuts ignore focused hunk action buttons', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const review = createDiffReviewElement([
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches: [
+        { from: 0, to: 5, expected: 'alpha', insert: 'ALPHA' }
+      ],
+      diff: [
+        { lines: [{ type: 'remove', text: 'alpha' }, { type: 'add', text: 'ALPHA' }] }
+      ]
+    }
+  ]);
+  const jumpButton = review.container.querySelector('[data-diff-hunk-jump]');
+  const event = {
+    type: 'keydown',
+    key: 'Enter',
+    target: jumpButton,
+    defaultPrevented: false,
+    preventDefault() {
+      this.defaultPrevented = true;
+    }
+  };
+
+  review.container.dispatchEvent(event);
+
+  assert.equal(event.defaultPrevented, false);
+  assert.deepEqual(createDiffReviewElement.pageBridgeCalls, []);
+});
+
+test('hunk jump failure renders visible hunk-level status text', async () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest({
+    pageBridgeResult: { ok: false, reason: 'editor unavailable' }
+  });
+  const review = createDiffReviewElement([
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches: [
+        { from: 0, to: 5, expected: 'alpha', insert: 'ALPHA' }
+      ],
+      diff: [
+        { lines: [{ type: 'remove', text: 'alpha' }, { type: 'add', text: 'ALPHA' }] }
+      ]
+    }
+  ]);
+
+  await review.container.querySelector('[data-diff-hunk-jump]').click();
+
+  const status = review.container.querySelector('[data-diff-hunk-jump-status]');
+  assert.ok(status);
+  assert.match(status.textContent, /editor unavailable/);
+  assert.equal(review.container.querySelector('[data-diff-review-hunk]').dataset.jumpStatus, 'failed');
 });
 
 test('diff review keyboard shortcuts are scoped and only prevent handled keys', () => {
