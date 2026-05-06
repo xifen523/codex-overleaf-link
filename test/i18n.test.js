@@ -33,6 +33,18 @@ test('i18n covers plugin dialogs, diff review, toasts, and undo actions', () => 
   assert.equal(I18n.t('zh', 'deleteSessionTitle'), '删除这个 Codex 会话？');
   assert.equal(I18n.t('en', 'diffAcceptAll'), 'Accept all');
   assert.equal(I18n.t('zh', 'diffAcceptAll'), '接受全部');
+  assert.equal(I18n.t('en', 'diffHunkAccept'), 'Accept hunk');
+  assert.equal(I18n.t('zh', 'diffHunkAccept'), '接受此段');
+  assert.equal(I18n.t('en', 'diffHunkReject'), 'Reject hunk');
+  assert.equal(I18n.t('zh', 'diffHunkReject'), '拒绝此段');
+  assert.equal(I18n.t('en', 'diffHunkJump'), 'Jump to hunk');
+  assert.equal(I18n.t('zh', 'diffHunkJump'), '跳到此段');
+  assert.equal(I18n.t('en', 'diffHunkAccepted'), 'Hunk accepted');
+  assert.equal(I18n.t('zh', 'diffHunkAccepted'), '此段已接受');
+  assert.equal(I18n.t('en', 'diffHunkRejected'), 'Hunk rejected');
+  assert.equal(I18n.t('zh', 'diffHunkRejected'), '此段已拒绝');
+  assert.equal(I18n.t('en', 'diffFallbackFileOnly'), 'Review at file level');
+  assert.equal(I18n.t('zh', 'diffFallbackFileOnly'), '按文件确认');
   assert.equal(I18n.t('en', 'undoRun'), 'Undo changes');
   assert.equal(I18n.t('zh', 'undoRun'), '撤销改动');
   assert.equal(I18n.t('en', 'undoApplied'), 'Undone');

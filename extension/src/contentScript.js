@@ -60,6 +60,7 @@
     crypto
   });
   const writebackController = window.CodexOverleafWritebackController;
+  const ReviewHunks = window.CodexOverleafReviewHunks;
   const runController = window.CodexOverleafRunController;
   const mirrorHealth = window.CodexOverleafMirrorHealth;
   const otWarmMirrorController = window.CodexOverleafOtWarmMirrorController;
@@ -2311,8 +2312,13 @@
     if (readonly) {
       container.dataset.readonly = 'true';
     }
+    const reviewHunks = window.CodexOverleafReviewHunks || ReviewHunks;
+    const reviewModel = reviewHunks?.buildReviewModel?.(syncChanges) || { files: [], hunks: [] };
+    const reviewFilesByIndex = new Map(reviewModel.files.map(file => [file.index, file]));
     const fileStates = new Map();
+    const hunkStates = new Map();
     const fileViews = new Map();
+    const hunkViews = new Map();
     const decisionListeners = new Set();
 
     function notifyDecisionChanged() {
@@ -2328,12 +2334,70 @@
       actions.replaceChildren(status);
     }
 
+    function setHunkDecisionStatus(actions, accepted) {
+      const status = document.createElement('span');
+      status.className = 'codex-diff-hunk-status';
+      status.textContent = accepted ? tr('diffHunkAccepted') : tr('diffHunkRejected');
+      actions.replaceChildren(status);
+    }
+
+    function updateReviewableFileDecision(view, fileModel) {
+      const decisions = fileModel.hunks.map(hunk => hunkStates.get(hunk.decisionKey));
+      const allAccepted = decisions.every(value => value === true);
+      const allRejected = decisions.every(value => value === false);
+      if (allAccepted || allRejected) {
+        view.card.dataset.accepted = allAccepted ? 'true' : 'false';
+        view.card.dataset.decision = allAccepted ? 'accepted' : 'rejected';
+        setDecisionStatus(view.actions, allAccepted);
+        return;
+      }
+      view.card.dataset.decision = 'pending';
+      delete view.card.dataset.accepted;
+    }
+
+    function decideHunkChange(hunk, accepted) {
+      if (readonly || hunkStates.get(hunk.decisionKey) !== null) {
+        return;
+      }
+      hunkStates.set(hunk.decisionKey, accepted);
+      const hunkView = hunkViews.get(hunk.decisionKey);
+      if (hunkView) {
+        hunkView.hunkEl.dataset.decision = accepted ? 'accepted' : 'rejected';
+        setHunkDecisionStatus(hunkView.actions, accepted);
+      }
+      const fileView = fileViews.get(hunk.path);
+      const fileModel = reviewModel.files.find(file => file.path === hunk.path);
+      if (fileView && fileModel) {
+        updateReviewableFileDecision(fileView, fileModel);
+      }
+      notifyDecisionChanged();
+    }
+
     function decideFileChange(path, accepted) {
-      if (readonly || fileStates.get(path) !== null) {
+      if (readonly) {
         return;
       }
       const view = fileViews.get(path);
       if (!view) {
+        return;
+      }
+      const fileModel = view.fileModel;
+      if (fileModel?.reviewable) {
+        for (const hunk of fileModel.hunks) {
+          if (hunkStates.get(hunk.decisionKey) === null) {
+            hunkStates.set(hunk.decisionKey, accepted);
+            const hunkView = hunkViews.get(hunk.decisionKey);
+            if (hunkView) {
+              hunkView.hunkEl.dataset.decision = accepted ? 'accepted' : 'rejected';
+              setHunkDecisionStatus(hunkView.actions, accepted);
+            }
+          }
+        }
+        updateReviewableFileDecision(view, fileModel);
+        notifyDecisionChanged();
+        return;
+      }
+      if (fileStates.get(path) !== null) {
         return;
       }
       fileStates.set(path, accepted);
@@ -2350,15 +2414,42 @@
           count += 1;
         }
       }
+      for (const value of hunkStates.values()) {
+        if (value === null) {
+          count += 1;
+        }
+      }
       return count;
     }
 
+    function getDecisions() {
+      const decisions = {};
+      for (const [path, value] of fileStates.entries()) {
+        decisions[reviewHunks?.normalizeReviewDecisionKey?.(path) || `${path}::file`] = value;
+      }
+      for (const [key, value] of hunkStates.entries()) {
+        decisions[key] = value;
+      }
+      return decisions;
+    }
+
     function getAcceptedChanges() {
+      const decisions = getDecisions();
+      if (reviewHunks?.buildAcceptedSyncChanges) {
+        return reviewHunks.buildAcceptedSyncChanges(syncChanges, decisions);
+      }
       return syncChanges.filter(change => fileStates.get(change.path) === true);
     }
 
-    for (const change of syncChanges) {
-      fileStates.set(change.path, readonly ? true : null);
+    for (const [changeIndex, change] of syncChanges.entries()) {
+      const fileModel = reviewFilesByIndex.get(changeIndex);
+      if (fileModel?.reviewable) {
+        for (const hunk of fileModel.hunks) {
+          hunkStates.set(hunk.decisionKey, readonly ? true : null);
+        }
+      } else {
+        fileStates.set(change.path, readonly ? true : null);
+      }
       const card = document.createElement('div');
       card.className = 'codex-diff-file';
       card.dataset.path = change.path;
@@ -2401,12 +2492,53 @@
       header.append(pathEl, actions);
       card.append(header);
 
-      if (change.diff?.length) {
+      const diffHunks = Array.isArray(change.diff) ? change.diff : [];
+      if (diffHunks.length || fileModel?.reviewable) {
         const body = document.createElement('div');
         body.className = 'codex-diff-body';
-        for (const hunk of change.diff) {
+        const hunkCount = fileModel?.reviewable ? Math.max(diffHunks.length, fileModel.hunks.length) : diffHunks.length;
+        for (let hunkIndex = 0; hunkIndex < hunkCount; hunkIndex += 1) {
+          const hunk = diffHunks[hunkIndex] || { lines: [] };
+          const reviewHunk = fileModel?.reviewable ? fileModel.hunks[hunkIndex] : null;
           const hunkEl = document.createElement('div');
           hunkEl.className = 'codex-diff-hunk';
+          if (reviewHunk) {
+            hunkEl.dataset.decision = readonly ? 'accepted' : 'pending';
+            const hunkActions = document.createElement('div');
+            hunkActions.className = 'codex-diff-hunk-actions';
+            if (readonly) {
+              setHunkDecisionStatus(hunkActions, true);
+            } else {
+              const acceptHunkBtn = document.createElement('button');
+              acceptHunkBtn.type = 'button';
+              acceptHunkBtn.setAttribute('data-diff-hunk-accept', '');
+              acceptHunkBtn.textContent = '✓';
+              acceptHunkBtn.title = tr('diffHunkAccept');
+              const rejectHunkBtn = document.createElement('button');
+              rejectHunkBtn.type = 'button';
+              rejectHunkBtn.setAttribute('data-diff-hunk-reject', '');
+              rejectHunkBtn.textContent = '✗';
+              rejectHunkBtn.title = tr('diffHunkReject');
+              const jumpHunkBtn = document.createElement('button');
+              jumpHunkBtn.type = 'button';
+              jumpHunkBtn.setAttribute('data-diff-hunk-jump', '');
+              jumpHunkBtn.textContent = '↗';
+              jumpHunkBtn.title = tr('diffHunkJump');
+
+              acceptHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, true));
+              rejectHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, false));
+              jumpHunkBtn.addEventListener('click', () => {});
+
+              hunkActions.append(acceptHunkBtn, rejectHunkBtn, jumpHunkBtn);
+            }
+            hunkEl.append(hunkActions);
+            hunkViews.set(reviewHunk.decisionKey, { hunkEl, actions: hunkActions });
+          } else if (!readonly && fileModel && !fileModel.reviewable && hunkIndex === 0) {
+            const fallback = document.createElement('div');
+            fallback.className = 'codex-diff-fallback-label';
+            fallback.textContent = tr('diffFallbackFileOnly');
+            hunkEl.append(fallback);
+          }
           for (const line of hunk.lines) {
             const lineEl = document.createElement('div');
             lineEl.className = 'codex-diff-line';
@@ -2420,7 +2552,7 @@
       }
 
       container.append(card);
-      fileViews.set(change.path, { card, actions });
+      fileViews.set(change.path, { card, actions, fileModel });
     }
 
     return {
@@ -2428,6 +2560,7 @@
       fileStates,
       decideFileChange,
       getPendingCount,
+      getDecisions,
       getAcceptedChanges,
       onDecision(callback) {
         decisionListeners.add(callback);
@@ -2471,7 +2604,9 @@
       function finishIfAllDecided() {
         updateSummary();
         if (review.getPendingCount() === 0) {
-          finish(review.getAcceptedChanges());
+          finish(ReviewHunks?.buildAcceptedSyncChanges
+            ? ReviewHunks.buildAcceptedSyncChanges(syncChanges, review.getDecisions())
+            : review.getAcceptedChanges());
         }
       }
 

@@ -1237,6 +1237,24 @@ test('confirm diff review uses immediate per-file decisions and batch accept rej
   assert.match(css, /\.codex-diff-toolbar-summary/);
 });
 
+test('confirm diff review renders hunk controls and resolves accepted hunk patches', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const createDiffBody = contentScript.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderDiffReview/)?.[0] || '';
+  const renderDiffBody = contentScript.match(/function renderDiffReview\(syncChanges\) \{[\s\S]*?\n  function renderReadOnlyDiffReview/)?.[0] || '';
+
+  assert.match(contentScript, /CodexOverleafReviewHunks/);
+  assert.match(createDiffBody, /window\.CodexOverleafReviewHunks/);
+  assert.match(createDiffBody, /data-diff-hunk-accept/);
+  assert.match(createDiffBody, /data-diff-hunk-reject/);
+  assert.match(createDiffBody, /data-diff-hunk-jump/);
+  assert.match(createDiffBody, /buildAcceptedSyncChanges\(syncChanges,\s*decisions\)/);
+  assert.match(renderDiffBody, /review\.getAcceptedChanges\(\)/);
+  assert.match(renderDiffBody, /buildAcceptedSyncChanges/);
+});
+
 test('auto recompile is based on successfully applied Overleaf writes', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),

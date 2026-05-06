@@ -36,6 +36,47 @@ test('buildSyncApplyOperations prefers local text patches for existing files', (
   ]);
 });
 
+test('buildSyncApplyOperations preserves filtered review hunk patches', () => {
+  const operations = WritebackController.buildSyncApplyOperations([
+    {
+      type: 'write',
+      path: 'main.tex',
+      previousContent: 'alpha beta gamma',
+      content: 'alpha zeta delta',
+      patches: [
+        {
+          from: 6,
+          to: 10,
+          expected: 'beta',
+          insert: 'zeta'
+        }
+      ]
+    }
+  ], {
+    files: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ]
+  });
+
+  assert.deepEqual(operations, [
+    {
+      type: 'edit',
+      path: 'main.tex',
+      patches: [
+        {
+          from: 6,
+          to: 10,
+          expected: 'beta',
+          insert: 'zeta'
+        }
+      ],
+      reasonKey: 'localWorkspacePatch',
+      reasonParams: { count: 1 },
+      reason: 'Synced 1 local Codex workspace edit.'
+    }
+  ]);
+});
+
 test('mergeVerifiedAppliedFiles preserves Overleaf snapshot but overlays verified writeback content', () => {
   const merged = WritebackController.mergeVerifiedAppliedFiles({
     files: [

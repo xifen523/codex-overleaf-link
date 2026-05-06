@@ -1630,8 +1630,62 @@
   padding: 2px 0;
 }
 
+#codex-overleaf-panel .codex-diff-hunk[data-decision="accepted"] {
+  background: rgba(35, 134, 54, 0.08);
+}
+
+#codex-overleaf-panel .codex-diff-hunk[data-decision="rejected"] {
+  background: rgba(248, 81, 73, 0.06);
+  opacity: 0.68;
+}
+
 #codex-overleaf-panel .codex-diff-hunk:first-child {
   border-top: 0;
+}
+
+#codex-overleaf-panel .codex-diff-hunk-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 2px 6px;
+}
+
+#codex-overleaf-panel .codex-diff-hunk-actions button {
+  min-height: 20px;
+  border: 1px solid #3a3d41;
+  border-radius: 4px;
+  background: #252526;
+  color: #cccccc;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+#codex-overleaf-panel .codex-diff-hunk-actions [data-diff-hunk-accept] {
+  border-color: #2d5a3e;
+  color: #89d185;
+}
+
+#codex-overleaf-panel .codex-diff-hunk-actions [data-diff-hunk-reject] {
+  border-color: #5a3430;
+  color: #f48771;
+}
+
+#codex-overleaf-panel .codex-diff-hunk-status,
+#codex-overleaf-panel .codex-diff-fallback-label {
+  color: #858585;
+  font-size: 11px;
+}
+
+#codex-overleaf-panel .codex-diff-hunk[data-decision="accepted"] .codex-diff-hunk-status {
+  color: #89d185;
+}
+
+#codex-overleaf-panel .codex-diff-hunk[data-decision="rejected"] .codex-diff-hunk-status {
+  color: #f48771;
+}
+
+#codex-overleaf-panel .codex-diff-fallback-label {
+  padding: 2px 8px;
 }
 
 #codex-overleaf-panel .codex-diff-line {
