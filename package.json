@@ -1,8 +1,8 @@
 {
   "name": "codex-overleaf-link",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
-  "description": "Chrome/macOS bridge that connects Codex to the active Overleaf project.",
+  "description": "Cross-platform Chrome bridge that connects Codex to the active Overleaf project.",
   "license": "MIT",
   "type": "commonjs",
   "scripts": {

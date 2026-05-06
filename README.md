@@ -3,8 +3,8 @@
   <h1>Codex Overleaf Link</h1>
   <p><strong>Empower Overleaf with Codex.</strong></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.4.0-blue" alt="version">
-    <img src="https://img.shields.io/badge/platform-macOS-lightgrey" alt="platform">
+    <img src="https://img.shields.io/badge/version-0.5.0-blue" alt="version">
+    <img src="https://img.shields.io/badge/platform-macOS%20%2F%20Windows%20%2F%20Linux-lightgrey" alt="platform">
     <img src="https://img.shields.io/badge/chrome-MV3-green" alt="chrome manifest v3">
     <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="node version">
     <a href="https://github.com/Ghqqqq/codex-overleaf-link/actions/workflows/test.yml"><img src="https://github.com/Ghqqqq/codex-overleaf-link/actions/workflows/test.yml/badge.svg" alt="tests"></a>
@@ -29,19 +29,26 @@ Codex Overleaf Link bridges the two: it adds a Codex panel directly inside Overl
 
 ## Install
 
-Latest source install:
+macOS / Linux latest source install:
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh?$(date +%s)" | bash
 ```
 
-Version-pinned install or update for v0.4.0:
+macOS / Linux version-pinned install or update for v0.5.0:
 
 ```bash
-CODEX_OVERLEAF_REF=v0.4.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.4.0/install.sh)"
+CODEX_OVERLEAF_REF=v0.5.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.5.0/install.sh)"
 ```
 
-The installer opens Chrome's extension page, opens Finder to the extension folder, and copies the folder path.
+Windows version-pinned install or update for v0.5.0 from PowerShell:
+
+```powershell
+iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.5.0/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+The macOS / Linux installer creates a visible `~/Codex Overleaf Link Extension` shortcut to the extension folder. On macOS it also opens Chrome's extension page, opens Finder to the shortcut, and copies the shortcut path. The Windows installer prints the extension folder path after registering the native host.
 Chrome still requires one manual approval step for unpacked extensions:
 
 1. Enable **Developer mode** in `chrome://extensions`.
@@ -58,17 +65,26 @@ cd codex-overleaf-link
 npm run install:native
 ```
 
-Then load `extension/` as an unpacked extension in Chrome.
+Then load `extension/` as an unpacked extension in Chrome and run `npm run install:native` again if Chrome assigns a different extension id.
 
 </details>
 
 <details>
 <summary><strong>Update</strong></summary>
 
-For a deterministic v0.4.0 update, run the pinned command. This is also the native mismatch recovery command shown by the popup and panel when they report **Native host update required**:
+For a deterministic v0.5.0 update, run the pinned command for your platform. This is also the native mismatch recovery command shown by the popup and panel when they report **Native host update required**.
+
+macOS / Linux:
 
 ```bash
-CODEX_OVERLEAF_REF=v0.4.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.4.0/install.sh)"
+CODEX_OVERLEAF_REF=v0.5.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.5.0/install.sh)"
+```
+
+Windows PowerShell:
+
+```powershell
+iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.5.0/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 Then reload the extension in `chrome://extensions` and refresh the Overleaf page.
@@ -77,24 +93,33 @@ Then reload the extension in `chrome://extensions` and refresh the Overleaf page
 
 ## GitHub Release Artifacts
 
-The v0.4.0 GitHub Release contains:
+The v0.5.0 GitHub Release contains:
 
-- `codex-overleaf-link-extension-v0.4.0.zip`: loadable Chrome extension package for unpacked or Web Store inspection.
-- `codex-overleaf-native-host-v0.4.0.tar.gz`: native host runtime files used by the installer and release verification.
-- `install.sh`: release-pinned macOS installer that defaults to `v0.4.0` when run directly from the release artifact.
+- `codex-overleaf-link-extension-v0.5.0.zip`: loadable Chrome extension package for unpacked or Web Store inspection.
+- `codex-overleaf-native-host-v0.5.0.tar.gz`: native host runtime files used by the installer and release verification.
+- `install.sh`: release-pinned macOS / Linux installer that defaults to `v0.5.0` when run directly from the release artifact.
+- `install.ps1`: release-pinned Windows PowerShell installer that defaults to `v0.5.0` when run directly from the release artifact.
 - `uninstall-native-host.mjs`: native host uninstaller that removes the Chrome Native Messaging manifest, bridge executable, and runtime copy.
 - `SHA256SUMS` and `release-manifest.json`: checksum and artifact metadata for release verification.
 
 <details>
 <summary><strong>Uninstall</strong></summary>
 
+macOS / Linux:
+
 ```bash
 node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs
 ```
 
+Windows PowerShell:
+
+```powershell
+node $env:LOCALAPPDATA\CodexOverleaf\source\scripts\uninstall-native-host.mjs
+```
+
 If you installed from a manual checkout, you can also run `npm run uninstall:native` inside the repo.
 
-Remove the extension from `chrome://extensions`. Optionally delete `~/.codex-overleaf` to remove local mirrors and plugin history.
+Remove the extension from `chrome://extensions`. Optionally delete `~/.codex-overleaf` on macOS / Linux or `$env:LOCALAPPDATA\CodexOverleaf` on Windows to remove local mirrors, native runtime files, and plugin history.
 
 </details>
 
@@ -102,12 +127,12 @@ Remove the extension from `chrome://extensions`. Optionally delete `~/.codex-ove
 
 | Requirement | Notes |
 |-------------|-------|
-| macOS | Native Messaging host targets `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/` |
+| macOS / Windows / Linux | Native Messaging host targets the current user's Chrome / Chromium registration location |
 | Chrome / Chromium | Developer mode enabled for unpacked extension |
 | Node.js >= 20 | Powers the native host bridge |
 | Codex CLI | Installed and logged in (`codex --version` to verify) |
 | Overleaf account | Access to the target project |
-| MacTeX *(optional)* | For `latexmk` / local compile checks |
+| TeX distribution *(optional)* | For `latexmk` / local compile checks |
 
 ## Features
 
@@ -140,7 +165,7 @@ Remove the extension from `chrome://extensions`. Optionally delete `~/.codex-ove
 │    ↕ Native Messaging (stdio)                               │
 ├─────────────────────────────────────────────────────────────┤
 │  Native host (Node.js)                                      │
-│    → mirror sync: ~/.codex-overleaf/projects/<id>/workspace │
+│    → mirror sync: per-user Codex Overleaf local workspace    │
 │    → Codex CLI session                                      │
 │    ← collect diffs + patches                                │
 ├─────────────────────────────────────────────────────────────┤
@@ -165,10 +190,19 @@ This repo ships a stable Chrome extension `key`, producing the deterministic id:
 illdpneeeopfffmiepaejglgmhpmdhdc
 ```
 
-If Chrome assigns a different id, reinstall the native host with the actual id:
+If Chrome assigns a different id, reinstall the native host with the actual id.
+
+macOS / Linux:
 
 ```bash
 cd ~/.codex-overleaf/source && npm run install:native -- --extension-id <your-chrome-extension-id>
+```
+
+Windows PowerShell:
+
+```powershell
+cd $env:LOCALAPPDATA\CodexOverleaf\source
+npm run install:native -- --extension-id <your-chrome-extension-id>
 ```
 
 For Chrome Web Store builds, record the final Web Store extension id before publishing the native-host installer guidance. Pass that id with `CODEX_OVERLEAF_EXTENSION_ID=<web-store-extension-id>` when running `install.sh`, or with `--extension-id <web-store-extension-id>` when running `scripts/install-native-host.mjs`, so the native manifest `allowed_origins` entry matches the installed extension.

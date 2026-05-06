@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.5.0 - 2026-05-06
+
+Cross-platform native host release. This version extends the native installer, runtime paths, and release packaging beyond the original macOS-only preview while preserving the v0.4 user workflow and release safeguards.
+
+### Added
+
+- Windows Native Messaging host installation through `install.ps1`, including user-level Chrome registry registration and `.cmd` bridge launch support.
+- Linux Chrome and Chromium Native Messaging host manifest paths under the user's config directory.
+- Release artifacts for the v0.5.0 extension package, native host runtime, macOS / Linux installer, Windows PowerShell installer, uninstaller, checksums, and release manifest.
+- Cross-platform CI coverage for macOS, Ubuntu, and Windows, with release publishing gated by the test matrix.
+
+### Changed
+
+- Bumped package and extension metadata to `0.5.0`.
+- Updated install, update, release artifact, and uninstall documentation for macOS, Windows, and Linux.
+- Replaced macOS-only platform requirements with macOS / Windows / Linux support guidance.
+
+### Notes
+
+- Release publishing remains tag-based and uploads artifacts from a single release job after the matrix passes.
+- Chrome still requires manual unpacked-extension approval after the native host installer finishes.
+
 ## v0.4.0 - 2026-05-06
 
 Distribution and update foundation release. This version keeps the v0.3 sync and writeback behavior intact while adding compatibility diagnostics, release artifacts, installer update guidance, and Chrome Web Store preparation material.

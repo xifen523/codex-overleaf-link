@@ -1,17 +1,29 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
+const {
+  getCodexOverleafHome,
+  getNativeHostPlatform
+} = require('./nativeHostPlatform');
 
-const LOG_DIR = path.join(os.homedir(), '.codex-overleaf');
-const LOG_PATH = path.join(LOG_DIR, 'native-host.log');
 const MAX_FIELD_LENGTH = 8000;
 
-function logDebug(event, detail = {}) {
+function getDebugLogDir(options = {}) {
+  return getCodexOverleafHome(options);
+}
+
+function getDebugLogPath(options = {}) {
+  const platformPath = getNativeHostPlatform(options) === 'win32' ? path.win32 : path.posix;
+  return platformPath.join(getDebugLogDir(options), 'native-host.log');
+}
+
+function logDebug(event, detail = {}, options = {}) {
   try {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
-    fs.appendFileSync(LOG_PATH, `${JSON.stringify({
+    const logDir = getDebugLogDir(options);
+    const logPath = getDebugLogPath(options);
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(logPath, `${JSON.stringify({
       time: new Date().toISOString(),
       event,
       detail: sanitize(detail)
@@ -56,7 +68,11 @@ function sanitize(value) {
 }
 
 module.exports = {
-  LOG_PATH,
+  getDebugLogDir,
+  getDebugLogPath,
+  get LOG_PATH() {
+    return getDebugLogPath();
+  },
   logDebug,
   truncateText
 };

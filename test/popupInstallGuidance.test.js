@@ -55,7 +55,7 @@ test('popup sends compatibility-aware bridge ping params', async () => {
   assert.equal(sentMessage?.payload?.method, 'bridge.ping');
   assert.deepEqual(
     JSON.parse(JSON.stringify(sentMessage?.payload?.params)),
-    compatibility.buildBridgePingParams({ version: '0.4.0' })
+    compatibility.buildBridgePingParams({ version: compatibility.BUILD_TARGET_VERSION })
   );
 });
 
@@ -131,7 +131,7 @@ async function loadPopupHarness({ nativeResponse, onSendMessage } = {}) {
     chrome: {
       runtime: {
         getManifest() {
-          return { version: '0.4.0' };
+          return { version: compatibility.BUILD_TARGET_VERSION };
         },
         sendMessage(message) {
           if (typeof onSendMessage === 'function') {

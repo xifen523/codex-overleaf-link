@@ -21,6 +21,10 @@ function readReleaseWorkflow() {
   return readText(path.join(repoRoot, '.github/workflows/release.yml'));
 }
 
+function readTestWorkflow() {
+  return readText(path.join(repoRoot, '.github/workflows/test.yml'));
+}
+
 function getTopLevelYamlSection(text, sectionName) {
   const lines = text.split(/\r?\n/);
   const start = lines.findIndex((line) => line === `${sectionName}:`);
@@ -69,8 +73,103 @@ function listZipEntries(filePath, t) {
   return result.stdout.split('\n').filter(Boolean);
 }
 
+let releaseTestIndexPath;
+
+function createReleaseTestIndexPath() {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-index-'));
+  const indexPath = path.join(tempDir, 'index');
+  const env = {
+    ...process.env,
+    GIT_INDEX_FILE: indexPath
+  };
+  const readTree = spawnSync('git', ['read-tree', 'HEAD'], {
+    cwd: repoRoot,
+    env,
+    encoding: 'utf8'
+  });
+  assert.equal(readTree.status, 0, readTree.stderr || readTree.stdout);
+  const add = spawnSync('git', [
+    'add',
+    '--',
+    'install.ps1',
+    'native-host/src/nativeHostPlatform.js'
+  ], {
+    cwd: repoRoot,
+    env,
+    encoding: 'utf8'
+  });
+  assert.equal(add.status, 0, add.stderr || add.stdout);
+  return indexPath;
+}
+
+function getReleaseTestIndexPath() {
+  if (!releaseTestIndexPath) {
+    releaseTestIndexPath = createReleaseTestIndexPath();
+  }
+  return releaseTestIndexPath;
+}
+
+function releaseTrackedInputEnv(overrides = {}) {
+  return {
+    ...process.env,
+    GIT_INDEX_FILE: getReleaseTestIndexPath(),
+    ...overrides
+  };
+}
+
+function releaseBuildEnv(overrides = {}) {
+  return {
+    ...process.env,
+    CODEX_OVERLEAF_ALLOW_DIRTY_RELEASE_INPUTS: '1',
+    GIT_INDEX_FILE: getReleaseTestIndexPath(),
+    ...overrides
+  };
+}
+
+function writeMinimalReleaseBuildFixture(rootDir, { untracked = [] } = {}) {
+  const files = {
+    'package.json': `${JSON.stringify({ version: '0.5.0' }, null, 2)}\n`,
+    'CHANGELOG.md': '# Changelog\n\n## v0.5.0 - 2026-05-06\n\nFixture release notes.\n',
+    'install.sh': '#!/usr/bin/env bash\nREF="${CODEX_OVERLEAF_REF:-main}"\n',
+    'install.ps1': "$DefaultRef = 'main'\n",
+    'extension/manifest.json': `${JSON.stringify({ version: '0.5.0' }, null, 2)}\n`,
+    'extension/popup.html': '<!doctype html>\n',
+    'extension/src/shared/compatibility.js': 'module.exports = {};\n',
+    'native-host/src/nativeHostPlatform.js': 'module.exports = {};\n',
+    'native-host/src/taskRunner.js': 'module.exports = {};\n',
+    'scripts/codex-json-agent.mjs': '#!/usr/bin/env node\n',
+    'scripts/uninstall-native-host.mjs': [
+      '#!/usr/bin/env node',
+      "import { getDefaultBridgePath } from '../native-host/src/nativeHostPlatform.js';",
+      'void getDefaultBridgePath;'
+    ].join('\n')
+  };
+
+  for (const [relativePath, content] of Object.entries(files)) {
+    const fullPath = path.join(rootDir, relativePath);
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+    fs.writeFileSync(fullPath, content);
+  }
+
+  const init = spawnSync('git', ['init'], { cwd: rootDir, encoding: 'utf8' });
+  assert.equal(init.status, 0, init.stderr || init.stdout);
+  const trackedFiles = Object.keys(files).filter((relativePath) => !untracked.includes(relativePath));
+  const add = spawnSync('git', ['add', '--', ...trackedFiles], { cwd: rootDir, encoding: 'utf8' });
+  assert.equal(add.status, 0, add.stderr || add.stdout);
+  const commit = spawnSync('git', [
+    '-c',
+    'user.name=Codex Test',
+    '-c',
+    'user.email=codex@example.invalid',
+    'commit',
+    '-m',
+    'fixture'
+  ], { cwd: rootDir, encoding: 'utf8' });
+  assert.equal(commit.status, 0, commit.stderr || commit.stdout);
+}
+
 function writeReleaseFixture(rootDir, overrides = {}) {
-  const packageVersion = overrides.packageVersion || '1.2.3';
+  const packageVersion = overrides.packageVersion || '0.5.0';
   const manifestVersion = overrides.manifestVersion || packageVersion;
   const readmeVersion = overrides.readmeVersion || packageVersion;
   const changelogVersion = overrides.changelogVersion || packageVersion;
@@ -96,6 +195,10 @@ function writeReleaseFixture(rootDir, overrides = {}) {
     path.join(rootDir, 'CHANGELOG.md'),
     overrides.changelogText || `# Changelog\n\n## v${changelogVersion} - ${changelogDate}\n\n${changelogBody}`
   );
+  fs.writeFileSync(path.join(rootDir, 'install.sh'), '#!/usr/bin/env bash\n');
+  fs.writeFileSync(path.join(rootDir, 'install.ps1'), '$ErrorActionPreference = "Stop"\n');
+  fs.mkdirSync(path.join(rootDir, 'scripts'), { recursive: true });
+  fs.writeFileSync(path.join(rootDir, 'scripts/install-native-host.mjs'), '#!/usr/bin/env node\n');
 }
 
 function writeChromeWebStoreDocs(rootDir) {
@@ -104,7 +207,20 @@ function writeChromeWebStoreDocs(rootDir) {
   fs.writeFileSync(path.join(docsDir, 'permissions.md'), 'nativeMessaging\nstorage\nhttps://www.overleaf.com/project/*\nhttps://overleaf.com/project/*\nno broad host permissions\n');
   fs.writeFileSync(path.join(docsDir, 'privacy.md'), 'no hosted backend\n~/.codex-overleaf/projects\n~/.codex-overleaf/codex-home\nCodex CLI account\nno default telemetry\ndiagnostics exclude project content\n');
   fs.writeFileSync(path.join(docsDir, 'listing.md'), 'Short description\nDetailed description\nFeature bullets\nSupport\n128 icon\nscreenshots\nsmall promo image\noptional marquee image\n');
-  fs.writeFileSync(path.join(docsDir, 'release-checklist.md'), 'npm test\nnpm run verify:release\nnpm run build:release\nverify checksums\ninspect extension zip\nWeb Store extension id\noutside v0.4\n');
+  fs.writeFileSync(
+    path.join(docsDir, 'release-checklist.md'),
+    [
+      'npm test',
+      'npm run verify:release',
+      'npm run build:release',
+      'dist/releases/v0.5.0/SHA256SUMS',
+      'codex-overleaf-link-extension-v0.5.0.zip',
+      'codex-overleaf-native-host-v0.5.0.tar.gz',
+      'install.ps1',
+      'Web Store extension id',
+      'current release scope'
+    ].join('\n')
+  );
 }
 
 test('package exposes release verification and artifact build commands', () => {
@@ -136,6 +252,29 @@ test('release workflow grants publish permission and runs release checks before 
     'run: npm test',
     'run: npm run verify:release',
     'run: npm run build:release',
+    'uses: softprops/action-gh-release@v2'
+  ]);
+});
+
+test('test workflow runs the test suite on macOS, Linux, and Windows', () => {
+  const workflow = readTestWorkflow();
+
+  assert.match(workflow, /^\s+strategy:\s*$/m);
+  assert.match(workflow, /^\s+matrix:\s*$/m);
+  assert.match(workflow, /^\s+os:\s+\[macos-latest,\s+ubuntu-latest,\s+windows-latest\]\s*$/m);
+  assert.match(workflow, /^\s+runs-on:\s+\$\{\{ matrix\.os \}\}\s*$/m);
+  assert.match(workflow, /run: npm test/);
+});
+
+test('release workflow gates publishing on the cross-platform test matrix', () => {
+  const workflow = readReleaseWorkflow();
+
+  assertContainsInOrder(workflow, [
+    'test-matrix:',
+    'os: [macos-latest, ubuntu-latest, windows-latest]',
+    'run: npm test',
+    'release:',
+    'needs: test-matrix',
     'uses: softprops/action-gh-release@v2'
   ]);
 });
@@ -178,6 +317,28 @@ test('release verifier catches package and extension manifest version mismatch',
       errors.some((error) => /manifest\.json version .*1\.2\.4.*package\.json version .*1\.2\.3/i.test(error)),
       errors.join('\n')
     );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('release verifier requires v0.5 package metadata and Windows installer source', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-v050-'));
+  try {
+    writeReleaseFixture(tempDir, {
+      packageVersion: '0.4.0'
+    });
+    fs.rmSync(path.join(tempDir, 'install.ps1'));
+    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
+    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+
+    const errors = collectReleaseVerificationErrors({
+      rootDir: tempDir,
+      releaseDate: '2026-05-06'
+    });
+
+    assert.ok(errors.some((error) => /package\.json version .*0\.5\.0/i.test(error)), errors.join('\n'));
+    assert.ok(errors.some((error) => /install\.ps1 is required/i.test(error)), errors.join('\n'));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -231,11 +392,11 @@ test('release verifier catches CHANGELOG heading date mismatch', async () => {
   }
 });
 
-test('release verifier requires Chrome Web Store prep docs for v0.4 releases', async () => {
+test('release verifier requires Chrome Web Store prep docs for v0.5 releases', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-docs-'));
   try {
     writeReleaseFixture(tempDir, {
-      packageVersion: '0.4.0'
+      packageVersion: '0.5.0'
     });
     const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
     const { collectReleaseVerificationErrors } = await import(moduleUrl);
@@ -263,6 +424,38 @@ test('release verifier requires Chrome Web Store prep docs for v0.4 releases', a
 
     writeChromeWebStoreDocs(tempDir);
     assert.deepEqual(collectReleaseVerificationErrors({ rootDir: tempDir, releaseDate: '2026-05-06' }), []);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('release verifier rejects stale Chrome Web Store release checklist instructions', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-stale-checklist-'));
+  try {
+    writeReleaseFixture(tempDir, {
+      packageVersion: '0.5.0'
+    });
+    writeChromeWebStoreDocs(tempDir);
+    fs.writeFileSync(
+      path.join(tempDir, 'docs/chrome-web-store/release-checklist.md'),
+      'npm test\nnpm run verify:release\nnpm run build:release\nverify checksums\ninspect extension zip\nWeb Store extension id\noutside v0.4\n'
+    );
+    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
+    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+
+    const errors = collectReleaseVerificationErrors({
+      rootDir: tempDir,
+      releaseDate: '2026-05-06'
+    });
+
+    assert.ok(
+      errors.some((error) => /release-checklist\.md.*v0\.5\.0/i.test(error)),
+      errors.join('\n')
+    );
+    assert.ok(
+      errors.some((error) => /release-checklist\.md.*must not reference stale v0\.4/i.test(error)),
+      errors.join('\n')
+    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -302,10 +495,14 @@ test('Chrome Web Store prep docs describe current permissions and privacy postur
   assert.match(checklist, /npm test/);
   assert.match(checklist, /npm run verify:release/);
   assert.match(checklist, /npm run build:release/);
-  assert.match(checklist, /verify checksums/i);
-  assert.match(checklist, /inspect extension zip/i);
+  assert.match(checklist, /dist\/releases\/v0\.5\.0\/SHA256SUMS/);
+  assert.match(checklist, /codex-overleaf-link-extension-v0\.5\.0\.zip/);
+  assert.match(checklist, /codex-overleaf-native-host-v0\.5\.0\.tar\.gz/);
+  assert.match(checklist, /install\.ps1/);
+  assert.match(checklist, /v0\.5\.0/);
   assert.match(checklist, /Web Store extension id/i);
-  assert.match(checklist, /outside v0\.4/i);
+  assert.doesNotMatch(checklist, /v0\.4\.0/);
+  assert.doesNotMatch(checklist, /outside v0\.4/i);
 });
 
 test('release verifier CLI exits 1 on metadata mismatch', () => {
@@ -409,6 +606,7 @@ test('build-release CLI exits non-zero on unknown flags before building', () => 
       '--unknown'
     ], {
       cwd: repoRoot,
+      env: releaseTrackedInputEnv(),
       encoding: 'utf8'
     });
 
@@ -435,6 +633,48 @@ test('release note extraction fails for missing or empty changelog sections', as
   );
 });
 
+test('build-release refuses an untracked Windows installer source', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-untracked-ps1-'));
+  const outputDir = path.join(tempDir, 'out');
+  try {
+    const fixtureRoot = path.join(tempDir, 'repo');
+    fs.mkdirSync(fixtureRoot, { recursive: true });
+    writeMinimalReleaseBuildFixture(fixtureRoot, {
+      untracked: ['install.ps1']
+    });
+    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
+    const { buildRelease } = await import(moduleUrl);
+
+    assert.throws(
+      () => buildRelease({ rootDir: fixtureRoot, outputDir, allowDirtyReleaseInputs: true }),
+      /Required release file is not git-tracked: install\.ps1/
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('build-release refuses an untracked required native runtime helper', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-untracked-native-'));
+  const outputDir = path.join(tempDir, 'out');
+  try {
+    const fixtureRoot = path.join(tempDir, 'repo');
+    fs.mkdirSync(fixtureRoot, { recursive: true });
+    writeMinimalReleaseBuildFixture(fixtureRoot, {
+      untracked: ['native-host/src/nativeHostPlatform.js']
+    });
+    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
+    const { buildRelease } = await import(moduleUrl);
+
+    assert.throws(
+      () => buildRelease({ rootDir: fixtureRoot, outputDir, allowDirtyReleaseInputs: true }),
+      /Required release file is not git-tracked: native-host\/src\/nativeHostPlatform\.js/
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('top-level copied uninstaller runs from release artifact root', (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-uninstall-'));
   const outputDir = path.join(tempDir, 'out');
@@ -449,6 +689,7 @@ test('top-level copied uninstaller runs from release artifact root', (t) => {
       outputDir
     ], {
       cwd: repoRoot,
+      env: releaseBuildEnv(),
       encoding: 'utf8'
     });
 
@@ -507,6 +748,7 @@ test('release archives exclude untracked files under packaged directories', (t) 
       outputDir
     ], {
       cwd: repoRoot,
+      env: releaseBuildEnv(),
       encoding: 'utf8'
     });
 
@@ -549,6 +791,7 @@ test('build-release refuses dirty tracked packaged files before writing artifact
       outputDir
     ], {
       cwd: repoRoot,
+      env: releaseTrackedInputEnv(),
       encoding: 'utf8'
     });
 
@@ -570,10 +813,14 @@ test('build-release refuses packaged files staged for deletion from HEAD', () =>
   const relativePath = 'extension/src/shared/summary.js';
   const trackedFile = path.join(repoRoot, relativePath);
   const originalContent = fs.readFileSync(trackedFile);
+  const gitEnv = releaseTrackedInputEnv({
+    GIT_INDEX_FILE: createReleaseTestIndexPath()
+  });
 
   try {
     const removeResult = spawnSync('git', ['rm', '--cached', relativePath], {
       cwd: repoRoot,
+      env: gitEnv,
       encoding: 'utf8'
     });
     assert.equal(removeResult.status, 0, removeResult.stderr || removeResult.stdout);
@@ -585,6 +832,7 @@ test('build-release refuses packaged files staged for deletion from HEAD', () =>
       outputDir
     ], {
       cwd: repoRoot,
+      env: gitEnv,
       encoding: 'utf8'
     });
 
@@ -596,10 +844,6 @@ test('build-release refuses packaged files staged for deletion from HEAD', () =>
     assert.equal(fs.existsSync(path.join(outputDir, `codex-overleaf-link-extension-v${readJson(path.join(repoRoot, 'package.json')).version}.zip`)), false);
   } finally {
     fs.writeFileSync(trackedFile, originalContent);
-    spawnSync('git', ['restore', '--staged', '--', relativePath], {
-      cwd: repoRoot,
-      encoding: 'utf8'
-    });
     fs.writeFileSync(trackedFile, originalContent);
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -620,6 +864,7 @@ test('build-release creates expected artifacts and metadata', (t) => {
       outputDir
     ], {
       cwd: repoRoot,
+      env: releaseBuildEnv(),
       encoding: 'utf8'
     });
 
@@ -633,6 +878,7 @@ test('build-release creates expected artifacts and metadata', (t) => {
       extensionZip,
       nativeTarball,
       'install.sh',
+      'install.ps1',
       'uninstall-native-host.mjs',
       'release-manifest.json',
       'release-notes.md',
@@ -648,7 +894,7 @@ test('build-release creates expected artifacts and metadata', (t) => {
     assert.doesNotThrow(() => new Date(manifest.createdAt).toISOString());
     assert.deepEqual(
       manifest.artifacts.map((artifact) => artifact.name).sort(),
-      [extensionZip, nativeTarball, 'install.sh', 'uninstall-native-host.mjs'].sort()
+      [extensionZip, nativeTarball, 'install.sh', 'install.ps1', 'uninstall-native-host.mjs'].sort()
     );
     for (const artifact of manifest.artifacts) {
       const artifactPath = path.join(outputDir, artifact.name);
@@ -665,7 +911,7 @@ test('build-release creates expected artifacts and metadata', (t) => {
     const checksumNames = sums.map((line) => line.replace(/^[0-9a-f]{64}\s+\*?/, ''));
     assert.deepEqual(
       checksumNames.sort(),
-      [extensionZip, nativeTarball, 'install.sh', 'uninstall-native-host.mjs', 'release-manifest.json', 'release-notes.md'].sort()
+      [extensionZip, nativeTarball, 'install.sh', 'install.ps1', 'uninstall-native-host.mjs', 'release-manifest.json', 'release-notes.md'].sort()
     );
     assert.equal(checksumNames.includes('SHA256SUMS'), false);
     for (const line of sums) {
@@ -697,6 +943,7 @@ test('build-release writes a version-pinned install artifact while root installe
       outputDir
     ], {
       cwd: repoRoot,
+      env: releaseBuildEnv(),
       encoding: 'utf8'
     });
 
@@ -708,9 +955,14 @@ test('build-release writes a version-pinned install artifact while root installe
 
     const rootInstaller = readText(path.join(repoRoot, 'install.sh'));
     const releaseInstaller = readText(path.join(outputDir, 'install.sh'));
+    const rootWindowsInstaller = readText(path.join(repoRoot, 'install.ps1'));
+    const releaseWindowsInstaller = readText(path.join(outputDir, 'install.ps1'));
     assert.match(rootInstaller, /REF="\$\{CODEX_OVERLEAF_REF:-main\}"/);
     assert.match(releaseInstaller, new RegExp(`REF="\\$\\{CODEX_OVERLEAF_REF:-${releaseRef}\\}"`));
     assert.doesNotMatch(releaseInstaller, /REF="\$\{CODEX_OVERLEAF_REF:-main\}"/);
+    assert.match(rootWindowsInstaller, /\$DefaultRef = 'main'/);
+    assert.match(releaseWindowsInstaller, new RegExp(`\\$DefaultRef = '${releaseRef}'`));
+    assert.doesNotMatch(releaseWindowsInstaller, /\$DefaultRef = 'main'/);
 
     fs.mkdirSync(binDir, { recursive: true });
     fs.writeFileSync(path.join(binDir, 'git'), [
@@ -767,6 +1019,7 @@ test('native host tarball includes only runtime categories', (t) => {
       outputDir
     ], {
       cwd: repoRoot,
+      env: releaseBuildEnv(),
       encoding: 'utf8'
     });
 
@@ -782,6 +1035,7 @@ test('native host tarball includes only runtime categories', (t) => {
     assert.ok(entries.some((entry) => entry.startsWith('extension/src/shared/')));
     assert.ok(entries.includes('scripts/codex-json-agent.mjs'));
     assert.ok(entries.includes('install.sh'));
+    assert.ok(entries.includes('install.ps1'));
     assert.ok(entries.includes('scripts/uninstall-native-host.mjs'));
 
     const forbiddenPatterns = [
@@ -817,6 +1071,7 @@ test('extension zip includes loadable extension files and excludes repository/na
       outputDir
     ], {
       cwd: repoRoot,
+      env: releaseBuildEnv(),
       encoding: 'utf8'
     });
 
@@ -842,7 +1097,8 @@ test('extension zip includes loadable extension files and excludes repository/na
       /^native-host\//,
       /^scripts\//,
       /^package\.json$/,
-      /^install\.sh$/
+      /^install\.sh$/,
+      /^install\.ps1$/
     ];
     for (const pattern of forbiddenPatterns) {
       assert.equal(entries.some((entry) => pattern.test(entry)), false, `unexpected extension zip entry matching ${pattern}`);

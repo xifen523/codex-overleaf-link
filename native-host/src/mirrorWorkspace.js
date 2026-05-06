@@ -3,13 +3,13 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { getHomeDir } = require('./nativeHostPlatform');
 
-const DEFAULT_ROOT = path.join(process.env.HOME || process.cwd(), '.codex-overleaf', 'projects');
 const BASELINE_FILE = 'baseline.json';
 const MAX_BINARY_FILE_BYTES = 10 * 1024 * 1024;
 
 function getProjectMirror(projectId, options = {}) {
-  const rootDir = path.resolve(options.rootDir || DEFAULT_ROOT);
+  const rootDir = path.resolve(options.rootDir || getDefaultMirrorRoot(options));
   const projectKey = normalizeProjectKey(projectId);
   const projectRoot = path.join(rootDir, projectKey);
   return {
@@ -19,6 +19,10 @@ function getProjectMirror(projectId, options = {}) {
     metadataPath: path.join(projectRoot, 'metadata'),
     baselinePath: path.join(projectRoot, 'metadata', BASELINE_FILE)
   };
+}
+
+function getDefaultMirrorRoot(options = {}) {
+  return path.join(getHomeDir(options), '.codex-overleaf', 'projects');
 }
 
 async function syncOverleafToMirror({ projectId, project, rootDir }) {
@@ -801,6 +805,7 @@ module.exports = {
   applyFileOverlays,
   collectMirrorChangesDetailed,
   collectMirrorChanges,
+  getDefaultMirrorRoot,
   getMirrorStatus,
   getProjectMirror,
   markMirrorDirty,

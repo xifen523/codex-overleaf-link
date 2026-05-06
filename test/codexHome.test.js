@@ -8,8 +8,39 @@ const {
   buildCodexHomeEnv,
   clearPluginCodexHistory,
   getPluginCodexHome,
+  getUserCodexHome,
   preparePluginCodexHome
 } = require('../native-host/src/codexHome');
+
+test('Codex homes fall back to USERPROFILE when HOME is absent', () => {
+  const userProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-userprofile-'));
+  try {
+    assert.equal(getUserCodexHome({ USERPROFILE: userProfile }), path.join(userProfile, '.codex'));
+    assert.equal(
+      getPluginCodexHome({ USERPROFILE: userProfile }),
+      path.join(userProfile, '.codex-overleaf', 'codex-home')
+    );
+  } finally {
+    fs.rmSync(userProfile, { recursive: true, force: true });
+  }
+});
+
+test('Windows Codex homes prefer USERPROFILE before HOME', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-msys-home-'));
+  const userProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-win-profile-'));
+  try {
+    const env = { HOME: home, USERPROFILE: userProfile };
+
+    assert.equal(getUserCodexHome(env, { platform: 'win32' }), path.join(userProfile, '.codex'));
+    assert.equal(
+      getPluginCodexHome(env, { platform: 'win32' }),
+      path.join(userProfile, '.codex-overleaf', 'codex-home')
+    );
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(userProfile, { recursive: true, force: true });
+  }
+});
 
 test('plugin Codex home mirrors auth/config but does not copy global sessions', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-home-'));
@@ -70,6 +101,61 @@ test('plugin Codex home reuses local Codex skills and plugin config without link
     assert.equal(fs.lstatSync(path.join(pluginHome, 'rules')).isSymbolicLink(), true);
     assert.equal(fs.existsSync(path.join(pluginHome, 'sessions')), false);
   } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('plugin Codex home reports skipped links while preserving copied auth/config', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-link-failure-'));
+  const userCodexHome = path.join(home, '.codex');
+  const originalSymlinkSync = fs.symlinkSync;
+  try {
+    fs.mkdirSync(path.join(userCodexHome, 'skills'), { recursive: true });
+    fs.writeFileSync(path.join(userCodexHome, 'auth.json'), '{"token":"user-token"}\n', 'utf8');
+    fs.writeFileSync(path.join(userCodexHome, 'config.toml'), 'model = "gpt-5.5"\n', 'utf8');
+    fs.symlinkSync = () => {
+      const error = new Error('link denied');
+      error.code = 'EPERM';
+      throw error;
+    };
+
+    const prepared = preparePluginCodexHome({ HOME: home });
+    const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+
+    assert.equal(fs.readFileSync(path.join(pluginHome, 'auth.json'), 'utf8'), '{"token":"user-token"}\n');
+    assert.equal(fs.readFileSync(path.join(pluginHome, 'config.toml'), 'utf8'), 'model = "gpt-5.5"\n');
+    assert.deepEqual(prepared.linked, []);
+    assert.deepEqual(prepared.skippedLinks.map(link => [link.name, link.reason]), [['skills', 'EPERM']]);
+  } finally {
+    fs.symlinkSync = originalSymlinkSync;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('Windows plugin Codex directory links request junction semantics', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-junction-'));
+  const userCodexHome = path.join(home, 'user-codex');
+  const pluginHome = path.join(home, 'plugin-codex');
+  const originalSymlinkSync = fs.symlinkSync;
+  const calls = [];
+  try {
+    fs.mkdirSync(path.join(userCodexHome, 'skills'), { recursive: true });
+    fs.symlinkSync = (source, target, type) => {
+      calls.push({ source, target, type });
+    };
+
+    const prepared = preparePluginCodexHome({
+      CODEX_OVERLEAF_USER_CODEX_HOME: userCodexHome,
+      CODEX_OVERLEAF_CODEX_HOME: pluginHome
+    }, { platform: 'win32' });
+
+    assert.deepEqual(prepared.linked, ['skills']);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].source, path.join(userCodexHome, 'skills'));
+    assert.equal(calls[0].target, path.join(pluginHome, 'skills'));
+    assert.equal(calls[0].type, 'junction');
+  } finally {
+    fs.symlinkSync = originalSymlinkSync;
     fs.rmSync(home, { recursive: true, force: true });
   }
 });

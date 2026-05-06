@@ -109,16 +109,34 @@ test('bridge.ping returns bridge metadata', async () => {
   assert.equal(response.id, '1');
   assert.equal(response.ok, true);
   assert.equal(response.result.host, 'com.codex.overleaf');
-  assert.equal(response.result.platform, 'darwin');
+  assert.equal(response.result.platform, process.platform);
   assert.equal(response.result.version, packageJson.version);
   assert.deepEqual(response.result.supportedProtocol, { min: 1, max: 1 });
   assert.deepEqual(
     response.result.capabilities,
     Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true]))
   );
-  assert.equal(response.result.minExtensionVersion, '0.4.0');
+  assert.equal(response.result.minExtensionVersion, BUILD_TARGET_VERSION);
   assert.equal(response.result.environment.codex.ok, true);
   assert.deepEqual(response.result.environment.latex.available, ['latexmk']);
+});
+
+test('bridge.ping reports injected platform metadata from the native host environment', async () => {
+  const response = await handleRequest({ id: 'platform', method: 'bridge.ping', params: {} }, {
+    CODEX_OVERLEAF_PLATFORM: 'linux'
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.platform, 'linux');
+});
+
+test('bridge.ping ignores unsupported ambient platform metadata', async () => {
+  const response = await handleRequest({ id: 'platform-spoof', method: 'bridge.ping', params: {} }, {
+    CODEX_OVERLEAF_PLATFORM: 'freebsd'
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.platform, process.platform);
 });
 
 test('real bridge.ping compatibility follows package version metadata', async () => {

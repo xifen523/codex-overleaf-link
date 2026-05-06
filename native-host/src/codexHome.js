@@ -2,6 +2,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  getHomeDir,
+  getNativeHostPlatform
+} = require('./nativeHostPlatform');
 
 const COPIED_USER_CODEX_FILES = [
   'auth.json',
@@ -27,28 +31,29 @@ const HISTORY_DIRS = [
   'history'
 ];
 
-function getUserCodexHome(env = process.env) {
-  const home = env.HOME || process.env.HOME || process.cwd();
+function getUserCodexHome(env = process.env, options = {}) {
+  const home = getHomeDir({ ...options, env });
   return path.resolve(env.CODEX_OVERLEAF_USER_CODEX_HOME || env.CODEX_HOME || path.join(home, '.codex'));
 }
 
-function getPluginCodexHome(env = process.env) {
-  const home = env.HOME || process.env.HOME || process.cwd();
+function getPluginCodexHome(env = process.env, options = {}) {
+  const home = getHomeDir({ ...options, env });
   return path.resolve(env.CODEX_OVERLEAF_CODEX_HOME || path.join(home, '.codex-overleaf', 'codex-home'));
 }
 
-function preparePluginCodexHome(env = process.env) {
-  const userHome = getUserCodexHome(env);
-  const pluginHome = getPluginCodexHome(env);
+function preparePluginCodexHome(env = process.env, options = {}) {
+  const userHome = getUserCodexHome(env, options);
+  const pluginHome = getPluginCodexHome(env, options);
 
   fs.mkdirSync(pluginHome, { recursive: true });
   chmodIfPossible(pluginHome, 0o700);
   if (samePath(userHome, pluginHome)) {
-    return { userHome, pluginHome, copied: [] };
+    return { userHome, pluginHome, copied: [], linked: [], skippedLinks: [] };
   }
 
   const copied = [];
   const linked = [];
+  const skippedLinks = [];
   for (const fileName of COPIED_USER_CODEX_FILES) {
     const source = path.join(userHome, fileName);
     const target = path.join(pluginHome, fileName);
@@ -66,13 +71,21 @@ function preparePluginCodexHome(env = process.env) {
   for (const dirName of LINKED_USER_CODEX_DIRS) {
     const source = path.join(userHome, dirName);
     const target = path.join(pluginHome, dirName);
-    if (!isDirectory(source) || !ensureSymlink(source, target)) {
+    if (!isDirectory(source)) {
+      continue;
+    }
+    const linkResult = ensureSymlink(source, target, options);
+    if (!linkResult.ok) {
+      skippedLinks.push({
+        name: dirName,
+        reason: linkResult.reason
+      });
       continue;
     }
     linked.push(dirName);
   }
 
-  return { userHome, pluginHome, copied, linked };
+  return { userHome, pluginHome, copied, linked, skippedLinks };
 }
 
 function buildCodexHomeEnv(env = process.env) {
@@ -254,22 +267,30 @@ function isDirectory(filePath) {
   }
 }
 
-function ensureSymlink(source, target) {
+function ensureSymlink(source, target, options = {}) {
   try {
     const existing = fs.lstatSync(target);
     if (existing.isSymbolicLink() && path.resolve(fs.readlinkSync(target)) === path.resolve(source)) {
-      return true;
+      return { ok: true };
     }
-    return false;
+    return { ok: false, reason: 'target_exists' };
   } catch (error) {
     if (error.code !== 'ENOENT') {
-      return false;
+      return { ok: false, reason: error.code || 'lstat_failed' };
     }
   }
 
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.symlinkSync(source, target, 'dir');
-  return true;
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.symlinkSync(source, target, getDirectorySymlinkType(options));
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, reason: error.code || 'link_failed' };
+  }
+}
+
+function getDirectorySymlinkType(options = {}) {
+  return getNativeHostPlatform(options) === 'win32' ? 'junction' : 'dir';
 }
 
 function chmodIfPossible(target, mode) {

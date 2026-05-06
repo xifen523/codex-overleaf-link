@@ -8,10 +8,25 @@ const {
   markMirrorDirty,
   collectMirrorChangesDetailed,
   collectMirrorChanges,
+  getDefaultMirrorRoot,
   getProjectMirror,
   getMirrorStatus,
   syncOverleafToMirror
 } = require('../native-host/src/mirrorWorkspace');
+
+test('default mirror root falls back to USERPROFILE when HOME is absent', () => {
+  const userProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-profile-'));
+  try {
+    const env = { USERPROFILE: userProfile };
+    const expectedRoot = path.join(userProfile, '.codex-overleaf', 'projects');
+    const mirror = getProjectMirror('profile-fallback-project', { env });
+
+    assert.equal(getDefaultMirrorRoot({ env }), expectedRoot);
+    assert.equal(mirror.projectRoot, path.join(expectedRoot, 'profile-fallback-project'));
+  } finally {
+    fs.rmSync(userProfile, { recursive: true, force: true });
+  }
+});
 
 test('maps the same Overleaf project to a stable local mirror workspace', () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
@@ -56,6 +71,27 @@ test('syncs Overleaf text files to the mirror and removes files missing from the
 
     assert.equal(fs.readFileSync(path.join(second.workspacePath, 'main.tex'), 'utf8'), 'hello again');
     assert.equal(fs.existsSync(path.join(second.workspacePath, 'sections/old.tex')), false);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('normalizes Windows-style Overleaf file paths to forward slash baseline identity', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-windows-paths',
+      rootDir,
+      project: {
+        files: [
+          { path: 'sections\\intro.tex', content: 'intro' }
+        ]
+      }
+    });
+
+    assert.equal(fs.readFileSync(path.join(mirror.workspacePath, 'sections', 'intro.tex'), 'utf8'), 'intro');
+    const baseline = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+    assert.deepEqual(baseline.files.map(file => file.path), ['sections/intro.tex']);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

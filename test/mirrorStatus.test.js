@@ -5,6 +5,8 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const debugLog = require('../native-host/src/debugLog');
+const { getDebugLogPath } = debugLog;
 const {
   syncOverleafToMirror,
   getProjectMirror,
@@ -18,6 +20,50 @@ let tempRoot;
 
 beforeEach(() => {
   tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-status-'));
+});
+
+test('debug log path uses USERPROFILE fallback when HOME is absent', () => {
+  const userProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'debug-log-profile-'));
+  try {
+    assert.equal(
+      getDebugLogPath({ env: { USERPROFILE: userProfile } }),
+      path.join(userProfile, '.codex-overleaf', 'native-host.log')
+    );
+  } finally {
+    fs.rmSync(userProfile, { recursive: true, force: true });
+  }
+});
+
+test('Windows debug log path uses the native host local data root', () => {
+  assert.equal(
+    getDebugLogPath({
+      platform: 'win32',
+      env: {
+        USERPROFILE: 'C:\\Users\\Alice'
+      }
+    }),
+    'C:\\Users\\Alice\\AppData\\Local\\CodexOverleaf\\native-host.log'
+  );
+});
+
+test('exported LOG_PATH reflects HOME changes after module load', () => {
+  const originalHome = process.env.HOME;
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'debug-log-dynamic-home-'));
+  try {
+    process.env.HOME = tempHome;
+
+    assert.equal(
+      debugLog.LOG_PATH,
+      path.join(tempHome, '.codex-overleaf', 'native-host.log')
+    );
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
 });
 
 test('syncOverleafToMirror writes lastFullSyncAt to baseline', async () => {

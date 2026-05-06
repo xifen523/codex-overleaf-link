@@ -13,7 +13,7 @@ const { resolveCodexModels } = require('./codexModels');
 const { clearPluginCodexHistory } = require('./codexHome');
 const { logDebug, truncateText } = require('./debugLog');
 const { HOST_NAME } = require('./manifest');
-const { summarizeNativeEnvironment } = require('./nativeEnvironment');
+const { getNativeRuntimePlatform, summarizeNativeEnvironment } = require('./nativeEnvironment');
 const { version: PACKAGE_VERSION } = require('../../package.json');
 
 const activeProjectLocks = new Map();
@@ -29,7 +29,7 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
   if (request.method === 'bridge.ping') {
     return okResponse(request.id, {
       host: HOST_NAME,
-      platform: 'darwin',
+      platform: getNativeRuntimePlatform({ env }),
       protocolVersion: 1,
       supportedProtocol: { ...SUPPORTED_NATIVE_PROTOCOL },
       capabilities: Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true])),

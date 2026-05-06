@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const DEFAULT_RELEASE_DATE = '2026-05-06';
+const REQUIRED_RELEASE_VERSION = '0.5.0';
 const CHROME_WEB_STORE_DOCS = [
   'permissions.md',
   'privacy.md',
@@ -29,6 +30,9 @@ export function collectReleaseVerificationErrors(options = {}) {
     errors.push('package.json must define a release version.');
     return errors;
   }
+  if (version !== REQUIRED_RELEASE_VERSION) {
+    errors.push(`package.json version ${formatValue(version)} must be ${REQUIRED_RELEASE_VERSION} for v0.5 release verification.`);
+  }
 
   if (manifest.version !== version) {
     errors.push(
@@ -46,7 +50,18 @@ export function collectReleaseVerificationErrors(options = {}) {
     errors.push(`CHANGELOG.md must contain the release heading "${expectedHeading}".`);
   }
 
+  errors.push(...collectInstallerArtifactErrors(rootDir));
   errors.push(...collectChromeWebStoreDocErrors(rootDir));
+  return errors;
+}
+
+export function collectInstallerArtifactErrors(rootDir) {
+  const errors = [];
+  for (const relativePath of ['install.sh', 'install.ps1', 'scripts/install-native-host.mjs']) {
+    if (!fs.existsSync(path.join(rootDir, relativePath))) {
+      errors.push(`${relativePath} is required for v0.5 release verification.`);
+    }
+  }
   return errors;
 }
 
@@ -56,8 +71,34 @@ export function collectChromeWebStoreDocErrors(rootDir) {
   for (const fileName of CHROME_WEB_STORE_DOCS) {
     const docPath = path.join(docsDir, fileName);
     if (!fs.existsSync(docPath)) {
-      errors.push(`docs/chrome-web-store/${fileName} is required for v0.4 release verification.`);
+      errors.push(`docs/chrome-web-store/${fileName} is required for v0.5 release verification.`);
     }
+  }
+  if (errors.length === 0) {
+    errors.push(...collectReleaseChecklistErrors(docsDir));
+  }
+  return errors;
+}
+
+function collectReleaseChecklistErrors(docsDir) {
+  const errors = [];
+  const relativePath = 'docs/chrome-web-store/release-checklist.md';
+  const checklist = fs.readFileSync(path.join(docsDir, 'release-checklist.md'), 'utf8');
+  const releaseRef = `v${REQUIRED_RELEASE_VERSION}`;
+  const requiredFragments = [
+    `dist/releases/${releaseRef}/SHA256SUMS`,
+    `codex-overleaf-link-extension-${releaseRef}.zip`,
+    `codex-overleaf-native-host-${releaseRef}.tar.gz`,
+    'install.ps1'
+  ];
+
+  for (const fragment of requiredFragments) {
+    if (!checklist.includes(fragment)) {
+      errors.push(`${relativePath} must reference current ${releaseRef} release instruction "${fragment}".`);
+    }
+  }
+  if (/\bv0\.4(?:\.0)?\b/i.test(checklist)) {
+    errors.push(`${relativePath} must not reference stale v0.4 release instructions.`);
   }
   return errors;
 }

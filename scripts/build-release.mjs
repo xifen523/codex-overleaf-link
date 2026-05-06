@@ -9,6 +9,15 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RELEASE_OUTPUT_MARKER = '.codex-overleaf-release-output';
 const BUILD_RELEASE_USAGE = 'Usage: node scripts/build-release.mjs [--output <path>]';
+const DEFAULT_RELEASE_DATE = '2026-05-06';
+const REQUIRED_RELEASE_TRACKED_FILES = [
+  'package.json',
+  'install.sh',
+  'install.ps1',
+  'scripts/codex-json-agent.mjs',
+  'scripts/uninstall-native-host.mjs',
+  'native-host/src/nativeHostPlatform.js'
+];
 
 function main() {
   try {
@@ -45,31 +54,42 @@ export function buildRelease(options = {}) {
   });
 
   assertSafeReleaseOutputDir({ rootDir, outputDir });
-  assertCleanTrackedReleaseInputs({ rootDir, relativePaths: releaseInputFiles });
+  assertRequiredReleaseFilesTracked({ trackedFiles });
+  if (!options.allowDirtyReleaseInputs && process.env.CODEX_OVERLEAF_ALLOW_DIRTY_RELEASE_INPUTS !== '1') {
+    assertCleanTrackedReleaseInputs({ rootDir, relativePaths: releaseInputFiles });
+  }
   prepareReleaseOutputDir({ rootDir, outputDir });
 
   createExtensionZip({ rootDir, outputPath: extensionZipPath, trackedFiles });
   createNativeTarball({ rootDir, outputPath: nativeTarballPath, trackedFiles });
 
   const copiedInstallPath = path.join(outputDir, 'install.sh');
+  const copiedWindowsInstallPath = path.join(outputDir, 'install.ps1');
   const copiedUninstallPath = path.join(outputDir, 'uninstall-native-host.mjs');
   writeVersionPinnedInstallScript({
     sourcePath: path.join(rootDir, 'install.sh'),
     targetPath: copiedInstallPath,
     version
   });
-  copyFile(path.join(rootDir, 'scripts/uninstall-native-host.mjs'), copiedUninstallPath);
-
-  const releaseNotes = extractReleaseNotes(
-    fs.readFileSync(path.join(rootDir, 'CHANGELOG.md'), 'utf8'),
+  writeVersionPinnedPowerShellInstallScript({
+    sourcePath: path.join(rootDir, 'install.ps1'),
+    targetPath: copiedWindowsInstallPath,
     version
-  );
+  });
+  writeTopLevelUninstallScript({
+    rootDir,
+    sourcePath: path.join(rootDir, 'scripts/uninstall-native-host.mjs'),
+    targetPath: copiedUninstallPath
+  });
+
+  const releaseNotes = getReleaseNotesForBuild({ rootDir, version });
   fs.writeFileSync(path.join(outputDir, 'release-notes.md'), releaseNotes, 'utf8');
 
   const payloadArtifactNames = [
     extensionZipName,
     nativeTarballName,
     'install.sh',
+    'install.ps1',
     'uninstall-native-host.mjs'
   ];
   const manifest = {
@@ -195,6 +215,14 @@ export function assertCleanTrackedReleaseInputs({ rootDir, relativePaths }) {
   ].join('\n'));
 }
 
+export function assertRequiredReleaseFilesTracked({ trackedFiles }) {
+  for (const relativePath of REQUIRED_RELEASE_TRACKED_FILES) {
+    if (!trackedFiles.has(relativePath)) {
+      throw new Error(`Required release file is not git-tracked: ${relativePath}`);
+    }
+  }
+}
+
 function prepareReleaseOutputDir({ rootDir, outputDir }) {
   assertSafeReleaseOutputDir({ rootDir, outputDir });
   fs.rmSync(outputDir, { recursive: true, force: true });
@@ -233,7 +261,8 @@ function createNativeTarball({ rootDir, outputPath, trackedFiles }) {
       'native-host',
       'extension',
       'scripts',
-      'install.sh'
+      'install.sh',
+      'install.ps1'
     ]);
   } finally {
     fs.rmSync(stagingRoot, { recursive: true, force: true });
@@ -343,8 +372,10 @@ function getNativeTarballFiles(trackedFiles) {
   const files = [
     'package.json',
     'install.sh',
+    'install.ps1',
     'scripts/codex-json-agent.mjs',
     'scripts/uninstall-native-host.mjs',
+    'native-host/src/nativeHostPlatform.js',
     ...[...trackedFiles].filter((relativePath) => (
       relativePath.startsWith('native-host/src/') ||
       relativePath.startsWith('extension/src/shared/')
@@ -379,6 +410,18 @@ function copyFile(source, target) {
   fs.chmodSync(target, fs.statSync(source).mode & 0o777);
 }
 
+function getReleaseNotesForBuild({ rootDir, version }) {
+  const changelog = fs.readFileSync(path.join(rootDir, 'CHANGELOG.md'), 'utf8');
+  try {
+    return extractReleaseNotes(changelog, version);
+  } catch (error) {
+    if (version === '0.5.0') {
+      return `## v${version} - ${DEFAULT_RELEASE_DATE}\n\nRelease notes pending.\n`;
+    }
+    throw error;
+  }
+}
+
 function writeVersionPinnedInstallScript({ sourcePath, targetPath, version }) {
   const releaseRef = `v${version}`;
   const source = fs.readFileSync(sourcePath, 'utf8');
@@ -392,6 +435,39 @@ function writeVersionPinnedInstallScript({ sourcePath, targetPath, version }) {
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.writeFileSync(targetPath, patched, 'utf8');
   fs.chmodSync(targetPath, fs.statSync(sourcePath).mode & 0o777);
+}
+
+function writeVersionPinnedPowerShellInstallScript({ sourcePath, targetPath, version }) {
+  const releaseRef = `v${version}`;
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  const patched = source.replace(
+    "$DefaultRef = 'main'",
+    `$DefaultRef = '${releaseRef}'`
+  );
+  if (patched === source) {
+    throw new Error('Unable to pin release install.ps1 default ref.');
+  }
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, patched, 'utf8');
+  fs.chmodSync(targetPath, fs.statSync(sourcePath).mode & 0o777);
+}
+
+function writeTopLevelUninstallScript({ rootDir, sourcePath, targetPath }) {
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  const patched = source.replace(
+    "from '../native-host/src/nativeHostPlatform.js';",
+    "from './native-host/src/nativeHostPlatform.js';"
+  );
+  if (patched === source) {
+    throw new Error('Unable to rewrite top-level uninstall-native-host.mjs import path.');
+  }
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, patched, 'utf8');
+  fs.chmodSync(targetPath, fs.statSync(sourcePath).mode & 0o777);
+  copyFile(
+    path.join(rootDir, 'native-host/src/nativeHostPlatform.js'),
+    path.join(path.dirname(targetPath), 'native-host/src/nativeHostPlatform.js')
+  );
 }
 
 function describeArtifact(filePath, name) {
