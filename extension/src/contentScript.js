@@ -13,6 +13,8 @@
   const STREAM_SAVE_DELAY_MS = 1000;
   const MAX_RUN_EVENTS = 300;
   const MAX_SAFE_UNDO_REPLACEALL_CHARS = 2000;
+  const MAX_INITIAL_REVIEW_HUNKS = 20;
+  const MAX_INITIAL_HUNK_LINES = 80;
   const NATIVE_COMPATIBILITY_GATED_METHODS = new Set([
     'codex.run',
     'task.run',
@@ -2309,6 +2311,9 @@
     const readonly = Boolean(options.readonly);
     const container = document.createElement('div');
     container.className = 'codex-diff-review';
+    container.tabIndex = 0;
+    container.setAttribute('role', 'region');
+    container.setAttribute('data-diff-review-container', '');
     if (readonly) {
       container.dataset.readonly = 'true';
     }
@@ -2320,6 +2325,7 @@
     const fileViews = new Map();
     const hunkViews = new Map();
     const decisionListeners = new Set();
+    let focusedHunkKey = null;
 
     function notifyDecisionChanged() {
       for (const listener of decisionListeners) {
@@ -2339,6 +2345,147 @@
       status.className = 'codex-diff-hunk-status';
       status.textContent = accepted ? tr('diffHunkAccepted') : tr('diffHunkRejected');
       actions.replaceChildren(status);
+    }
+
+    function setHunkFocused(hunkEl, focused) {
+      hunkEl.dataset.focused = focused ? 'true' : 'false';
+      const baseClass = 'codex-diff-hunk';
+      hunkEl.className = focused ? `${baseClass} codex-diff-hunk-focused` : baseClass;
+    }
+
+    function getFocusableHunks() {
+      return Array.from(hunkViews.values()).filter(view => view.reviewHunk);
+    }
+
+    function focusHunkByIndex(index) {
+      const hunks = getFocusableHunks();
+      if (!hunks.length) {
+        return false;
+      }
+      const nextIndex = Math.max(0, Math.min(index, hunks.length - 1));
+      const next = hunks[nextIndex];
+      if (focusedHunkKey && focusedHunkKey !== next.reviewHunk.decisionKey) {
+        const previous = hunkViews.get(focusedHunkKey);
+        if (previous) {
+          setHunkFocused(previous.hunkEl, false);
+        }
+      }
+      focusedHunkKey = next.reviewHunk.decisionKey;
+      setHunkFocused(next.hunkEl, true);
+      return true;
+    }
+
+    function moveFocusedHunk(delta) {
+      const hunks = getFocusableHunks();
+      if (!hunks.length) {
+        return false;
+      }
+      const currentIndex = Math.max(0, hunks.findIndex(view => view.reviewHunk.decisionKey === focusedHunkKey));
+      return focusHunkByIndex(currentIndex + delta);
+    }
+
+    function getFocusedHunk() {
+      if (!focusedHunkKey) {
+        focusHunkByIndex(0);
+      }
+      return hunkViews.get(focusedHunkKey)?.reviewHunk || null;
+    }
+
+    function getHunkJumpRange(reviewHunk) {
+      const from = Number(reviewHunk?.startOffset);
+      const to = Number(reviewHunk?.endOffset);
+      return {
+        path: reviewHunk?.path,
+        from: Number.isInteger(from) && from >= 0 ? from : 0,
+        to: Number.isInteger(to) && to >= 0 ? to : (Number.isInteger(from) && from >= 0 ? from : 0)
+      };
+    }
+
+    async function jumpToHunk(reviewHunk) {
+      if (!reviewHunk) {
+        return;
+      }
+      const { path, from, to } = getHunkJumpRange(reviewHunk);
+      const view = hunkViews.get(reviewHunk.decisionKey);
+      if (view) {
+        view.hunkEl.dataset.jumpStatus = 'pending';
+      }
+      try {
+        const result = await callPageBridge('jumpToPosition', { path, from, to });
+        if (view) {
+          view.hunkEl.dataset.jumpStatus = result?.ok === false ? 'failed' : 'done';
+        }
+      } catch (error) {
+        if (view) {
+          view.hunkEl.dataset.jumpStatus = 'failed';
+        }
+      }
+    }
+
+    function isDiffReviewEditableTarget(target) {
+      const tagName = String(target?.tagName || '').toUpperCase();
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') {
+        return true;
+      }
+      if (target?.isContentEditable || target?.getAttribute?.('contenteditable') === 'true') {
+        return true;
+      }
+      return Boolean(target?.closest?.('input, textarea, select, [contenteditable="true"]'));
+    }
+
+    function handleDiffReviewKeydown(event) {
+      if (isDiffReviewEditableTarget(event.target)) {
+        return;
+      }
+      let handled = false;
+      switch (event.key) {
+        case 'j':
+          handled = moveFocusedHunk(1);
+          break;
+        case 'k':
+          handled = moveFocusedHunk(-1);
+          break;
+        case 'a': {
+          const hunk = getFocusedHunk();
+          if (hunk && !readonly) {
+            decideHunkChange(hunk, true);
+            handled = true;
+          }
+          break;
+        }
+        case 'r': {
+          const hunk = getFocusedHunk();
+          if (hunk && !readonly) {
+            decideHunkChange(hunk, false);
+            handled = true;
+          }
+          break;
+        }
+        case 'Enter': {
+          const hunk = getFocusedHunk();
+          if (hunk) {
+            jumpToHunk(hunk);
+            handled = true;
+          }
+          break;
+        }
+        case 'Escape':
+          if (focusedHunkKey) {
+            const previous = hunkViews.get(focusedHunkKey);
+            if (previous) {
+              setHunkFocused(previous.hunkEl, false);
+            }
+            focusedHunkKey = null;
+          }
+          container.blur?.();
+          handled = true;
+          break;
+        default:
+          break;
+      }
+      if (handled) {
+        event.preventDefault?.();
+      }
     }
 
     function updateReviewableFileDecision(view, fileModel) {
@@ -2439,6 +2586,88 @@
       return syncChanges.filter(change => fileStates.get(change.path) === true);
     }
 
+    function createDiffLineElement(line) {
+      const lineEl = document.createElement('div');
+      lineEl.className = 'codex-diff-line';
+      lineEl.dataset.type = line.type;
+      lineEl.setAttribute('data-diff-line', '');
+      lineEl.textContent = line.text;
+      return lineEl;
+    }
+
+    function appendHunkLines(hunkEl, lines = []) {
+      const lineWrap = document.createElement('div');
+      lineWrap.className = 'codex-diff-hunk-lines';
+      const normalizedLines = Array.isArray(lines) ? lines : [];
+
+      function renderLines(expanded) {
+        const visibleLines = expanded ? normalizedLines : normalizedLines.slice(0, MAX_INITIAL_HUNK_LINES);
+        const children = visibleLines.map(createDiffLineElement);
+        if (!expanded && normalizedLines.length > MAX_INITIAL_HUNK_LINES) {
+          const expandBtn = document.createElement('button');
+          expandBtn.type = 'button';
+          expandBtn.className = 'codex-diff-hunk-expand';
+          expandBtn.setAttribute('data-diff-hunk-expand', '');
+          expandBtn.textContent = tr('diffHunkExpandLines', {
+            count: normalizedLines.length - MAX_INITIAL_HUNK_LINES
+          });
+          expandBtn.addEventListener('click', () => renderLines(true));
+          children.push(expandBtn);
+        }
+        lineWrap.replaceChildren(...children);
+      }
+
+      renderLines(false);
+      hunkEl.append(lineWrap);
+    }
+
+    function createDiffHunkElement(hunk, reviewHunk, fileModel, hunkIndex) {
+      const hunkEl = document.createElement('div');
+      hunkEl.className = 'codex-diff-hunk';
+      hunkEl.setAttribute('data-diff-review-hunk', '');
+      hunkEl.dataset.hunkIndex = String(hunkIndex);
+      if (reviewHunk) {
+        hunkEl.dataset.decision = readonly ? 'accepted' : (hunkStates.get(reviewHunk.decisionKey) === true ? 'accepted' : hunkStates.get(reviewHunk.decisionKey) === false ? 'rejected' : 'pending');
+        setHunkFocused(hunkEl, focusedHunkKey === reviewHunk.decisionKey);
+        const hunkActions = document.createElement('div');
+        hunkActions.className = 'codex-diff-hunk-actions';
+        if (readonly) {
+          setHunkDecisionStatus(hunkActions, true);
+        } else {
+          const acceptHunkBtn = document.createElement('button');
+          acceptHunkBtn.type = 'button';
+          acceptHunkBtn.setAttribute('data-diff-hunk-accept', '');
+          acceptHunkBtn.textContent = '✓';
+          acceptHunkBtn.title = tr('diffHunkAccept');
+          const rejectHunkBtn = document.createElement('button');
+          rejectHunkBtn.type = 'button';
+          rejectHunkBtn.setAttribute('data-diff-hunk-reject', '');
+          rejectHunkBtn.textContent = '✗';
+          rejectHunkBtn.title = tr('diffHunkReject');
+          const jumpHunkBtn = document.createElement('button');
+          jumpHunkBtn.type = 'button';
+          jumpHunkBtn.setAttribute('data-diff-hunk-jump', '');
+          jumpHunkBtn.textContent = '↗';
+          jumpHunkBtn.title = tr('diffHunkJump');
+
+          acceptHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, true));
+          rejectHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, false));
+          jumpHunkBtn.addEventListener('click', () => jumpToHunk(reviewHunk));
+
+          hunkActions.append(acceptHunkBtn, rejectHunkBtn, jumpHunkBtn);
+        }
+        hunkEl.append(hunkActions);
+        hunkViews.set(reviewHunk.decisionKey, { hunkEl, actions: hunkActions, reviewHunk });
+      } else if (!readonly && fileModel && !fileModel.reviewable && hunkIndex === 0) {
+        const fallback = document.createElement('div');
+        fallback.className = 'codex-diff-fallback-label';
+        fallback.textContent = tr('diffFallbackFileOnly');
+        hunkEl.append(fallback);
+      }
+      appendHunkLines(hunkEl, hunk.lines);
+      return hunkEl;
+    }
+
     for (const [changeIndex, change] of syncChanges.entries()) {
       const fileModel = reviewFilesByIndex.get(changeIndex);
       if (fileModel?.reviewable) {
@@ -2495,63 +2724,35 @@
         const body = document.createElement('div');
         body.className = 'codex-diff-body';
         const hunkCount = fileModel?.reviewable ? Math.max(diffHunks.length, fileModel.hunks.length) : diffHunks.length;
-        for (let hunkIndex = 0; hunkIndex < hunkCount; hunkIndex += 1) {
-          const hunk = diffHunks[hunkIndex] || { lines: [] };
-          const reviewHunk = fileModel?.reviewable ? fileModel.hunks[hunkIndex] : null;
-          const hunkEl = document.createElement('div');
-          hunkEl.className = 'codex-diff-hunk';
-          if (reviewHunk) {
-            hunkEl.dataset.decision = readonly ? 'accepted' : 'pending';
-            const hunkActions = document.createElement('div');
-            hunkActions.className = 'codex-diff-hunk-actions';
-            if (readonly) {
-              setHunkDecisionStatus(hunkActions, true);
-            } else {
-              const acceptHunkBtn = document.createElement('button');
-              acceptHunkBtn.type = 'button';
-              acceptHunkBtn.setAttribute('data-diff-hunk-accept', '');
-              acceptHunkBtn.textContent = '✓';
-              acceptHunkBtn.title = tr('diffHunkAccept');
-              const rejectHunkBtn = document.createElement('button');
-              rejectHunkBtn.type = 'button';
-              rejectHunkBtn.setAttribute('data-diff-hunk-reject', '');
-              rejectHunkBtn.textContent = '✗';
-              rejectHunkBtn.title = tr('diffHunkReject');
-              const jumpHunkBtn = document.createElement('button');
-              jumpHunkBtn.type = 'button';
-              jumpHunkBtn.setAttribute('data-diff-hunk-jump', '');
-              jumpHunkBtn.textContent = '↗';
-              jumpHunkBtn.title = tr('diffHunkJump');
-
-              acceptHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, true));
-              rejectHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, false));
-              jumpHunkBtn.addEventListener('click', () => {});
-
-              hunkActions.append(acceptHunkBtn, rejectHunkBtn, jumpHunkBtn);
-            }
-            hunkEl.append(hunkActions);
-            hunkViews.set(reviewHunk.decisionKey, { hunkEl, actions: hunkActions });
-          } else if (!readonly && fileModel && !fileModel.reviewable && hunkIndex === 0) {
-            const fallback = document.createElement('div');
-            fallback.className = 'codex-diff-fallback-label';
-            fallback.textContent = tr('diffFallbackFileOnly');
-            hunkEl.append(fallback);
+        function renderHunks(visibleCount) {
+          const children = [];
+          for (let hunkIndex = 0; hunkIndex < visibleCount; hunkIndex += 1) {
+            const hunk = diffHunks[hunkIndex] || { lines: [] };
+            const reviewHunk = fileModel?.reviewable ? fileModel.hunks[hunkIndex] : null;
+            children.push(createDiffHunkElement(hunk, reviewHunk, fileModel, hunkIndex));
           }
-          for (const line of hunk.lines) {
-            const lineEl = document.createElement('div');
-            lineEl.className = 'codex-diff-line';
-            lineEl.dataset.type = line.type;
-            lineEl.textContent = line.text;
-            hunkEl.append(lineEl);
+          if (visibleCount < hunkCount) {
+            const showMoreBtn = document.createElement('button');
+            showMoreBtn.type = 'button';
+            showMoreBtn.className = 'codex-diff-show-more-hunks';
+            showMoreBtn.setAttribute('data-diff-show-more-hunks', '');
+            showMoreBtn.textContent = tr('diffShowMoreHunks', {
+              count: hunkCount - visibleCount
+            });
+            showMoreBtn.addEventListener('click', () => renderHunks(hunkCount));
+            children.push(showMoreBtn);
           }
-          body.append(hunkEl);
+          body.replaceChildren(...children);
         }
+        renderHunks(Math.min(hunkCount, MAX_INITIAL_REVIEW_HUNKS));
         card.append(body);
       }
 
       container.append(card);
       fileViews.set(change.path, { card, actions, fileModel });
     }
+
+    container.addEventListener('keydown', handleDiffReviewKeydown);
 
     return {
       container,

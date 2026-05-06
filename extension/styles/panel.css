@@ -1639,6 +1639,12 @@
   opacity: 0.68;
 }
 
+#codex-overleaf-panel .codex-diff-hunk[data-focused="true"] {
+  outline: 1px solid #4f9cff;
+  outline-offset: -1px;
+  background: rgba(79, 156, 255, 0.08);
+}
+
 #codex-overleaf-panel .codex-diff-hunk:first-child {
   border-top: 0;
 }
@@ -1686,6 +1692,18 @@
 
 #codex-overleaf-panel .codex-diff-fallback-label {
   padding: 2px 8px;
+}
+
+#codex-overleaf-panel .codex-diff-show-more-hunks,
+#codex-overleaf-panel .codex-diff-hunk-expand {
+  width: calc(100% - 12px);
+  margin: 4px 6px;
+  min-height: 22px;
+  border: 1px dashed #3a3d41;
+  border-radius: 4px;
+  background: #202124;
+  color: #9cdcfe;
+  font-size: 11px;
 }
 
 #codex-overleaf-panel .codex-diff-line {

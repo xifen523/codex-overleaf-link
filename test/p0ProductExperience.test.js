@@ -41,6 +41,7 @@ function createMinimalDocument() {
       this.textContent = '';
       this.title = '';
       this.type = '';
+      this.tabIndex = undefined;
     }
 
     append(...children) {
@@ -63,6 +64,22 @@ function createMinimalDocument() {
     addEventListener(type, listener) {
       this.listeners[type] = this.listeners[type] || [];
       this.listeners[type].push(listener);
+    }
+
+    dispatchEvent(event) {
+      for (const listener of this.listeners[event.type] || []) {
+        listener(event);
+      }
+      return !event.defaultPrevented;
+    }
+
+    focus() {
+      this.focused = true;
+    }
+
+    blur() {
+      this.blurred = true;
+      this.focused = false;
     }
 
     click() {
@@ -110,14 +127,23 @@ function loadCreateDiffReviewElementForTest() {
     .match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderDiffReview/)?.[0]
     ?.replace(/\n  function renderDiffReview$/, '');
   assert.ok(source, 'createDiffReviewElement should be extractable for behavior tests');
-  return vm.runInNewContext(`(${source})`, {
+  const pageBridgeCalls = [];
+  const createDiffReviewElement = vm.runInNewContext(`(${source})`, {
     document: createMinimalDocument(),
     ReviewHunks,
+    MAX_INITIAL_REVIEW_HUNKS: 20,
+    MAX_INITIAL_HUNK_LINES: 80,
     window: { CodexOverleafReviewHunks: ReviewHunks },
+    callPageBridge(method, params) {
+      pageBridgeCalls.push({ method, params });
+      return Promise.resolve({ ok: true });
+    },
     tr(key) {
       return key;
     }
   });
+  createDiffReviewElement.pageBridgeCalls = pageBridgeCalls;
+  return createDiffReviewElement;
 }
 
 test('composer defaults to English task modes and keeps Chinese translations available', () => {
@@ -1347,6 +1373,166 @@ test('confirm diff review renders hunk controls and resolves accepted hunk patch
   assert.match(createDiffBody, /buildAcceptedSyncChanges\(syncChanges,\s*decisions\)/);
   assert.match(renderDiffBody, /review\.getAcceptedChanges\(\)/);
   assert.match(renderDiffBody, /buildAcceptedSyncChanges/);
+});
+
+test('confirm diff review exposes editor-native hunk review limits and shortcuts', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const createDiffBody = contentScript.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderDiffReview/)?.[0] || '';
+
+  assert.match(contentScript, /const MAX_INITIAL_REVIEW_HUNKS = 20/);
+  assert.match(contentScript, /const MAX_INITIAL_HUNK_LINES = 80/);
+  assert.match(createDiffBody, /container\.tabIndex = 0/);
+  assert.match(createDiffBody, /handleDiffReviewKeydown/);
+  assert.match(createDiffBody, /addEventListener\('keydown', handleDiffReviewKeydown\)/);
+  assert.match(createDiffBody, /callPageBridge\('jumpToPosition',\s*\{\s*path/);
+  assert.match(createDiffBody, /case 'j'/);
+  assert.match(createDiffBody, /case 'k'/);
+  assert.match(createDiffBody, /case 'a'/);
+  assert.match(createDiffBody, /case 'r'/);
+  assert.match(createDiffBody, /case 'Enter'/);
+  assert.match(createDiffBody, /case 'Escape'/);
+  assert.match(createDiffBody, /isDiffReviewEditableTarget/);
+  assert.match(createDiffBody, /MAX_INITIAL_REVIEW_HUNKS/);
+  assert.match(createDiffBody, /MAX_INITIAL_HUNK_LINES/);
+});
+
+test('hunk review buttons return only the accepted patch subset', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const syncChanges = [
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches: [
+        { from: 0, to: 5, expected: 'alpha', insert: 'ALPHA' },
+        { from: 6, to: 10, expected: 'beta', insert: 'BETA' }
+      ],
+      diff: [
+        { lines: [{ type: 'remove', text: 'alpha' }, { type: 'add', text: 'ALPHA' }] },
+        { lines: [{ type: 'remove', text: 'beta' }, { type: 'add', text: 'BETA' }] }
+      ]
+    }
+  ];
+
+  const review = createDiffReviewElement(syncChanges);
+  const acceptButtons = review.container.querySelectorAll('[data-diff-hunk-accept]');
+  const rejectButtons = review.container.querySelectorAll('[data-diff-hunk-reject]');
+  acceptButtons[0].click();
+  rejectButtons[1].click();
+
+  assert.equal(review.getPendingCount(), 0);
+  assert.deepEqual(review.getAcceptedChanges(), [
+    {
+      ...syncChanges[0],
+      patches: [syncChanges[0].patches[0]]
+    }
+  ]);
+});
+
+test('hunk jump button calls page bridge with path and offset metadata', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const syncChanges = [
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches: [
+        { from: 6, to: 10, expected: 'beta', insert: 'BETA' }
+      ],
+      diff: [
+        { lines: [{ type: 'remove', text: 'beta' }, { type: 'add', text: 'BETA' }] }
+      ]
+    }
+  ];
+
+  const review = createDiffReviewElement(syncChanges);
+  review.container.querySelector('[data-diff-hunk-jump]').click();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(createDiffReviewElement.pageBridgeCalls)), [
+    {
+      method: 'jumpToPosition',
+      params: { path: 'main.tex', from: 6, to: 10 }
+    }
+  ]);
+});
+
+test('large diff review initially limits hunks and long hunk lines with explicit expansion controls', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const patches = Array.from({ length: 22 }, (_, index) => ({
+    from: index * 10,
+    to: index * 10 + 1,
+    expected: `old-${index}`,
+    insert: `new-${index}`
+  }));
+  const longLines = Array.from({ length: 85 }, (_, index) => ({
+    type: index % 2 ? 'add' : 'remove',
+    text: `line-${index}`
+  }));
+  const syncChanges = [
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches,
+      diff: patches.map((patch, index) => ({
+        lines: index === 0 ? longLines : [{ type: 'add', text: patch.insert }]
+      }))
+    }
+  ];
+
+  const review = createDiffReviewElement(syncChanges);
+  assert.equal(review.container.querySelectorAll('[data-diff-review-hunk]').length, 20);
+  assert.equal(review.container.querySelectorAll('[data-diff-line]').length, 99);
+  assert.equal(review.container.querySelectorAll('[data-diff-show-more-hunks]').length, 1);
+  assert.equal(review.container.querySelectorAll('[data-diff-hunk-expand]').length, 1);
+
+  review.container.querySelector('[data-diff-hunk-expand]').click();
+  assert.equal(review.container.querySelectorAll('[data-diff-line]').length, 104);
+
+  review.container.querySelector('[data-diff-show-more-hunks]').click();
+  assert.equal(review.container.querySelectorAll('[data-diff-review-hunk]').length, 22);
+});
+
+test('diff review keyboard shortcuts are scoped and only prevent handled keys', () => {
+  const createDiffReviewElement = loadCreateDiffReviewElementForTest();
+  const syncChanges = [
+    {
+      type: 'write',
+      path: 'main.tex',
+      patches: [
+        { from: 0, to: 5, expected: 'alpha', insert: 'ALPHA' },
+        { from: 6, to: 10, expected: 'beta', insert: 'BETA' }
+      ],
+      diff: [
+        { lines: [{ type: 'remove', text: 'alpha' }, { type: 'add', text: 'ALPHA' }] },
+        { lines: [{ type: 'remove', text: 'beta' }, { type: 'add', text: 'BETA' }] }
+      ]
+    }
+  ];
+  const review = createDiffReviewElement(syncChanges);
+  const dispatchKey = (key, target = review.container) => {
+    const event = {
+      type: 'keydown',
+      key,
+      target,
+      defaultPrevented: false,
+      preventDefault() {
+        this.defaultPrevented = true;
+      }
+    };
+    review.container.dispatchEvent(event);
+    return event;
+  };
+
+  assert.equal(dispatchKey('x').defaultPrevented, false);
+  assert.equal(dispatchKey('a', { tagName: 'INPUT' }).defaultPrevented, false);
+  assert.equal(dispatchKey('a').defaultPrevented, true);
+  assert.equal(dispatchKey('j').defaultPrevented, true);
+  assert.equal(dispatchKey('r').defaultPrevented, true);
+  assert.equal(dispatchKey('Escape').defaultPrevented, true);
+  assert.equal(review.container.blurred, true);
+  assert.equal(review.getPendingCount(), 0);
+  assert.deepEqual(review.getAcceptedChanges()[0]?.patches, [syncChanges[0].patches[0]]);
 });
 
 test('file-level hunk review action overrides previous hunk decisions for that file', () => {
