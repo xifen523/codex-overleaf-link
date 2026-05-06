@@ -78,6 +78,8 @@
   let contextProject = null;
   let contextLoadId = 0;
   let contextExpandedFolders = new Set();
+  let customInstructionsEditorProjectId = '';
+  let customInstructionsEditorValue = '';
   let logAutoFollow = true;
   let userScrollIntentUntil = 0;
   let runCancellationRequested = false;
@@ -212,8 +214,24 @@
               </section>
             </div>
             <button type="button" data-new-session title="New Session" aria-label="New Session">✎</button>
+            <button type="button" data-custom-instructions-settings title="Custom Instructions" aria-label="Custom Instructions" aria-expanded="false">⚙</button>
           </div>
         </div>
+        <section class="codex-custom-instructions-panel" data-custom-instructions-panel hidden>
+          <div class="codex-custom-instructions-head">
+            <div>
+              <div class="codex-custom-instructions-title" data-i18n="customInstructionsTitle">Custom Instructions</div>
+              <div class="codex-custom-instructions-subtitle" data-i18n="customInstructionsSubtitle">Give Codex extra instructions and context for this Overleaf project.</div>
+              <a class="codex-custom-instructions-learn-more" data-custom-instructions-learn-more data-i18n="customInstructionsLearnMore" href="https://developers.openai.com/codex/guides/agents-md#create-global-guidance" target="_blank" rel="noopener noreferrer">Learn more</a>
+            </div>
+            <button type="button" data-custom-instructions-close title="Close" aria-label="Close">×</button>
+          </div>
+          <label class="codex-custom-instructions-label" for="codex-custom-instructions-input" data-i18n="personalizationConfig">Personalization</label>
+          <textarea id="codex-custom-instructions-input" class="codex-custom-instructions-input" data-custom-instructions-input rows="7" placeholder="Style, terminology, venue constraints, and LaTeX conventions for this project."></textarea>
+          <div class="codex-custom-instructions-actions">
+            <button type="button" data-custom-instructions-save data-i18n="save">Save</button>
+          </div>
+        </section>
         <div class="codex-vscode-main" data-main>
           <section class="codex-task-section">
             <div class="codex-section-head">
@@ -311,6 +329,13 @@
       document.documentElement.classList.add('codex-overleaf-panel-mounted');
 
       panel.querySelector('[data-new-session]').addEventListener('click', () => startNewSession());
+      panel.querySelector('[data-custom-instructions-settings]').addEventListener('click', () => openCustomInstructionsSettings());
+      panel.querySelector('[data-custom-instructions-close]').addEventListener('click', () => closeCustomInstructionsSettings());
+      panel.querySelector('[data-custom-instructions-save]').addEventListener('click', () => {
+        saveCustomInstructionsSettings().catch(error => {
+          appendStorageNoticeOnce('custom-instructions-save-failed', tx(`Failed to save custom instructions: ${error.message}`, `保存自定义指令失败：${error.message}`));
+        });
+      });
       panel.querySelector('[data-panel-resize-handle]').addEventListener('pointerdown', startPanelResize);
       panel.querySelector('[data-panel-resize-handle]').addEventListener('dblclick', resetPanelWidth);
       panel.querySelector('[data-composer-form]').addEventListener('submit', event => {
@@ -403,6 +428,7 @@
     if (open) {
       closeModelConfigPopover();
       closeContextTray();
+      closeCustomInstructionsSettings();
     }
     popover.hidden = !open;
     button.dataset.active = open ? 'true' : 'false';
@@ -420,6 +446,116 @@
     button.setAttribute('aria-expanded', 'false');
   }
 
+  function normalizeCustomInstructionsByProject(value) {
+    const result = {};
+    const textMaxChars = 12000;
+    const keyMaxChars = 160;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    for (const rawKey of Object.keys(value)) {
+      const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+      if (!key) {
+        continue;
+      }
+      const normalizedKey = key.length <= keyMaxChars ? key : key.slice(0, keyMaxChars - 1) + '…';
+      const rawText = typeof value[rawKey] === 'string' ? value[rawKey] : '';
+      result[normalizedKey] = rawText.length <= textMaxChars
+        ? rawText
+        : rawText.slice(0, textMaxChars - 1) + '…';
+    }
+    return result;
+  }
+
+  function getCustomInstructionsForCurrentProject() {
+    const projectId = getCurrentProjectId();
+    const normalizedProject = normalizeCustomInstructionsByProject({ [projectId]: '' });
+    const normalizedProjectId = Object.keys(normalizedProject)[0] || '';
+    if (!normalizedProjectId) {
+      return '';
+    }
+    return normalizeCustomInstructionsByProject(state?.customInstructionsByProject)[normalizedProjectId] || '';
+  }
+
+  function setCustomInstructionsForProject(projectId, value) {
+    const normalizedProject = normalizeCustomInstructionsByProject({ [projectId]: value });
+    const normalizedProjectId = Object.keys(normalizedProject)[0] || '';
+    if (!normalizedProjectId) {
+      return;
+    }
+    state = {
+      ...state,
+      customInstructionsByProject: {
+        ...normalizeCustomInstructionsByProject(state?.customInstructionsByProject),
+        [normalizedProjectId]: normalizedProject[normalizedProjectId]
+      }
+    };
+  }
+
+  function openCustomInstructionsSettings() {
+    const settingsPanel = panel?.querySelector('[data-custom-instructions-panel]');
+    const button = panel?.querySelector('[data-custom-instructions-settings]');
+    if (!settingsPanel || !button) {
+      return;
+    }
+    closeDiagnosticsMenu();
+    closeDiagnosticsResult();
+    closeModelConfigPopover();
+    closeContextTray();
+    syncCustomInstructionsEditorForProject(getCurrentProjectId(), { force: true });
+    settingsPanel.hidden = false;
+    button.dataset.active = 'true';
+    button.setAttribute('aria-expanded', 'true');
+    panel?.querySelector('[data-custom-instructions-input]')?.focus?.();
+  }
+
+  function closeCustomInstructionsSettings() {
+    const settingsPanel = panel?.querySelector('[data-custom-instructions-panel]');
+    const button = panel?.querySelector('[data-custom-instructions-settings]');
+    if (!settingsPanel || !button) {
+      return;
+    }
+    settingsPanel.hidden = true;
+    button.dataset.active = 'false';
+    button.setAttribute('aria-expanded', 'false');
+  }
+
+  async function saveCustomInstructionsSettings() {
+    const input = panel?.querySelector('[data-custom-instructions-input]');
+    if (!input) {
+      return;
+    }
+    setCustomInstructionsForProject(getCurrentProjectId(), input.value);
+    syncCustomInstructionsEditorForProject(getCurrentProjectId(), { force: true });
+    await saveState();
+    showPluginToast(tr('customInstructionsSavedToast'), { status: 'completed' });
+  }
+
+  function syncCustomInstructionsEditorForProject(projectId = getCurrentProjectId(), options) {
+    const syncOptions = options || {};
+    const input = panel?.querySelector('[data-custom-instructions-input]');
+    if (!input) {
+      return;
+    }
+    const normalizedProject = normalizeCustomInstructionsByProject({ [projectId]: '' });
+    const normalizedProjectId = Object.keys(normalizedProject)[0] || '';
+    const storedValue = normalizedProjectId
+      ? normalizeCustomInstructionsByProject(state?.customInstructionsByProject)[normalizedProjectId] || ''
+      : '';
+    input.placeholder = tr('customInstructionsPlaceholder');
+    const settingsPanel = panel?.querySelector('[data-custom-instructions-panel]');
+    const editorIsOpen = settingsPanel?.hidden === false;
+    const editorIsDirty = normalizedProjectId
+      && customInstructionsEditorProjectId === normalizedProjectId
+      && input.value !== customInstructionsEditorValue;
+    if (!syncOptions.force && editorIsOpen && editorIsDirty) {
+      return;
+    }
+    input.value = storedValue;
+    customInstructionsEditorProjectId = normalizedProjectId;
+    customInstructionsEditorValue = storedValue;
+  }
+
   function toggleModelConfigPopover() {
     const popover = panel?.querySelector('[data-model-config-popover]');
     const button = panel?.querySelector('[data-model-config-toggle]');
@@ -431,6 +567,7 @@
     if (open) {
       closeDiagnosticsMenu();
       closeContextTray();
+      closeCustomInstructionsSettings();
       renderModelConfigChoices();
     }
     popover.hidden = !open;
@@ -498,6 +635,8 @@
     setElementTitleAndAria('[data-diagnostics-menu]', tr('diagnosticsMenu'), tr('diagnosticsMenu'));
     setElementTitleAndAria('[data-diagnostics-result-close]', tr('close'), tr('closeDiagnostics'));
     setElementTitleAndAria('[data-new-session]', tr('newSession'), tr('newSession'));
+    setElementTitleAndAria('[data-custom-instructions-settings]', tr('customInstructionsSettings'), tr('customInstructionsSettings'));
+    setElementTitleAndAria('[data-custom-instructions-close]', tr('close'), tr('customInstructionsClose'));
     setElementTitleAndAria('[data-add-context]', tr('addContext'), tr('addContext'));
     setElementTitleAndAria('[data-context-refresh]', tr('refreshFileList'), tr('refreshFileList'));
     setElementTitleAndAria('[data-run]', currentRunView ? tr('cancelRun') : tr('send'), currentRunView ? tr('cancelRun') : tr('send'));
@@ -509,6 +648,11 @@
     const task = panel.querySelector('[data-task]');
     if (task) {
       task.placeholder = tr('placeholder');
+    }
+    const customInstructionsInput = panel.querySelector('[data-custom-instructions-input]');
+    if (customInstructionsInput) {
+      customInstructionsInput.placeholder = tr('customInstructionsPlaceholder');
+      customInstructionsInput.setAttribute('aria-label', tr('personalizationConfig'));
     }
     const modeSwitch = panel.querySelector('.codex-mode-switch');
     if (modeSwitch) {
@@ -782,6 +926,7 @@
     if (open) {
       closeModelConfigPopover();
       closeDiagnosticsMenu();
+      closeCustomInstructionsSettings();
     }
     tray.hidden = !open;
     button.dataset.active = open ? 'true' : 'false';
@@ -1626,6 +1771,7 @@
     // Freeze submitted run identity before the panel can change during the run.
     const submittedMode = state.mode;
     const submittedRequireReviewing = state.requireReviewing === true;
+    const submittedCustomInstructions = getCustomInstructionsForCurrentProject();
 
     const task = state.task.trim();
     if (!task) {
@@ -1790,6 +1936,7 @@
           restrictToFocusFiles,
           codexThreadId,
           compileLogContext,
+          customInstructions: submittedCustomInstructions,
           submittedMode
         })
       });
@@ -1821,6 +1968,7 @@
             restrictToFocusFiles,
             codexThreadId,
             compileLogContext,
+            customInstructions: submittedCustomInstructions,
             submittedMode
           })
         });
@@ -1851,6 +1999,7 @@
               restrictToFocusFiles,
               codexThreadId: '',
               compileLogContext,
+              customInstructions: submittedCustomInstructions,
               submittedMode
             })
           });
@@ -2267,6 +2416,7 @@
     restrictToFocusFiles,
     codexThreadId,
     compileLogContext,
+    customInstructions,
     submittedMode
   } = {}) {
     return runController.buildCodexRunParams({
@@ -2280,6 +2430,9 @@
       otWarmStart,
       restrictToFocusFiles,
       codexThreadId,
+      customInstructions: customInstructions === undefined
+        ? getCustomInstructionsForCurrentProject()
+        : customInstructions,
       compileLogContext,
       submittedMode
     });
@@ -4242,8 +4395,10 @@
 
   function syncMirrorPrefetchStateForProject() {
     const projectId = getCurrentProjectId();
+    const projectChanged = Boolean(mirrorPrefetchState.projectId && mirrorPrefetchState.projectId !== projectId);
+    syncCustomInstructionsEditorForProject(projectId, { force: projectChanged });
     syncOtWarmMirrorStateForProject();
-    if (!mirrorPrefetchState.projectId || mirrorPrefetchState.projectId === projectId) {
+    if (!mirrorPrefetchState.projectId || !projectChanged) {
       return;
     }
     if (mirrorPrefetchState.timer) {
@@ -5461,6 +5616,7 @@
         requireReviewing: prefs.requireReviewing !== false,
         autoRecompile: prefs.autoRecompile !== false,
         experimentalOtByProject: prefs.experimentalOtByProject || {},
+        customInstructionsByProject: prefs.customInstructionsByProject || {},
         panelWidth: prefs.panelWidth || PANEL_DEFAULT_WIDTH,
         sessions: sessions.map(session => ({
           id: session.id,
@@ -5500,15 +5656,40 @@
       const Migration = window.CodexOverleafStorageMigration;
       const projectId = getCurrentProjectId();
       const compactState = prepareStateForStorage(state);
+      compactState.autoRecompile = state.autoRecompile;
       compactState.experimentalOtByProject = state.experimentalOtByProject;
+      compactState.customInstructionsByProject = state.customInstructionsByProject;
 
       // Save lightweight prefs to chrome.storage.local
-      const prefs = StorageDb.extractLightweightPrefs(compactState, projectId);
+      const latestPrefs = typeof Migration.loadPrefs === 'function'
+        ? await Migration.loadPrefs()
+        : {};
+      const prefsFromState = StorageDb.extractLightweightPrefs(compactState, projectId);
+      const prefs = {
+        ...(latestPrefs && typeof latestPrefs === 'object' ? latestPrefs : {}),
+        ...prefsFromState
+      };
       prefs.activeSessionByProject = StorageDb.buildActiveSessionByProject(
-        prefs.activeSessionByProject || {},
+        latestPrefs?.activeSessionByProject || {},
         projectId,
         compactState.activeSessionId || state.activeSessionId || ''
       );
+      prefs.experimentalOtByProject = {
+        ...(latestPrefs?.experimentalOtByProject || {}),
+        [projectId]: normalizeExperimentalOtByProject(state?.experimentalOtByProject)[projectId] === true
+      };
+      const normalizedCustomProject = normalizeCustomInstructionsByProject({ [projectId]: '' });
+      const normalizedCustomProjectId = Object.keys(normalizedCustomProject)[0] || '';
+      const currentCustomInstructions = normalizeCustomInstructionsByProject(state?.customInstructionsByProject);
+      prefs.customInstructionsByProject = {
+        ...(latestPrefs?.customInstructionsByProject || {})
+      };
+      if (normalizedCustomProjectId) {
+        prefs.customInstructionsByProject[normalizedCustomProjectId] =
+          Object.prototype.hasOwnProperty.call(currentCustomInstructions, normalizedCustomProjectId)
+            ? currentCustomInstructions[normalizedCustomProjectId]
+            : '';
+      }
       await Migration.savePrefs(prefs);
 
       // Save all displayable session state to IndexedDB. The panel history lives here;
@@ -6063,6 +6244,7 @@
       recompileCheckbox.checked = state.autoRecompile !== false;
     }
     syncExperimentalOtToggleForProject();
+    syncCustomInstructionsEditorForProject();
     applyPanelWidth(state.panelWidth || PANEL_DEFAULT_WIDTH, { persist: false });
     renderModelConfigChoices();
     updateModelDisplay();

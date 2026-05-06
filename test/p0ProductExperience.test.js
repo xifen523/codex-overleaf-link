@@ -1844,6 +1844,88 @@ test('@compile-log context is preserved across Codex run retries', () => {
   assert.match(runTaskBody, /thread_resume_failed[\s\S]*buildCodexRunParams\([\s\S]*compileLogContext/);
 });
 
+test('runTask freezes submitted custom instructions for initial and retry codex runs', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
+  const submittedModeIndex = runTaskBody.indexOf('const submittedMode = state.mode');
+  const submittedReviewingIndex = runTaskBody.indexOf('const submittedRequireReviewing = state.requireReviewing === true');
+  const submittedCustomInstructionsIndex = runTaskBody.indexOf('const submittedCustomInstructions = getCustomInstructionsForCurrentProject()');
+  const taskIndex = runTaskBody.indexOf('const task = state.task.trim()');
+  const runParamBlocks = Array.from(runTaskBody.matchAll(/buildCodexRunParams\(\{[\s\S]*?submittedMode\s*\}/g))
+    .map(match => match[0]);
+
+  assert.match(contentScript, /function getCustomInstructionsForCurrentProject\(/);
+  assert.ok(submittedModeIndex >= 0, 'runTask should freeze the submitted mode');
+  assert.ok(submittedReviewingIndex > submittedModeIndex, 'runTask should freeze reviewing after mode');
+  assert.ok(
+    submittedCustomInstructionsIndex > submittedReviewingIndex,
+    'runTask should freeze custom instructions with the submitted run options'
+  );
+  assert.ok(
+    taskIndex > submittedCustomInstructionsIndex,
+    'runTask should freeze custom instructions before later run setup can observe settings changes'
+  );
+  assert.equal(
+    runParamBlocks.length,
+    3,
+    'initial, mirror-stale retry, and thread-resume run params should be visible'
+  );
+  for (const block of runParamBlocks) {
+    assert.match(block, /customInstructions:\s*submittedCustomInstructions/);
+    assert.doesNotMatch(block, /getCustomInstructionsForCurrentProject\(\)/);
+  }
+});
+
+test('content script run-param wrapper uses explicit custom instructions before falling back to getter', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const wrapperBody = contentScript.match(/function buildCodexRunParams\(\{[\s\S]*?\n  function appendRunCancelledReport/)?.[0] || '';
+  const wrapperSource = wrapperBody.replace(/\n  function appendRunCancelledReport$/, '');
+  const harness = Function(`
+    let getterCalls = 0;
+    let getterValue = 'fresh getter value';
+    const runController = {
+      buildCodexRunParams(params) {
+        return params;
+      }
+    };
+    const state = {
+      mode: 'auto',
+      model: 'gpt-5.5',
+      reasoningEffort: 'xhigh'
+    };
+    function getCurrentProjectId() { return 'project-123'; }
+    function getCustomInstructionsForCurrentProject() {
+      getterCalls++;
+      return getterValue;
+    }
+    ${wrapperSource}
+    return {
+      buildCodexRunParams,
+      setGetterValue(value) { getterValue = value; },
+      getGetterCalls: () => getterCalls
+    };
+  `)();
+
+  const explicit = harness.buildCodexRunParams({
+    task: '润色摘要',
+    customInstructions: 'submitted frozen instructions'
+  });
+  assert.equal(explicit.customInstructions, 'submitted frozen instructions');
+  assert.equal(harness.getGetterCalls(), 0);
+
+  harness.setGetterValue('fallback getter instructions');
+  const fallback = harness.buildCodexRunParams({ task: '检查语法' });
+  assert.equal(fallback.customInstructions, 'fallback getter instructions');
+  assert.equal(harness.getGetterCalls(), 1);
+  assert.match(wrapperBody, /customInstructions:\s*customInstructions === undefined\s*\?\s*getCustomInstructionsForCurrentProject\(\)\s*:\s*customInstructions/);
+});
+
 test('warm mirror stale retry fetches a real snapshot before full-sync retry', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -2235,6 +2317,358 @@ test('diagnostics menu exposes an experimental project-scoped OT warm mirror tog
   assert.doesNotMatch(syncBody, /mirror\.patchFiles/);
   assert.match(i18n, /experimentalOtWarmMirror:\s*'/);
   assert.match(i18n, /otStatusObserving:\s*'/);
+});
+
+test('header exposes project custom instructions settings and editor surface', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const headerActions = contentScript.match(/<div class="codex-vscode-head-actions"[\s\S]*?<div class="codex-vscode-main"/)?.[0] || '';
+
+  assert.match(headerActions, /data-new-session/);
+  assert.match(headerActions, /data-custom-instructions-settings/);
+  assert.ok(
+    headerActions.indexOf('data-new-session') < headerActions.indexOf('data-custom-instructions-settings'),
+    'custom instructions settings must be the rightmost header action after New Session'
+  );
+  assert.match(contentScript, /data-custom-instructions-panel/);
+  assert.match(contentScript, /data-custom-instructions-input/);
+  assert.match(contentScript, /data-custom-instructions-save/);
+  assert.match(contentScript, /<a class="codex-custom-instructions-learn-more" data-custom-instructions-learn-more data-i18n="customInstructionsLearnMore"/);
+  for (const key of [
+    'customInstructionsTitle',
+    'customInstructionsSubtitle',
+    'customInstructionsLearnMore',
+    'personalizationConfig',
+    'customInstructionsPlaceholder'
+  ]) {
+    assert.match(contentScript, new RegExp(`data-i18n="${key}"|tr\\('${key}'\\)`), `content script should use ${key}`);
+    assert.match(i18n, new RegExp(`${key}:\\s*'`), `i18n should define ${key}`);
+  }
+  assert.match(css, /\.codex-custom-instructions-panel/);
+  assert.match(css, /\.codex-custom-instructions-input/);
+});
+
+test('project custom instructions Learn more control is actionable', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /data-custom-instructions-learn-more/);
+  assert.match(contentScript, /href="https:\/\/developers\.openai\.com\/codex\/guides\/agents-md#create-global-guidance"/);
+  assert.match(contentScript, /target="_blank"/);
+  assert.match(contentScript, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(contentScript, /showCustomInstructionsLearnMore/);
+  assert.doesNotMatch(contentScript, /customInstructionsLearnMoreToast/);
+});
+
+test('project custom instructions editor saves and restores by project', async () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const harness = Function(`
+    let currentProjectId = 'project_a';
+    let savedCount = 0;
+    let lastToast = '';
+    let focused = false;
+    let customInstructionsEditorProjectId = '';
+    let customInstructionsEditorValue = '';
+    let state = {
+      customInstructionsByProject: {}
+    };
+    const customInstructionsInput = {
+      value: '',
+      placeholder: '',
+      focus() { focused = true; }
+    };
+    const customInstructionsPanel = {
+      hidden: true
+    };
+    const settingsButton = {
+      dataset: {},
+      setAttribute(name, value) { this[name] = value; }
+    };
+    const controls = {
+      '[data-custom-instructions-input]': customInstructionsInput,
+      '[data-custom-instructions-panel]': customInstructionsPanel,
+      '[data-custom-instructions-settings]': settingsButton
+    };
+    const panel = {
+      querySelector(selector) {
+        return controls[selector] || null;
+      }
+    };
+    function getCurrentProjectId() { return currentProjectId; }
+    function closeDiagnosticsMenu() {}
+    function closeDiagnosticsResult() {}
+    function closeModelConfigPopover() {}
+    function closeContextTray() {}
+    function tr(key) { return key; }
+    function showPluginToast(message) { lastToast = message; }
+    async function saveState() { savedCount++; }
+    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
+    ${extractFunction(contentScript, 'getCustomInstructionsForCurrentProject')}
+    ${extractFunction(contentScript, 'setCustomInstructionsForProject')}
+    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
+    ${extractFunction(contentScript, 'openCustomInstructionsSettings')}
+    ${extractFunction(contentScript, 'saveCustomInstructionsSettings')}
+    return {
+      input: customInstructionsInput,
+      settingsPanel: customInstructionsPanel,
+      getState: () => state,
+      getSavedCount: () => savedCount,
+      getToast: () => lastToast,
+      wasFocused: () => focused,
+      navigate(projectId) {
+        currentProjectId = projectId;
+        syncCustomInstructionsEditorForProject(projectId);
+      },
+      openCustomInstructionsSettings,
+      saveCustomInstructionsSettings
+    };
+  `)();
+
+  harness.openCustomInstructionsSettings();
+  assert.equal(harness.settingsPanel.hidden, false);
+  assert.equal(harness.wasFocused(), true);
+
+  harness.input.value = 'Use NeurIPS style and \\\\cref{}.';
+  await harness.saveCustomInstructionsSettings();
+  assert.equal(
+    harness.getState().customInstructionsByProject.project_a,
+    'Use NeurIPS style and \\\\cref{}.'
+  );
+  assert.equal(harness.getSavedCount(), 1);
+  assert.equal(harness.getToast(), 'customInstructionsSavedToast');
+
+  harness.navigate('project_b');
+  assert.equal(harness.input.value, '');
+
+  harness.navigate('project_a');
+  assert.equal(harness.input.value, 'Use NeurIPS style and \\\\cref{}.');
+});
+
+test('mirror prefetch state sync preserves unsaved custom instructions for same project', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const harness = Function(`
+    let currentProjectId = 'project_a';
+    let state = {
+      customInstructionsByProject: {
+        project_a: 'Saved instructions'
+      }
+    };
+    let customInstructionsEditorProjectId = '';
+    let customInstructionsEditorValue = '';
+    let mirrorPrefetchState = {
+      inFlight: null,
+      lastSuccessAt: 10,
+      lastErrorAt: 0,
+      lastError: null,
+      timer: null,
+      projectId: 'project_a'
+    };
+    const customInstructionsInput = {
+      value: '',
+      placeholder: ''
+    };
+    const customInstructionsPanel = {
+      hidden: false
+    };
+    const panel = {
+      querySelector(selector) {
+        if (selector === '[data-custom-instructions-input]') {
+          return customInstructionsInput;
+        }
+        if (selector === '[data-custom-instructions-panel]') {
+          return customInstructionsPanel;
+        }
+        return null;
+      }
+    };
+    const window = {
+      clearTimeout() {}
+    };
+    function getCurrentProjectId() { return currentProjectId; }
+    function tr(key) { return key; }
+    function syncOtWarmMirrorStateForProject() {}
+    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
+    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
+    ${extractFunction(contentScript, 'syncMirrorPrefetchStateForProject')}
+    return {
+      input: customInstructionsInput,
+      syncCustomInstructionsEditorForProject,
+      syncMirrorPrefetchStateForProject
+    };
+  `)();
+
+  harness.syncCustomInstructionsEditorForProject('project_a', { force: true });
+  assert.equal(harness.input.value, 'Saved instructions');
+
+  harness.input.value = 'Unsaved typed instructions';
+  harness.syncMirrorPrefetchStateForProject();
+
+  assert.equal(harness.input.value, 'Unsaved typed instructions');
+});
+
+test('stored project custom instructions are rehydrated before lightweight prefs are saved', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const loadBody = contentScript.match(/async function loadStoredState\(\) \{[\s\S]*?\n  async function saveState/)?.[0] || '';
+  const saveBody = contentScript.match(/async function saveState\(\) \{[\s\S]*?\n  function appendStorageNoticeOnce/)?.[0] || '';
+
+  assert.match(loadBody, /experimentalOtByProject:\s*prefs\.experimentalOtByProject \|\| \{\}/);
+  assert.match(loadBody, /customInstructionsByProject:\s*prefs\.customInstructionsByProject \|\| \{\}/);
+  assert.match(saveBody, /compactState\.experimentalOtByProject = state\.experimentalOtByProject/);
+  assert.match(saveBody, /compactState\.customInstructionsByProject = state\.customInstructionsByProject/);
+});
+
+test('saveState merges latest lightweight prefs before saving project-scoped settings', async () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const StorageDbModule = require('../extension/src/shared/storageDb');
+  const { prepareStateForStorage } = require('../extension/src/shared/sessionState');
+
+  const harness = Function('StorageDbModule', 'prepareStateForStorage', `
+    const savedPrefs = [];
+    const storedSessionRecords = [];
+    const deletedSessionIds = [];
+    let loadPrefsCount = 0;
+    let state = {
+      model: 'gpt-5.4',
+      reasoningEffort: 'high',
+      speedTier: 'standard',
+      mode: 'confirm',
+      locale: 'en',
+      requireReviewing: true,
+      autoRecompile: false,
+      panelWidth: 420,
+      activeSessionId: 'session_current',
+      experimentalOtByProject: {
+        project_a: false,
+        project_b: false
+      },
+      customInstructionsByProject: {
+        project_a: '',
+        project_b: 'stale instructions from this tab'
+      },
+      sessions: [{
+        id: 'session_current',
+        title: 'Current task',
+        titleSource: 'manual',
+        focusFiles: [],
+        codexThreadId: '',
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:01:00.000Z',
+        runs: [],
+        history: [],
+        task: 'Current task',
+        mode: 'confirm',
+        model: 'gpt-5.4',
+        reasoningEffort: 'high',
+        speedTier: 'standard',
+        requireReviewing: true
+      }]
+    };
+    const latestPrefs = {
+      storageSchemaVersion: 1,
+      model: 'older-model',
+      unknownFuturePref: { keep: true },
+      autoRecompile: true,
+      activeSessionByProject: {
+        project_a: 'session_from_other_tab',
+        project_b: 'session_b'
+      },
+      experimentalOtByProject: {
+        project_a: true,
+        project_b: true,
+        project_c: false
+      },
+      customInstructionsByProject: {
+        project_a: 'newer instructions from another tab',
+        project_b: 'keep project b instructions',
+        project_c: 'keep project c instructions'
+      }
+    };
+    const StorageDb = {
+      ...StorageDbModule,
+      putRecords(_storeName, records) {
+        storedSessionRecords.push(...records);
+        return Promise.resolve(records);
+      },
+      getAllByIndex() {
+        return Promise.resolve([{ id: 'old_project_session' }]);
+      },
+      deleteRecord(_storeName, id) {
+        deletedSessionIds.push(id);
+        return Promise.resolve();
+      }
+    };
+    const Migration = {
+      loadPrefs() {
+        loadPrefsCount++;
+        return Promise.resolve(JSON.parse(JSON.stringify(latestPrefs)));
+      },
+      savePrefs(prefs) {
+        savedPrefs.push(JSON.parse(JSON.stringify(prefs)));
+        return Promise.resolve();
+      }
+    };
+    const window = {
+      CodexOverleafStorageDb: StorageDb,
+      CodexOverleafStorageMigration: Migration
+    };
+    function getCurrentProjectId() { return 'project_a'; }
+    ${extractFunction(contentScript, 'normalizeExperimentalOtByProject')}
+    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
+    ${extractFunction(contentScript, 'saveState')}
+    return {
+      saveState,
+      getSavedPrefs: () => savedPrefs[0],
+      getLoadPrefsCount: () => loadPrefsCount,
+      getStoredSessionRecords: () => storedSessionRecords,
+      getDeletedSessionIds: () => deletedSessionIds
+    };
+  `)(StorageDbModule, prepareStateForStorage);
+
+  await harness.saveState();
+
+  assert.equal(harness.getLoadPrefsCount(), 1);
+  assert.deepEqual(harness.getSavedPrefs().unknownFuturePref, { keep: true });
+  assert.equal(harness.getSavedPrefs().autoRecompile, false);
+  assert.deepEqual(harness.getSavedPrefs().activeSessionByProject, {
+    project_a: 'session_current',
+    project_b: 'session_b'
+  });
+  assert.deepEqual(harness.getSavedPrefs().experimentalOtByProject, {
+    project_a: false,
+    project_b: true,
+    project_c: false
+  });
+  assert.deepEqual(harness.getSavedPrefs().customInstructionsByProject, {
+    project_a: '',
+    project_b: 'keep project b instructions',
+    project_c: 'keep project c instructions'
+  });
+  assert.equal(harness.getStoredSessionRecords().length, 1);
+  assert.deepEqual(harness.getDeletedSessionIds(), ['old_project_session']);
 });
 
 test('experimental OT sync ignores stale responses and reverts failed starts to default off', () => {

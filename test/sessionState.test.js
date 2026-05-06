@@ -24,6 +24,7 @@ test('normalizes missing panel state with defaults and a session id', () => {
   assert.equal(state.reasoningEffort, DEFAULT_PANEL_STATE.reasoningEffort);
   assert.equal(state.speedTier, DEFAULT_PANEL_STATE.speedTier);
   assert.equal(state.locale, 'en');
+  assert.deepEqual(state.customInstructionsByProject, {});
   assert.match(state.session.id, /^session_/);
   assert.equal(state.sessions.length, 1);
   assert.equal(state.activeSessionId, state.session.id);
@@ -46,6 +47,53 @@ test('normalizes locale as a global panel preference across sessions', () => {
 
   const compact = prepareStateForStorage(switched);
   assert.equal(compact.locale, 'zh');
+});
+
+test('normalizes custom instructions as a project-level preference across sessions', () => {
+  const state = normalizePanelState({
+    customInstructionsByProject: {
+      project_a: 'Use NeurIPS style. Prefer \\cref{}.',
+      project_b: 42,
+      '': 'ignored'
+    },
+    activeSessionId: 'session_a',
+    sessions: [
+      { id: 'session_a', title: 'A', runs: [] },
+      { id: 'session_b', title: 'B', runs: [] }
+    ]
+  });
+
+  assert.deepEqual(state.customInstructionsByProject, {
+    project_a: 'Use NeurIPS style. Prefer \\cref{}.',
+    project_b: ''
+  });
+
+  const switched = setActiveSession(state, 'session_b');
+  assert.deepEqual(switched.customInstructionsByProject, state.customInstructionsByProject);
+
+  const compact = prepareStateForStorage(switched);
+  assert.deepEqual(compact.customInstructionsByProject, state.customInstructionsByProject);
+});
+
+test('length-limits custom instruction values during normalization and storage compaction', () => {
+  const longInstructions = 'x'.repeat(13000);
+  const state = normalizePanelState({
+    customInstructionsByProject: {
+      project_long: longInstructions
+    }
+  });
+
+  assert.equal(state.customInstructionsByProject.project_long.length, 12000);
+  assert.match(state.customInstructionsByProject.project_long, /…$/);
+
+  const compact = prepareStateForStorage({
+    ...state,
+    customInstructionsByProject: {
+      project_long: longInstructions
+    }
+  });
+  assert.equal(compact.customInstructionsByProject.project_long.length, 12000);
+  assert.match(compact.customInstructionsByProject.project_long, /…$/);
 });
 
 test('creates a fresh session with empty history', () => {

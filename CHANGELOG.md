@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.7.0 - 2026-05-06
+
+Project personalization release. This version adds project-scoped custom instructions that are injected into Codex runs while keeping the v0.6 hunk review workflow intact.
+
+### Added
+
+- A settings entry in the panel header for project-scoped custom instructions.
+- A personalization settings view with a large custom instruction editor and saved per-project storage.
+- Native run prompt injection so saved custom instructions are included as additional Codex context for the active Overleaf project.
+
+### Changed
+
+- Bumped package, extension, and native compatibility metadata to `0.7.0`.
+- Updated install, update, README badge, native mismatch recovery command, and release artifact references for `v0.7.0`.
+
+### Fixed
+
+- Native Codex runs now preserve recoverable thread resume failures so the panel can surface session recovery issues instead of flattening them into generic failures.
+
+### Notes
+
+- Native protocol remains `1`; this release uses a version compatibility bump because the extension and native host both participate in custom instruction delivery.
+- Custom instructions are user-defined project preferences stored locally by project id and injected only for that project's runs.
+
 ## v0.6.0 - 2026-05-06
 
 Editor-native review UX release. This version adds hunk-level review controls and editor jump support while preserving the v0.5 cross-platform native host packaging and guarded browser writeback model.

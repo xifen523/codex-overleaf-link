@@ -487,6 +487,9 @@ test('release verifier rejects stale Chrome Web Store release checklist instruct
 });
 
 test('Chrome Web Store prep docs describe current permissions and privacy posture', () => {
+  const packageVersion = readJson(path.join(repoRoot, 'package.json')).version;
+  const releaseRef = `v${packageVersion}`;
+  const escapedReleaseRef = releaseRef.replace(/\./g, '\\.');
   const docsDir = path.join(repoRoot, 'docs/chrome-web-store');
   const permissions = readText(path.join(docsDir, 'permissions.md'));
   const privacy = readText(path.join(docsDir, 'privacy.md'));
@@ -522,12 +525,13 @@ test('Chrome Web Store prep docs describe current permissions and privacy postur
   assert.match(checklist, /npm test/);
   assert.match(checklist, /npm run verify:release/);
   assert.match(checklist, /npm run build:release/);
-  assert.match(checklist, /dist\/releases\/v0\.6\.0\/SHA256SUMS/);
-  assert.match(checklist, /codex-overleaf-link-extension-v0\.6\.0\.zip/);
-  assert.match(checklist, /codex-overleaf-native-host-v0\.6\.0\.tar\.gz/);
+  assert.match(checklist, new RegExp(`dist/releases/${escapedReleaseRef}/SHA256SUMS`));
+  assert.match(checklist, new RegExp(`codex-overleaf-link-extension-${escapedReleaseRef}\\.zip`));
+  assert.match(checklist, new RegExp(`codex-overleaf-native-host-${escapedReleaseRef}\\.tar\\.gz`));
   assert.match(checklist, /install\.ps1/);
-  assert.match(checklist, /v0\.6\.0/);
+  assert.match(checklist, new RegExp(escapedReleaseRef));
   assert.match(checklist, /Web Store extension id/i);
+  assert.doesNotMatch(checklist, /v0\.6\.0/);
   assert.doesNotMatch(checklist, /v0\.5\.0/);
   assert.doesNotMatch(checklist, /v0\.4\.0/);
   assert.doesNotMatch(checklist, /outside v0\.4/i);

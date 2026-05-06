@@ -20,6 +20,7 @@ const activeProjectLocks = new Map();
 const activeRunControllers = new Map();
 const pendingPlans = new Map();
 const PENDING_PLAN_TTL_MS = 30 * 60 * 1000;
+const CODEX_RUN_PASSTHROUGH_ERROR_CODES = new Set(['thread_resume_failed']);
 
 async function handleRequest(request, env = process.env, emit = () => {}) {
   if (!request || typeof request !== 'object') {
@@ -148,11 +149,21 @@ async function handleCodexRun(request, env, emit) {
   } catch (error) {
     if (isCancellationError(error)) {
       logDebug('codex.run.cancelled', {
+        code: error.code,
         message: error.message
       });
       return errorResponse(request.id, 'codex_cancelled', 'Codex run was cancelled by the user');
     }
+    if (shouldPassthroughCodexRunError(error)) {
+      logDebug('codex.run.passthrough_failed', {
+        code: error.code,
+        message: error.message,
+        stack: error.stack
+      });
+      return errorResponse(request.id, error.code, truncateText(error.message, 12000));
+    }
     logDebug('codex.run.failed', {
+      code: error.code,
       message: error.message,
       stack: error.stack
     });
@@ -310,6 +321,10 @@ function isCancellationError(error = {}) {
   return error.code === 'codex_cancelled'
     || error.name === 'AbortError'
     || /cancelled by the user|was cancelled/i.test(error.message || '');
+}
+
+function shouldPassthroughCodexRunError(error = {}) {
+  return CODEX_RUN_PASSTHROUGH_ERROR_CODES.has(error.code);
 }
 
 function isCodexMissing(env = process.env) {

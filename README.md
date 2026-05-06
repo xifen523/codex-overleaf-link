@@ -3,7 +3,7 @@
   <h1>Codex Overleaf Link</h1>
   <p><strong>Empower Overleaf with Codex.</strong></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.6.0-blue" alt="version">
+    <img src="https://img.shields.io/badge/version-0.7.0-blue" alt="version">
     <img src="https://img.shields.io/badge/platform-macOS%20%2F%20Windows%20%2F%20Linux-lightgrey" alt="platform">
     <img src="https://img.shields.io/badge/chrome-MV3-green" alt="chrome manifest v3">
     <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="node version">
@@ -35,16 +35,16 @@ macOS / Linux latest source install:
 curl -fsSL "https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh?$(date +%s)" | bash
 ```
 
-macOS / Linux version-pinned install or update for v0.6.0:
+macOS / Linux version-pinned install or update for v0.7.0:
 
 ```bash
-CODEX_OVERLEAF_REF=v0.6.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.6.0/install.sh)"
+CODEX_OVERLEAF_REF=v0.7.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.7.0/install.sh)"
 ```
 
-Windows version-pinned install or update for v0.6.0 from PowerShell:
+Windows version-pinned install or update for v0.7.0 from PowerShell:
 
 ```powershell
-iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.6.0/install.ps1 -OutFile install.ps1
+iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.7.0/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
@@ -72,18 +72,18 @@ Then load `extension/` as an unpacked extension in Chrome and run `npm run insta
 <details>
 <summary><strong>Update</strong></summary>
 
-For a deterministic v0.6.0 update, run the pinned command for your platform. This is also the native mismatch recovery command shown by the popup and panel when they report **Native host update required**.
+For a deterministic v0.7.0 update, run the pinned command for your platform. This is also the native mismatch recovery command shown by the popup and panel when they report **Native host update required**.
 
 macOS / Linux:
 
 ```bash
-CODEX_OVERLEAF_REF=v0.6.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.6.0/install.sh)"
+CODEX_OVERLEAF_REF=v0.7.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.7.0/install.sh)"
 ```
 
 Windows PowerShell:
 
 ```powershell
-iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.6.0/install.ps1 -OutFile install.ps1
+iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.7.0/install.ps1 -OutFile install.ps1
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
@@ -93,12 +93,12 @@ Then reload the extension in `chrome://extensions` and refresh the Overleaf page
 
 ## GitHub Release Artifacts
 
-The v0.6.0 GitHub Release contains:
+The v0.7.0 GitHub Release contains:
 
-- `codex-overleaf-link-extension-v0.6.0.zip`: loadable Chrome extension package for unpacked or Web Store inspection.
-- `codex-overleaf-native-host-v0.6.0.tar.gz`: native host runtime files used by the installer and release verification.
-- `install.sh`: release-pinned macOS / Linux installer that defaults to `v0.6.0` when run directly from the release artifact.
-- `install.ps1`: release-pinned Windows PowerShell installer that defaults to `v0.6.0` when run directly from the release artifact.
+- `codex-overleaf-link-extension-v0.7.0.zip`: loadable Chrome extension package for unpacked or Web Store inspection.
+- `codex-overleaf-native-host-v0.7.0.tar.gz`: native host runtime files used by the installer and release verification.
+- `install.sh`: release-pinned macOS / Linux installer that defaults to `v0.7.0` when run directly from the release artifact.
+- `install.ps1`: release-pinned Windows PowerShell installer that defaults to `v0.7.0` when run directly from the release artifact.
 - `uninstall-native-host.mjs`: native host uninstaller that removes the Chrome Native Messaging manifest, bridge executable, and runtime copy.
 - `SHA256SUMS` and `release-manifest.json`: checksum and artifact metadata for release verification.
 

@@ -19,6 +19,7 @@ test('run controller builds codex.run params without embedding project when mirr
     fileOverlays: [{ path: 'main.tex', content: 'live' }],
     focusFiles: ['main.tex'],
     codexThreadId: 'thread-1',
+    customInstructions: 'Use project-specific notation and concise academic tone.',
     compileLogContext: {
       available: true,
       log: 'compile log',
@@ -36,8 +37,31 @@ test('run controller builds codex.run params without embedding project when mirr
   assert.equal(params.expectedMirrorFreshness, 300000);
   assert.equal(params.threadId, 'thread-1');
   assert.equal(params.speedTier, 'fast');
+  assert.equal(params.customInstructions, 'Use project-specific notation and concise academic tone.');
   assert.equal(params.compileLog, 'compile log');
   assert.deepEqual(params.compileErrors, ['error']);
+});
+
+test('run controller carries trimmed project custom instructions for normal snapshots', () => {
+  const params = RunController.buildCodexRunParams({
+    currentProjectId: 'project-123',
+    state: {
+      mode: 'auto',
+      model: 'gpt-5.5',
+      reasoningEffort: 'xhigh',
+      session: { id: 'session-1' }
+    },
+    task: '润色摘要',
+    project: {
+      capabilities: { fullProjectSnapshot: true },
+      files: [{ path: 'main.tex', content: 'Before' }]
+    },
+    useExistingMirror: false,
+    customInstructions: '  Use project terminology. Prefer \\\\cref{} references.  '
+  });
+
+  assert.equal(params.project?.files?.[0]?.path, 'main.tex');
+  assert.equal(params.customInstructions, 'Use project terminology. Prefer \\\\cref{} references.');
 });
 
 test('run controller uses the submitted mode instead of mutable panel state when provided', () => {

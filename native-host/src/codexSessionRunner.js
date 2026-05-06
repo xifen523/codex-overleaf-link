@@ -8,6 +8,8 @@ const { buildCodexHomeEnv } = require('./codexHome');
 const { buildCodexSpeedArgs } = require('./codexArgs');
 const { truncateText } = require('./debugLog');
 
+const PROJECT_CUSTOM_INSTRUCTIONS_MAX_CHARS = 12000;
+
 async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex, signal } = {}) {
   throwIfAborted(signal);
   const projectId = params.projectId || params.project?.projectId || params.project?.id || params.project?.url || 'overleaf-project';
@@ -133,6 +135,9 @@ function buildCodexTurnPrompt(params = {}, mirror = {}) {
     'Compilation context (@compile-log):',
     formatCompileLogContext(params),
     '',
+    'Project custom instructions:',
+    formatCustomInstructionsContext(params),
+    '',
     'Mode for this turn:',
     `- ${mode}`,
     '- ask: inspect and explain only; do not edit files.',
@@ -252,6 +257,17 @@ function formatCompileLogContext(params = {}) {
     '- log:',
     fencedBlock(log)
   ].filter(Boolean).join('\n');
+}
+
+function formatCustomInstructionsContext(params = {}) {
+  const instructions = truncateText(
+    String(params.customInstructions || '').trim(),
+    PROJECT_CUSTOM_INSTRUCTIONS_MAX_CHARS
+  );
+  if (!instructions) {
+    return '- none provided.';
+  }
+  return fencedBlock(instructions);
 }
 
 function normalizeCompileMessages(value) {

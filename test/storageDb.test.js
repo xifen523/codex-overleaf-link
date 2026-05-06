@@ -260,6 +260,10 @@ test('extractLightweightPrefs extracts correct fields', () => {
     panelWidth: 512,
     activeSessionByProject: { proj_1: 'ses_1' },
     experimentalOtByProject: { proj_1: true, proj_2: false },
+    customInstructionsByProject: {
+      proj_1: 'Use project terminology.',
+      proj_2: 'Prefer concise edits.'
+    },
     extraField: 'should be ignored',
     sessions: [{ id: 'ses_1' }]
   };
@@ -275,6 +279,10 @@ test('extractLightweightPrefs extracts correct fields', () => {
   assert.equal(prefs.panelWidth, 512);
   assert.deepEqual(prefs.activeSessionByProject, { proj_1: 'ses_1' });
   assert.deepEqual(prefs.experimentalOtByProject, { proj_1: true, proj_2: false });
+  assert.deepEqual(prefs.customInstructionsByProject, {
+    proj_1: 'Use project terminology.',
+    proj_2: 'Prefer concise edits.'
+  });
   assert.equal(prefs.extraField, undefined);
   assert.equal(prefs.sessions, undefined);
 });
@@ -307,6 +315,32 @@ test('extractLightweightPrefs preserves only literal true experimental OT projec
   );
 });
 
+test('extractLightweightPrefs normalizes malformed custom instruction project prefs', () => {
+  const longInstructions = 'x'.repeat(13000);
+  const prefs = extractLightweightPrefs({
+    customInstructionsByProject: {
+      proj_text: 'Use project terminology.',
+      proj_number: 1,
+      proj_object: {},
+      proj_array: [],
+      proj_long: longInstructions,
+      '': 'ignored'
+    }
+  }, 'proj_text');
+
+  assert.equal(prefs.customInstructionsByProject.proj_text, 'Use project terminology.');
+  assert.equal(prefs.customInstructionsByProject.proj_number, '');
+  assert.equal(prefs.customInstructionsByProject.proj_object, '');
+  assert.equal(prefs.customInstructionsByProject.proj_array, '');
+  assert.equal(prefs.customInstructionsByProject.proj_long.length, 12000);
+  assert.match(prefs.customInstructionsByProject.proj_long, /…$/);
+  assert.equal(prefs.customInstructionsByProject[''], undefined);
+  assert.deepEqual(
+    Object.values(prefs.customInstructionsByProject).map(value => typeof value),
+    ['string', 'string', 'string', 'string', 'string']
+  );
+});
+
 test('extractLightweightPrefs defaults missing values', () => {
   const prefs = extractLightweightPrefs({}, 'proj_2');
   assert.equal(prefs.storageSchemaVersion, TARGET_SCHEMA_VERSION);
@@ -320,6 +354,7 @@ test('extractLightweightPrefs defaults missing values', () => {
   assert.equal(prefs.panelWidth, 0);
   assert.deepEqual(prefs.activeSessionByProject, {});
   assert.deepEqual(prefs.experimentalOtByProject, {});
+  assert.deepEqual(prefs.customInstructionsByProject, {});
 });
 
 test('buildActiveSessionByProject merges new mapping into empty existing', () => {

@@ -34,6 +34,40 @@ test('loadPrefs defaults missing experimental OT map to an empty object', async 
   try {
     const prefs = await Migration.loadPrefs();
     assert.deepEqual(prefs.experimentalOtByProject, {});
+    assert.deepEqual(prefs.customInstructionsByProject, {});
+  } finally {
+    global.chrome = previousChrome;
+  }
+});
+
+test('savePrefs normalizes custom instruction project prefs', async () => {
+  const calls = [];
+  const previousChrome = global.chrome;
+  global.chrome = {
+    storage: {
+      local: {
+        set(payload) {
+          calls.push(payload);
+          return Promise.resolve();
+        }
+      }
+    }
+  };
+
+  try {
+    await Migration.savePrefs({
+      storageSchemaVersion: 1,
+      customInstructionsByProject: {
+        project_1: 'Use project terminology.',
+        project_2: 42,
+        '': 'ignored'
+      }
+    });
+
+    assert.deepEqual(calls[0][Migration.PREFS_KEY].customInstructionsByProject, {
+      project_1: 'Use project terminology.',
+      project_2: ''
+    });
   } finally {
     global.chrome = previousChrome;
   }
@@ -63,6 +97,12 @@ test('current-schema migration load path normalizes experimental OT map values',
                 project_3: 'yes',
                 project_4: {},
                 project_5: []
+              },
+              customInstructionsByProject: {
+                project_1: 'Prefer \\cref{}.',
+                project_2: 0,
+                project_3: [],
+                '': 'ignored'
               }
             }
           });
@@ -80,6 +120,11 @@ test('current-schema migration load path normalizes experimental OT map values',
       project_3: false,
       project_4: false,
       project_5: false
+    });
+    assert.deepEqual(result.prefs.customInstructionsByProject, {
+      project_1: 'Prefer \\cref{}.',
+      project_2: '',
+      project_3: ''
     });
     assert.equal(result.activeSessionId, 'session_1');
   } finally {
@@ -101,6 +146,11 @@ test('migration preserves legacy session task, history, runs, and settings', asy
     mode: 'auto',
     requireReviewing: false,
     experimentalOtByProject: { project_1: true },
+    customInstructionsByProject: {
+      project_1: 'Use ACL style.',
+      project_2: 123,
+      '': 'ignored'
+    },
     activeSessionId: 'session_legacy',
     sessions: [{
       id: 'session_legacy',
@@ -142,6 +192,7 @@ test('migration preserves legacy session task, history, runs, and settings', asy
         mode: blob.mode,
         requireReviewing: blob.requireReviewing !== false,
         experimentalOtByProject: blob.experimentalOtByProject || {},
+        customInstructionsByProject: blob.customInstructionsByProject || {},
         activeSessionByProject: {}
       };
     },
@@ -185,7 +236,15 @@ test('migration preserves legacy session task, history, runs, and settings', asy
     assert.deepEqual(record.history, legacyBlob.sessions[0].history);
     assert.deepEqual(record.runs, legacyBlob.sessions[0].runs);
     assert.deepEqual(result.prefs.experimentalOtByProject, { project_1: true });
+    assert.deepEqual(result.prefs.customInstructionsByProject, {
+      project_1: 'Use ACL style.',
+      project_2: ''
+    });
     assert.deepEqual(calls.set[0][Migration.PREFS_KEY].experimentalOtByProject, { project_1: true });
+    assert.deepEqual(calls.set[0][Migration.PREFS_KEY].customInstructionsByProject, {
+      project_1: 'Use ACL style.',
+      project_2: ''
+    });
     assert.equal(calls.remove[0], legacyStorageKey);
   } finally {
     global.window = previousWindow;

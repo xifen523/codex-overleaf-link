@@ -9,6 +9,8 @@
 
   var TARGET_SCHEMA_VERSION = 1;
   var DB_NAME = 'codex-overleaf';
+  var CUSTOM_INSTRUCTIONS_MAX_CHARS = 12000;
+  var PROJECT_PREF_KEY_MAX_CHARS = 160;
 
   var STORES = {
     sessions: {
@@ -261,7 +263,8 @@
       autoRecompile: state.autoRecompile !== false,
       panelWidth: Number.isFinite(Number(state.panelWidth)) ? Math.round(Number(state.panelWidth)) : 0,
       activeSessionByProject: state.activeSessionByProject || {},
-      experimentalOtByProject: normalizeBooleanMap(state.experimentalOtByProject)
+      experimentalOtByProject: normalizeBooleanMap(state.experimentalOtByProject),
+      customInstructionsByProject: normalizeStringMap(state.customInstructionsByProject)
     };
     return prefs;
   }
@@ -280,6 +283,41 @@
       result[key] = value[key] === true;
     }
     return result;
+  }
+
+  function normalizeStringMap(value) {
+    var result = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    var keys = Object.keys(value);
+    for (var i = 0; i < keys.length; i++) {
+      var rawKey = keys[i];
+      var key = normalizeProjectPrefKey(rawKey);
+      if (!key) {
+        continue;
+      }
+      result[key] = typeof value[rawKey] === 'string'
+        ? normalizeTextField(value[rawKey], CUSTOM_INSTRUCTIONS_MAX_CHARS)
+        : '';
+    }
+    return result;
+  }
+
+  function normalizeProjectPrefKey(value) {
+    var key = typeof value === 'string' ? value.trim() : '';
+    if (!key) {
+      return '';
+    }
+    return normalizeTextField(key, PROJECT_PREF_KEY_MAX_CHARS);
+  }
+
+  function normalizeTextField(value, maxChars) {
+    var text = typeof value === 'string' ? value : '';
+    if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) {
+      return text;
+    }
+    return text.slice(0, Math.max(0, maxChars - 1)) + '…';
   }
 
   function buildActiveSessionByProject(existing, projectId, sessionId) {

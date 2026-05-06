@@ -183,6 +183,67 @@ test('passes Codex mode, model, and reasoning settings to the runner boundary', 
   }
 });
 
+test('passes project custom instructions into the Codex turn prompt', () => {
+  const prompt = buildCodexTurnPrompt({
+    projectId: 'project-custom-instructions',
+    task: '润色摘要',
+    mode: 'auto',
+    project: { files: [{ path: 'paper.tex', content: 'Before' }] },
+    customInstructions: 'Use the term sequential recommendation. Avoid overclaiming.\n```latex\n\\\\cref{sec:intro}\n```'
+  }, {
+    projectKey: 'project-custom-instructions',
+    workspacePath: '/tmp/project-custom-instructions'
+  });
+
+  const instructionsIndex = prompt.indexOf('Project custom instructions:');
+  assert.notEqual(instructionsIndex, -1);
+  assert.ok(instructionsIndex < prompt.indexOf('Mode for this turn:'));
+  assert.ok(instructionsIndex < prompt.indexOf('Current user request:'));
+  assert.match(prompt, /Project custom instructions:\n```text\nUse the term sequential recommendation/);
+  assert.match(prompt, /` ` `latex/);
+  assert.match(prompt, /Current user request:\n润色摘要/);
+});
+
+test('marks missing project custom instructions as none provided', () => {
+  const prompt = buildCodexTurnPrompt({
+    projectId: 'project-no-custom-instructions',
+    task: '检查摘要',
+    mode: 'ask',
+    project: { files: [{ path: 'paper.tex', content: 'Before' }] }
+  }, {
+    projectKey: 'project-no-custom-instructions',
+    workspacePath: '/tmp/project-no-custom-instructions'
+  });
+
+  assert.match(prompt, /Project custom instructions:\n- none provided\./);
+});
+
+test('runCodexSession passes project custom instructions to executeCodex', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  let received = null;
+  try {
+    await runCodexSession({
+      params: {
+        projectId: 'project-custom-boundary',
+        task: '检查摘要',
+        mode: 'ask',
+        customInstructions: 'Use venue-specific terminology.',
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async input => {
+        received = input;
+      }
+    });
+
+    assert.match(received.task, /Project custom instructions:\n```text\nUse venue-specific terminology\.\n```/);
+    assert.match(received.task, /Current user request:\n检查摘要/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('passes recent UI session history into the Codex turn prompt', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
   let received = null;

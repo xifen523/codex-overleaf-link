@@ -19,10 +19,12 @@
     focusFiles,
     otWarmStart,
     codexThreadId,
+    customInstructions,
     compileLogContext,
     submittedMode,
     restrictToFocusFiles
   } = {}) {
+    const normalizedCustomInstructions = String(customInstructions || '').trim();
     const params = {
       projectId: currentProjectId,
       mode: submittedMode || state.mode,
@@ -39,7 +41,8 @@
       reasoningEffort: state.reasoningEffort,
       speedTier: state.speedTier,
       session: state.session,
-      threadId: codexThreadId || undefined
+      threadId: codexThreadId || undefined,
+      customInstructions: normalizedCustomInstructions || undefined
     };
 
     if (compileLogContext?.available) {

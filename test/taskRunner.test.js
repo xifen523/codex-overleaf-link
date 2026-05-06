@@ -316,6 +316,32 @@ test('codex.run accepts explicit focused partial snapshots', async () => {
   assert.equal(calls, 1);
 });
 
+test('codex.run preserves recoverable thread resume failures from the runner', async () => {
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    const error = new Error('Could not resume Codex thread');
+    error.code = 'thread_resume_failed';
+    throw error;
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-thread-resume-failed',
+    method: 'codex.run',
+    params: {
+      projectId: 'thread-resume-failed-project',
+      mode: 'ask',
+      task: '继续上一轮',
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'hello' }]
+      }
+    }
+  }, {});
+
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, 'thread_resume_failed');
+  assert.equal(response.error.message, 'Could not resume Codex thread');
+});
+
 test('codex.run rejects focused partial snapshots missing focused files', async () => {
   let calls = 0;
   const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {

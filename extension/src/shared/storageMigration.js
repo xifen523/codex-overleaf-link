@@ -8,6 +8,8 @@
   'use strict';
 
   var PREFS_KEY = 'codexOverleafPrefs';
+  var CUSTOM_INSTRUCTIONS_MAX_CHARS = 12000;
+  var PROJECT_PREF_KEY_MAX_CHARS = 160;
 
   function runMigrationIfNeeded(projectId, legacyStorageKey) {
     var StorageDb = (typeof window !== 'undefined' && window.CodexOverleafStorageDb)
@@ -95,7 +97,8 @@
   function normalizePrefs(prefs) {
     var source = prefs && typeof prefs === 'object' ? prefs : {};
     return Object.assign({}, source, {
-      experimentalOtByProject: normalizeBooleanMap(source.experimentalOtByProject)
+      experimentalOtByProject: normalizeBooleanMap(source.experimentalOtByProject),
+      customInstructionsByProject: normalizeStringMap(source.customInstructionsByProject)
     });
   }
 
@@ -113,6 +116,41 @@
       result[key] = value[key] === true;
     }
     return result;
+  }
+
+  function normalizeStringMap(value) {
+    var result = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    var keys = Object.keys(value);
+    for (var i = 0; i < keys.length; i++) {
+      var rawKey = keys[i];
+      var key = normalizeProjectPrefKey(rawKey);
+      if (!key) {
+        continue;
+      }
+      result[key] = typeof value[rawKey] === 'string'
+        ? normalizeTextField(value[rawKey], CUSTOM_INSTRUCTIONS_MAX_CHARS)
+        : '';
+    }
+    return result;
+  }
+
+  function normalizeProjectPrefKey(value) {
+    var key = typeof value === 'string' ? value.trim() : '';
+    if (!key) {
+      return '';
+    }
+    return normalizeTextField(key, PROJECT_PREF_KEY_MAX_CHARS);
+  }
+
+  function normalizeTextField(value, maxChars) {
+    var text = typeof value === 'string' ? value : '';
+    if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) {
+      return text;
+    }
+    return text.slice(0, Math.max(0, maxChars - 1)) + '…';
   }
 
   return {

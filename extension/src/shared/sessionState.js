@@ -21,7 +21,8 @@
     session: null,
     runs: [],
     sessions: [],
-    activeSessionId: ''
+    activeSessionId: '',
+    customInstructionsByProject: {}
   };
 
   const VALID_MODES = new Set(['ask', 'confirm', 'auto']);
@@ -32,6 +33,8 @@
   const LEGACY_DEFAULT_SESSION_TITLE = 'New task';
   const SESSION_AUTO_TITLE_CHARS = 24;
   const MAX_RUN_EVENTS = 300;
+  const CUSTOM_INSTRUCTIONS_MAX_CHARS = 12000;
+  const PROJECT_PREF_KEY_MAX_CHARS = 160;
   const STORAGE_DEFAULT_LIMITS = {
     maxSessions: 12,
     maxRunsPerSession: 10,
@@ -86,6 +89,7 @@
     state.panelWidth = normalizePanelWidth(state.panelWidth);
     state.task = typeof state.task === 'string' ? state.task : '';
     state.model = typeof state.model === 'string' && state.model ? state.model : DEFAULT_PANEL_STATE.model;
+    state.customInstructionsByProject = normalizeCustomInstructionsByProject(state.customInstructionsByProject);
     state.runs = normalizeRuns(state.runs, options);
     state.sessions = normalizeSessions(state, input, options);
     state.activeSessionId = resolveActiveSessionId(state.sessions, input.activeSessionId);
@@ -568,6 +572,32 @@
     return files.slice(0, 5);
   }
 
+  function normalizeCustomInstructionsByProject(value) {
+    const result = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    const keys = Object.keys(value);
+    for (const rawKey of keys) {
+      const key = normalizeProjectPrefKey(rawKey);
+      if (!key) {
+        continue;
+      }
+      result[key] = typeof value[rawKey] === 'string'
+        ? normalizeTextField(value[rawKey], CUSTOM_INSTRUCTIONS_MAX_CHARS)
+        : '';
+    }
+    return result;
+  }
+
+  function normalizeProjectPrefKey(value) {
+    const key = typeof value === 'string' ? value.trim() : '';
+    if (!key) {
+      return '';
+    }
+    return normalizeTextField(key, PROJECT_PREF_KEY_MAX_CHARS);
+  }
+
   function prepareStateForStorage(input = {}, options = {}) {
     const limits = options.aggressive ? STORAGE_AGGRESSIVE_LIMITS : STORAGE_DEFAULT_LIMITS;
     const compact = compactPanelStateForStorage(input, limits);
@@ -613,7 +643,8 @@
       } : null,
       runs: [],
       sessions: compactSessions,
-      activeSessionId: active?.id || ''
+      activeSessionId: active?.id || '',
+      customInstructionsByProject: normalizeCustomInstructionsByProject(source.customInstructionsByProject)
     };
   }
 
