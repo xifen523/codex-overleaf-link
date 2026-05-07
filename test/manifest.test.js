@@ -19,19 +19,19 @@ const {
 } = require('../native-host/src/nativeHostPlatform');
 const extensionManifest = require('../extension/manifest.json');
 
-test('release metadata is prepared for v0.8.0', () => {
-  assert.equal(packageJson.version, '0.8.0');
+test('release metadata is prepared for v0.9.0', () => {
+  assert.equal(packageJson.version, '0.9.0');
   assert.equal(extensionManifest.version, packageJson.version);
 });
 
-test('release docs carry exact v0.8.0 badge and changelog heading', () => {
+test('release docs carry exact v0.9.0 badge and changelog heading', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
   const changelog = fs.readFileSync(path.join(__dirname, '../CHANGELOG.md'), 'utf8');
 
-  assert.match(readme, /version-0\.8\.0-blue/);
-  assert.doesNotMatch(readme, /version-0\.7\.0-blue/);
-  assert.match(changelog, /^## v0\.8\.0 - 2026-05-06$/m);
-  assert.doesNotMatch(changelog, /^## v0\.7\.0 - 2026-05-06[\s\S]*version-0\.8\.0-blue/m);
+  assert.match(readme, /version-0\.9\.0-blue/);
+  assert.doesNotMatch(readme, /version-0\.8\.0-blue/);
+  assert.match(changelog, /^## v0\.9\.0 - 2026-05-07$/m);
+  assert.doesNotMatch(changelog, /^## v0\.8\.0 - 2026-05-06[\s\S]*version-0\.9\.0-blue/m);
 });
 
 test('validates Chrome extension ids', () => {
@@ -181,7 +181,7 @@ test('content script loads shared compatibility before native and panel scripts'
   assert.ok(compatibilityIndex < scripts.indexOf('src/contentScript.js'));
 });
 
-test('content script loads v0.8 governance, sensitive scan, and audit helpers before the panel script', () => {
+test('content script loads governance, sensitive scan, and audit helpers before the panel script', () => {
   const scripts = extensionManifest.content_scripts[0].js;
   for (const helper of [
     'src/shared/governanceRules.js',
@@ -193,7 +193,7 @@ test('content script loads v0.8 governance, sensitive scan, and audit helpers be
   }
 });
 
-test('page bridge injection can load v0.8 shared helpers from web accessible resources', () => {
+test('page bridge injection can load governance, sensitive scan, and audit shared helpers from web accessible resources', () => {
   const resources = extensionManifest.web_accessible_resources[0].resources;
   for (const helper of [
     'src/shared/governanceRules.js',

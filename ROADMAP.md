@@ -1,14 +1,15 @@
 # Roadmap to v1.0
 
-This roadmap describes the planned path from the current `v0.1.0` stable preview to a production-ready `v1.0.0`.
+This roadmap describes the planned path from the current `v0.9.0` release candidate to a production-ready `v1.0.0`. The `v0.1` through `v0.8` sections are retained as historical milestones.
 
 The guiding principle is simple: make the existing bridge reliable first, then improve synchronization, then broaden distribution and platform support. Features that increase sync complexity or security surface area should stay behind explicit opt-in flags until they are proven stable.
 
 ## Release Discipline
 
-- `main` tracks stable releases and hotfixes.
-- `next` tracks active development for the next minor release.
-- `v0.1.x` releases are hotfix-only unless a change is required to keep the current product usable.
+- `main` tracks release-candidate hardening, stable releases, and release hotfixes.
+- `next` tracks post-`v0.9.0` development toward `v1.0.0`.
+- `v0.9.x` is release-candidate hardening only: P0/P1 fixes, release gate corrections, documentation corrections, manual smoke signoff, and compatibility signoff.
+- Historical `v0.1.x` releases were the original hotfix-only stable preview line and are no longer the current release line.
 - Experimental sync features must preserve the current full-snapshot fallback path.
 - User project content must stay local to the bridge and the user's configured Codex CLI account. The project should not add a hosted backend.
 
@@ -228,6 +229,12 @@ The guiding principle is simple: make the existing bridge reliable first, then i
 
 **Goal:** Freeze features and validate the product against real workflows.
 
+**Status:** Implemented as the v0.9 release-candidate hardening release. Automated
+release gates, smoke tooling, payload safety, page-bridge/native security hardening,
+diagnostics privacy tests, documentation, and compatibility templates are in place;
+publishing still requires completing the real Overleaf manual smoke checklist and
+recording P0/P1 signoff.
+
 ### Planned Work
 
 - Real Overleaf smoke-test checklist.
@@ -248,9 +255,10 @@ The guiding principle is simple: make the existing bridge reliable first, then i
 
 ### Acceptance Criteria
 
-- No known P0/P1 bugs remain open.
-- Release-candidate builds pass the full automated test suite and the manual smoke-test checklist.
-- Documentation matches the actual install and update flow.
+- No known P0/P1 bugs remain open or are explicitly downgraded before publishing.
+- Release-candidate builds pass the full automated test suite and produce verified release artifacts.
+- The manual real Overleaf smoke-test checklist is completed before store or GitHub release publication.
+- Documentation matches the actual install, update, uninstall, compatibility, and local-data cleanup flow.
 
 ## v1.0.0: Production Stable
 

@@ -7,6 +7,9 @@ const { getHomeDir } = require('./nativeHostPlatform');
 
 const BASELINE_FILE = 'baseline.json';
 const MAX_BINARY_FILE_BYTES = 10 * 1024 * 1024;
+const NATIVE_OUTPUT_LIMIT_BYTES = 1024 * 1024;
+const SAFE_INLINE_BINARY_CHANGE_BYTES = 512 * 1024;
+const SAFE_NATIVE_RESPONSE_PAYLOAD_BYTES = NATIVE_OUTPUT_LIMIT_BYTES - (64 * 1024);
 const TURN_ATTACHMENTS_DIR = '.codex-overleaf-attachments';
 
 function getProjectMirror(projectId, options = {}) {
@@ -136,6 +139,14 @@ async function collectMirrorChangesDetailed({ projectId, rootDir }) {
         if (hashBytes(bytes) === previous.hash) {
           continue;
         }
+        if (stat.size > SAFE_INLINE_BINARY_CHANGE_BYTES) {
+          unsupportedChanges.push(buildOversizedBinaryPayloadChange({
+            filePath,
+            size: stat.size,
+            previous
+          }));
+          continue;
+        }
         currentByPath.set(filePath, {
           binary: true,
           bytes,
@@ -145,6 +156,14 @@ async function collectMirrorChangesDetailed({ projectId, rootDir }) {
         continue;
       }
       if (!previous) {
+        if (stat.size > SAFE_INLINE_BINARY_CHANGE_BYTES) {
+          unsupportedChanges.push(buildOversizedBinaryPayloadChange({
+            filePath,
+            size: stat.size,
+            previous
+          }));
+          continue;
+        }
         currentByPath.set(filePath, {
           binary: true,
           bytes: fs.readFileSync(target),
@@ -230,9 +249,105 @@ async function collectMirrorChangesDetailed({ projectId, rootDir }) {
     }
   }
 
+  const budgeted = enforceNativeResponsePayloadBudget({
+    changes,
+    unsupportedChanges,
+    mirror
+  });
+
   return {
-    changes: changes.sort(compareSyncChanges),
-    unsupportedChanges: unsupportedChanges.sort((left, right) => left.path.localeCompare(right.path))
+    changes: budgeted.changes.sort(compareSyncChanges),
+    unsupportedChanges: budgeted.unsupportedChanges.sort((left, right) => left.path.localeCompare(right.path))
+  };
+}
+
+function enforceNativeResponsePayloadBudget({ changes, unsupportedChanges, mirror }) {
+  const nextChanges = [...changes];
+  const nextUnsupportedChanges = [...unsupportedChanges];
+  while (
+    estimateNativeResponsePayloadBytes(nextChanges, nextUnsupportedChanges, mirror) > SAFE_NATIVE_RESPONSE_PAYLOAD_BYTES
+  ) {
+    const index = findLargestInlineBinaryChangeIndex(nextChanges);
+    if (index < 0) {
+      break;
+    }
+    const [change] = nextChanges.splice(index, 1);
+    nextUnsupportedChanges.push(buildOversizedBinaryPayloadChange({
+      filePath: change.path,
+      size: change.size,
+      previousExists: change.previousExists === true,
+      previousKind: change.previousKind || '',
+      previousSize: change.previousSize,
+      attemptedChangeType: change.type,
+      aggregateBudgetExceeded: true
+    }));
+  }
+  return {
+    changes: nextChanges,
+    unsupportedChanges: nextUnsupportedChanges
+  };
+}
+
+function estimateNativeResponsePayloadBytes(changes, unsupportedChanges, mirror = {}) {
+  return Buffer.byteLength(JSON.stringify({
+    status: 'completed',
+    projectId: mirror.projectKey || '',
+    workspacePath: mirror.workspacePath || '',
+    assistantMessage: '',
+    threadId: '',
+    syncChanges: changes,
+    unsupportedChanges
+  }), 'utf8');
+}
+
+function findLargestInlineBinaryChangeIndex(changes) {
+  let largestIndex = -1;
+  let largestSize = -1;
+  for (let index = 0; index < changes.length; index += 1) {
+    const change = changes[index];
+    if (
+      (change?.type !== 'binary-create' && change?.type !== 'overwrite-binary')
+      || typeof change.contentBase64 !== 'string'
+    ) {
+      continue;
+    }
+    const size = Number.isFinite(Number(change.size)) ? Number(change.size) : estimateBase64Size(change.contentBase64);
+    if (size > largestSize) {
+      largestSize = size;
+      largestIndex = index;
+    }
+  }
+  return largestIndex;
+}
+
+function buildOversizedBinaryPayloadChange({
+  filePath,
+  size,
+  previous,
+  previousExists,
+  previousKind,
+  previousSize,
+  attemptedChangeType,
+  aggregateBudgetExceeded = false
+}) {
+  const resolvedPreviousExists = typeof previousExists === 'boolean' ? previousExists : Boolean(previous);
+  const resolvedAttemptedChangeType = attemptedChangeType || (resolvedPreviousExists ? 'overwrite-binary' : 'binary-create');
+  const guidancePrefix = aggregateBudgetExceeded
+    ? `The ${resolvedAttemptedChangeType} payload would exceed the native messaging response budget when combined with other changes.`
+    : `The ${resolvedAttemptedChangeType} payload is too large for native messaging.`;
+  return {
+    type: 'unsupported-local-file',
+    path: filePath,
+    reason: 'binary_payload_exceeds_native_message_limit',
+    size,
+    attemptedChangeType: resolvedAttemptedChangeType,
+    previousExists: resolvedPreviousExists,
+    previousKind: previousKind ?? previous?.kind ?? '',
+    previousSize: previousSize ?? previous?.size,
+    limit: SAFE_INLINE_BINARY_CHANGE_BYTES,
+    aggregateLimit: SAFE_NATIVE_RESPONSE_PAYLOAD_BYTES,
+    nativeOutputLimit: NATIVE_OUTPUT_LIMIT_BYTES,
+    guidance: `${guidancePrefix} Update ${filePath} in Overleaf directly or reduce it below ${SAFE_INLINE_BINARY_CHANGE_BYTES} bytes.`
   };
 }
 
@@ -889,6 +1004,9 @@ function verifyWorkspaceMatchesBaseline(workspacePath, baselineFiles = []) {
 }
 
 module.exports = {
+  NATIVE_OUTPUT_LIMIT_BYTES,
+  SAFE_INLINE_BINARY_CHANGE_BYTES,
+  SAFE_NATIVE_RESPONSE_PAYLOAD_BYTES,
   applyFileOverlays,
   collectMirrorChangesDetailed,
   collectMirrorChanges,

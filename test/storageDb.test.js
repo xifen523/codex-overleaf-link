@@ -13,6 +13,7 @@ const {
   extractLightweightPrefs,
   buildActiveSessionByProject
 } = require('../extension/src/shared/storageDb');
+const { prepareStateForStorage } = require('../extension/src/shared/sessionState');
 
 test('TARGET_SCHEMA_VERSION is a positive integer', () => {
   assert.equal(typeof TARGET_SCHEMA_VERSION, 'number');
@@ -85,6 +86,7 @@ test('buildSessionRecord preserves provided values', () => {
     id: 'ses_custom',
     projectId: 'proj_2',
     title: 'My Session',
+    titleSource: 'manual',
     codexThreadId: 'thread_abc',
     status: 'completed',
     focusFiles: ['main.tex', 'intro.tex'],
@@ -102,36 +104,139 @@ test('buildSessionRecord preserves provided values', () => {
   assert.equal(record.updatedAt, '2025-01-02T00:00:00.000Z');
 });
 
-test('buildSessionRecord preserves reloadable session state', () => {
+test('buildSessionRecord preserves reloadable session display text while stripping bulky unsafe payloads', () => {
+  const rawPrompt = 'STORAGE_DB_PROMPT_SHOULD_NOT_PERSIST';
+  const rawOutput = 'STORAGE_DB_OUTPUT_SHOULD_NOT_PERSIST';
+  const rawCompileLog = 'STORAGE_DB_COMPILE_LOG_SHOULD_NOT_PERSIST';
+  const rawDiff = 'STORAGE_DB_RAW_DIFF_SHOULD_NOT_PERSIST';
+  const rawProjectText = 'STORAGE_DB_PROJECT_TEXT_SHOULD_NOT_PERSIST';
+  const finalReport = [
+    '结论：这轮历史刷新后应该仍然可读。',
+    '',
+    '1. 保留用户问题。',
+    '2. 保留最终回答。'
+  ].join('\n');
   const input = {
     id: 'ses_stateful',
     projectId: 'proj_stateful',
     title: 'Check grammar',
-    task: '帮我检查语法错误',
+    titleSource: 'manual',
+    task: rawPrompt,
     mode: 'auto',
     model: 'gpt-5.3-codex-spark',
     reasoningEffort: 'xhigh',
     speedTier: 'fast',
     requireReviewing: false,
-    history: [{ task: '上一轮', result: '改了摘要', at: '2026-05-02T01:00:00.000Z' }],
+    history: [{ task: rawPrompt, result: rawOutput, at: '2026-05-02T01:00:00.000Z' }],
     runs: [{
       id: 'run_1',
-      task: '帮我检查语法错误',
-      status: 'completed',
-      events: [{ title: 'Codex 完成处理。', status: 'completed' }]
+      task: rawPrompt,
+      status: 'failed',
+      statusText: rawOutput,
+      startedAt: '2026-05-02T01:00:00.000Z',
+      finishedAt: '2026-05-02T01:01:00.000Z',
+      events: [{
+        title: '本轮完成报告',
+        status: 'completed',
+        kind: 'report',
+        detail: finalReport
+      }, {
+        title: rawCompileLog,
+        status: 'failed',
+        kind: 'activity',
+        detail: {
+          compileLog: rawCompileLog,
+          rawDiff,
+          projectText: rawProjectText,
+          path: 'main.tex'
+        }
+      }],
+      attachments: [{
+        name: 'figure.png',
+        mimeType: 'image/png',
+        size: 128,
+        kind: 'image',
+        previewDataUrl: 'data:image/png;base64,STORAGE_DB_IMAGE_SHOULD_NOT_PERSIST'
+      }],
+      undoOperations: [{ type: 'edit', path: 'main.tex', replaceAll: rawDiff }],
+      undoBaseFiles: [{ path: 'main.tex', content: rawProjectText }],
+      undoExpectedFiles: [{ path: 'main.tex', content: rawProjectText }]
     }]
   };
 
   const record = buildSessionRecord(input);
+  const serialized = JSON.stringify(record);
 
-  assert.equal(record.task, '帮我检查语法错误');
+  for (const forbidden of [
+    rawDiff,
+    rawProjectText,
+    'data:image/png;base64,STORAGE_DB_IMAGE_SHOULD_NOT_PERSIST'
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, `buildSessionRecord leaked ${forbidden}`);
+  }
+
+  assert.equal(record.title, 'Check grammar');
+  assert.equal(record.task, rawPrompt);
   assert.equal(record.mode, 'auto');
   assert.equal(record.model, 'gpt-5.3-codex-spark');
   assert.equal(record.reasoningEffort, 'xhigh');
   assert.equal(record.speedTier, 'fast');
   assert.equal(record.requireReviewing, false);
-  assert.deepEqual(record.history, input.history);
-  assert.deepEqual(record.runs, input.runs);
+  assert.equal(record.history[0].task, rawPrompt);
+  assert.equal(record.history[0].result, rawOutput);
+  assert.equal(record.runs[0].status, 'failed');
+  assert.equal(record.runs[0].task, rawPrompt);
+  assert.equal(record.runs[0].statusText, rawOutput);
+  assert.equal(record.runs[0].startedAt, '2026-05-02T01:00:00.000Z');
+  assert.equal(record.runs[0].events[0].title, '本轮完成报告');
+  assert.equal(record.runs[0].events[0].detail, finalReport);
+  assert.equal(record.runs[0].events[1].title, rawCompileLog);
+  assert.equal(record.runs[0].events[1].detail.redacted, true);
+  assert.deepEqual(record.runs[0].events[1].detail.paths, ['main.tex']);
+  assert.deepEqual(record.runs[0].attachments, [{
+    name: 'figure.png',
+    mimeType: 'image/png',
+    size: 128,
+    kind: 'image'
+  }]);
+  assert.equal(record.runs[0].undoOperations.length, 0);
+});
+
+test('auto session titles are not persisted as raw prompt snippets while manual titles remain', () => {
+  const rawPrompt = 'AUTO_TITLE_PROMPT_SHOULD_NOT_PERSIST rewrite the whole introduction';
+  const compact = prepareStateForStorage({
+    activeSessionId: 'session_auto_title',
+    sessions: [{
+      id: 'session_auto_title',
+      title: rawPrompt,
+      titleSource: 'auto',
+      task: rawPrompt,
+      runs: [{
+        id: 'run_auto_title',
+        task: rawPrompt,
+        status: 'completed'
+      }]
+    }, {
+      id: 'session_manual_title',
+      title: 'Manual Literature Review Pass',
+      titleSource: 'manual',
+      task: rawPrompt,
+      runs: []
+    }]
+  });
+  const autoRecord = buildSessionRecord({
+    ...compact.sessions.find(session => session.id === 'session_auto_title'),
+    projectId: 'proj_title'
+  });
+  const manualRecord = buildSessionRecord({
+    ...compact.sessions.find(session => session.id === 'session_manual_title'),
+    projectId: 'proj_title'
+  });
+
+  assert.equal(JSON.stringify(compact).includes(rawPrompt), false);
+  assert.equal(JSON.stringify(autoRecord).includes(rawPrompt), false);
+  assert.notEqual(autoRecord.title, rawPrompt);
+  assert.equal(manualRecord.title, 'Manual Literature Review Pass');
 });
 
 test('buildSessionRecord generates id when not provided', () => {
@@ -154,7 +259,7 @@ test('buildTurnRecord normalizes with defaults', () => {
   assert.equal(record.finalSummary, '');
 });
 
-test('buildTurnRecord preserves provided values', () => {
+test('buildTurnRecord preserves metadata and summarizes body fields', () => {
   const input = {
     id: 'turn_x',
     sessionId: 'ses_x',
@@ -170,14 +275,31 @@ test('buildTurnRecord preserves provided values', () => {
   const record = buildTurnRecord(input);
   assert.equal(record.id, 'turn_x');
   assert.equal(record.sessionId, 'ses_x');
-  assert.equal(record.task, 'Fix the bug');
+  assert.match(record.task, /^\[turn task omitted; chars=\d+; hash=[a-f0-9]{8}\]$/);
   assert.equal(record.mode, 'auto');
   assert.equal(record.model, 'gpt-5.4');
   assert.equal(record.reasoningEffort, 'high');
   assert.equal(record.speedTier, 'fast');
   assert.equal(record.createdAt, '2025-03-01T00:00:00.000Z');
   assert.equal(record.completedAt, '2025-03-01T00:05:00.000Z');
-  assert.equal(record.finalSummary, 'Bug fixed successfully');
+  assert.match(record.finalSummary, /^\[turn summary omitted; chars=\d+; hash=[a-f0-9]{8}\]$/);
+});
+
+test('buildTurnRecord summarizes prompt and final summary bodies', () => {
+  const rawPrompt = 'TURN_PROMPT_SHOULD_NOT_PERSIST';
+  const rawSummary = 'TURN_FINAL_SUMMARY_SHOULD_NOT_PERSIST';
+  const record = buildTurnRecord({
+    id: 'turn_privacy',
+    sessionId: 'ses_privacy',
+    task: rawPrompt,
+    finalSummary: rawSummary
+  });
+  const serialized = JSON.stringify(record);
+
+  assert.equal(serialized.includes(rawPrompt), false);
+  assert.equal(serialized.includes(rawSummary), false);
+  assert.match(record.task, /^\[turn task omitted; chars=\d+; hash=[a-f0-9]{8}\]$/);
+  assert.match(record.finalSummary, /^\[turn summary omitted; chars=\d+; hash=[a-f0-9]{8}\]$/);
 });
 
 test('buildTurnRecord generates id when not provided', () => {
@@ -196,7 +318,7 @@ test('buildEventRecord normalizes with defaults', () => {
   assert.ok(typeof record.createdAt === 'string' && record.createdAt.length > 0);
 });
 
-test('buildEventRecord preserves provided values', () => {
+test('buildEventRecord preserves metadata and summarizes body fields', () => {
   const input = {
     id: 'evt_x',
     turnId: 'turn_x',
@@ -211,9 +333,35 @@ test('buildEventRecord preserves provided values', () => {
   assert.equal(record.turnId, 'turn_x');
   assert.equal(record.index, 5);
   assert.equal(record.kind, 'file_edit');
-  assert.equal(record.text, 'Edited main.tex');
-  assert.deepEqual(record.detail, { path: 'main.tex' });
+  assert.match(record.text, /^\[event text omitted; chars=\d+; hash=[a-f0-9]{8}\]$/);
+  assert.equal(record.detail.redacted, true);
+  assert.deepEqual(record.detail.paths, ['main.tex']);
   assert.equal(record.createdAt, '2025-04-01T00:00:00.000Z');
+});
+
+test('buildEventRecord summarizes text and structured detail bodies', () => {
+  const rawText = 'EVENT_TEXT_SHOULD_NOT_PERSIST';
+  const rawCompileLog = 'EVENT_COMPILE_LOG_SHOULD_NOT_PERSIST';
+  const rawProjectText = 'EVENT_PROJECT_TEXT_SHOULD_NOT_PERSIST';
+  const record = buildEventRecord({
+    id: 'evt_privacy',
+    turnId: 'turn_privacy',
+    index: 1,
+    kind: 'stream',
+    text: rawText,
+    detail: {
+      compileLog: rawCompileLog,
+      projectText: rawProjectText,
+      path: 'main.tex'
+    }
+  });
+  const serialized = JSON.stringify(record);
+
+  for (const forbidden of [rawText, rawCompileLog, rawProjectText]) {
+    assert.equal(serialized.includes(forbidden), false, `buildEventRecord leaked ${forbidden}`);
+  }
+  assert.match(record.text, /^\[event text omitted; chars=\d+; hash=[a-f0-9]{8}\]$/);
+  assert.deepEqual(record.detail.paths, ['main.tex']);
 });
 
 test('buildEventRecord generates id when not provided', () => {
@@ -231,7 +379,7 @@ test('buildArtifactRecord normalizes with defaults', () => {
   assert.ok(typeof record.createdAt === 'string' && record.createdAt.length > 0);
 });
 
-test('buildArtifactRecord preserves provided values', () => {
+test('buildArtifactRecord preserves metadata and summarizes payload fields', () => {
   const input = {
     id: 'art_x',
     turnId: 'turn_x',
@@ -245,8 +393,28 @@ test('buildArtifactRecord preserves provided values', () => {
   assert.equal(record.turnId, 'turn_x');
   assert.equal(record.type, 'file');
   assert.equal(record.path, 'output/result.pdf');
-  assert.deepEqual(record.payload, { size: 1024 });
+  assert.equal(record.payload.redacted, true);
+  assert.equal(record.payload.type, 'object');
   assert.equal(record.createdAt, '2025-05-01T00:00:00.000Z');
+});
+
+test('buildArtifactRecord summarizes raw payload bodies', () => {
+  const rawPayload = 'ARTIFACT_PAYLOAD_SHOULD_NOT_PERSIST';
+  const record = buildArtifactRecord({
+    id: 'art_privacy',
+    turnId: 'turn_privacy',
+    type: 'diagnostic',
+    path: 'diagnostics.json',
+    payload: {
+      output: rawPayload,
+      path: 'main.tex'
+    }
+  });
+  const serialized = JSON.stringify(record);
+
+  assert.equal(serialized.includes(rawPayload), false);
+  assert.equal(record.payload.redacted, true);
+  assert.deepEqual(record.payload.paths, ['main.tex']);
 });
 
 test('buildArtifactRecord generates id when not provided', () => {
@@ -281,6 +449,71 @@ test('buildAuditLogRecord normalizes summary-only audit fields', () => {
   assert.deepEqual(record.blockedFiles, [{ path: 'locked.tex', reason: 'readonly' }]);
   assert.deepEqual(record.appliedFiles, [{ path: 'main.tex' }]);
   assert.equal(JSON.stringify(record).includes('body'), false);
+});
+
+test('buildAuditLogRecord does not persist raw sensitive finding previews', () => {
+  const record = buildAuditLogRecord({
+    id: 'aud_preview',
+    projectId: 'proj',
+    sensitiveFindings: [{
+      detectorId: 'redacted-secret',
+      path: 'main.tex',
+      source: 'project',
+      preview: 'PROJECT LINE SHOULD NOT PERSIST [REDACTED_SECRET]'
+    }]
+  });
+  const serialized = JSON.stringify(record);
+
+  assert.equal(serialized.includes('PROJECT LINE SHOULD NOT PERSIST'), false);
+  assert.match(record.sensitiveFindings[0].preview, /^\[sensitive preview omitted; chars=\d+; hash=[a-f0-9]{8}\]$/);
+});
+
+test('buildAuditLogRecord summarizes raw prompt summaries at the storage boundary', () => {
+  const rawPrompt = 'AUDIT_PROMPT_SHOULD_NOT_PERSIST rewrite the whole introduction';
+  const record = buildAuditLogRecord({
+    id: 'aud_prompt_privacy',
+    projectId: 'proj',
+    promptSummary: rawPrompt
+  });
+  const serialized = JSON.stringify(record);
+
+  assert.equal(serialized.includes(rawPrompt), false);
+  assert.match(record.promptSummary, /^\[audit prompt omitted; chars=\d+; hash=[a-f0-9]{8}\]$/);
+});
+
+test('buildAuditLogRecord summarizes raw save verification blobs', () => {
+  const rawOutput = 'AUDIT_SAVE_OUTPUT_SHOULD_NOT_PERSIST';
+  const record = buildAuditLogRecord({
+    id: 'aud_save_privacy',
+    projectId: 'proj',
+    saveVerification: {
+      status: 'failed',
+      ok: false,
+      stdout: rawOutput,
+      stderr: rawOutput,
+      commandOutput: rawOutput,
+      raw: rawOutput,
+      message: rawOutput,
+      diagnostics: {
+        status: 'failed',
+        errorCode: 'latex_failed',
+        stdout: rawOutput
+      }
+    }
+  });
+  const serialized = JSON.stringify(record);
+
+  assert.equal(serialized.includes(rawOutput), false);
+  assert.deepEqual(record.saveVerification, {
+    status: 'failed',
+    ok: false,
+    errorCategory: 'error',
+    diagnostics: {
+      status: 'failed',
+      errorCode: 'latex_failed',
+      errorCategory: 'error'
+    }
+  });
 });
 
 test('extractLightweightPrefs extracts correct fields', () => {

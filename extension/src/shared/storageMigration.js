@@ -15,7 +15,6 @@
     var StorageDb = (typeof window !== 'undefined' && window.CodexOverleafStorageDb)
       ? window.CodexOverleafStorageDb
       : require('./storageDb');
-
     return chrome.storage.local.get([PREFS_KEY, legacyStorageKey]).then(function (stored) {
       var prefs = normalizePrefs(stored[PREFS_KEY] || {});
       var schemaVersion = prefs.storageSchemaVersion || 0;
@@ -36,24 +35,9 @@
       for (var i = 0; i < legacySessions.length; i++) {
         var legacy = legacySessions[i];
         if (!legacy || !legacy.id) { continue; }
-        var record = StorageDb.buildSessionRecord({
-          id: legacy.id,
-          projectId: projectId,
-          title: legacy.title || '',
-          titleSource: legacy.titleSource === 'manual' ? 'manual' : 'auto',
-          codexThreadId: '',
-          status: 'active',
-          focusFiles: Array.isArray(legacy.focusFiles) ? legacy.focusFiles : [],
-          history: Array.isArray(legacy.history) ? legacy.history : [],
-          runs: Array.isArray(legacy.runs) ? legacy.runs : [],
-          task: typeof legacy.task === 'string' ? legacy.task : '',
-          mode: typeof legacy.mode === 'string' ? legacy.mode : legacyBlob.mode || '',
-          model: typeof legacy.model === 'string' ? legacy.model : legacyBlob.model || '',
-          reasoningEffort: typeof legacy.reasoningEffort === 'string' ? legacy.reasoningEffort : legacyBlob.reasoningEffort || '',
-          requireReviewing: legacy.requireReviewing !== false && legacyBlob.requireReviewing !== false,
-          createdAt: legacy.createdAt,
-          updatedAt: legacy.updatedAt
-        });
+        var record = StorageDb.buildSessionRecord(
+          buildLegacySessionRecordInput(projectId, legacyBlob, legacy)
+        );
         migratedSessions.push(record);
       }
 
@@ -82,6 +66,28 @@
         });
       });
     });
+  }
+
+  function buildLegacySessionRecordInput(projectId, legacyBlob, legacy) {
+    return {
+      id: legacy.id,
+      projectId: projectId,
+      title: legacy.title || '',
+      titleSource: legacy.titleSource === 'manual' ? 'manual' : 'auto',
+      codexThreadId: '',
+      status: 'active',
+      focusFiles: Array.isArray(legacy.focusFiles) ? legacy.focusFiles : [],
+      history: Array.isArray(legacy.history) ? legacy.history : [],
+      runs: Array.isArray(legacy.runs) ? legacy.runs : [],
+      task: typeof legacy.task === 'string' ? legacy.task : '',
+      mode: typeof legacy.mode === 'string' ? legacy.mode : legacyBlob.mode || '',
+      model: typeof legacy.model === 'string' ? legacy.model : legacyBlob.model || '',
+      reasoningEffort: typeof legacy.reasoningEffort === 'string' ? legacy.reasoningEffort : legacyBlob.reasoningEffort || '',
+      speedTier: typeof legacy.speedTier === 'string' ? legacy.speedTier : legacyBlob.speedTier || '',
+      requireReviewing: legacy.requireReviewing !== false && legacyBlob.requireReviewing !== false,
+      createdAt: legacy.createdAt,
+      updatedAt: legacy.updatedAt
+    };
   }
 
   function savePrefs(prefs) {

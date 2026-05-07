@@ -34,6 +34,7 @@
   const CodexOverleafCompatibility = window.CodexOverleafCompatibility;
   const INSTALL_COMMAND = CodexOverleafCompatibility?.buildInstallCommand?.() ||
     'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash';
+  const PAGE_BRIDGE_CAPABILITY = createPageBridgeCapability();
   const pageBridgeReady = injectPageBridge();
   const {
     createSession,
@@ -91,6 +92,10 @@
   let composerAttachments = [];
   let pendingComposerAttachmentKeys = new Set();
   let composerSkillInvocation = null;
+  let slashCodexOverleafSkills = [];
+  let slashCodexOverleafSkillsLoaded = false;
+  let slashCodexOverleafSkillsLoading = false;
+  let renderedSlashCommands = new Map();
   let customInstructionsEditorProjectId = '';
   let customInstructionsEditorValue = '';
   let logAutoFollow = true;
@@ -121,15 +126,31 @@
     projectId: ''
   };
 
-  chrome.runtime.onMessage.addListener(message => {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'codex-overleaf/open-panel') {
       ensurePanelOpen();
+      sendResponse?.(getPanelStateResponse());
+      return;
+    }
+    if (message?.type === 'codex-overleaf/get-panel-state') {
+      sendResponse?.(getPanelStateResponse());
+      return;
+    }
+    if (message?.type === 'codex-overleaf/toggle-panel') {
+      if (isPanelOpen()) {
+        closePanel();
+      } else {
+        ensurePanelOpen();
+      }
+      sendResponse?.(getPanelStateResponse());
+      return;
     }
     if (nativeChannel.shouldHandleNativeEvent(message)) {
       appendNativeEvent(message.event);
     }
   });
 
+  exposeSmokeHelper();
   init();
 
   async function init() {
@@ -165,6 +186,128 @@
         chrome.runtime.getManifest?.().version ||
         ''
     };
+  }
+
+  function exposeSmokeHelper() {
+    const helper = Object.freeze({
+      probeNative: smokeProbeNative,
+      probeProject: smokeProbeProject,
+      getProjectSnapshotMetrics: smokeProbeProject
+    });
+    try {
+      Object.defineProperty(globalThis, 'CodexOverleafSmoke', {
+        configurable: true,
+        enumerable: false,
+        value: helper
+      });
+    } catch (_error) {
+      globalThis.CodexOverleafSmoke = helper;
+    }
+  }
+
+  async function smokeProbeNative() {
+    try {
+      const params = CodexOverleafCompatibility?.buildBridgePingParams
+        ? CodexOverleafCompatibility.buildBridgePingParams(getExtensionCompatibilityMetadata())
+        : {};
+      const response = await sendBackgroundNative({ method: 'bridge.ping', params });
+      const compatibility = CodexOverleafCompatibility?.evaluateNativeCompatibility
+        ? CodexOverleafCompatibility.evaluateNativeCompatibility(response, getExtensionCompatibilityMetadata())
+        : fallbackNativeCompatibility(response);
+      return {
+        supported: true,
+        ok: response?.ok === true && compatibility?.status === 'ok',
+        status: compatibility?.status || (response?.ok ? 'ok' : 'native_missing'),
+        errorCode: response?.error?.code || compatibility?.status || '',
+        nativeCompatibility: summarizeSmokeNativeCompatibility(compatibility, response)
+      };
+    } catch (_error) {
+      return {
+        supported: true,
+        ok: false,
+        status: 'native_probe_failed',
+        errorCode: 'native_probe_failed'
+      };
+    }
+  }
+
+  async function smokeProbeProject(options = {}) {
+    try {
+      const project = await callPageBridge('getProjectSnapshot', {
+        force: Boolean(options.force),
+        preferLightweight: true,
+        allowZipFallback: true,
+        allowEditorNavigation: false,
+        requireFullProject: false,
+        includeBinaryFiles: true,
+        includeContent: false,
+        zipTimeoutMs: RUN_SNAPSHOT_ZIP_TIMEOUT_MS
+      });
+      const files = Array.isArray(project?.files) ? project.files : [];
+      const skipped = Array.isArray(project?.capabilities?.skipped) ? project.capabilities.skipped : [];
+      const bytes = summarizeSmokeProjectBytes(files);
+      const ok = project?.ok !== false && files.length > 0;
+      return {
+        supported: true,
+        ok,
+        status: ok ? 'ok' : 'project_snapshot_unavailable',
+        errorCode: ok ? '' : project?.code || 'project_snapshot_unavailable',
+        counts: {
+          files: files.length,
+          skipped: skipped.length
+        },
+        bytes,
+        method: project?.capabilities?.method || ''
+      };
+    } catch (_error) {
+      return {
+        supported: true,
+        ok: false,
+        status: 'project_probe_failed',
+        errorCode: 'project_probe_failed',
+        counts: {
+          files: 0,
+          skipped: 0
+        },
+        bytes: {
+          text: 0,
+          binary: 0
+        }
+      };
+    }
+  }
+
+  function summarizeSmokeNativeCompatibility(compatibility = {}, response = {}) {
+    const native = compatibility?.native || response?.result || {};
+    return {
+      status: compatibility?.status || (response?.ok ? 'ok' : 'native_missing'),
+      nativeVersion: compatibility?.nativeVersion || native.version || '',
+      version: compatibility?.version || native.version || '',
+      minimumNativeVersion: compatibility?.minimumNativeVersion || compatibility?.minNativeVersion || '',
+      protocolVersion: compatibility?.protocolVersion || native.protocolVersion || '',
+      supportedProtocol: compatibility?.supportedProtocol || native.supportedProtocol || ''
+    };
+  }
+
+  function summarizeSmokeProjectBytes(files = []) {
+    return files.reduce((bytes, file) => {
+      let size = Number(file?.size || file?.byteLength || 0);
+      if ((!Number.isFinite(size) || size <= 0) && typeof file?.content === 'string') {
+        size = new TextEncoder().encode(file.content).byteLength;
+      }
+      if (!Number.isFinite(size) || size <= 0) {
+        return bytes;
+      }
+      if (file?.kind === 'binary') {
+        bytes.binary += size;
+      } else {
+        bytes.text += size;
+      }
+      return bytes;
+    }, {
+      text: 0,
+      binary: 0
+    });
   }
 
   function listSeparator() {
@@ -368,7 +511,7 @@
             <button type="submit" data-run title="Send" aria-label="Send">↑</button>
           </div>
           <div class="codex-slash-menu" data-slash-menu hidden>
-            <button type="button" data-slash-command="install-skill">
+            <button type="button" data-slash-command="install-skill" data-slash-command-kind="installer">
               <span data-i18n="slashInstallSkillTitle">Install skill</span>
               <small data-i18n="slashInstallSkillSubtitle">Add a Codex Overleaf skill under this plugin.</small>
             </button>
@@ -479,6 +622,24 @@
     }
 
     panel.classList.add('is-open');
+    document.documentElement.classList.add('codex-overleaf-panel-mounted');
+  }
+
+  function closePanel() {
+    panel?.classList.remove('is-open');
+    document.documentElement.classList.remove('codex-overleaf-panel-mounted');
+    document.documentElement.classList.remove('codex-overleaf-panel-resizing');
+  }
+
+  function isPanelOpen() {
+    return panel?.classList.contains('is-open') === true;
+  }
+
+  function getPanelStateResponse() {
+    return {
+      ok: true,
+      open: isPanelOpen()
+    };
   }
 
   function toggleDiagnosticsMenu() {
@@ -625,7 +786,7 @@
       syncProjectSettingsEditorForProject(getCurrentProjectId());
     }
     await saveState();
-    showPluginToast(tr('customInstructionsSavedToast'), { status: 'completed' });
+    showPluginToast(tr('projectSettingsSavedToast'), { status: 'completed' });
     closeCustomInstructionsSettings();
   }
 
@@ -3791,16 +3952,62 @@
       delayMs: mirrorHealth?.PREFETCH_DEBOUNCE_MS || 1200
     });
     updateSlashMenuForTaskInput();
+    refreshCodexOverleafSkillsForSlashMenu().catch(() => {
+      // The slash menu still works with the built-in install command when native skill listing fails.
+    });
   }
 
   function getSlashCommands() {
-    return [
+    const commands = [
       {
         id: 'install-skill',
+        kind: 'installer',
         title: tr('slashInstallSkillTitle'),
         subtitle: tr('slashInstallSkillSubtitle')
       }
     ];
+    if (getSkillLoadingSettings().loadCodexOverleafSkills === false) {
+      return commands;
+    }
+    for (const skill of slashCodexOverleafSkills) {
+      const id = String(skill?.id || '').trim();
+      if (!isSafeSkillId(id)) {
+        continue;
+      }
+      const title = String(skill?.title || skill?.name || id).trim().slice(0, 80) || id;
+      commands.push({
+        id: `skill:${id}`,
+        kind: 'codex-overleaf-skill',
+        scope: 'codex-overleaf',
+        skillId: id,
+        title,
+        subtitle: tr('slashUseSkillSubtitle')
+      });
+    }
+    return commands;
+  }
+
+  async function refreshCodexOverleafSkillsForSlashMenu() {
+    if (slashCodexOverleafSkillsLoaded || slashCodexOverleafSkillsLoading) {
+      return;
+    }
+    if (!getSlashTrigger() || getSkillLoadingSettings().loadCodexOverleafSkills === false) {
+      return;
+    }
+    slashCodexOverleafSkillsLoading = true;
+    try {
+      const response = await sendBackgroundNative({
+        method: 'skills.list',
+        params: { scope: 'codex-overleaf' }
+      });
+      if (response?.ok) {
+        slashCodexOverleafSkills = Array.isArray(response.result?.skills) ? response.result.skills : [];
+        slashCodexOverleafSkillsLoaded = true;
+        updateSlashMenuForTaskInput();
+      }
+    } finally {
+      slashCodexOverleafSkillsLoading = false;
+    }
   }
 
   function updateSlashMenuForTaskInput() {
@@ -3855,6 +4062,13 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.dataset.slashCommand = command.id;
+      button.dataset.slashCommandKind = command.kind || '';
+      if (command.skillId) {
+        button.dataset.slashSkillId = command.skillId;
+      }
+      if (command.scope) {
+        button.dataset.slashSkillScope = command.scope;
+      }
       button.dataset.active = index === 0 ? 'true' : 'false';
       const title = document.createElement('span');
       title.textContent = command.title;
@@ -3863,6 +4077,7 @@
       button.append(title, subtitle);
       menu.append(button);
     });
+    renderedSlashCommands = new Map(commands.map(command => [command.id, command]));
     menu.dataset.activeIndex = '0';
     menu.hidden = false;
   }
@@ -3921,13 +4136,20 @@
   }
 
   function selectSlashCommand(commandId) {
-    if (commandId !== 'install-skill') {
+    const command = renderedSlashCommands.get(commandId);
+    if (!command) {
       closeSlashMenu();
       return;
     }
     clearSlashTriggerFromTaskInput();
     closeSlashMenu();
-    activateSkillInstallerComposerContext();
+    if (command.kind === 'installer') {
+      activateSkillInstallerComposerContext();
+      return;
+    }
+    if (command.kind === 'codex-overleaf-skill') {
+      activateCodexOverleafSkillComposerContext(command);
+    }
   }
 
   function clearSlashTriggerFromTaskInput() {
@@ -3959,6 +4181,21 @@
     input?.focus?.();
   }
 
+  function activateCodexOverleafSkillComposerContext(command) {
+    const id = String(command?.skillId || '').trim();
+    if (!isSafeSkillId(id)) {
+      return;
+    }
+    composerSkillInvocation = {
+      id,
+      title: String(command?.title || id).trim().slice(0, 80) || id,
+      scope: 'codex-overleaf'
+    };
+    renderComposerSkillInvocation();
+    const input = panel?.querySelector('[data-task]');
+    input?.focus?.();
+  }
+
   function clearComposerSkillInvocation() {
     composerSkillInvocation = null;
     renderComposerSkillInvocation();
@@ -3966,13 +4203,37 @@
   }
 
   function getComposerSkillInvocationForRun() {
-    if (composerSkillInvocation?.id !== 'skill-installer') {
+    const normalized = normalizeComposerSkillInvocation(composerSkillInvocation);
+    if (!normalized) {
       return null;
     }
-    return {
-      id: 'skill-installer',
-      title: tr('skillInstallerComposerLabel')
-    };
+    if (normalized.id === 'skill-installer') {
+      return {
+        id: 'skill-installer',
+        title: tr('skillInstallerComposerLabel')
+      };
+    }
+    return normalized;
+  }
+
+  function normalizeComposerSkillInvocation(value) {
+    const id = String(value?.id || '').trim();
+    if (!isSafeSkillId(id)) {
+      return null;
+    }
+    const title = String(value?.title || id).trim().slice(0, 80) || id;
+    if (id === 'skill-installer') {
+      return { id, title };
+    }
+    if (value?.scope !== 'codex-overleaf') {
+      return null;
+    }
+    return { id, title, scope: 'codex-overleaf' };
+  }
+
+  function isSafeSkillId(id) {
+    return /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(String(id || ''))
+      && !String(id || '').includes('..');
   }
 
   function renderComposerSkillInvocation() {
@@ -3988,8 +4249,11 @@
     }
     const clear = context.querySelector('[data-composer-skill-clear]');
     if (clear) {
-      clear.title = tr('skillInstallerComposerClear');
-      clear.setAttribute('aria-label', tr('skillInstallerComposerClear'));
+      const clearLabel = active?.id === 'skill-installer'
+        ? tr('skillInstallerComposerClear')
+        : tr('composerSkillClear');
+      clear.title = clearLabel;
+      clear.setAttribute('aria-label', clearLabel);
     }
   }
 
@@ -4728,6 +4992,12 @@
     let additionalSkippedEntries = [];
     let skippedFilesForAudit = additionalSkippedEntries;
     let appliedFilesForAudit = [];
+    const pathSafety = partitionUnsafeProjectPathOperations(operations);
+    if (pathSafety.skipped.length) {
+      additionalSkippedEntries.push(...pathSafety.skipped);
+      operations = pathSafety.safe;
+      visibleSyncChanges = filterSyncChangesByOperations(syncChanges, operations);
+    }
     const governed = evaluateGovernedOperations(operations);
     if (governed.blocked.length) {
       const governanceSkipped = buildGovernanceSkippedApplyResult(governed.blocked);
@@ -4805,6 +5075,11 @@
         };
       }
       operations = buildSyncApplyOperations(accepted, project);
+      const acceptedPathSafety = partitionUnsafeProjectPathOperations(operations);
+      if (acceptedPathSafety.skipped.length) {
+        additionalSkippedEntries.push(...acceptedPathSafety.skipped);
+        operations = acceptedPathSafety.safe;
+      }
     }
 
     const deleteOperations = operations.filter(operation => operation.type === 'delete');
@@ -5316,6 +5591,83 @@
 
   function buildSyncApplyOperations(syncChanges = [], project = {}) {
     return writebackController.buildSyncApplyOperations(syncChanges, project);
+  }
+
+  function partitionUnsafeProjectPathOperations(operations = []) {
+    const safe = [];
+    const skipped = [];
+    for (const operation of operations || []) {
+      const normalized = normalizeOperationProjectPaths(operation);
+      const invalid = getInvalidOperationProjectPath(normalized);
+      if (invalid) {
+        skipped.push({
+          operation: normalized,
+          result: {
+            ok: false,
+            code: 'invalid_project_path',
+            reason: tx(`Invalid ${invalid}. Codex did not write this file.`, `路径无效：${invalid}。Codex 没有写入这个文件。`)
+          }
+        });
+        continue;
+      }
+      safe.push(normalized);
+    }
+    return { safe, skipped };
+  }
+
+  function normalizeOperationProjectPaths(operation = {}) {
+    if (!operation || typeof operation !== 'object') {
+      return operation;
+    }
+    const normalized = { ...operation };
+    if (typeof operation.path === 'string') {
+      normalized.path = normalizeSafeProjectPath(operation.path);
+      if (!normalized.path) {
+        normalized.invalidProjectPath = true;
+      }
+    }
+    if (typeof operation.to === 'string') {
+      normalized.to = normalizeSafeProjectPath(operation.to);
+      if (!normalized.to) {
+        normalized.invalidProjectDestinationPath = true;
+      }
+    }
+    if (typeof operation.destinationPath === 'string') {
+      normalized.destinationPath = normalizeSafeProjectPath(operation.destinationPath);
+      if (!normalized.destinationPath) {
+        normalized.invalidProjectDestinationPath = true;
+      }
+    }
+    return normalized;
+  }
+
+  function getInvalidOperationProjectPath(operation = {}) {
+    if (operation.invalidProjectPath || (requiresOperationPath(operation) && !operation.path)) {
+      return 'operation path';
+    }
+    if (operation.invalidProjectDestinationPath || (requiresOperationDestinationPath(operation) && !(operation.to || operation.destinationPath))) {
+      return 'operation destination path';
+    }
+    return '';
+  }
+
+  function requiresOperationPath(operation = {}) {
+    return ['edit', 'create', 'delete', 'rename', 'move', 'binary-create', 'overwrite-binary'].includes(operation.type);
+  }
+
+  function requiresOperationDestinationPath(operation = {}) {
+    return operation.type === 'rename' || operation.type === 'move';
+  }
+
+  function normalizeSafeProjectPath(value) {
+    if (window.CodexOverleafProjectFiles?.normalizeSafeProjectPath) {
+      return window.CodexOverleafProjectFiles.normalizeSafeProjectPath(value);
+    }
+    return String(value || '')
+      .replace(/\s+/g, ' ')
+      .replace(/\\/g, '/')
+      .trim()
+      .replace(/^\/+/, '');
   }
 
   function evaluateGovernedOperations(operations = []) {
@@ -6610,25 +6962,33 @@
 
   function partitionOperationsForApply(operations, options = {}) {
     if (options.allowHighRisk) {
-      return {
-        safe: operations || [],
-        skipped: []
-      };
+      return partitionUnsafeProjectPathOperations(operations || []);
     }
 
     const safe = [];
     const skipped = [];
     for (const operation of operations || []) {
-      if (HIGH_RISK_TYPES.includes(operation?.type)) {
+      const normalized = normalizeOperationProjectPaths(operation);
+      const invalidPath = getInvalidOperationProjectPath(normalized);
+      if (invalidPath) {
         skipped.push({
-          operation,
+          operation: normalized,
+          result: {
+            ok: false,
+            code: 'invalid_project_path',
+            reason: tx(`Invalid ${invalidPath}. Codex did not write this file.`, `路径无效：${invalidPath}。Codex 没有写入这个文件。`)
+          }
+        });
+      } else if (HIGH_RISK_TYPES.includes(normalized?.type)) {
+        skipped.push({
+          operation: normalized,
           result: {
             ok: false,
             reason: 'High-risk operation requires explicit approval before application'
           }
         });
       } else {
-        safe.push(operation);
+        safe.push(normalized);
       }
     }
 
@@ -7346,16 +7706,16 @@
         error: `Page bridge unavailable: ${error.message}`
       };
     }
-    const id = crypto.randomUUID();
-    window.postMessage({
-      source: 'codex-overleaf/content',
-      id,
-      method,
-      params
-    }, window.location.origin);
+    const timeoutMs = getPageBridgeTimeoutMs(method);
+    return sendPageBridgeRequest(method, params, {
+      timeoutMs
+    });
+  }
 
+  function sendPageBridgeRequest(method, params, options = {}) {
+    const id = crypto.randomUUID();
     return new Promise(resolve => {
-      const timeoutMs = getPageBridgeTimeoutMs(method);
+      const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 8000;
       const timeout = window.setTimeout(() => {
         window.removeEventListener('message', onMessage);
         resolve({ ok: false, error: 'Page bridge timed out' });
@@ -7374,6 +7734,16 @@
       }
 
       window.addEventListener('message', onMessage);
+      // This capability narrows accidental/spoofed page-bridge calls. It is not
+      // a secret from malicious same-page Overleaf scripts because postMessage
+      // traffic is page-visible.
+      window.postMessage({
+        source: 'codex-overleaf/content',
+        id,
+        method,
+        params,
+        capability: PAGE_BRIDGE_CAPABILITY
+      }, window.location.origin);
     });
   }
 
@@ -7407,6 +7777,7 @@
     await injectScriptOnce('src/page/overleafProjectSnapshot.js', 'codex-overleaf-project-snapshot-script');
     await injectOptionalOtDependencies();
     await injectScriptOnce('src/pageBridge.js', 'codex-overleaf-page-bridge-script');
+    await initializePageBridgeCapability();
   }
 
   async function injectOptionalOtDependencies() {
@@ -7447,6 +7818,24 @@
       };
       (document.head || document.documentElement).append(script);
     });
+  }
+
+  async function initializePageBridgeCapability() {
+    const result = await sendPageBridgeRequest('initializeCapability', {}, {
+      timeoutMs: 8000
+    });
+    if (!result?.ok) {
+      throw new Error(result?.error || result?.reason || 'Page bridge capability initialization failed');
+    }
+  }
+
+  function createPageBridgeCapability() {
+    if (crypto?.randomUUID) {
+      return crypto.randomUUID();
+    }
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
   }
 
   async function loadStoredState() {
@@ -7567,7 +7956,7 @@
 
       // Save all displayable session state to IndexedDB. The panel history lives here;
       // chrome.storage.local only keeps small pointers/preferences.
-      const sessionRecords = (compactState.sessions || []).map(session => (
+      const sessionRecords = (state.sessions || []).map(session => (
         StorageDb.buildSessionRecord({
           ...session,
           projectId,

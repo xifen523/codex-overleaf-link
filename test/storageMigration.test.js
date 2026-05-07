@@ -2,6 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 
 const Migration = require('../extension/src/shared/storageMigration');
+const StorageDbModule = require('../extension/src/shared/storageDb');
 
 test('storageMigration exports PREFS_KEY', () => {
   assert.strictEqual(Migration.PREFS_KEY, 'codexOverleafPrefs');
@@ -133,7 +134,7 @@ test('current-schema migration load path normalizes experimental OT map values',
   }
 });
 
-test('migration preserves legacy session task, history, runs, and settings', async () => {
+test('migration preserves legacy session display fields and settings', async () => {
   const calls = {
     putRecords: [],
     set: [],
@@ -233,8 +234,12 @@ test('migration preserves legacy session task, history, runs, and settings', asy
     assert.equal(record.reasoningEffort, 'xhigh');
     assert.equal(record.requireReviewing, false);
     assert.deepEqual(record.focusFiles, ['paper.tex']);
-    assert.deepEqual(record.history, legacyBlob.sessions[0].history);
-    assert.deepEqual(record.runs, legacyBlob.sessions[0].runs);
+    assert.equal(record.history[0].task, '上一轮');
+    assert.equal(record.history[0].result, '改了引言');
+    assert.equal(record.runs[0].id, 'run_legacy');
+    assert.equal(record.runs[0].task, '帮我检查语法错误');
+    assert.equal(record.runs[0].events[0].title, '本轮完成报告');
+    assert.equal(record.runs[0].events[0].status, 'completed');
     assert.deepEqual(result.prefs.experimentalOtByProject, { project_1: true });
     assert.deepEqual(result.prefs.customInstructionsByProject, {
       project_1: 'Use ACL style.',
@@ -246,6 +251,135 @@ test('migration preserves legacy session task, history, runs, and settings', asy
       project_2: ''
     });
     assert.equal(calls.remove[0], legacyStorageKey);
+  } finally {
+    global.window = previousWindow;
+    global.chrome = previousChrome;
+  }
+});
+
+test('migration strips bulky legacy payloads while preserving displayable history', async () => {
+  const calls = {
+    putRecords: [],
+    set: [],
+    remove: []
+  };
+  const legacyStorageKey = 'codexOverleafPanelState:project_privacy';
+  const markers = [
+    'LEGACY_RAW_DIFF_SHOULD_NOT_PERSIST',
+    'LEGACY_PROJECT_TEXT_SHOULD_NOT_PERSIST',
+    'data:image/png;base64,LEGACY_IMAGE_SHOULD_NOT_PERSIST'
+  ];
+  const legacyBlob = {
+    model: 'gpt-5.4',
+    reasoningEffort: 'high',
+    mode: 'confirm',
+    sessions: [{
+      id: 'session_legacy_privacy',
+      title: 'LEGACY_PROMPT_SHOULD_NOT_PERSIST from task',
+      titleSource: 'auto',
+      task: 'LEGACY_PROMPT_SHOULD_NOT_PERSIST',
+      focusFiles: ['main.tex'],
+      history: [{
+        task: 'LEGACY_PROMPT_SHOULD_NOT_PERSIST',
+        result: 'LEGACY_OUTPUT_SHOULD_NOT_PERSIST',
+        at: '2026-05-02T02:00:00.000Z'
+      }],
+      runs: [{
+        id: 'run_legacy_privacy',
+        task: 'LEGACY_PROMPT_SHOULD_NOT_PERSIST',
+        status: 'failed',
+        statusText: 'LEGACY_OUTPUT_SHOULD_NOT_PERSIST',
+        startedAt: '2026-05-02T01:00:00.000Z',
+        finishedAt: '2026-05-02T02:00:00.000Z',
+        events: [{
+          title: 'LEGACY_COMPILE_LOG_SHOULD_NOT_PERSIST',
+          status: 'failed',
+          kind: 'report',
+          detail: {
+            output: 'LEGACY_OUTPUT_SHOULD_NOT_PERSIST',
+            compileLog: 'LEGACY_COMPILE_LOG_SHOULD_NOT_PERSIST',
+            rawDiff: 'LEGACY_RAW_DIFF_SHOULD_NOT_PERSIST',
+            projectText: 'LEGACY_PROJECT_TEXT_SHOULD_NOT_PERSIST',
+            path: 'main.tex'
+          }
+        }],
+        attachments: [{
+          name: 'figure.png',
+          mimeType: 'image/png',
+          size: 128,
+          kind: 'image',
+          previewDataUrl: 'data:image/png;base64,LEGACY_IMAGE_SHOULD_NOT_PERSIST'
+        }],
+        undoOperations: [{
+          type: 'edit',
+          path: 'main.tex',
+          replaceAll: 'LEGACY_RAW_DIFF_SHOULD_NOT_PERSIST'
+        }],
+        undoBaseFiles: [{ path: 'main.tex', content: 'LEGACY_PROJECT_TEXT_SHOULD_NOT_PERSIST' }],
+        undoExpectedFiles: [{ path: 'main.tex', content: 'LEGACY_PROJECT_TEXT_SHOULD_NOT_PERSIST' }]
+      }],
+      createdAt: '2026-05-02T01:00:00.000Z',
+      updatedAt: '2026-05-02T02:00:00.000Z'
+    }]
+  };
+  const fakeStorageDb = {
+    TARGET_SCHEMA_VERSION: 2,
+    buildSessionRecord(input) {
+      return StorageDbModule.buildSessionRecord(input);
+    },
+    putRecords(storeName, records) {
+      calls.putRecords.push({ storeName, records });
+      return Promise.resolve(records);
+    },
+    extractLightweightPrefs() {
+      return { storageSchemaVersion: 2, activeSessionByProject: {} };
+    },
+    buildActiveSessionByProject(existing, projectId, sessionId) {
+      return { ...existing, [projectId]: sessionId };
+    }
+  };
+  const previousWindow = global.window;
+  const previousChrome = global.chrome;
+  global.window = { CodexOverleafStorageDb: fakeStorageDb };
+  global.chrome = {
+    storage: {
+      local: {
+        get() {
+          return Promise.resolve({ [legacyStorageKey]: legacyBlob });
+        },
+        set(payload) {
+          calls.set.push(payload);
+          return Promise.resolve();
+        },
+        remove(key) {
+          calls.remove.push(key);
+          return Promise.resolve();
+        }
+      }
+    }
+  };
+
+  try {
+    const result = await Migration.runMigrationIfNeeded('project_privacy', legacyStorageKey);
+    const persisted = JSON.stringify({
+      result,
+      putRecords: calls.putRecords
+    });
+
+    for (const marker of markers) {
+      assert.equal(persisted.includes(marker), false, `migration leaked ${marker}`);
+    }
+    assert.equal(calls.putRecords[0].storeName, 'sessions');
+    const record = calls.putRecords[0].records[0];
+    assert.equal(record.id, 'session_legacy_privacy');
+    assert.equal(record.task, 'LEGACY_PROMPT_SHOULD_NOT_PERSIST');
+    assert.equal(record.history[0].result, 'LEGACY_OUTPUT_SHOULD_NOT_PERSIST');
+    assert.equal(record.runs[0].statusText, 'LEGACY_OUTPUT_SHOULD_NOT_PERSIST');
+    assert.equal(record.runs[0].events[0].title, 'LEGACY_COMPILE_LOG_SHOULD_NOT_PERSIST');
+    assert.equal(record.runs[0].events[0].detail.redacted, true);
+    assert.deepEqual(record.runs[0].events[0].detail.paths, ['main.tex']);
+    assert.equal(record.runs[0].attachments[0].previewDataUrl, undefined);
+    assert.equal(record.runs[0].undoOperations.length, 0);
   } finally {
     global.window = previousWindow;
     global.chrome = previousChrome;

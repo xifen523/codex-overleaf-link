@@ -205,7 +205,7 @@
         : 'Codex 在本地生成了这些文件，但插件没有同步回 Overleaf：',
       ...visibleChanges.map(change => {
         const path = change.path || (isEnglish ? 'unnamed file' : '未命名文件');
-        const reason = formatUnsupportedLocalChangeReason(change.reason, locale);
+        const reason = formatUnsupportedLocalChangeReason(change, locale);
         return isEnglish ? `- ${path}: ${reason}` : `- ${path}：${reason}`;
       })
     ];
@@ -218,8 +218,12 @@
     return lines.join('\n');
   }
 
-  function formatUnsupportedLocalChangeReason(reason, locale = 'zh') {
+  function formatUnsupportedLocalChangeReason(changeOrReason, locale = 'zh') {
     const isEnglish = locale === 'en';
+    const change = typeof changeOrReason === 'object' && changeOrReason
+      ? changeOrReason
+      : { reason: changeOrReason };
+    const reason = change.reason;
     if (reason === 'generated_artifact') {
       return isEnglish
         ? 'LaTeX build artifact; not written back by default.'
@@ -230,9 +234,45 @@
         ? 'Non-text file; automatic writeback is not supported yet.'
         : '非文本文件，暂不支持自动写回。';
     }
+    if (reason === 'binary_payload_exceeds_native_message_limit') {
+      return formatBinaryPayloadLimitReason(change, locale);
+    }
     return isEnglish
       ? 'This file type is not supported for automatic writeback yet.'
       : '当前类型暂不支持自动写回。';
+  }
+
+  function formatBinaryPayloadLimitReason(change = {}, locale = 'zh') {
+    const isEnglish = locale === 'en';
+    const size = formatBytes(change.size);
+    const limit = formatBytes(change.limit || change.aggregateLimit || change.nativeOutputLimit);
+    if (isEnglish) {
+      const sizeText = size ? ` (${size})` : '';
+      const limitText = limit ? ` or reduce it below ${limit}` : '';
+      return `Binary change is too large to send through native messaging${sizeText}. Upload it in Overleaf${limitText}.`;
+    }
+    const sizeText = size ? `（${size}）` : '';
+    const limitText = limit ? `，或减小到 ${limit} 以下` : '';
+    return `二进制改动过大，无法通过 Native Messaging 返回${sizeText}。请在 Overleaf 中手动上传${limitText}。`;
+  }
+
+  function formatBytes(value) {
+    const bytes = Number(value);
+    if (!Number.isFinite(bytes) || bytes < 0) {
+      return '';
+    }
+    if (bytes < 1024) {
+      return `${bytes} bytes`;
+    }
+    const kib = bytes / 1024;
+    if (kib < 1024) {
+      return `${formatByteNumber(kib)} KB`;
+    }
+    return `${formatByteNumber(kib / 1024)} MB`;
+  }
+
+  function formatByteNumber(value) {
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
   }
 
   function getAppliedSyncChanges(syncChanges = [], applied = {}) {

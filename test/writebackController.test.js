@@ -1,7 +1,42 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+const projectFiles = require('../extension/src/shared/projectFiles');
 const WritebackController = require('../extension/src/content/writebackController');
+
+test('safe project path validator rejects traversal, absolute, Windows, encoded, and control paths', () => {
+  const unsafePaths = [
+    '../x',
+    '.',
+    '..',
+    '/abs.tex',
+    'C:\\tmp\\x.tex',
+    'folder\\file.tex',
+    'folder/%2e%2e/file.tex',
+    'bad\u0000name.tex'
+  ];
+
+  for (const filePath of unsafePaths) {
+    assert.equal(projectFiles.normalizeSafeProjectPath(filePath), '', filePath);
+    assert.throws(
+      () => projectFiles.assertSafeProjectPath(filePath),
+      /Invalid path/,
+      filePath
+    );
+  }
+});
+
+test('safe project path validator keeps normal Overleaf project paths', () => {
+  assert.deepEqual([
+    projectFiles.normalizeSafeProjectPath('main.tex'),
+    projectFiles.normalizeSafeProjectPath('sections/intro.tex'),
+    projectFiles.normalizeSafeProjectPath('figures/plot.pdf')
+  ], [
+    'main.tex',
+    'sections/intro.tex',
+    'figures/plot.pdf'
+  ]);
+});
 
 test('buildSyncApplyOperations prefers local text patches for existing files', () => {
   const operations = WritebackController.buildSyncApplyOperations([
@@ -221,6 +256,30 @@ test('unsupported local changes are reported with per-file user-readable reasons
   assert.match(summary, /- main\.pdf：LaTeX 构建产物，默认不写回。/);
   assert.match(summary, /- diagram\.png：非文本文件，暂不支持自动写回。/);
   assert.match(summary, /- unknown\.bin：当前类型暂不支持自动写回。/);
+});
+
+test('oversized binary native payload unsupported changes get explicit guidance', () => {
+  const english = WritebackController.formatUnsupportedLocalChangeSummary([
+    {
+      path: 'figures/large.pdf',
+      reason: 'binary_payload_exceeds_native_message_limit',
+      size: 614400,
+      limit: 524288
+    }
+  ], 'en');
+  const chinese = WritebackController.formatUnsupportedLocalChangeSummary([
+    {
+      path: 'figures/large.pdf',
+      reason: 'binary_payload_exceeds_native_message_limit',
+      size: 614400,
+      limit: 524288
+    }
+  ], 'zh');
+
+  assert.match(english, /figures\/large\.pdf: Binary change is too large to send through native messaging \(600 KB\)\. Upload it in Overleaf or reduce it below 512 KB\./);
+  assert.doesNotMatch(english, /file type is not supported/i);
+  assert.match(chinese, /figures\/large\.pdf：二进制改动过大，无法通过 Native Messaging 返回（600 KB）。请在 Overleaf 中手动上传，或减小到 512 KB 以下。/);
+  assert.doesNotMatch(chinese, /当前类型暂不支持/);
 });
 
 test('unsupported local changes are localized in English', () => {

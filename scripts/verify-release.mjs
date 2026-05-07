@@ -1,19 +1,58 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const DEFAULT_RELEASE_DATE = '2026-05-06';
 const CHROME_WEB_STORE_DOCS = [
   'permissions.md',
   'privacy.md',
   'listing.md',
   'release-checklist.md'
 ];
+export const FORBIDDEN_TRACKED_PATH_PATTERNS = [
+  /^\.local\//,
+  /^docs\/superpowers\//,
+  /^dist\//,
+  /^build\//,
+  /^native-host\/bin\//,
+  /^\.worktrees\//,
+  /^worktrees\//,
+  /\.(pem|key|p12|crx|sqlite|log)$/i
+];
+const PACKAGED_SOURCE_TREE_PREFIXES = [
+  'extension/',
+  'native-host/',
+  'scripts/'
+];
+const FORBIDDEN_PACKAGED_SOURCE_PATH_TOKENS = new Set([
+  'credential',
+  'credentials',
+  'debug',
+  'env',
+  'internal',
+  'local',
+  'localonly',
+  'plan',
+  'private',
+  'secret',
+  'secrets',
+  'spec'
+]);
+const RELEASE_CHECKLIST_REQUIRED_SECTIONS = [
+  'Automated Verification',
+  'Release Artifact Hygiene',
+  'Real Overleaf Smoke',
+  'Large-Project Performance Baseline',
+  'Security And Privacy Review',
+  'Documentation Pass',
+  'Compatibility Matrix',
+  'P0/P1 Signoff'
+];
 
 export function collectReleaseVerificationErrors(options = {}) {
   const rootDir = path.resolve(options.rootDir || getRepoRoot());
-  const releaseDate = options.releaseDate || DEFAULT_RELEASE_DATE;
+  const releaseDate = options.releaseDate;
   const errors = [];
   const pkg = readJsonFile(rootDir, 'package.json', errors);
   const manifest = readJsonFile(rootDir, 'extension/manifest.json', errors);
@@ -41,17 +80,34 @@ export function collectReleaseVerificationErrors(options = {}) {
       errors.push(`README.md must contain the release badge fragment "${expectedBadge}".`);
     }
 
-    const expectedHeading = `## v${version} - ${releaseDate}`;
-    if (!changelog.includes(expectedHeading)) {
+    const changelogHeadingPattern = releaseDate
+      ? new RegExp(`^## v${escapeRegExp(version)} - ${escapeRegExp(releaseDate)}$`, 'm')
+      : new RegExp(`^## v${escapeRegExp(version)} - \\d{4}-\\d{2}-\\d{2}$`, 'm');
+    if (!changelogHeadingPattern.test(changelog)) {
+      const expectedHeading = releaseDate
+        ? `## v${version} - ${releaseDate}`
+        : `## v${version} - YYYY-MM-DD`;
       errors.push(`CHANGELOG.md must contain the release heading "${expectedHeading}".`);
     }
   }
 
+  errors.push(...collectForbiddenTrackedPathErrors(rootDir, options.trackedFiles));
   errors.push(...collectInstallerArtifactErrors(rootDir));
   if (version) {
     errors.push(...collectChromeWebStoreDocErrors(rootDir, version));
   } else {
     errors.push(...collectChromeWebStoreDocErrors(rootDir));
+  }
+  return errors;
+}
+
+export function collectForbiddenTrackedPathErrors(rootDir, trackedFiles = readGitTrackedFiles(rootDir)) {
+  const errors = [];
+  for (const trackedFile of trackedFiles) {
+    const relativePath = normalizeTrackedPath(trackedFile);
+    if (isForbiddenTrackedReleasePath(relativePath)) {
+      errors.push(`Tracked release input must not include internal/private path: ${relativePath}`);
+    }
   }
   return errors;
 }
@@ -98,6 +154,14 @@ function collectReleaseChecklistErrors(docsDir, version) {
       errors.push(`${relativePath} must reference current ${releaseRef} release instruction "${fragment}".`);
     }
   }
+  for (const section of RELEASE_CHECKLIST_REQUIRED_SECTIONS) {
+    if (!hasMarkdownSection(checklist, section)) {
+      errors.push(`${relativePath} must include a "${section}" section for v0.9 release readiness.`);
+    }
+  }
+  if (!hasP0P1IssueSignoff(checklist)) {
+    errors.push(`${relativePath} must include a P0/P1 issue signoff command using "gh issue list --search 'is:issue is:open (label:P0 OR label:P1)'" or separate P0 and P1 label checks.`);
+  }
   if (/\bv0\.4(?:\.0)?\b/i.test(checklist)) {
     errors.push(`${relativePath} must not reference stale v0.4 release instructions.`);
   }
@@ -126,6 +190,67 @@ function readTextFile(rootDir, relativePath, errors) {
 
 function formatValue(value) {
   return value === undefined ? '<missing>' : String(value);
+}
+
+function hasMarkdownSection(markdown, section) {
+  return new RegExp(`^#{2,6}\\s+${escapeRegExp(section)}\\s*$`, 'im').test(markdown);
+}
+
+function hasP0P1IssueSignoff(checklist) {
+  const hasCombinedSearch = /gh issue list --search ["']is:issue is:open \(label:P0 OR label:P1\)["']/.test(checklist);
+  const hasSeparateChecks = /gh issue list --state open --label P0\b/.test(checklist)
+    && /gh issue list --state open --label P1\b/.test(checklist);
+  return hasCombinedSearch || hasSeparateChecks;
+}
+
+function normalizeTrackedPath(relativePath) {
+  return String(relativePath).replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function isForbiddenTrackedReleasePath(relativePath) {
+  return FORBIDDEN_TRACKED_PATH_PATTERNS.some((pattern) => pattern.test(relativePath))
+    || isForbiddenPackagedSourceTreePath(relativePath);
+}
+
+function isForbiddenPackagedSourceTreePath(relativePath) {
+  if (!PACKAGED_SOURCE_TREE_PREFIXES.some((prefix) => relativePath.startsWith(prefix))) {
+    return false;
+  }
+
+  return relativePath
+    .toLowerCase()
+    .split('/')
+    .some((component) => getPathComponentTokens(component)
+      .some((token) => FORBIDDEN_PACKAGED_SOURCE_PATH_TOKENS.has(token)));
+}
+
+function getPathComponentTokens(component) {
+  return component
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+function readGitTrackedFiles(rootDir) {
+  const insideWorkTree = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], {
+    cwd: rootDir,
+    encoding: 'utf8'
+  });
+  if (insideWorkTree.status !== 0) {
+    return [];
+  }
+
+  const result = spawnSync('git', ['ls-files'], {
+    cwd: rootDir,
+    encoding: 'utf8'
+  });
+  if (result.status !== 0) {
+    throw new Error(`Unable to list git-tracked files: ${result.stderr || result.stdout}`.trim());
+  }
+  return result.stdout.split(/\r?\n/).filter(Boolean);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function parseArgs(argv) {

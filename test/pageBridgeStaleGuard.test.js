@@ -274,7 +274,7 @@ test('page bridge blocks creates that collide with files added after the task sn
   assert.equal(bridge.getFile('new.tex'), 'user-created content');
 });
 
-test('page bridge normalizes operation paths before opening and guarding files', async () => {
+test('page bridge keeps safe nested operation paths working', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'sections/main.tex',
     files: {
@@ -284,16 +284,98 @@ test('page bridge normalizes operation paths before opening and guarding files',
 
   const result = await bridge.call('applyOperations', {
     baseFiles: [
-      { path: '/sections\\main.tex', content: 'alpha' }
+      { path: 'sections/main.tex', content: 'alpha' }
     ],
     operations: [
-      { type: 'edit', path: '/sections\\main.tex', find: 'alpha', replace: 'beta' }
+      { type: 'edit', path: 'sections/main.tex', find: 'alpha', replace: 'beta' }
     ]
   });
 
   assert.equal(result.ok, true);
   assert.equal(result.applied.length, 1);
   assert.equal(bridge.getFile('sections/main.tex'), 'beta');
+});
+
+test('page bridge rejects spoofed mutating requests without the content capability', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'alpha beta'
+    }
+  });
+
+  await bridge.initializeCapability();
+
+  const result = await bridge.spoofCall('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta' }
+    ],
+    operations: [
+      { type: 'edit', path: 'main.tex', find: 'alpha', replace: 'omega' }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'page_bridge_unauthorized');
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta');
+  assert.equal(bridge.getDispatchCount(), 0);
+});
+
+test('page bridge rejects spoofed tracked-change rejection and compile requests without the content capability', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'alpha beta'
+    }
+  });
+
+  await bridge.initializeCapability();
+
+  for (const [method, params] of [
+    ['rejectTrackedChanges', { trackedChanges: [{ key: 'id:change-1', id: 'change-1', path: 'main.tex' }] }],
+    ['triggerCompile', {}]
+  ]) {
+    const result = await bridge.spoofCall(method, params);
+    assert.equal(result.ok, false, method);
+    assert.equal(result.code, 'page_bridge_unauthorized', method);
+  }
+});
+
+test('page bridge rejects unsafe project paths before mutating the active file', async () => {
+  const unsafePaths = [
+    '../x',
+    '.',
+    '..',
+    '/abs.tex',
+    'C:\\tmp\\x.tex',
+    'folder\\file.tex',
+    'folder/%2e%2e/file.tex',
+    'bad\u0000name.tex'
+  ];
+
+  for (const unsafePath of unsafePaths) {
+    const bridge = createPageBridgeHarness({
+      activePath: 'main.tex',
+      files: {
+        'main.tex': 'alpha beta'
+      }
+    });
+
+    const result = await bridge.call('applyOperations', {
+      baseFiles: [
+        { path: 'main.tex', content: 'alpha beta' }
+      ],
+      operations: [
+        { type: 'edit', path: unsafePath, find: 'alpha', replace: 'omega' }
+      ]
+    });
+
+    assert.equal(result.ok, false, unsafePath);
+    assert.equal(result.applied.length, 0, unsafePath);
+    assert.equal(result.skipped.length, 1, unsafePath);
+    assert.equal(result.skipped[0].result.code, 'invalid_project_path', unsafePath);
+    assert.equal(bridge.getFile('main.tex'), 'alpha beta', unsafePath);
+  }
 });
 
 test('page bridge applies edit patches as local CodeMirror changes', async () => {
@@ -854,6 +936,53 @@ test('page bridge records and rejects Overleaf tracked changes for Reviewing wri
   assert.equal(bridge.getDispatchCount(), 1);
   assert.equal(bridge.getTrackedChangeCount(), 0);
   assert.equal(bridge.getRejectClickCount(), 1);
+});
+
+test('page bridge rejects unsafe tracked-change paths before clicking reject controls', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.equal(write.trackedChanges.length, 1);
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: [
+      {
+        ...write.trackedChanges[0],
+        path: '../main.tex'
+      }
+    ]
+  });
+
+  assert.equal(undo.ok, false);
+  assert.equal(undo.applied.length, 0);
+  assert.equal(undo.skipped.length, 1);
+  assert.equal(undo.skipped[0].result.code, 'invalid_project_path');
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+  assert.equal(bridge.getRejectClickCount(), 0);
+  assert.equal(bridge.getTrackedChangeCount(), 1);
 });
 
 test('page bridge records tracked changes for each edited file in a Reviewing write', async () => {
@@ -1649,6 +1778,8 @@ function createPageBridgeHarness({
   let reviewingClickCount = 0;
   let rejectClickCount = 0;
   let editorUndoClickCount = 0;
+  const bridgeCapability = 'test-page-bridge-capability';
+  let capabilityInitialized = false;
   const rejectedChangeIds = [];
   let modeMenuOpen = false;
   let modeOptionClickCount = 0;
@@ -1767,22 +1898,27 @@ function createPageBridgeHarness({
   vm.runInContext(pageBridgeSource, context, { filename: 'pageBridge.js' });
 
   return {
+    async initializeCapability() {
+      if (capabilityInitialized) {
+        return { ok: true, alreadyInitialized: true };
+      }
+      const result = await sendPageBridgeRequest('initializeCapability', {}, {
+        capability: bridgeCapability
+      });
+      capabilityInitialized = true;
+      return result;
+    },
     async call(method, params) {
-      assert.equal(typeof listener, 'function');
-      const resultPromise = new Promise(resolve => {
-        pendingResult = resolve;
+      await this.initializeCapability();
+      return sendPageBridgeRequest(method, params, {
+        capability: bridgeCapability
       });
-      await listener({
-        source: window,
-        origin: window.location.origin,
-        data: {
-          source: 'codex-overleaf/content',
-          id: 'test-call',
-          method,
-          params
-        }
+    },
+    async spoofCall(method, params, options = {}) {
+      return sendPageBridgeRequest(method, params, {
+        capability: options.capability,
+        includeCapability: options.includeCapability === true
       });
-      return resultPromise;
     },
     fireDocumentEvent(type, event = { target: {} }) {
       const listenerItems = documentEventListeners.filter(item => item.type === type);
@@ -1831,6 +1967,28 @@ function createPageBridgeHarness({
       return reviewingActive;
     }
   };
+
+  async function sendPageBridgeRequest(method, params, options = {}) {
+    assert.equal(typeof listener, 'function');
+    const resultPromise = new Promise(resolve => {
+      pendingResult = resolve;
+    });
+    const data = {
+      source: 'codex-overleaf/content',
+      id: `test-call-${method}`,
+      method,
+      params
+    };
+    if (options.includeCapability !== false && typeof options.capability === 'string') {
+      data.capability = options.capability;
+    }
+    await listener({
+      source: window,
+      origin: window.location.origin,
+      data
+    });
+    return resultPromise;
+  }
 
   function createEditorView() {
     const stateByPath = new Map();

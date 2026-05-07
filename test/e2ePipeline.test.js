@@ -87,6 +87,8 @@ function createMinimalPageBridgeHarness({ activePath, files }) {
   let selectedPath = activePath;
   let listener = null;
   let pendingResult = null;
+  const bridgeCapability = 'test-page-bridge-capability';
+  let capabilityInitialized = false;
 
   const document = {
     body: {
@@ -155,27 +157,48 @@ function createMinimalPageBridgeHarness({ activePath, files }) {
   vm.runInContext(pageBridgeSource, context, { filename: 'pageBridge.js' });
 
   return {
+    async initializeCapability() {
+      if (capabilityInitialized) {
+        return { ok: true, alreadyInitialized: true };
+      }
+      const result = await sendPageBridgeRequest('initializeCapability', {}, {
+        capability: bridgeCapability
+      });
+      capabilityInitialized = true;
+      return result;
+    },
     async call(method, params) {
-      assert.equal(typeof listener, 'function');
-      const resultPromise = new Promise(resolve => {
-        pendingResult = resolve;
+      await this.initializeCapability();
+      return sendPageBridgeRequest(method, params, {
+        capability: bridgeCapability
       });
-      await listener({
-        source: window,
-        origin: window.location.origin,
-        data: {
-          source: 'codex-overleaf/content',
-          id: 'test-call',
-          method,
-          params
-        }
-      });
-      return resultPromise;
     },
     getFile(filePath) {
       return fileMap.get(filePath);
     }
   };
+
+  async function sendPageBridgeRequest(method, params, options = {}) {
+    assert.equal(typeof listener, 'function');
+    const resultPromise = new Promise(resolve => {
+      pendingResult = resolve;
+    });
+    const data = {
+      source: 'codex-overleaf/content',
+      id: `test-call-${method}`,
+      method,
+      params
+    };
+    if (typeof options.capability === 'string') {
+      data.capability = options.capability;
+    }
+    await listener({
+      source: window,
+      origin: window.location.origin,
+      data
+    });
+    return resultPromise;
+  }
 
   function createEditorView() {
     const doc = {

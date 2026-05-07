@@ -9,8 +9,8 @@
 
   const EXTENSION_PROTOCOL_VERSION = 1;
   const SUPPORTED_NATIVE_PROTOCOL = Object.freeze({ min: 1, max: 1 });
-  const MIN_NATIVE_VERSION = '0.8.0';
-  const BUILD_TARGET_VERSION = '0.8.0';
+  const MIN_NATIVE_VERSION = '0.9.0';
+  const BUILD_TARGET_VERSION = '0.9.0';
   const REQUIRED_CAPABILITIES = Object.freeze([
     'bridgePing',
     'mirrorSync',

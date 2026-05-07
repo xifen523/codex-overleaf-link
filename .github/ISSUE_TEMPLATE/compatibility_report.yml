@@ -29,10 +29,30 @@ body:
     validations:
       required: true
   - type: input
+    id: os_version_arch
+    attributes:
+      label: OS, version, and architecture
+      placeholder: macOS 14.4 arm64 / Windows 11 x64 / Ubuntu 24.04 x64
+    validations:
+      required: true
+  - type: input
     id: browser
     attributes:
-      label: Browser and version
-      placeholder: Chrome 124 on macOS 14.4
+      label: Browser, channel, version, and install mode
+      description: Include Chrome or Linux Chromium, channel if known, version, and whether the extension is unpacked or Web Store.
+      placeholder: Chrome Stable 124, unpacked extension
+    validations:
+      required: true
+  - type: dropdown
+    id: native_install_mode
+    attributes:
+      label: Native install mode
+      options:
+        - macOS/Linux Chrome installer
+        - Windows Chrome installer
+        - Linux Chromium installer with --browser chromium
+        - Manual npm run install:native
+        - Other
     validations:
       required: true
   - type: input
@@ -42,6 +62,82 @@ body:
       placeholder: illdpneeeopfffmiepaejglgmhpmdhdc
     validations:
       required: true
+  - type: input
+    id: extension_version
+    attributes:
+      label: Extension version
+      placeholder: 0.8.0
+    validations:
+      required: true
+  - type: input
+    id: native_version
+    attributes:
+      label: Native host version and compatibility status
+      description: Copy from the popup/panel diagnostics if available.
+      placeholder: 0.8.0, status ok
+    validations:
+      required: true
+  - type: input
+    id: codex_cli_version
+    attributes:
+      label: Codex CLI version and login status
+      placeholder: codex 0.x.y, logged in
+    validations:
+      required: true
+  - type: input
+    id: node_version
+    attributes:
+      label: Node.js version
+      placeholder: v20.19.0
+    validations:
+      required: true
+  - type: input
+    id: install_update_method
+    attributes:
+      label: Install or update command used
+      description: Include whether you used the pinned command, latest source installer, Linux Chromium `--browser chromium`, or manual install. Redact private paths if needed.
+      placeholder: CODEX_OVERLEAF_REF=v0.8.0 ... / install.ps1 / npm run install:native
+    validations:
+      required: true
+  - type: input
+    id: project_shape
+    attributes:
+      label: Overleaf project shape
+      description: File count, approximate size, binary assets, collaborators, Reviewing/Track Changes status, and whether local TeX tools are installed.
+      placeholder: 42 files, 5 MiB text, 3 PDFs, Reviewing enabled
+    validations:
+      required: true
+  - type: dropdown
+    id: task_mode
+    attributes:
+      label: Task mode or surface
+      options:
+        - Ask-only
+        - Suggest-edit
+        - Auto-write
+        - Compile
+        - Diagnostics
+        - Skills
+        - Install/update/uninstall
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: diagnostics_export
+    attributes:
+      label: Diagnostics export attached?
+      options:
+        - "Yes, redacted diagnostics are attached"
+        - "No, diagnostics are not available"
+        - "No, I cannot share diagnostics"
+    validations:
+      required: true
+  - type: textarea
+    id: compatibility_matrix_row
+    attributes:
+      label: Compatibility matrix details
+      description: "Fill any known fields: OS/version/arch, browser/channel/version, install mode, extension id, manifest/registry path, bridge/runtime/source path, Node/Git/Codex/TeX, native protocol/capabilities, and last smoke date/result."
+      render: text
   - type: textarea
     id: diagnostics
     attributes:
@@ -51,8 +147,8 @@ body:
   - type: textarea
     id: native_host_logs
     attributes:
-      label: Native host logs
-      description: Include relevant native host logs if available.
+      label: Native host logs or launcher logs
+      description: Include relevant native-host.log or native-host-launcher.log snippets if available. Redact private project content, prompts, compile logs, diffs, project ids, file paths, tokens, and secrets.
       render: text
   - type: textarea
     id: reproduction
@@ -69,4 +165,12 @@ body:
     attributes:
       label: What seems to have changed in Overleaf?
       description: For example, editor DOM changed, compile request shape changed, or writeback no longer updates the file.
-
+  - type: checkboxes
+    id: redaction
+    attributes:
+      label: Redaction checklist
+      options:
+        - label: I have removed or redacted project text, prompt bodies, compile logs, raw diffs, binary content, tokens, secrets, private project ids, and private file paths from anything attached.
+          required: true
+        - label: I understand diagnostics are local exports and should be reviewed before sharing.
+          required: true

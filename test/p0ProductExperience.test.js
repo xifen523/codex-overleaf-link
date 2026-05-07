@@ -290,7 +290,7 @@ test('project settings expose governed rules and local skills without Overleaf a
   assert.doesNotMatch(i18n, /assetUploadTitle/);
 });
 
-test('composer slash menu offers Codex Overleaf skill installation', () => {
+test('composer slash menu offers Codex Overleaf skill installation and installed skills', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -309,16 +309,21 @@ test('composer slash menu offers Codex Overleaf skill installation', () => {
 
   assert.match(contentScript, /data-slash-menu/);
   assert.match(contentScript, /data-slash-command="install-skill"/);
+  assert.match(contentScript, /data-slash-command-kind/);
+  assert.match(contentScript, /scope:\s*'codex-overleaf'/);
   assert.match(contentScript, /data-composer-skill-context/);
   assert.match(contentScript, /data-composer-skill-label/);
   assert.match(contentScript, /data-composer-skill-clear/);
   assert.match(keydownBody, /handleSlashMenuKeydown\(event\)/);
   assert.match(contentScript, /function updateSlashMenuForTaskInput/);
+  assert.match(contentScript, /function refreshCodexOverleafSkillsForSlashMenu/);
   assert.match(contentScript, /function selectSlashCommand/);
   assert.match(contentScript, /function activateSkillInstallerComposerContext/);
+  assert.match(contentScript, /function activateCodexOverleafSkillComposerContext/);
   assert.match(contentScript, /function getComposerSkillInvocationForRun/);
   assert.match(contentScript, /async function runSkillInstallerTask/);
   assert.match(selectBody, /activateSkillInstallerComposerContext\(\)/);
+  assert.match(selectBody, /activateCodexOverleafSkillComposerContext/);
   assert.match(runTaskBody, /const submittedSkillInvocation = getComposerSkillInvocationForRun\(\)/);
   assert.match(runTaskBody, /submittedSkillInvocation\?\.id === 'skill-installer'[\s\S]*runSkillInstallerTask/);
   assert.match(runTaskBody, /try\s*\{\s*if \(submittedSkillInvocation\?\.id === 'skill-installer'\)[\s\S]*runSkillInstallerTask/);
@@ -330,6 +335,7 @@ test('composer slash menu offers Codex Overleaf skill installation', () => {
   assert.match(css, /\.codex-composer-skill-context/);
   assert.doesNotMatch(css, /\.codex-skill-install-dialog/);
   assert.match(i18n, /slashInstallSkillTitle/);
+  assert.match(i18n, /slashUseSkillSubtitle/);
   assert.match(i18n, /skillInstallerComposerLabel/);
   assert.match(i18n, /skillInstallerComposerClear/);
 });
@@ -2751,7 +2757,7 @@ test('project custom instructions editor saves and restores by project', async (
     'Use NeurIPS style and \\\\cref{}.'
   );
   assert.equal(harness.getSavedCount(), 1);
-  assert.equal(harness.getToast(), 'customInstructionsSavedToast');
+  assert.equal(harness.getToast(), 'projectSettingsSavedToast');
   assert.equal(harness.settingsPanel.hidden, true);
   assert.equal(harness.settingsButton.dataset.active, 'false');
   assert.equal(harness.settingsButton['aria-expanded'], 'false');
@@ -2947,8 +2953,25 @@ test('saveState merges latest lightweight prefs before saving project-scoped set
         codexThreadId: '',
         createdAt: '2026-05-06T00:00:00.000Z',
         updatedAt: '2026-05-06T00:01:00.000Z',
-        runs: [],
-        history: [],
+        runs: [{
+          id: 'run_current',
+          task: 'Current task',
+          status: 'completed',
+          statusText: 'Done 7s',
+          startedAt: '2026-05-06T00:00:00.000Z',
+          finishedAt: '2026-05-06T00:00:07.000Z',
+          events: [{
+            title: '本轮完成报告',
+            status: 'completed',
+            kind: 'report',
+            detail: '结论：刷新后历史仍应显示这段回答。'
+          }]
+        }],
+        history: [{
+          task: 'Current task',
+          result: '结论：刷新后历史仍应显示这段回答。',
+          at: '2026-05-06T00:00:07.000Z'
+        }],
         task: 'Current task',
         mode: 'confirm',
         model: 'gpt-5.4',
@@ -3038,6 +3061,11 @@ test('saveState merges latest lightweight prefs before saving project-scoped set
     project_c: 'keep project c instructions'
   });
   assert.equal(harness.getStoredSessionRecords().length, 1);
+  assert.equal(harness.getStoredSessionRecords()[0].task, 'Current task');
+  assert.equal(harness.getStoredSessionRecords()[0].history[0].result, '结论：刷新后历史仍应显示这段回答。');
+  assert.equal(harness.getStoredSessionRecords()[0].runs[0].task, 'Current task');
+  assert.equal(harness.getStoredSessionRecords()[0].runs[0].statusText, 'Done 7s');
+  assert.equal(harness.getStoredSessionRecords()[0].runs[0].events[0].detail, '结论：刷新后历史仍应显示这段回答。');
   assert.deepEqual(harness.getDeletedSessionIds(), ['old_project_session']);
 });
 

@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  SAFE_INLINE_BINARY_CHANGE_BYTES,
   markMirrorDirty,
   collectMirrorChangesDetailed,
   collectMirrorChanges,
@@ -13,6 +14,7 @@ const {
   getMirrorStatus,
   syncOverleafToMirror
 } = require('../native-host/src/mirrorWorkspace');
+const { encodeMessage } = require('../native-host/src/nativeMessaging');
 
 test('default mirror root falls back to USERPROFILE when HOME is absent', () => {
   const userProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-profile-'));
@@ -285,6 +287,89 @@ test('collects new supported binary assets while leaving generated PDFs unsuppor
     assert.deepEqual(result.unsupportedChanges.map(change => [change.path, change.reason, change.size]), [
       ['main.pdf', 'generated_artifact', Buffer.byteLength('%PDF-1.7 generated')]
     ]);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('reports oversized binary changes without inlining native response payloads', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-large-binary-writeback',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: '\\includegraphics{figures/large.pdf}' }
+        ]
+      }
+    });
+
+    const largePdf = Buffer.alloc(600 * 1024, 7);
+    fs.mkdirSync(path.join(mirror.workspacePath, 'figures'), { recursive: true });
+    fs.writeFileSync(path.join(mirror.workspacePath, 'figures', 'large.pdf'), largePdf);
+
+    const result = await collectMirrorChangesDetailed({ projectId: 'project-large-binary-writeback', rootDir });
+
+    assert.equal(result.changes.some(change => change.path === 'figures/large.pdf'), false);
+    const unsupported = result.unsupportedChanges.find(change => change.path === 'figures/large.pdf');
+    assert.deepEqual({
+      type: unsupported?.type,
+      path: unsupported?.path,
+      reason: unsupported?.reason,
+      size: unsupported?.size,
+      attemptedChangeType: unsupported?.attemptedChangeType
+    }, {
+      type: 'unsupported-local-file',
+      path: 'figures/large.pdf',
+      reason: 'binary_payload_exceeds_native_message_limit',
+      size: largePdf.length,
+      attemptedChangeType: 'binary-create'
+    });
+    assert.equal(Object.hasOwn(unsupported, 'contentBase64'), false);
+    assert.match(unsupported.guidance, /native messaging.*Overleaf/i);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('keeps aggregate inline binary changes within the native response frame budget', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'project-aggregate-binary-writeback',
+      rootDir,
+      project: {
+        files: [
+          { path: 'main.tex', content: '\\includegraphics{figures/a.png}\\includegraphics{figures/b.png}' }
+        ]
+      }
+    });
+
+    const mediumBinary = Buffer.alloc(Math.floor(SAFE_INLINE_BINARY_CHANGE_BYTES * 0.84), 5);
+    fs.mkdirSync(path.join(mirror.workspacePath, 'figures'), { recursive: true });
+    fs.writeFileSync(path.join(mirror.workspacePath, 'figures', 'a.png'), mediumBinary);
+    fs.writeFileSync(path.join(mirror.workspacePath, 'figures', 'b.png'), mediumBinary);
+
+    const result = await collectMirrorChangesDetailed({ projectId: 'project-aggregate-binary-writeback', rootDir });
+    const inlineBinaryChanges = result.changes.filter(change => change.type === 'binary-create');
+    const degradedBinaryChanges = result.unsupportedChanges.filter(change =>
+      change.reason === 'binary_payload_exceeds_native_message_limit'
+    );
+
+    assert.equal(inlineBinaryChanges.length, 1);
+    assert.equal(degradedBinaryChanges.length, 1);
+    assert.equal(Object.hasOwn(degradedBinaryChanges[0], 'contentBase64'), false);
+    assert.match(degradedBinaryChanges[0].guidance, /native messaging.*Overleaf/i);
+    assert.doesNotThrow(() => encodeMessage({
+      status: 'completed',
+      projectId: 'project-aggregate-binary-writeback',
+      workspacePath: mirror.workspacePath,
+      assistantMessage: '',
+      threadId: '',
+      syncChanges: result.changes,
+      unsupportedChanges: result.unsupportedChanges
+    }));
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

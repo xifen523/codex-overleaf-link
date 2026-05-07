@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.9.0 - 2026-05-07
+
+Release-candidate hardening release. This version focuses on release gates, real workflow smoke coverage, payload safety, security/privacy hardening, and public documentation accuracy rather than new product surface area.
+
+### Added
+
+- A redacted Chrome smoke runner with `panel`, `native`, `project`, `diagnostics`, and `all` probes, plus JSON output for release-candidate evidence.
+- A real Overleaf release-candidate checklist covering install/update, ask/suggest/auto/undo/compile/context, attachments, governance, sensitive preflight, local skills, stale conflicts, and diagnostics redaction.
+- A synthetic large-project benchmark with 250+ files, long `.tex` files, binary assets, oversized binary degradation, repeated session state, and required performance metrics.
+- Public compatibility and troubleshooting documentation for Chrome/Chromium support, native host paths, local data cleanup, diagnostics, skill toggles, and issue reports.
+- Regression tests for diagnostics/session redaction, task/native request quotas, smoke redaction, final native response sizing, and issue-template release triage fields.
+
+### Changed
+
+- Bumped package, extension, README, release artifact, and native compatibility metadata to `0.9.0`.
+- Native compatibility now requires a v0.9 native host so extension and bridge agree on release-candidate gates, quotas, diagnostics behavior, and skill-installer containment.
+- Diagnostics export now favors allowlisted summaries over broad raw object redaction.
+- Smoke and diagnostics paths report counts, byte sizes, capability status, and error categories without project text, prompt bodies, compile logs, diffs, binary data, or raw secrets.
+- Windows pinned install/update and native mismatch recovery docs now explicitly set `CODEX_OVERLEAF_REF`.
+
+### Fixed
+
+- Final native responses now degrade oversized text writeback before native message encoding instead of allowing content, previous content, diffs, or patches to exceed the output frame limit.
+- Oversized binary writeback now produces explicit unsupported-change guidance instead of inlining payloads that can exceed native message limits.
+- Page-bridge requests now reject spoofed or unsafe paths before browser mutation while preserving authorized e2e writeback flows.
+- Skill installer command approval is constrained to safe read-only inspection and contained HTTPS `git clone` writes under Codex Overleaf skill roots.
+- Native request quotas now cover project snapshots, file overlays, proposed operations, secondary operations, compile logs, attachments, and skill content before mirror mutation or confirm-plan creation.
+- Project file listing preserves real Overleaf folder hierarchy and ZIP byte-size metadata without reading or exposing file contents for list-only contexts.
+
+### Notes
+
+- Native protocol remains `1`; this release uses version and capability gates because v0.9 extension and native host behavior must match.
+- Actual Chrome Web Store submission and real Overleaf manual smoke signoff remain release-process steps after artifacts are built.
+- There is still no hosted telemetry; diagnostics and audit data remain local and redacted by default.
+
 ## v0.8.0 - 2026-05-06
 
 Governed attachment, binary asset, and local skill release. This version completes the remaining v0.7 turn-scoped attachment and local skill workflows, then adds the v0.8 collaboration governance layer for safer shared Overleaf projects.

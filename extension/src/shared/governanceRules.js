@@ -1,10 +1,16 @@
 (function initGovernanceRules(root, factory) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = factory();
+    let projectFiles = null;
+    try {
+      projectFiles = require('./projectFiles');
+    } catch (_error) {
+      projectFiles = null;
+    }
+    module.exports = factory(projectFiles);
   } else {
-    root.CodexOverleafGovernanceRules = factory();
+    root.CodexOverleafGovernanceRules = factory(root.CodexOverleafProjectFiles);
   }
-})(typeof globalThis !== 'undefined' ? globalThis : window, function governanceRulesFactory() {
+})(typeof globalThis !== 'undefined' ? globalThis : window, function governanceRulesFactory(projectFiles) {
   'use strict';
 
   const WRITE_OPERATION_TYPES = new Set([
@@ -59,6 +65,12 @@
         continue;
       }
 
+      const invalidPath = getInvalidOperationProjectPath(normalizedOperation);
+      if (invalidPath) {
+        blocked.push({ operation: normalizedOperation, reason: 'invalid_project_path', path: invalidPath });
+        continue;
+      }
+
       const paths = getOperationPaths(normalizedOperation);
       const readonlyPath = paths.find(path => matchesAnyPattern(path, normalizedRules.readonlyPatterns));
       if (readonlyPath) {
@@ -83,17 +95,40 @@
   function normalizeOperation(operation = {}) {
     const result = Object.assign({}, operation);
     result.type = typeof operation.type === 'string' ? operation.type : '';
-    result.path = normalizeProjectPath(operation.path);
+    result.path = normalizeSafeOperationPath(operation.path);
+    if (operation.path !== undefined && String(operation.path || '').trim() && !result.path) {
+      result.invalidProjectPath = true;
+    }
     if (operation.destinationPath !== undefined) {
-      result.destinationPath = normalizeProjectPath(operation.destinationPath);
+      result.destinationPath = normalizeSafeOperationPath(operation.destinationPath);
+      if (String(operation.destinationPath || '').trim() && !result.destinationPath) {
+        result.invalidProjectDestinationPath = true;
+      }
     }
     if (operation.destPath !== undefined && !result.destinationPath) {
-      result.destinationPath = normalizeProjectPath(operation.destPath);
+      result.destinationPath = normalizeSafeOperationPath(operation.destPath);
+      if (String(operation.destPath || '').trim() && !result.destinationPath) {
+        result.invalidProjectDestinationPath = true;
+      }
     }
     if (operation.to !== undefined && !result.destinationPath) {
-      result.destinationPath = normalizeProjectPath(operation.to);
+      result.destinationPath = normalizeSafeOperationPath(operation.to);
+      if (String(operation.to || '').trim() && !result.destinationPath) {
+        result.invalidProjectDestinationPath = true;
+      }
     }
     return result;
+  }
+
+  function getInvalidOperationProjectPath(operation = {}) {
+    if (operation.invalidProjectPath || !operation.path) {
+      return 'operation path';
+    }
+    if ((operation.type === 'rename' || operation.type === 'move')
+      && (operation.invalidProjectDestinationPath || !operation.destinationPath)) {
+      return 'operation destination path';
+    }
+    return '';
   }
 
   function getOperationPaths(operation) {
@@ -158,6 +193,53 @@
       .trim()
       .replace(/^\/+/, '')
       .replace(/\/+/g, '/');
+  }
+
+  function normalizeSafeOperationPath(path) {
+    if (projectFiles && typeof projectFiles.normalizeSafeProjectPath === 'function') {
+      return projectFiles.normalizeSafeProjectPath(path);
+    }
+    return normalizeSafeProjectPathFallback(path);
+  }
+
+  function normalizeSafeProjectPathFallback(value) {
+    if (typeof value !== 'string' || /[\u0000-\u001f\u007f]/.test(value)) {
+      return '';
+    }
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.startsWith('/') || trimmed.includes('\\') || /^[A-Za-z]:/.test(trimmed)) {
+      return '';
+    }
+    let decoded = trimmed;
+    for (let index = 0; index < 3; index += 1) {
+      if (/%(?:2f|5c)/i.test(decoded)) {
+        return '';
+      }
+      let next;
+      try {
+        next = decodeURIComponent(decoded);
+      } catch (_error) {
+        return '';
+      }
+      if (next === decoded) {
+        break;
+      }
+      decoded = next;
+    }
+    if (/[\u0000-\u001f\u007f]/.test(decoded)
+      || decoded.startsWith('/')
+      || decoded.includes('\\')
+      || /^[A-Za-z]:/.test(decoded)) {
+      return '';
+    }
+    const normalized = decoded.replace(/\/+/g, '/').trim();
+    if (!normalized) {
+      return '';
+    }
+    const segments = normalized.split('/');
+    return segments.some(segment => !segment || segment === '.' || segment === '..')
+      ? ''
+      : normalized;
   }
 
   return {

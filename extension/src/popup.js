@@ -9,17 +9,19 @@
   const nativeInstall = document.getElementById('native-install');
   const installCommand = document.getElementById('install-command');
   const copyInstallCommand = document.getElementById('copy-install-command');
+  let activeOverleafTab = null;
 
   installCommand.textContent = INSTALL_COMMAND;
+  button.textContent = 'Open panel in Overleaf';
 
   button.addEventListener('click', async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.id || !/^https:\/\/(www\.)?overleaf\.com\/project\//.test(tab.url || '')) {
+    const tab = activeOverleafTab || await getActiveOverleafProjectTab();
+    if (!tab?.id) {
       status.textContent = 'Open an Overleaf project tab first.';
       return;
     }
 
-    await chrome.tabs.sendMessage(tab.id, { type: 'codex-overleaf/open-panel' });
+    await chrome.tabs.sendMessage(tab.id, { type: 'codex-overleaf/toggle-panel' });
     window.close();
   });
 
@@ -31,7 +33,42 @@
     }, 1400);
   });
 
-  checkNativeHost();
+  initPopupState();
+
+  async function initPopupState() {
+    await checkNativeHost();
+    await refreshPanelButtonState();
+  }
+
+  async function refreshPanelButtonState() {
+    const tab = await getActiveOverleafProjectTab();
+    activeOverleafTab = tab;
+    if (!tab?.id) {
+      button.textContent = 'Open panel in Overleaf';
+      return;
+    }
+
+    try {
+      const response = await chrome.tabs.sendMessage(tab.id, { type: 'codex-overleaf/get-panel-state' });
+      const open = response?.open === true;
+      button.textContent = open ? 'Close panel in Overleaf' : 'Open panel in Overleaf';
+      status.textContent = open
+        ? 'Panel is open in this Overleaf tab.'
+        : 'Panel is closed in this Overleaf tab.';
+    } catch (_error) {
+      button.textContent = 'Open panel in Overleaf';
+      status.textContent = 'Refresh the Overleaf tab, then open the panel.';
+    }
+  }
+
+  async function getActiveOverleafProjectTab() {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    return tab?.id && isOverleafProjectUrl(tab.url) ? tab : null;
+  }
+
+  function isOverleafProjectUrl(url) {
+    return /^https:\/\/(www\.)?overleaf\.com\/project\//.test(String(url || ''));
+  }
 
   async function checkNativeHost() {
     try {

@@ -22,6 +22,8 @@ test('popup checks native host status and offers a copyable install command', ()
   assert.match(popupJs, /const INSTALL_COMMAND/);
   assert.match(popupJs, /bridge\.ping/);
   assert.match(popupJs, /codex-overleaf\/native-request/);
+  assert.match(popupJs, /codex-overleaf\/get-panel-state/);
+  assert.match(popupJs, /codex-overleaf\/toggle-panel/);
   assert.match(popupJs, /navigator\.clipboard\.writeText\(INSTALL_COMMAND\)/);
   assert.match(popupJs, /showNativeInstallGuide/);
 });
@@ -70,6 +72,69 @@ test('popup treats an old native response as update-required instead of connecte
   assert.equal(harness.elements.installCommand.textContent, compatibility.buildInstallCommand());
 });
 
+test('popup reflects the active Overleaf panel state and toggles it', async () => {
+  const tabMessages = [];
+  const harness = await loadPopupHarness({
+    nativeResponse: compatibleNativeResponse(),
+    activeTab: {
+      id: 42,
+      url: 'https://www.overleaf.com/project/example'
+    },
+    onTabMessage(_tabId, message) {
+      tabMessages.push(message);
+      if (message.type === 'codex-overleaf/get-panel-state') {
+        return { ok: true, open: true };
+      }
+      if (message.type === 'codex-overleaf/toggle-panel') {
+        return { ok: true, open: false };
+      }
+      return { ok: false };
+    }
+  });
+
+  assert.equal(harness.elements.button.textContent, 'Close panel in Overleaf');
+  assert.match(harness.elements.status.textContent, /Panel is open/i);
+
+  await harness.elements.button.click();
+
+  assert.deepEqual(tabMessages.map(message => message.type), [
+    'codex-overleaf/get-panel-state',
+    'codex-overleaf/toggle-panel'
+  ]);
+  assert.equal(harness.closed, true);
+});
+
+test('popup shows an open action when the active Overleaf panel is closed', async () => {
+  const harness = await loadPopupHarness({
+    nativeResponse: compatibleNativeResponse(),
+    activeTab: {
+      id: 43,
+      url: 'https://overleaf.com/project/example'
+    },
+    onTabMessage(_tabId, message) {
+      if (message.type === 'codex-overleaf/get-panel-state') {
+        return { ok: true, open: false };
+      }
+      return { ok: true, open: true };
+    }
+  });
+
+  assert.equal(harness.elements.button.textContent, 'Open panel in Overleaf');
+  assert.match(harness.elements.status.textContent, /Panel is closed/i);
+});
+
+test('content script exposes panel state and panel toggling messages', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /codex-overleaf\/get-panel-state/);
+  assert.match(contentScript, /codex-overleaf\/toggle-panel/);
+  assert.match(contentScript, /function closePanel/);
+  assert.match(contentScript, /function getPanelStateResponse/);
+});
+
 function compatibleNativeResponse() {
   return {
     ok: true,
@@ -103,7 +168,7 @@ function oldNativeResponse() {
   };
 }
 
-async function loadPopupHarness({ nativeResponse, onSendMessage } = {}) {
+async function loadPopupHarness({ nativeResponse, activeTab = null, onSendMessage, onTabMessage } = {}) {
   const compatibilitySource = fs.readFileSync(
     path.join(__dirname, '../extension/src/shared/compatibility.js'),
     'utf8'
@@ -127,6 +192,7 @@ async function loadPopupHarness({ nativeResponse, onSendMessage } = {}) {
     'copy-install-command': elements.copyInstallCommand
   };
 
+  const harness = { closed: false };
   const sandbox = {
     chrome: {
       runtime: {
@@ -142,9 +208,12 @@ async function loadPopupHarness({ nativeResponse, onSendMessage } = {}) {
       },
       tabs: {
         query() {
-          return Promise.resolve([]);
+          return Promise.resolve(activeTab ? [activeTab] : []);
         },
-        sendMessage() {
+        sendMessage(tabId, message) {
+          if (typeof onTabMessage === 'function') {
+            return Promise.resolve(onTabMessage(tabId, message));
+          }
           return Promise.resolve();
         }
       }
@@ -174,13 +243,17 @@ async function loadPopupHarness({ nativeResponse, onSendMessage } = {}) {
   };
   sandbox.globalThis = sandbox;
   sandbox.window = sandbox;
-  sandbox.close = () => {};
+  sandbox.close = () => {
+    harness.closed = true;
+  };
 
   vm.runInNewContext(`${compatibilitySource}\n${popupSource}`, sandbox);
   await new Promise(resolve => setImmediate(resolve));
   await Promise.resolve();
+  await Promise.resolve();
 
-  return { elements };
+  harness.elements = elements;
+  return harness;
 }
 
 function createPopupElement(id, options = {}) {

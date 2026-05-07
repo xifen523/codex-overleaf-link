@@ -21,10 +21,26 @@ const activeRunControllers = new Map();
 const pendingPlans = new Map();
 const PENDING_PLAN_TTL_MS = 30 * 60 * 1000;
 const CODEX_RUN_PASSTHROUGH_ERROR_CODES = new Set(['thread_resume_failed']);
+const NATIVE_REQUEST_QUOTAS = Object.freeze({
+  maxProjectFiles: 1000,
+  maxProjectTextBytes: 32 * 1024 * 1024,
+  maxProjectBinaryBytes: 32 * 1024 * 1024,
+  maxOperations: 1000,
+  maxCompileLogBytes: 512 * 1024,
+  maxAttachmentCount: 8,
+  maxAttachmentBytes: 12 * 1024 * 1024,
+  maxAttachmentTotalBytes: 8 * 12 * 1024 * 1024,
+  maxSkillContentBytes: 64 * 1024
+});
 
 async function handleRequest(request, env = process.env, emit = () => {}) {
   if (!request || typeof request !== 'object') {
     return errorResponse(undefined, 'invalid_request', 'Request must be an object');
+  }
+
+  const quotaError = validateNativeRequestQuotas(request);
+  if (quotaError) {
+    return quotaErrorResponse(request.id, quotaError);
   }
 
   if (request.method === 'bridge.ping') {
@@ -93,6 +109,283 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
   }
 
   return errorResponse(request.id, 'method_not_found', `Unknown method: ${request.method}`);
+}
+
+function validateNativeRequestQuotas(request = {}) {
+  const params = request.params || {};
+  switch (request.method) {
+    case 'codex.run':
+      return firstQuotaViolation([
+        validateProjectSnapshotQuota(params.project),
+        validateOperationListQuota(params.fileOverlays, 'fileOverlays'),
+        validateFilePayloadQuota(params.fileOverlays, 'fileOverlays'),
+        validateCompileLogQuota(params),
+        validateAttachmentQuota(params.attachments),
+        validateSkillContentQuota(params.skillContent)
+      ]);
+    case 'mirror.sync':
+      return validateProjectSnapshotQuota(params.project);
+    case 'mirror.patchFiles':
+      return firstQuotaViolation([
+        validateOperationListQuota(params.files, 'files'),
+        validatePatchFileTextQuota(params.files)
+      ]);
+    case 'task.run':
+      return firstQuotaViolation([
+        validateProjectSnapshotQuota(params.project),
+        validateOperationListQuota(params.fileOverlays, 'fileOverlays'),
+        validateFilePayloadQuota(params.fileOverlays, 'fileOverlays'),
+        validateOperationListQuota(params.proposedOperations, 'proposedOperations'),
+        validateOperationPayloadQuota(params.proposedOperations, 'proposedOperations'),
+        validateOperationListQuota(params.operations, 'operations'),
+        validateOperationPayloadQuota(params.operations, 'operations'),
+        validateCompileLogQuota(params)
+      ]);
+    case 'skills.install':
+      return validateSkillContentQuota(params.content);
+    default:
+      return null;
+  }
+}
+
+function firstQuotaViolation(violations) {
+  return violations.find(Boolean) || null;
+}
+
+function validateProjectSnapshotQuota(project = {}) {
+  const files = Array.isArray(project?.files) ? project.files : [];
+  if (files.length > NATIVE_REQUEST_QUOTAS.maxProjectFiles) {
+    return quotaViolation('project.files', NATIVE_REQUEST_QUOTAS.maxProjectFiles, files.length, 'too many project files');
+  }
+
+  return validateFilePayloadQuota(files, 'project.files');
+}
+
+function validateFilePayloadQuota(files, fieldPrefix) {
+  let textBytes = 0;
+  let binaryBytes = 0;
+  for (const file of Array.isArray(files) ? files : []) {
+    for (const key of ['content', 'nextContent']) {
+      if (typeof file?.[key] === 'string') {
+        textBytes += Buffer.byteLength(file[key], 'utf8');
+      }
+    }
+    if (typeof file?.contentBase64 === 'string') {
+      binaryBytes += getDeclaredOrEstimatedBinaryBytes(file);
+    }
+  }
+  if (textBytes > NATIVE_REQUEST_QUOTAS.maxProjectTextBytes) {
+    return quotaViolation(
+      `${fieldPrefix}.content`,
+      NATIVE_REQUEST_QUOTAS.maxProjectTextBytes,
+      textBytes,
+      `${fieldPrefix} text is too large`
+    );
+  }
+  if (binaryBytes > NATIVE_REQUEST_QUOTAS.maxProjectBinaryBytes) {
+    return quotaViolation(
+      `${fieldPrefix}.contentBase64`,
+      NATIVE_REQUEST_QUOTAS.maxProjectBinaryBytes,
+      binaryBytes,
+      `${fieldPrefix} binary payload is too large`
+    );
+  }
+  return null;
+}
+
+function validatePatchFileTextQuota(files) {
+  let textBytes = 0;
+  for (const file of Array.isArray(files) ? files : []) {
+    for (const key of ['nextContent', 'content']) {
+      if (typeof file?.[key] === 'string') {
+        textBytes += Buffer.byteLength(file[key], 'utf8');
+      }
+    }
+  }
+  return textBytes > NATIVE_REQUEST_QUOTAS.maxProjectTextBytes
+    ? quotaViolation('files.content', NATIVE_REQUEST_QUOTAS.maxProjectTextBytes, textBytes, 'patch text is too large')
+    : null;
+}
+
+function validateOperationListQuota(value, field) {
+  const operations = Array.isArray(value) ? value : [];
+  return operations.length > NATIVE_REQUEST_QUOTAS.maxOperations
+    ? quotaViolation(field, NATIVE_REQUEST_QUOTAS.maxOperations, operations.length, 'too many operations')
+    : null;
+}
+
+function validateOperationPayloadQuota(value, fieldPrefix) {
+  const operations = Array.isArray(value) ? value : [];
+  const { textBytes, binaryBytes } = measureOperationPayloads(operations);
+  if (textBytes > NATIVE_REQUEST_QUOTAS.maxProjectTextBytes) {
+    return quotaViolation(
+      `${fieldPrefix}.content`,
+      NATIVE_REQUEST_QUOTAS.maxProjectTextBytes,
+      textBytes,
+      `${fieldPrefix} text payload is too large`
+    );
+  }
+  if (binaryBytes > NATIVE_REQUEST_QUOTAS.maxProjectBinaryBytes) {
+    return quotaViolation(
+      `${fieldPrefix}.contentBase64`,
+      NATIVE_REQUEST_QUOTAS.maxProjectBinaryBytes,
+      binaryBytes,
+      `${fieldPrefix} binary payload is too large`
+    );
+  }
+  return null;
+}
+
+function measureOperationPayloads(operations = []) {
+  const totals = { textBytes: 0, binaryBytes: 0 };
+  const seen = new Set();
+  for (const operation of operations) {
+    measureOperationPayloadValue(operation, '', totals, seen);
+  }
+  return totals;
+}
+
+function measureOperationPayloadValue(value, key, totals, seen) {
+  if (value === null || value === undefined) {
+    return;
+  }
+  if (typeof value === 'string') {
+    if (isBase64PayloadKey(key)) {
+      return;
+    }
+    totals.textBytes += Buffer.byteLength(value, 'utf8');
+    return;
+  }
+  if (typeof value !== 'object') {
+    return;
+  }
+  if (seen.has(value)) {
+    return;
+  }
+  seen.add(value);
+
+  if (typeof value.contentBase64 === 'string') {
+    totals.binaryBytes += getDeclaredOrEstimatedBinaryBytes(value);
+  } else if (isBinarySizedOperationPayload(value)) {
+    totals.binaryBytes += Number(value.size);
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      measureOperationPayloadValue(item, '', totals, seen);
+    }
+    return;
+  }
+
+  for (const [childKey, childValue] of Object.entries(value)) {
+    if (isBase64PayloadKey(childKey)) {
+      continue;
+    }
+    measureOperationPayloadValue(childValue, childKey, totals, seen);
+  }
+}
+
+function isBase64PayloadKey(key) {
+  return key === 'contentBase64';
+}
+
+function isBinarySizedOperationPayload(value = {}) {
+  const size = Number(value.size);
+  if (!Number.isFinite(size) || size <= 0) {
+    return false;
+  }
+  return String(value.type || '').includes('binary')
+    || String(value.kind || '') === 'binary'
+    || Object.prototype.hasOwnProperty.call(value, 'contentBase64');
+}
+
+function validateCompileLogQuota(params = {}) {
+  const bytes = Buffer.byteLength(String(params.compileLog || ''), 'utf8')
+    + byteLengthOfStringArray(params.compileErrors)
+    + byteLengthOfStringArray(params.compileWarnings);
+  return bytes > NATIVE_REQUEST_QUOTAS.maxCompileLogBytes
+    ? quotaViolation('compileLog', NATIVE_REQUEST_QUOTAS.maxCompileLogBytes, bytes, 'compile log context is too large')
+    : null;
+}
+
+function validateAttachmentQuota(attachments) {
+  const items = Array.isArray(attachments) ? attachments : [];
+  if (items.length > NATIVE_REQUEST_QUOTAS.maxAttachmentCount) {
+    return quotaViolation('attachments', NATIVE_REQUEST_QUOTAS.maxAttachmentCount, items.length, 'too many attachments');
+  }
+
+  let totalBytes = 0;
+  for (const item of items) {
+    const bytes = getDeclaredOrEstimatedBinaryBytes(item);
+    if (bytes > NATIVE_REQUEST_QUOTAS.maxAttachmentBytes) {
+      return quotaViolation(
+        'attachments.contentBase64',
+        NATIVE_REQUEST_QUOTAS.maxAttachmentBytes,
+        bytes,
+        'attachment payload is too large'
+      );
+    }
+    totalBytes += bytes;
+  }
+  return totalBytes > NATIVE_REQUEST_QUOTAS.maxAttachmentTotalBytes
+    ? quotaViolation('attachments', NATIVE_REQUEST_QUOTAS.maxAttachmentTotalBytes, totalBytes, 'attachment payload is too large')
+    : null;
+}
+
+function validateSkillContentQuota(content) {
+  if (content === undefined || content === null) {
+    return null;
+  }
+  const bytes = typeof content === 'string'
+    ? Buffer.byteLength(content, 'utf8')
+    : Buffer.byteLength(String(content), 'utf8');
+  return bytes > NATIVE_REQUEST_QUOTAS.maxSkillContentBytes
+    ? quotaViolation('content', NATIVE_REQUEST_QUOTAS.maxSkillContentBytes, bytes, 'skill content is too large')
+    : null;
+}
+
+function getDeclaredOrEstimatedBinaryBytes(value = {}) {
+  const declared = Number(value.size);
+  const estimated = typeof value.contentBase64 === 'string'
+    ? estimateBase64DecodedBytes(value.contentBase64)
+    : 0;
+  return Math.max(Number.isFinite(declared) && declared > 0 ? declared : 0, estimated);
+}
+
+function estimateBase64DecodedBytes(value) {
+  const clean = String(value || '').replace(/\s+/g, '');
+  if (!clean) {
+    return 0;
+  }
+  const padding = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor(clean.length * 3 / 4) - padding);
+}
+
+function byteLengthOfStringArray(value) {
+  return (Array.isArray(value) ? value : [])
+    .reduce((sum, item) => sum + Buffer.byteLength(String(item || ''), 'utf8'), 0);
+}
+
+function quotaViolation(field, limit, actual, reason) {
+  return {
+    field,
+    limit,
+    actual,
+    reason
+  };
+}
+
+function quotaErrorResponse(id, violation) {
+  return errorResponse(
+    id,
+    'native_request_quota_exceeded',
+    `Native request quota exceeded: ${violation.reason} (${violation.actual}/${violation.limit}).`,
+    {
+      field: violation.field,
+      limit: violation.limit,
+      actual: violation.actual
+    }
+  );
 }
 
 async function handleCodexRun(request, env, emit) {
@@ -559,7 +852,12 @@ async function handleTaskRun(request, env, emit) {
         status: result?.status || 'completed',
         operationCount: Array.isArray(result?.operations) ? result.operations.length : 0
       }, 'completed');
-      return okResponse(request.id, prepareResultForResponse(mode, normalizeAgentResult(mode, result, params)));
+      const normalized = normalizeAgentResult(mode, result, params);
+      const resultQuotaError = validateTaskResultOperationQuotas(normalized);
+      if (resultQuotaError) {
+        return quotaErrorResponse(request.id, resultQuotaError);
+      }
+      return okResponse(request.id, prepareResultForResponse(mode, normalized));
     } catch (error) {
       logDebug('agent.run.failed', {
         message: error.message,
@@ -573,7 +871,12 @@ async function handleTaskRun(request, env, emit) {
   }
 
   const operations = params.proposedOperations || [];
-  return okResponse(request.id, prepareResultForResponse(mode, buildDefaultTaskResult(mode, operations, params)));
+  const result = buildDefaultTaskResult(mode, operations, params);
+  const resultQuotaError = validateTaskResultOperationQuotas(result);
+  if (resultQuotaError) {
+    return quotaErrorResponse(request.id, resultQuotaError);
+  }
+  return okResponse(request.id, prepareResultForResponse(mode, result));
 }
 
 function isVerifiedReviewing(reviewing) {
@@ -720,6 +1023,14 @@ function prepareResultForResponse(mode, result) {
     ...redacted,
     planId
   };
+}
+
+function validateTaskResultOperationQuotas(result = {}) {
+  const operations = collectResultOperations(result);
+  return firstQuotaViolation([
+    validateOperationListQuota(operations, 'operations'),
+    validateOperationPayloadQuota(operations, 'operations')
+  ]);
 }
 
 function buildDefaultUserReport(mode, operations = [], params = {}) {
@@ -1019,18 +1330,20 @@ function okResponse(id, result) {
   };
 }
 
-function errorResponse(id, code, message) {
+function errorResponse(id, code, message, details = {}) {
   return {
     id,
     ok: false,
     error: {
       code,
-      message
+      message,
+      ...details
     }
   };
 }
 
 module.exports = {
+  NATIVE_REQUEST_QUOTAS,
   buildDefaultTaskResult,
   handleRequest,
   parseAgentEventLines,

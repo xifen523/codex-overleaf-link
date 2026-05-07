@@ -72,6 +72,29 @@ test('context file list uses the exact Overleaf ZIP file tree and caches it', as
   assert.equal(bridge.getFetchCount(), 1);
 });
 
+test('context file list carries ZIP byte sizes without file contents', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': 'alpha beta\n',
+      'Figures/plot.pdf': '%PDF-test'
+    }
+  });
+
+  const result = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.capabilities.method, 'overleaf-zip-file-list');
+  assert.deepEqual(Array.from(result.files, file => [file.path, file.size]), [
+    ['main.tex', Buffer.byteLength('alpha beta\n')],
+    ['Figures/plot.pdf', Buffer.byteLength('%PDF-test')]
+  ]);
+  assert.equal(result.files.some(file => Object.prototype.hasOwnProperty.call(file, 'content')), false);
+  assert.equal(result.files.some(file => Object.prototype.hasOwnProperty.call(file, 'contentBase64')), false);
+});
+
 test('context file list falls back to strict project tree when ZIP is unavailable', async () => {
   const bridge = createSnapshotHarness({
     files: {
@@ -267,6 +290,24 @@ test('project snapshots reuse the same Overleaf ZIP package within maxAgeMs', as
   assert.deepEqual(Array.from(second.files, file => file.path), ['main.tex', 'refs.bib']);
   assert.equal(bridge.getFetchCount(), 1);
   assert.equal(second.capabilities.diagnostics.snapshotCache, 'memory');
+});
+
+test('page bridge rejects spoofed project snapshots without the content capability', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}'
+    }
+  });
+
+  await bridge.initializeCapability();
+  const result = await bridge.spoofCall('getProjectSnapshot', {
+    requireFullProject: true,
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'page_bridge_unauthorized');
+  assert.equal(bridge.getFetchCount(), 0);
 });
 
 test('preferred lightweight project snapshots read editor state without ZIP download', async () => {
@@ -1025,6 +1066,8 @@ function createSnapshotHarness({
   let openClickCount = 0;
   let treeQueryCount = 0;
   let selectedPath = Array.from(fileMap.keys())[0];
+  const bridgeCapability = 'test-page-bridge-capability';
+  let capabilityInitialized = false;
   const treeNodes = treePaths
     ? treePaths.flatMap(parts => makeNestedTreeNodes(parts))
     : null;
@@ -1189,23 +1232,27 @@ function createSnapshotHarness({
   vm.runInContext(pageBridgeSource, context, { filename: 'pageBridge.js' });
 
   return {
+    async initializeCapability() {
+      if (capabilityInitialized) {
+        return { ok: true, alreadyInitialized: true };
+      }
+      const result = await sendPageBridgeRequest('initializeCapability', {}, {
+        capability: bridgeCapability
+      });
+      capabilityInitialized = true;
+      return result;
+    },
     async call(method, params) {
-      assert.equal(typeof listener, 'function');
-      const id = `test-${pendingResults.size + 1}-${Date.now()}`;
-      const resultPromise = new Promise(resolve => {
-        pendingResults.set(id, resolve);
+      await this.initializeCapability();
+      return sendPageBridgeRequest(method, params, {
+        capability: bridgeCapability
       });
-      await listener({
-        source: window,
-        origin: window.location.origin,
-        data: {
-          source: 'codex-overleaf/content',
-          id,
-          method,
-          params
-        }
+    },
+    async spoofCall(method, params, options = {}) {
+      return sendPageBridgeRequest(method, params, {
+        capability: options.capability,
+        includeCapability: options.includeCapability === true
       });
-      return resultPromise;
     },
     getFetchCount() {
       return fetchCount;
@@ -1226,6 +1273,29 @@ function createSnapshotHarness({
       fetchMode = mode;
     }
   };
+
+  async function sendPageBridgeRequest(method, params, options = {}) {
+    assert.equal(typeof listener, 'function');
+    const id = `test-${pendingResults.size + 1}-${Date.now()}`;
+    const resultPromise = new Promise(resolve => {
+      pendingResults.set(id, resolve);
+    });
+    const data = {
+      source: 'codex-overleaf/content',
+      id,
+      method,
+      params
+    };
+    if (options.includeCapability !== false && typeof options.capability === 'string') {
+      data.capability = options.capability;
+    }
+    await listener({
+      source: window,
+      origin: window.location.origin,
+      data
+    });
+    return resultPromise;
+  }
 
   function makeTreeNode(filePath) {
     return {

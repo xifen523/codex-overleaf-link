@@ -5,7 +5,8 @@ const {
   collectUniqueTextPaths,
   isUsableProjectFileContent,
   isTextProjectPath,
-  normalizePath
+  normalizePath,
+  normalizeSafeProjectPath
 } = require('../extension/src/shared/projectFiles');
 
 test('keeps LaTeX project text files and skips binary assets', () => {
@@ -20,7 +21,8 @@ test('normalizes and deduplicates project file paths with a cap', () => {
   const paths = collectUniqueTextPaths([
     ' main.tex ',
     'main.tex',
-    'sections\\intro.tex',
+    'sections/intro.tex',
+    'sections\\draft.tex',
     'plot.pdf',
     'refs.bib',
     'notes.md'
@@ -31,6 +33,9 @@ test('normalizes and deduplicates project file paths with a cap', () => {
 
 test('rejects parent directory paths', () => {
   assert.equal(isTextProjectPath('../secret.tex'), false);
+  assert.equal(isTextProjectPath('sections\\intro.tex'), false);
+  assert.equal(normalizeSafeProjectPath('/main.tex'), '');
+  assert.equal(normalizeSafeProjectPath('sections\\intro.tex'), '');
   assert.equal(normalizePath('/main.tex'), 'main.tex');
 });
 

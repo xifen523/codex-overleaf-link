@@ -14,7 +14,9 @@ const {
   runCodexAppServerSession,
   runCodexSession
 } = require('../native-host/src/codexSessionRunner');
+const { buildCodexHomeEnv } = require('../native-host/src/codexHome');
 const { getMirrorStatus, getProjectMirror } = require('../native-host/src/mirrorWorkspace');
+const { encodeMessage, MAX_NATIVE_OUTPUT_MESSAGE_BYTES } = require('../native-host/src/nativeMessaging');
 
 const codexSessionRunnerSource = fs.readFileSync(
   path.join(__dirname, '../native-host/src/codexSessionRunner.js'),
@@ -94,6 +96,46 @@ test('runCodexSession marks mirror dirty when local changes are collected for wr
     assert.equal(status.exists, false);
     assert.equal(status.dirty, true);
     assert.equal(status.dirtyReason, 'codex_run_local_changes');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession degrades oversized text writeback before native response encoding', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  const previousContent = `\\section{Before}\n${'A'.repeat(700 * 1024)}\n`;
+  const nextContent = `\\section{After}\n${'B'.repeat(700 * 1024)}\n`;
+  try {
+    const result = await runCodexSession({
+      params: {
+        projectId: 'project-large-text-writeback',
+        task: 'Rewrite the large appendix.',
+        mode: 'auto',
+        project: {
+          files: [
+            { path: 'appendix/large.tex', content: previousContent }
+          ]
+        }
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async ({ workspacePath }) => {
+        fs.mkdirSync(path.join(workspacePath, 'appendix'), { recursive: true });
+        fs.writeFileSync(path.join(workspacePath, 'appendix', 'large.tex'), nextContent, 'utf8');
+      }
+    });
+
+    assert.doesNotThrow(() => encodeMessage({ id: 'large-text', ok: true, result }));
+    const payloadBytes = Buffer.byteLength(JSON.stringify({ id: 'large-text', ok: true, result }), 'utf8');
+    assert.equal(payloadBytes <= MAX_NATIVE_OUTPUT_MESSAGE_BYTES, true);
+    assert.equal(result.syncChanges.some(change => change.path === 'appendix/large.tex'), false);
+    const unsupported = result.unsupportedChanges.find(change => change.path === 'appendix/large.tex');
+    assert.equal(unsupported?.reason, 'text_payload_exceeds_native_message_limit');
+    assert.equal(Object.hasOwn(unsupported, 'content'), false);
+    assert.equal(Object.hasOwn(unsupported, 'previousContent'), false);
+    assert.equal(Object.hasOwn(unsupported, 'diff'), false);
+    assert.equal(Object.hasOwn(unsupported, 'patches'), false);
+    assert.match(unsupported?.guidance || '', /too large.*Overleaf/i);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
@@ -396,6 +438,8 @@ test('runCodexSession carries Codex skill loading toggles to the app-server boun
 
 test('runCodexSession treats skill installer invocations as Codex Overleaf skill-install turns', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-installer-home-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
   let received = null;
   try {
     await runCodexSession({
@@ -410,6 +454,10 @@ test('runCodexSession treats skill installer invocations as Codex Overleaf skill
         project: { files: [{ path: 'main.tex', content: 'Hello' }] }
       },
       rootDir,
+      env: {
+        HOME: home,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
       executeCodex: async input => {
         received = input;
         return {
@@ -419,8 +467,9 @@ test('runCodexSession treats skill installer invocations as Codex Overleaf skill
       }
     });
 
-    assert.equal(received.sandboxMode, 'danger-full-access');
+    assert.equal(received.sandboxMode, 'workspace-write');
     assert.equal(received.approvalPolicy, 'never');
+    assert.equal(received.workspacePath, overleafSkillsRoot);
     assert.equal(received.installCodexOverleafSkillsTarget, true);
     assert.deepEqual(received.skillInvocation, {
       id: 'skill-installer',
@@ -431,6 +480,86 @@ test('runCodexSession treats skill installer invocations as Codex Overleaf skill
     assert.match(received.task, /Current user request:\n安装 https:\/\/github\.com\/openai\/skills/);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession carries selected Codex Overleaf skill invocations without installer privileges', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  let received = null;
+  try {
+    await runCodexSession({
+      params: {
+        projectId: 'normal-skill-turn',
+        task: '用 rebuttal skill 帮我组织回复',
+        mode: 'ask',
+        skillInvocation: {
+          id: 'auto-rebuttal',
+          title: 'Auto Rebuttal',
+          scope: 'codex-overleaf'
+        },
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      executeCodex: async input => {
+        received = input;
+        return {
+          assistantMessage: 'Drafted a rebuttal outline.',
+          threadId: 'thread-normal-skill'
+        };
+      }
+    });
+
+    assert.equal(received.installCodexOverleafSkillsTarget, false);
+    assert.match(received.workspacePath, /workspace$/);
+    assert.deepEqual(received.skillInvocation, {
+      id: 'auto-rebuttal',
+      title: 'Auto Rebuttal',
+      scope: 'codex-overleaf'
+    });
+    assert.match(received.task, /Selected Codex skill:\n- auto-rebuttal \(Auto Rebuttal\)/);
+    assert.match(received.task, /Use this selected Codex Overleaf skill for the current turn/);
+    assert.doesNotMatch(received.task, /skill-install turn/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession rejects skill installer attachments before writing mirror files', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-installer-attachments-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-installer-attachments-home-'));
+  const projectId = 'skill-installer-attachment-turn';
+  try {
+    await assert.rejects(
+      runCodexSession({
+        params: {
+          projectId,
+          task: 'Install a skill using this attachment',
+          mode: 'ask',
+          skillInvocation: {
+            id: 'skill-installer',
+            title: 'Skill Installer'
+          },
+          attachments: [{
+            name: 'notes.txt',
+            contentBase64: Buffer.from('installer context').toString('base64')
+          }],
+          project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+        },
+        rootDir,
+        env: { HOME: home },
+        executeCodex: async () => {
+          throw new Error('Codex should not start for installer attachments');
+        }
+      }),
+      /skill installer.*attachments/i
+    );
+
+    const mirror = getProjectMirror(projectId, { rootDir });
+    assert.equal(fs.existsSync(mirror.workspacePath), false);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
@@ -683,15 +812,11 @@ test('Codex skill isolation disables system and real-user skills while keeping C
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-skill-isolation-'));
   const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
   const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
-  const realOverleafSkillsRoot = path.join(home, 'real-overleaf-skills');
   const realUserSkillPath = path.join(home, '.codex', 'superpowers', 'skills', 'brainstorming', 'SKILL.md');
   const writes = [];
   try {
-    fs.mkdirSync(realOverleafSkillsRoot, { recursive: true });
-    fs.mkdirSync(path.join(realOverleafSkillsRoot, 'overleaf-target'), { recursive: true });
-    fs.writeFileSync(path.join(realOverleafSkillsRoot, 'overleaf-target', 'SKILL.md'), '# Overleaf Target\n', 'utf8');
-    fs.mkdirSync(path.dirname(overleafSkillsRoot), { recursive: true });
-    fs.symlinkSync(realOverleafSkillsRoot, overleafSkillsRoot, 'dir');
+    fs.mkdirSync(path.join(overleafSkillsRoot, 'overleaf-target'), { recursive: true });
+    fs.writeFileSync(path.join(overleafSkillsRoot, 'overleaf-target', 'SKILL.md'), '# Overleaf Target\n', 'utf8');
     await applyCodexSkillIsolation({
       input: {
         workspacePath: '/tmp/project',
@@ -743,7 +868,7 @@ test('Codex skill isolation disables system and real-user skills while keeping C
                     name: 'overleaf-target',
                     scope: 'user',
                     enabled: true,
-                    path: path.join(realOverleafSkillsRoot, 'overleaf-target', 'SKILL.md')
+                    path: path.join(overleafSkillsRoot, 'overleaf-target', 'SKILL.md')
                   }
                 ]
               }
@@ -782,12 +907,437 @@ test('Codex app-server runs with plugin-isolated CODEX_HOME', () => {
   assert.doesNotMatch(codexSessionRunnerSource, /env:\s*input\.env \|\| process\.env/);
 });
 
-test('skill installer command approval accepts commands even when the visible mode is ask', () => {
-  assert.deepEqual(decideCommandApproval({
-    mode: 'ask',
-    skillInvocation: { id: 'skill-installer' },
-    params: { command: 'python scripts/install-skill-from-github.py --url https://github.com/openai/skills/tree/main/skills/.curated/pdf' }
-  }), { decision: 'accept' });
+test('skill installer command approval accepts only contained installer commands in ask mode', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-installer-approval-'));
+  const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const mirrorWorkspace = path.join(home, '.codex-overleaf', 'projects', 'paper', 'workspace');
+  try {
+    const base = {
+      mode: 'ask',
+      skillInvocation: { id: 'skill-installer' },
+      env: {
+        HOME: home,
+        CODEX_HOME: pluginHome,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
+      workspacePath: mirrorWorkspace
+    };
+
+    assert.deepEqual(decideCommandApproval({
+      ...base,
+      params: {
+        command: [
+          'git',
+          'clone',
+          '--depth',
+          '1',
+          'https://github.com/openai/skills.git',
+          '$CODEX_HOME/skills/pdf'
+        ]
+      }
+    }), { decision: 'accept' });
+
+    assert.equal(decideCommandApproval({
+      ...base,
+      params: {
+        command: [
+          'python3',
+          'scripts/install-skill-from-github.py',
+          '--url',
+          'https://github.com/openai/skills/tree/main/skills/.curated/pdf',
+          '--target',
+          path.join(home, '.codex', 'skills', 'pdf')
+        ]
+      }
+    }).decision, 'decline');
+
+    assert.equal(decideCommandApproval({
+      ...base,
+      params: {
+        command: [
+          'python3',
+          'scripts/install-skill-from-github.py',
+          '--url',
+          'https://github.com/openai/skills/tree/main/skills/.curated/pdf',
+          '--target',
+          path.join(mirrorWorkspace, '.codex-overleaf', 'skills', 'pdf')
+        ]
+      }
+    }).decision, 'decline');
+
+    assert.equal(decideCommandApproval({
+      ...base,
+      params: { command: 'rm -rf /tmp/codex-overleaf-owned' }
+    }).decision, 'decline');
+
+    assert.equal(decideCommandApproval({
+      ...base,
+      params: { command: 'sort -o /tmp/sorted.txt README.md' }
+    }).decision, 'decline');
+
+    assert.equal(decideCommandApproval({
+      ...base,
+      params: { command: 'sort --output=/tmp/sorted.txt README.md' }
+    }).decision, 'decline');
+
+    assert.equal(decideCommandApproval({
+      ...base,
+      params: {
+        command: [
+          'git',
+          'clone',
+          '--separate-git-dir',
+          '/tmp/codex-overleaf-git-dir',
+          'https://github.com/openai/skills.git',
+          '$CODEX_HOME/skills/pdf'
+        ]
+      }
+    }).decision, 'decline');
+
+    for (const command of [
+      'awk \'BEGIN { system("touch /tmp/codex-overleaf-owned") }\' README.md',
+      'awk \'{ print > "/tmp/codex-overleaf-owned" }\' README.md',
+      'sed \'w /tmp/codex-overleaf-owned\' README.md',
+      'find . -fprint /tmp/codex-overleaf-owned'
+    ]) {
+      assert.equal(
+        decideCommandApproval({ ...base, params: { command } }).decision,
+        'decline',
+        `expected "${command}" to be declined`
+      );
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('skill installer command approval rejects unsafe git clone forms and untrusted installer scripts', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-installer-unsafe-'));
+  const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  try {
+    const base = {
+      mode: 'ask',
+      skillInvocation: { id: 'skill-installer' },
+      env: {
+        HOME: home,
+        CODEX_HOME: pluginHome,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
+      workspacePath: overleafSkillsRoot
+    };
+
+    const unsafeCommands = [
+      [
+        'git',
+        'clone',
+        '-c',
+        'core.sshCommand=/tmp/evil-ssh',
+        'https://github.com/openai/skills.git',
+        '$CODEX_HOME/skills/pdf'
+      ],
+      [
+        'git',
+        'clone',
+        '--config',
+        'core.sshCommand=/tmp/evil-ssh',
+        'https://github.com/openai/skills.git',
+        '$CODEX_HOME/skills/pdf'
+      ],
+      [
+        'git',
+        'clone',
+        '--upload-pack=/tmp/evil-upload-pack',
+        'https://github.com/openai/skills.git',
+        '$CODEX_HOME/skills/pdf'
+      ],
+      [
+        'git',
+        'clone',
+        'ext::sh -c touch /tmp/codex-overleaf-owned',
+        '$CODEX_HOME/skills/pdf'
+      ],
+      [
+        'git',
+        'clone',
+        'file:///tmp/codex-overleaf-owned',
+        '$CODEX_HOME/skills/pdf'
+      ],
+      [
+        'git',
+        'clone',
+        '/tmp/codex-overleaf-owned',
+        '$CODEX_HOME/skills/pdf'
+      ],
+      [
+        'git',
+        'clone',
+        'ssh://github.com/openai/skills.git',
+        '$CODEX_HOME/skills/pdf'
+      ],
+      [
+        'git',
+        'clone',
+        'git@github.com:openai/skills.git',
+        '$CODEX_HOME/skills/pdf'
+      ],
+      [
+        'python3',
+        '/tmp/install-evil-skill.py',
+        '--target',
+        '$CODEX_HOME/skills/pdf'
+      ],
+      [
+        'node',
+        '/tmp/install-evil-skill.js',
+        '--target',
+        '$CODEX_HOME/skills/pdf'
+      ]
+    ];
+
+    for (const command of unsafeCommands) {
+      assert.equal(
+        decideCommandApproval({ ...base, params: { command } }).decision,
+        'decline',
+        `expected ${JSON.stringify(command)} to be declined`
+      );
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('skill installer command approval rejects symlinked write targets under skill roots', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-installer-symlink-target-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-installer-outside-target-'));
+  const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const escapeLink = path.join(overleafSkillsRoot, 'escape');
+  try {
+    fs.mkdirSync(overleafSkillsRoot, { recursive: true });
+    fs.symlinkSync(outside, escapeLink, process.platform === 'win32' ? 'junction' : 'dir');
+    const base = {
+      mode: 'ask',
+      skillInvocation: { id: 'skill-installer' },
+      env: {
+        HOME: home,
+        CODEX_HOME: pluginHome,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
+      workspacePath: overleafSkillsRoot
+    };
+
+    assert.equal(decideCommandApproval({
+      ...base,
+      params: {
+        command: [
+          'python3',
+          'scripts/install-skill-from-github.py',
+          '--url',
+          'https://github.com/openai/skills/tree/main/skills/.curated/pdf',
+          '--target',
+          path.join(escapeLink, 'pdf')
+        ]
+      }
+    }).decision, 'decline');
+
+    assert.equal(decideCommandApproval({
+      ...base,
+      params: {
+        command: [
+          'git',
+          'clone',
+          'https://github.com/openai/skills.git',
+          path.join(escapeLink, 'pdf')
+        ]
+      }
+    }).decision, 'decline');
+
+    assert.equal(decideCommandApproval({
+      ...base,
+      params: {
+        command: [
+          'git',
+          'clone',
+          '--separate-git-dir',
+          path.join(escapeLink, 'git-dir'),
+          'https://github.com/openai/skills.git',
+          '$CODEX_HOME/skills/pdf'
+        ]
+      }
+    }).decision, 'decline');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('skill installer command approval accepts real CODEX_HOME skills symlink while rejecting nested symlink escapes', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-real-installer-target-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-real-installer-outside-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  try {
+    const childEnv = buildCodexHomeEnv({
+      HOME: home,
+      CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+    }, {
+      installCodexOverleafSkillsTarget: true
+    });
+    const pluginSkills = path.join(childEnv.CODEX_HOME, 'skills');
+    assert.equal(fs.lstatSync(pluginSkills).isSymbolicLink(), true);
+    assert.equal(fs.realpathSync.native(pluginSkills), fs.realpathSync.native(overleafSkillsRoot));
+
+    const base = {
+      mode: 'ask',
+      skillInvocation: { id: 'skill-installer' },
+      env: childEnv,
+      workspacePath: overleafSkillsRoot
+    };
+
+    assert.deepEqual(decideCommandApproval({
+      ...base,
+      params: {
+        command: [
+          'git',
+          'clone',
+          'https://github.com/openai/skills.git',
+          '$CODEX_HOME/skills'
+        ]
+      }
+    }), { decision: 'accept' });
+
+    const escapeLink = path.join(overleafSkillsRoot, 'escape');
+    fs.symlinkSync(outside, escapeLink, process.platform === 'win32' ? 'junction' : 'dir');
+
+    assert.equal(decideCommandApproval({
+      ...base,
+      params: {
+        command: [
+          'python3',
+          'scripts/install-skill-from-github.py',
+          '--dest',
+          '$CODEX_HOME/skills/escape/pdf'
+        ]
+      }
+    }).decision, 'decline');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('skill installer command approval rejects CODEX_HOME skills symlinks outside the approved Overleaf skill root', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-bad-installer-root-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-bad-installer-outside-'));
+  const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  try {
+    fs.mkdirSync(pluginHome, { recursive: true });
+    fs.mkdirSync(overleafSkillsRoot, { recursive: true });
+    fs.symlinkSync(outside, path.join(pluginHome, 'skills'), process.platform === 'win32' ? 'junction' : 'dir');
+
+    assert.equal(decideCommandApproval({
+      mode: 'ask',
+      skillInvocation: { id: 'skill-installer' },
+      env: {
+        HOME: home,
+        CODEX_HOME: pluginHome,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
+      workspacePath: overleafSkillsRoot,
+      params: {
+        command: [
+          'python3',
+          'scripts/install-skill-from-github.py',
+          '--dest',
+          '$CODEX_HOME/skills/pdf'
+        ]
+      }
+    }).decision, 'decline');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test('skill installer command approval accepts contained read-only inspection commands', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-installer-read-'));
+  const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const workspacePath = path.join(home, '.codex-overleaf', 'projects', 'paper', 'workspace');
+  try {
+    fs.mkdirSync(path.join(pluginHome, 'skills', 'pdf'), { recursive: true });
+    fs.mkdirSync(path.join(overleafSkillsRoot, 'writer'), { recursive: true });
+    fs.mkdirSync(workspacePath, { recursive: true });
+    fs.writeFileSync(path.join(workspacePath, 'README.md'), '# skill\n', 'utf8');
+    fs.writeFileSync(path.join(pluginHome, 'skills', 'pdf', 'SKILL.md'), '# PDF\n', 'utf8');
+    fs.writeFileSync(path.join(overleafSkillsRoot, 'writer', 'SKILL.md'), '# Writer\n', 'utf8');
+
+    const base = {
+      mode: 'ask',
+      skillInvocation: { id: 'skill-installer' },
+      env: {
+        HOME: home,
+        CODEX_HOME: pluginHome,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
+      workspacePath
+    };
+
+    for (const command of [
+      'rg skill',
+      'grep skill',
+      'rg skill README.md',
+      'cat $CODEX_HOME/skills/pdf/SKILL.md',
+      `grep Writer ${path.join(overleafSkillsRoot, 'writer', 'SKILL.md')}`
+    ]) {
+      assert.deepEqual(
+        decideCommandApproval({ ...base, params: { command } }),
+        { decision: 'accept' },
+        `expected "${command}" to be accepted`
+      );
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('skill installer command approval rejects read-only inspection paths outside allowed roots', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-installer-read-escape-'));
+  const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const workspacePath = path.join(home, '.codex-overleaf', 'projects', 'paper', 'workspace');
+  try {
+    fs.mkdirSync(workspacePath, { recursive: true });
+    const base = {
+      mode: 'ask',
+      skillInvocation: { id: 'skill-installer' },
+      env: {
+        HOME: home,
+        CODEX_HOME: pluginHome,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
+      workspacePath
+    };
+
+    for (const command of [
+      'cat ~/.ssh/id_rsa',
+      'cat ~root/.ssh/id_rsa',
+      'bash -lc "cat ~/.ssh/id_rsa"',
+      'cat $HOME/.codex/config.toml',
+      'rg token ~/.ssh',
+      'grep token /etc/passwd'
+    ]) {
+      assert.equal(
+        decideCommandApproval({ ...base, params: { command } }).decision,
+        'decline',
+        `expected "${command}" to be declined`
+      );
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('command execution approvals only allow known local inspection and LaTeX commands', () => {

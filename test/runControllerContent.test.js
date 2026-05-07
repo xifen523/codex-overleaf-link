@@ -146,6 +146,32 @@ test('run controller forwards a bounded skill invocation for special composer sk
   });
 });
 
+test('run controller forwards selected Codex Overleaf skill invocations', () => {
+  const params = RunController.buildCodexRunParams({
+    currentProjectId: 'project-123',
+    state: {
+      mode: 'ask',
+      model: 'gpt-5.5',
+      reasoningEffort: 'medium',
+      session: { id: 'session-1' }
+    },
+    task: 'draft the rebuttal',
+    project: { files: [{ path: 'main.tex', content: 'hello' }] },
+    skillInvocation: {
+      id: 'auto-rebuttal',
+      title: 'Auto Rebuttal',
+      scope: 'codex-overleaf',
+      extra: 'drop-me'
+    }
+  });
+
+  assert.deepEqual(params.skillInvocation, {
+    id: 'auto-rebuttal',
+    title: 'Auto Rebuttal',
+    scope: 'codex-overleaf'
+  });
+});
+
 test('run controller uses the submitted mode instead of mutable panel state when provided', () => {
   const params = RunController.buildCodexRunParams({
     currentProjectId: 'project-123',

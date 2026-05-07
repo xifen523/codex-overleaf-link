@@ -8,7 +8,8 @@ const { truncateText } = require('./debugLog');
 
 const SKILLS_DIR = path.join('.codex-overleaf', 'skills');
 const CODEX_OVERLEAF_SKILLS_DIR = path.join('.codex-overleaf', 'skills');
-const MAX_SKILL_CONTENT_CHARS = 64 * 1024;
+const MAX_SKILL_CONTENT_BYTES = 64 * 1024;
+const MAX_SKILL_CONTENT_CHARS = MAX_SKILL_CONTENT_BYTES;
 const MAX_SKILL_PREVIEW_CHARS = 240;
 const PROJECT_SKILL_SCOPE = 'project';
 const CODEX_OVERLEAF_SKILL_SCOPE = 'codex-overleaf';
@@ -51,8 +52,8 @@ function installProjectSkill({ projectId, skillId, content, rootDir } = {}) {
   if (typeof content !== 'string') {
     throw new Error('Project-local skills require markdown/text content');
   }
-  if (content.length > MAX_SKILL_CONTENT_CHARS) {
-    throw new Error(`Project-local skill content exceeds ${MAX_SKILL_CONTENT_CHARS} characters`);
+  if (Buffer.byteLength(content, 'utf8') > MAX_SKILL_CONTENT_BYTES) {
+    throw new Error(`Project-local skill content exceeds ${MAX_SKILL_CONTENT_BYTES} bytes`);
   }
   if (content.includes('\u0000')) {
     throw new Error('Project-local skill content must be markdown/text');
@@ -121,8 +122,12 @@ function installCodexOverleafSkill({ skillId, content, env = process.env, skills
   const id = validateSkillId(skillId);
   validateSkillContent(content, 'Codex Overleaf skills');
 
+  const root = getCodexOverleafSkillsRoot({ env, skillsRoot });
   const filePath = resolveCodexOverleafSkillPath(id, { env, skillsRoot });
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const skillDir = path.dirname(filePath);
+  assertNoSymlinkEscape(skillDir, root, 'Unsafe Codex Overleaf skill path');
+  fs.mkdirSync(skillDir, { recursive: true });
+  assertNoSymlinkEscape(skillDir, root, 'Unsafe Codex Overleaf skill path');
   fs.writeFileSync(filePath, content, 'utf8');
 
   const stat = fs.statSync(filePath);
@@ -158,7 +163,7 @@ function loadSelectedProjectSkills({ projectId, selectedSkillIds, rootDir, proje
       continue;
     }
     const stat = fs.statSync(filePath);
-    if (stat.size > MAX_SKILL_CONTENT_CHARS * 4) {
+    if (stat.size > MAX_SKILL_CONTENT_BYTES) {
       missing.push(id);
       continue;
     }
@@ -201,13 +206,28 @@ function getProjectSkillsDir(projectId, options = {}) {
 }
 
 function getCodexOverleafSkillsRoot({ env = process.env, skillsRoot } = {}) {
+  const defaultRoot = getDefaultCodexOverleafSkillsRoot({ env });
   if (skillsRoot) {
-    return path.resolve(skillsRoot);
+    return validateCodexOverleafSkillsRoot(path.resolve(skillsRoot), defaultRoot);
   }
   if (env.CODEX_OVERLEAF_SKILLS_ROOT) {
-    return path.resolve(env.CODEX_OVERLEAF_SKILLS_ROOT);
+    return validateCodexOverleafSkillsRoot(path.resolve(env.CODEX_OVERLEAF_SKILLS_ROOT), defaultRoot);
   }
+  return validateCodexOverleafSkillsRoot(defaultRoot, defaultRoot);
+}
+
+function getDefaultCodexOverleafSkillsRoot({ env = process.env } = {}) {
   return path.resolve(getHomeDir({ env }), CODEX_OVERLEAF_SKILLS_DIR);
+}
+
+function validateCodexOverleafSkillsRoot(root, defaultRoot) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedDefault = path.resolve(defaultRoot);
+  if (!isInsideOrSamePath(resolvedRoot, resolvedDefault)) {
+    throw new Error(`Codex Overleaf skill root must stay inside ${resolvedDefault}`);
+  }
+  assertNoSymlinkEscape(resolvedRoot, path.dirname(resolvedDefault), 'Codex Overleaf skill root escapes the plugin data root');
+  return resolvedRoot;
 }
 
 function resolveSkillPath(projectId, skillId, options = {}) {
@@ -230,10 +250,44 @@ function resolveCodexOverleafSkillPath(skillId, options = {}) {
 function resolveInside(root, child, message) {
   const base = path.resolve(root);
   const target = path.resolve(base, child);
-  if (target !== base && !target.startsWith(base + path.sep)) {
+  if (!isInsideOrSamePath(target, base)) {
     throw new Error(message);
   }
   return target;
+}
+
+function assertNoSymlinkEscape(target, containmentRoot, message) {
+  const root = path.resolve(containmentRoot);
+  const resolvedTarget = path.resolve(target);
+  if (!isInsideOrSamePath(resolvedTarget, root)) {
+    throw new Error(message);
+  }
+
+  const relativeParts = path.relative(root, resolvedTarget).split(path.sep).filter(Boolean);
+  let current = root;
+  assertNotSymlink(current, message);
+  for (const part of relativeParts) {
+    current = path.join(current, part);
+    assertNotSymlink(current, message);
+  }
+}
+
+function assertNotSymlink(target, message) {
+  try {
+    if (fs.lstatSync(target).isSymbolicLink()) {
+      throw new Error(message);
+    }
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return;
+    }
+    throw error;
+  }
+}
+
+function isInsideOrSamePath(target, root) {
+  const relative = path.relative(path.resolve(root), path.resolve(target));
+  return relative === '' || (relative && !relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function validateProjectId(projectId) {
@@ -257,8 +311,8 @@ function validateSkillContent(content, label) {
   if (typeof content !== 'string') {
     throw new Error(`${label} require markdown/text content`);
   }
-  if (content.length > MAX_SKILL_CONTENT_CHARS) {
-    throw new Error(`${label} content exceeds ${MAX_SKILL_CONTENT_CHARS} characters`);
+  if (Buffer.byteLength(content, 'utf8') > MAX_SKILL_CONTENT_BYTES) {
+    throw new Error(`${label} content exceeds ${MAX_SKILL_CONTENT_BYTES} bytes`);
   }
   if (content.includes('\u0000')) {
     throw new Error(`${label} content must be markdown/text`);
@@ -311,8 +365,10 @@ function buildSkillMetadata({ id, content, size, updatedAt, scope }) {
 
 module.exports = {
   CODEX_OVERLEAF_SKILL_SCOPE,
+  MAX_SKILL_CONTENT_BYTES,
   MAX_SKILL_CONTENT_CHARS,
   PROJECT_SKILL_SCOPE,
+  getDefaultCodexOverleafSkillsRoot,
   getCodexOverleafSkillsRoot,
   installCodexOverleafSkill,
   installProjectSkill,

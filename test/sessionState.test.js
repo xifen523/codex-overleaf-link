@@ -16,6 +16,55 @@ const {
   updateActiveSession
 } = require('../extension/src/shared/sessionState');
 
+const SECRET = 'sk-v0test_DO_NOT_LEAK_1234567890abcdef';
+const SECRET_PATH = `sections/${SECRET}/main.tex`;
+const PROJECT_TEXT = `PROJECT_TEXT_SHOULD_NOT_PERSIST ${SECRET}`;
+const TASK_PROMPT = `TASK_PROMPT_SHOULD_NOT_PERSIST ${SECRET}`;
+const COMPILE_LOG = `COMPILE_LOG_SHOULD_NOT_PERSIST ${SECRET}`;
+const COMMAND_OUTPUT = `COMMAND_OUTPUT_SHOULD_NOT_PERSIST ${SECRET}`;
+const NO_SECRET_PROMPT_BODY = 'PROMPT_BODY_SHOULD_NOT_PERSIST';
+const NO_SECRET_COMMAND_OUTPUT = 'COMMAND_OUTPUT_SHOULD_NOT_PERSIST';
+const NO_SECRET_COMPILE_LOG = 'COMPILE_LOG_SHOULD_NOT_PERSIST';
+const NO_SECRET_RAW_DIFF = 'RAW_DIFF_SHOULD_NOT_PERSIST';
+const NO_SECRET_PROJECT_TEXT = 'PROJECT_TEXT_SHOULD_NOT_PERSIST';
+const NO_SECRET_IMAGE_DATA_URL = 'data:image/png;base64,NO_SECRET_IMAGE_DATA_SHOULD_NOT_PERSIST';
+const GITHUB_PAT = `ghp_${'A'.repeat(36)}`;
+const GITHUB_FINE_GRAINED_PAT = `github_pat_${'B'.repeat(36)}`;
+const SLACK_TOKEN = `xoxb-${'C'.repeat(24)}`;
+const AWS_ACCESS_KEY = `AKIA${'D'.repeat(16)}`;
+const BEARER_TOKEN_VALUE = `${'e'.repeat(32)}.${'f'.repeat(16)}`;
+const BEARER_TOKEN = `Bearer ${BEARER_TOKEN_VALUE}`;
+const PRIVATE_KEY_BLOCK = [
+  '-----BEGIN PRIVATE KEY-----',
+  'MIIEvCOMMONSECRETKEYDATA',
+  '-----END PRIVATE KEY-----'
+].join('\n');
+const API_KEY_VALUE = 'api_key_common_secret_12345';
+const TOKEN_VALUE = 'token_common_secret_12345';
+const PASSWORD_VALUE = 'password_common_secret_12345';
+const COMMON_SECRET_TEXT = [
+  GITHUB_PAT,
+  GITHUB_FINE_GRAINED_PAT,
+  SLACK_TOKEN,
+  AWS_ACCESS_KEY,
+  BEARER_TOKEN,
+  PRIVATE_KEY_BLOCK,
+  `api_key=${API_KEY_VALUE}`,
+  `token: ${TOKEN_VALUE}`,
+  `password=${PASSWORD_VALUE}`
+].join(' ');
+const COMMON_SECRET_FORBIDDEN_VALUES = [
+  GITHUB_PAT,
+  GITHUB_FINE_GRAINED_PAT,
+  SLACK_TOKEN,
+  AWS_ACCESS_KEY,
+  BEARER_TOKEN_VALUE,
+  'MIIEvCOMMONSECRETKEYDATA',
+  API_KEY_VALUE,
+  TOKEN_VALUE,
+  PASSWORD_VALUE
+];
+
 test('normalizes missing panel state with defaults and a session id', () => {
   const state = normalizePanelState({});
 
@@ -290,7 +339,7 @@ test('recordSessionResult preserves existing session runs and settings', () => {
   assert.equal(updated.history.at(-1).result, '已检查并总结');
 });
 
-test('normalizes and stores run attachment preview metadata without raw file content', () => {
+test('normalizes run attachment previews in memory and omits raw previews from compact storage', () => {
   const state = normalizePanelState({
     runs: [{
       id: 'run_attachments',
@@ -334,8 +383,236 @@ test('normalizes and stores run attachment preview metadata without raw file con
   ]);
 
   const compact = prepareStateForStorage(state);
-  assert.deepEqual(compact.sessions[0].runs[0].attachments, state.runs[0].attachments);
+  assert.deepEqual(compact.sessions[0].runs[0].attachments, [
+    {
+      name: 'image.png',
+      mimeType: 'image/png',
+      size: 1234,
+      kind: 'image'
+    },
+    {
+      name: 'CV_CN.pdf',
+      mimeType: 'application/pdf',
+      size: 4567,
+      kind: 'file'
+    }
+  ]);
+  assert.equal(JSON.stringify(compact).includes('data:image/png;base64,abc123'), false);
   assert.equal(JSON.stringify(compact).includes('raw-file-content-must-not-persist'), false);
+});
+
+test('prepareStateForStorage redacts seeded secrets from persisted session state', () => {
+  const state = normalizePanelState({
+    task: TASK_PROMPT,
+    focusFiles: [SECRET_PATH],
+    customInstructionsByProject: {
+      [`project-${SECRET}`]: `Prefer concise edits ${SECRET}`
+    },
+    sessions: [{
+      id: 'session_secret',
+      title: `Secret session ${SECRET}`,
+      task: TASK_PROMPT,
+      history: [{
+        task: TASK_PROMPT,
+        result: COMMAND_OUTPUT,
+        at: '2026-05-06T00:00:00.000Z'
+      }],
+      focusFiles: [SECRET_PATH],
+      runs: [{
+        id: 'run_secret',
+        task: TASK_PROMPT,
+        status: 'completed',
+        statusText: COMMAND_OUTPUT,
+        events: [{
+          title: `Compile failed ${SECRET}`,
+          status: 'failed',
+          kind: 'report',
+          detail: {
+            commandOutput: COMMAND_OUTPUT,
+            compileLog: COMPILE_LOG,
+            projectText: PROJECT_TEXT,
+            path: SECRET_PATH
+          },
+          technicalDetail: {
+            raw: COMMAND_OUTPUT
+          }
+        }],
+        attachments: [{
+          name: SECRET_PATH,
+          mimeType: 'text/plain',
+          size: 128,
+          previewDataUrl: ''
+        }],
+        undoOperations: [{
+          type: 'edit',
+          path: SECRET_PATH,
+          replaceAll: PROJECT_TEXT
+        }],
+        undoBaseFiles: [{ path: SECRET_PATH, content: PROJECT_TEXT }],
+        undoExpectedFiles: [{ path: SECRET_PATH, content: PROJECT_TEXT }],
+        undoTrackedChanges: [{ key: `tracked-${SECRET}`, path: SECRET_PATH, label: `Change ${SECRET}` }]
+      }]
+    }],
+    activeSessionId: 'session_secret'
+  });
+
+  const compact = prepareStateForStorage(state);
+  const serialized = JSON.stringify(compact);
+
+  for (const forbidden of [
+    SECRET,
+    PROJECT_TEXT,
+    TASK_PROMPT,
+    COMPILE_LOG,
+    COMMAND_OUTPUT,
+    SECRET_PATH
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, `persisted state leaked ${forbidden}`);
+  }
+
+  const run = compact.sessions[0].runs[0];
+  assert.equal(run.undoOperations.length, 0);
+  assert.equal(run.undoBaseFiles.length, 0);
+  assert.equal(run.undoExpectedFiles.length, 0);
+});
+
+test('prepareStateForStorage redacts common secret formats from persisted session state', () => {
+  const state = normalizePanelState({
+    task: `Rotate leaked credentials ${COMMON_SECRET_TEXT}`,
+    focusFiles: [`sections/${GITHUB_PAT}/main.tex`],
+    customInstructionsByProject: {
+      [`project-${GITHUB_FINE_GRAINED_PAT}`]: `Use replacement token: ${TOKEN_VALUE}`
+    },
+    sessions: [{
+      id: 'session_common_secrets',
+      title: `Secret rotation ${GITHUB_PAT}`,
+      task: `Rotate leaked credentials ${COMMON_SECRET_TEXT}`,
+      history: [{
+        task: `History ${GITHUB_PAT}`,
+        result: COMMON_SECRET_TEXT,
+        at: '2026-05-06T00:00:00.000Z'
+      }],
+      focusFiles: [`sections/${SLACK_TOKEN}/main.tex`],
+      runs: [{
+        id: 'run_common_secrets',
+        task: `Run ${COMMON_SECRET_TEXT}`,
+        status: 'completed',
+        statusText: `Failed with ${BEARER_TOKEN}`,
+        events: [{
+          title: `Event ${GITHUB_PAT}`,
+          status: 'failed',
+          kind: 'report',
+          detail: {
+            summary: COMMON_SECRET_TEXT,
+            path: `sections/${AWS_ACCESS_KEY}/main.tex`
+          },
+          technicalDetail: {
+            raw: COMMON_SECRET_TEXT
+          }
+        }],
+        attachments: [{
+          name: `attachment-${SLACK_TOKEN}.txt`,
+          mimeType: 'text/plain',
+          size: 128,
+          previewDataUrl: ''
+        }],
+        undoOperations: [{
+          type: 'edit',
+          path: `sections/${GITHUB_PAT}/main.tex`,
+          replaceAll: COMMON_SECRET_TEXT
+        }],
+        undoBaseFiles: [{ path: `sections/${GITHUB_PAT}/main.tex`, content: COMMON_SECRET_TEXT }],
+        undoExpectedFiles: [{ path: `sections/${GITHUB_PAT}/main.tex`, content: COMMON_SECRET_TEXT }],
+        undoTrackedChanges: [{ key: `tracked-${GITHUB_PAT}`, path: `sections/${SLACK_TOKEN}/main.tex`, label: `Change ${AWS_ACCESS_KEY}` }],
+        undoStatus: `undo ${BEARER_TOKEN}`
+      }]
+    }],
+    activeSessionId: 'session_common_secrets'
+  });
+
+  const compact = prepareStateForStorage(state);
+  const serialized = JSON.stringify(compact);
+  assert.match(compact.task, /^\[task omitted; chars=\d+; hash=[a-f0-9]{8}\]$/);
+  for (const forbidden of COMMON_SECRET_FORBIDDEN_VALUES) {
+    assert.equal(serialized.includes(forbidden), false, `persisted state leaked ${forbidden}`);
+  }
+
+  const run = compact.sessions[0].runs[0];
+  assert.equal(run.undoOperations.length, 0);
+  assert.equal(run.undoBaseFiles.length, 0);
+  assert.equal(run.undoExpectedFiles.length, 0);
+});
+
+test('prepareStateForStorage summarizes no-secret prompt and body fields instead of persisting raw text', () => {
+  const state = normalizePanelState({
+    task: NO_SECRET_PROMPT_BODY,
+    sessions: [{
+      id: 'session_no_secret_privacy',
+      title: 'No-secret privacy regression',
+      task: NO_SECRET_PROMPT_BODY,
+      history: [{
+        task: NO_SECRET_PROMPT_BODY,
+        result: NO_SECRET_COMMAND_OUTPUT,
+        at: '2026-05-06T00:00:00.000Z'
+      }],
+      focusFiles: ['main.tex', 'sections/method.tex'],
+      runs: [{
+        id: 'run_no_secret_privacy',
+        task: NO_SECRET_PROMPT_BODY,
+        status: 'failed',
+        statusText: NO_SECRET_COMMAND_OUTPUT,
+        startedAt: '2026-05-06T00:00:00.000Z',
+        finishedAt: '2026-05-06T00:01:00.000Z',
+        events: [{
+          title: NO_SECRET_COMMAND_OUTPUT,
+          status: NO_SECRET_COMMAND_OUTPUT,
+          kind: 'report',
+          detail: {
+            commandOutput: NO_SECRET_COMMAND_OUTPUT,
+            compileLog: NO_SECRET_COMPILE_LOG,
+            rawDiff: NO_SECRET_RAW_DIFF,
+            projectText: NO_SECRET_PROJECT_TEXT,
+            path: 'main.tex'
+          }
+        }],
+        attachments: [{
+          name: 'figure.png',
+          mimeType: 'image/png',
+          size: 256,
+          kind: 'image',
+          previewDataUrl: NO_SECRET_IMAGE_DATA_URL
+        }]
+      }]
+    }],
+    activeSessionId: 'session_no_secret_privacy'
+  });
+
+  const compact = prepareStateForStorage(state);
+  const serialized = JSON.stringify(compact);
+
+  for (const forbidden of [
+    NO_SECRET_PROMPT_BODY,
+    NO_SECRET_COMMAND_OUTPUT,
+    NO_SECRET_COMPILE_LOG,
+    NO_SECRET_RAW_DIFF,
+    NO_SECRET_PROJECT_TEXT,
+    NO_SECRET_IMAGE_DATA_URL
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, `persisted state leaked ${forbidden}`);
+  }
+
+  const storedRun = compact.sessions[0].runs[0];
+  assert.equal(compact.sessions[0].title, 'No-secret privacy regression');
+  assert.deepEqual(compact.sessions[0].focusFiles, ['main.tex', 'sections/method.tex']);
+  assert.equal(storedRun.status, 'failed');
+  assert.equal(storedRun.startedAt, '2026-05-06T00:00:00.000Z');
+  assert.equal(storedRun.finishedAt, '2026-05-06T00:01:00.000Z');
+  assert.deepEqual(storedRun.attachments, [{
+    name: 'figure.png',
+    mimeType: 'image/png',
+    size: 256,
+    kind: 'image'
+  }]);
 });
 
 test('normalizes previously corrupted history-only sessions into clickable runs', () => {
@@ -620,10 +897,10 @@ test('prepares a compact persisted state without storing huge historical payload
   assert.equal(activeStoredSession.runs[0].events[0].technicalDetail, undefined);
   assert.ok(activeStoredSession.runs[0].events[0].title.length < 6100);
   assert.equal(activeStoredSession.runs[0].undoOperations.length, 0);
-  assert.equal(activeStoredSession.runs.at(-1).undoOperations.length, 1);
+  assert.equal(activeStoredSession.runs.at(-1).undoOperations.length, 0);
 });
 
-test('storage compaction preserves long final reports better than transient activity details', () => {
+test('storage compaction summarizes long final reports instead of persisting report bodies', () => {
   const reportBody = [
     '结论：我检查了全文。',
     '',
@@ -663,9 +940,11 @@ test('storage compaction preserves long final reports better than transient acti
   const activity = run.events.find(event => event.kind === 'activity');
   const report = run.events.find(event => event.kind === 'report');
 
-  assert.match(report.detail, /END_REPORT_MARKER/);
-  assert.match(report.detail, /\[paper\.tex:486\]\(/);
-  assert.doesNotMatch(activity.detail, /END_ACTIVITY_MARKER/);
+  assert.match(report.detail, /^\[detail omitted; chars=\d+; hash=[a-f0-9]{8}\]$/);
+  assert.match(activity.detail, /^\[detail omitted; chars=\d+; hash=[a-f0-9]{8}\]$/);
+  assert.doesNotMatch(JSON.stringify(compact), /END_REPORT_MARKER/);
+  assert.doesNotMatch(JSON.stringify(compact), /END_ACTIVITY_MARKER/);
+  assert.doesNotMatch(JSON.stringify(compact), /\[paper\.tex:486\]\(/);
 });
 
 test('aggressive storage preparation preserves the active session essentials under a smaller cap', () => {

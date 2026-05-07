@@ -10,6 +10,11 @@
   const TEXT_PATH_EXTENSION_PATTERN = '(?:tex|bib|sty|cls|bst|bbx|cbx|lbx|cfg|def|clo|ist|txt|md|latex)';
   const MAX_BINARY_FILE_BYTES = 10 * 1024 * 1024;
   const MAX_BINARY_TOTAL_BYTES = 80 * 1024 * 1024;
+  const PAGE_BRIDGE_CAPABILITY_METHOD = 'initializeCapability';
+  // The page bridge runs in Overleaf's page world so it can reach editor state.
+  // The capability reduces unauthenticated postMessage calls, but same-page
+  // Overleaf code remains inside the trusted page boundary.
+  let pageBridgeCapability = '';
   const compileBridge = window.CodexOverleafCompileBridge.create({
     document,
     getActiveFilePath,
@@ -34,7 +39,7 @@
     buildProjectFileList,
     buildProjectSnapshot,
     getProjectId,
-    normalizePath: window.CodexOverleafProjectFiles.normalizePath,
+    normalizePath: normalizeSafeProjectPath,
     window
   });
   const otObserver = createOtObserver();
@@ -66,10 +71,16 @@
       return;
     }
 
-    const { id, method, params } = event.data;
+    const { id, method, params, capability } = event.data;
     let result;
     try {
-      result = await dispatch(method, params || {});
+      if (method === PAGE_BRIDGE_CAPABILITY_METHOD) {
+        result = initializePageBridgeCapability(capability);
+      } else if (!hasValidPageBridgeCapability(capability)) {
+        result = buildUnauthorizedBridgeResult();
+      } else {
+        result = await dispatch(method, params || {});
+      }
     } catch (error) {
       result = {
         ok: false,
@@ -83,6 +94,47 @@
       result
     }, window.location.origin);
   });
+
+  function initializePageBridgeCapability(capability) {
+    if (!isValidPageBridgeCapability(capability)) {
+      return {
+        ok: false,
+        code: 'invalid_page_bridge_capability',
+        error: 'Invalid page bridge capability'
+      };
+    }
+    if (!pageBridgeCapability) {
+      pageBridgeCapability = capability;
+      return { ok: true };
+    }
+    if (capability === pageBridgeCapability) {
+      return { ok: true, alreadyInitialized: true };
+    }
+    return {
+      ok: false,
+      code: 'page_bridge_capability_already_initialized',
+      error: 'Page bridge capability is already initialized'
+    };
+  }
+
+  function hasValidPageBridgeCapability(capability) {
+    return Boolean(pageBridgeCapability && capability === pageBridgeCapability);
+  }
+
+  function isValidPageBridgeCapability(capability) {
+    return typeof capability === 'string'
+      && capability.length >= 16
+      && capability.length <= 256
+      && !/[\u0000-\u001f\u007f]/.test(capability);
+  }
+
+  function buildUnauthorizedBridgeResult() {
+    return {
+      ok: false,
+      code: 'page_bridge_unauthorized',
+      error: 'Page bridge request is not authorized'
+    };
+  }
 
   async function dispatch(method, params) {
     if (method === 'probe') {
@@ -226,6 +278,21 @@
     };
   }
 
+  function normalizeSafeProjectPath(value) {
+    if (typeof window.CodexOverleafProjectFiles?.normalizeSafeProjectPath === 'function') {
+      return window.CodexOverleafProjectFiles.normalizeSafeProjectPath(value);
+    }
+    return window.CodexOverleafProjectFiles.normalizePath(value);
+  }
+
+  function invalidProjectPathResult(label = 'path') {
+    return {
+      ok: false,
+      code: 'invalid_project_path',
+      reason: `Invalid ${label}.`
+    };
+  }
+
   function withSnapshotCacheIdentity(params = {}) {
     if (params.restrictToRequestedPathsOnly !== true) {
       return params;
@@ -338,7 +405,7 @@
   }
 
   async function jumpToPosition(params = {}) {
-    const filePath = window.CodexOverleafProjectFiles.normalizePath(params.path);
+    const filePath = normalizeSafeProjectPath(params.path);
     if (!filePath) {
       return {
         ok: false,
@@ -1188,6 +1255,7 @@
       });
       if (zipSnapshot.ok && zipSnapshot.files.length) {
         const paths = collectUniqueProjectPaths(zipSnapshot.files.map(file => file.path), 1000);
+        const zipFileByPath = buildProjectFileEntryLookup(zipSnapshot.files);
         return {
           ok: true,
           id: getProjectId(),
@@ -1200,7 +1268,8 @@
               active: path === activePath,
               source: 'overleaf-zip',
               kind: isText ? 'text' : 'binary',
-              selectable: isText
+              selectable: isText,
+              ...buildFileSizeMetadata(zipFileByPath.get(path))
             };
           }),
           capabilities: {
@@ -1283,7 +1352,7 @@
     const seen = new Set();
     const result = [];
     for (const rawPath of paths || []) {
-      const path = window.CodexOverleafProjectFiles.normalizePath(rawPath);
+      const path = normalizeSafeProjectPath(rawPath);
       if (!isSafeProjectPath(path) || seen.has(path)) {
         continue;
       }
@@ -1296,8 +1365,25 @@
     return result;
   }
 
+  function buildProjectFileEntryLookup(files = []) {
+    const entries = new Map();
+    for (const file of files || []) {
+      const path = normalizeSafeProjectPath(file?.path);
+      if (!isSafeProjectPath(path) || entries.has(path)) {
+        continue;
+      }
+      entries.set(path, file);
+    }
+    return entries;
+  }
+
+  function buildFileSizeMetadata(file = {}) {
+    const size = Number(file?.size ?? file?.byteLength);
+    return Number.isFinite(size) && size >= 0 ? { size } : {};
+  }
+
   function isSafeProjectPath(path) {
-    return Boolean(path && !path.endsWith('/') && !/(^|\/)\.{1,2}(\/|$)/.test(path));
+    return Boolean(path && normalizeSafeProjectPath(path) === path && !path.endsWith('/'));
   }
 
   async function buildProjectSnapshot(params = {}) {
@@ -1788,11 +1874,17 @@
     const applied = [];
     const skipped = [];
     const trackedChanges = [];
-    const baseFileLookup = window.CodexOverleafStaleGuard?.buildBaseFileLookup(options.baseFiles);
-    const baseBinaryFileLookup = buildBaseBinaryFileLookup(options.baseFiles);
+    const safeBaseFiles = normalizeBaseFilesForSafety(options.baseFiles);
+    const baseFileLookup = window.CodexOverleafStaleGuard?.buildBaseFileLookup(safeBaseFiles);
+    const baseBinaryFileLookup = buildBaseBinaryFileLookup(safeBaseFiles);
 
     for (const rawOperation of operations) {
       const operation = normalizeOperationPaths(rawOperation);
+      const pathSafety = validateOperationProjectPaths(operation);
+      if (!pathSafety.ok) {
+        skipped.push({ operation, result: pathSafety });
+        continue;
+      }
       if (operation.type === 'edit') {
         const result = await applyEditOperation(operation, {
           baseFileLookup,
@@ -1838,6 +1930,17 @@
     const applied = [];
     const skipped = [];
     const appliedPaths = new Set();
+    const invalidTrackedChange = trackedChanges.find(trackedChange => trackedChange.invalidProjectPath);
+    if (invalidTrackedChange) {
+      return {
+        ok: false,
+        applied,
+        skipped: [{
+          trackedChange: invalidTrackedChange,
+          result: invalidProjectPathResult('tracked-change path')
+        }]
+      };
+    }
 
     const editorUndo = await rejectTrackedChangesViaEditorUndo(expectedFiles, postFiles, applied);
     if (editorUndo.ok) {
@@ -2000,10 +2103,12 @@
   async function rejectTrackedChangesViaEditorUndo(expectedFiles, postFiles, applied) {
     const expectedByPath = new Map((expectedFiles || [])
       .filter(file => file?.path && typeof file.content === 'string')
-      .map(file => [window.CodexOverleafProjectFiles.normalizePath(file.path), file.content]));
+      .map(file => [normalizeSafeProjectPath(file.path), file.content])
+      .filter(([path]) => path));
     const postByPath = new Map((postFiles || [])
       .filter(file => file?.path && typeof file.content === 'string')
-      .map(file => [window.CodexOverleafProjectFiles.normalizePath(file.path), file.content]));
+      .map(file => [normalizeSafeProjectPath(file.path), file.content])
+      .filter(([path]) => path));
     const paths = Array.from(expectedByPath.keys()).filter(path => postByPath.has(path));
     if (!paths.length) {
       return { ok: false, attempted: false };
@@ -2127,10 +2232,10 @@
 
   async function rejectRemainingTrackedChangesForTrackedPaths(trackedChanges, applied) {
     const paths = Array.from(new Set((trackedChanges || [])
-      .map(change => window.CodexOverleafProjectFiles.normalizePath(change?.path || ''))
+      .map(change => normalizeSafeProjectPath(change?.path || ''))
       .filter(Boolean)));
     if (!paths.length) {
-      const activePath = window.CodexOverleafProjectFiles.normalizePath(getActiveFilePath());
+      const activePath = normalizeSafeProjectPath(getActiveFilePath());
       if (!activePath || !applied.length) {
         return { ok: true };
       }
@@ -2617,7 +2722,7 @@
       if (!file?.path || typeof file.contentBase64 !== 'string') {
         continue;
       }
-      const filePath = window.CodexOverleafProjectFiles.normalizePath(file.path);
+      const filePath = normalizeSafeProjectPath(file.path);
       if (!filePath) {
         continue;
       }
@@ -2637,9 +2742,9 @@
         force: true,
         maxAgeMs: 0
       });
-      const normalizedPath = window.CodexOverleafProjectFiles.normalizePath(filePath);
+      const normalizedPath = normalizeSafeProjectPath(filePath);
       const file = (project?.files || []).find(item =>
-        window.CodexOverleafProjectFiles.normalizePath(item?.path) === normalizedPath
+        normalizeSafeProjectPath(item?.path) === normalizedPath
       );
       if (!file || typeof file.contentBase64 !== 'string') {
         return {
@@ -2930,15 +3035,58 @@
     if (!operation || typeof operation !== 'object') {
       return operation;
     }
-    return {
+    const normalized = {
       ...operation,
       path: typeof operation.path === 'string'
-        ? window.CodexOverleafProjectFiles.normalizePath(operation.path)
+        ? normalizeSafeProjectPath(operation.path)
         : operation.path,
       to: typeof operation.to === 'string'
-        ? window.CodexOverleafProjectFiles.normalizePath(operation.to)
+        ? normalizeSafeProjectPath(operation.to)
         : operation.to
     };
+    if (typeof operation.path === 'string' && !normalized.path) {
+      normalized.invalidProjectPath = true;
+    }
+    if (typeof operation.to === 'string' && !normalized.to) {
+      normalized.invalidProjectDestinationPath = true;
+    }
+    return normalized;
+  }
+
+  function validateOperationProjectPaths(operation) {
+    if (!operation || typeof operation !== 'object') {
+      return { ok: true };
+    }
+    if (operation.invalidProjectPath || (requiresOperationPath(operation) && !operation.path)) {
+      return invalidProjectPathResult('operation path');
+    }
+    if (operation.invalidProjectDestinationPath || (requiresOperationDestinationPath(operation) && !operation.to)) {
+      return invalidProjectPathResult('operation destination path');
+    }
+    return { ok: true };
+  }
+
+  function requiresOperationPath(operation) {
+    return ['edit', 'create', 'delete', 'rename', 'move', 'binary-create', 'overwrite-binary'].includes(operation.type);
+  }
+
+  function requiresOperationDestinationPath(operation) {
+    return operation.type === 'rename' || operation.type === 'move';
+  }
+
+  function normalizeBaseFilesForSafety(files) {
+    if (!Array.isArray(files)) {
+      return files;
+    }
+    return files
+      .map(file => {
+        if (!file || typeof file.path !== 'string') {
+          return null;
+        }
+        const filePath = normalizeSafeProjectPath(file.path);
+        return filePath ? { ...file, path: filePath } : null;
+      })
+      .filter(Boolean);
   }
 
   function collectOperationPaths(operations = []) {
@@ -3001,7 +3149,7 @@
   function trackedChangeRefFromNode(node, fallbackPath = '') {
     const id = readTrackedChangeId(node);
     const key = id ? `id:${id}` : `sig:${compact(readNodeSignalText(node), 180)}`;
-    const path = window.CodexOverleafProjectFiles.normalizePath(
+    const path = normalizeSafeProjectPath(
       node.getAttribute?.('data-path')
       || node.getAttribute?.('data-file-path')
       || node.getAttribute?.('data-doc-path')
@@ -3045,12 +3193,14 @@
         continue;
       }
       seen.add(key);
+      const hasPath = typeof ref.path === 'string';
+      const hasExplicitPath = hasPath && ref.path.trim() !== '';
+      const path = hasPath ? normalizeSafeProjectPath(ref.path) : '';
       normalized.push({
         key,
         id: typeof ref.id === 'string' ? ref.id : '',
-        path: typeof ref.path === 'string'
-          ? window.CodexOverleafProjectFiles.normalizePath(ref.path)
-          : '',
+        path,
+        invalidProjectPath: hasExplicitPath && !path,
         label: compact(String(ref.label || ''), 180)
       });
     }
@@ -3081,7 +3231,7 @@
 
   function findTrackedChangeNode(ref = {}) {
     const targetKey = ref.key || '';
-    if (!targetKey) {
+    if (!targetKey || ref.invalidProjectPath) {
       return null;
     }
     return collectTrackedChangeNodes()
@@ -3100,7 +3250,7 @@
   }
 
   function findTrackedChangeNodesForPath(path) {
-    const targetPath = window.CodexOverleafProjectFiles.normalizePath(path || getActiveFilePath());
+    const targetPath = normalizeSafeProjectPath(path || getActiveFilePath());
     return collectTrackedChangeNodes()
       .filter(node => {
         const ref = trackedChangeRefFromNode(node, targetPath);
@@ -3746,7 +3896,7 @@
     if (!filePath) {
       return false;
     }
-    const normalizedPath = window.CodexOverleafProjectFiles.normalizePath(filePath);
+    const normalizedPath = normalizeSafeProjectPath(filePath);
     if (!normalizedPath) {
       return false;
     }
@@ -3822,7 +3972,7 @@
 
       const ownName = readObjectPathName(value);
       const ownId = readObjectDocId(value);
-      const normalizedOwnName = window.CodexOverleafProjectFiles.normalizePath(ownName);
+      const normalizedOwnName = normalizeSafeProjectPath(ownName);
       const ownPath = normalizedOwnName && normalizedOwnName.includes('/')
         ? normalizedOwnName
         : joinPath(folderPath, normalizedOwnName);
@@ -3963,8 +4113,8 @@
   }
 
   function joinPath(folderPath, name) {
-    const cleanName = window.CodexOverleafProjectFiles.normalizePath(name);
-    const cleanFolder = window.CodexOverleafProjectFiles.normalizePath(folderPath);
+    const cleanName = normalizeSafeProjectPath(name);
+    const cleanFolder = normalizeSafeProjectPath(folderPath);
     if (!cleanName) {
       return cleanFolder;
     }
@@ -4157,12 +4307,12 @@
       const commentLength = view.getUint16(offset + 32, true);
       const localHeaderOffset = view.getUint32(offset + 42, true);
       const rawName = bytes.slice(offset + 46, offset + 46 + fileNameLength);
-      const path = window.CodexOverleafProjectFiles.normalizePath(decoder.decode(rawName));
+      const path = normalizeSafeProjectPath(decoder.decode(rawName));
       const isText = window.CodexOverleafProjectFiles.isTextProjectPath(path);
       const shouldInclude = path && !path.endsWith('/') && (isText || options.includeBinaryFiles);
 
       if (shouldInclude) {
-        const file = { path };
+        const file = { path, size: uncompressedSize };
         if (options.includeContent !== false && (isText || options.includeBinaryFiles)) {
           if (!isText) {
             if (uncompressedSize > MAX_BINARY_FILE_BYTES) {
@@ -4389,7 +4539,7 @@
       text
     ];
     for (const candidate of candidates) {
-      const normalized = window.CodexOverleafProjectFiles.normalizePath(candidate);
+      const normalized = normalizeSafeProjectPath(candidate);
       if (normalized && window.CodexOverleafProjectFiles.isTextProjectPath(normalized)) {
         return normalized;
       }
@@ -4434,7 +4584,7 @@
     if (!folders.length) {
       return '';
     }
-    const path = window.CodexOverleafProjectFiles.normalizePath([...folders, fileName].join('/'));
+    const path = normalizeSafeProjectPath([...folders, fileName].join('/'));
     return window.CodexOverleafProjectFiles.isTextProjectPath(path) ? path : '';
   }
 

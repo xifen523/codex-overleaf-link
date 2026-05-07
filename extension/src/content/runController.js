@@ -195,11 +195,22 @@
 
   function normalizeSkillInvocation(value) {
     const id = String(value?.id || '').trim();
-    if (id !== 'skill-installer') {
+    if (!isSafeSkillId(id)) {
       return null;
     }
     const title = String(value?.title || 'Skill Installer').trim().slice(0, 80) || 'Skill Installer';
-    return { id, title };
+    if (id === 'skill-installer') {
+      return { id, title };
+    }
+    if (value?.scope !== 'codex-overleaf') {
+      return null;
+    }
+    return { id, title, scope: 'codex-overleaf' };
+  }
+
+  function isSafeSkillId(id) {
+    return /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(String(id || ''))
+      && !String(id || '').includes('..');
   }
 
   function normalizeAttachmentName(value) {

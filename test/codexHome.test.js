@@ -294,6 +294,7 @@ test('Windows plugin Codex directory links request junction semantics', () => {
     };
 
     const prepared = preparePluginCodexHome({
+      HOME: home,
       CODEX_OVERLEAF_USER_CODEX_HOME: userCodexHome,
       CODEX_OVERLEAF_CODEX_HOME: pluginHome
     }, { platform: 'win32' });

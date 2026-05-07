@@ -11,6 +11,9 @@ const { getDefaultBridgePath } = require('../native-host/src/nativeHostPlatform'
 const CURRENT_PACKAGE_VERSION = require('../package.json').version;
 const CURRENT_RELEASE_REF = `v${CURRENT_PACKAGE_VERSION}`;
 const CANONICAL_RELEASE_INSTALL_COMMAND = `CODEX_OVERLEAF_REF=${CURRENT_RELEASE_REF} bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${CURRENT_RELEASE_REF}/install.sh)"`;
+const CANONICAL_WINDOWS_RELEASE_REF_COMMAND = `$env:CODEX_OVERLEAF_REF='${CURRENT_RELEASE_REF}'`;
+const CANONICAL_WINDOWS_RELEASE_INSTALL_URL = `https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${CURRENT_RELEASE_REF}/install.ps1`;
+const CANONICAL_WINDOWS_RELEASE_RUN_COMMAND = 'powershell -ExecutionPolicy Bypass -File install.ps1';
 
 function writeFakeRegistryCommand(tempDir, options = {}) {
   const scriptPath = path.join(tempDir, 'fake-reg.js');
@@ -502,6 +505,52 @@ test('README documents current cross-platform install, uninstall, release artifa
   assert.match(readme, /allowed_origins/);
   assert.doesNotMatch(readme, /version-0\.4\.0-blue/);
   assert.doesNotMatch(readme, /platform-macOS-lightgrey/);
+});
+
+test('README pins every Windows release installer command with CODEX_OVERLEAF_REF', () => {
+  const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
+  const installCommand = `iwr ${CANONICAL_WINDOWS_RELEASE_INSTALL_URL} -OutFile install.ps1`;
+  const installIndexes = [];
+  let searchFrom = 0;
+  while (true) {
+    const index = readme.indexOf(installCommand, searchFrom);
+    if (index === -1) {
+      break;
+    }
+    installIndexes.push(index);
+    searchFrom = index + installCommand.length;
+  }
+
+  assert.ok(installIndexes.length >= 4, 'expected install, update, recovery, and matrix Windows commands');
+  for (const index of installIndexes) {
+    const segment = readme.slice(index, index + 240);
+    assert.ok(segment.includes(CANONICAL_WINDOWS_RELEASE_REF_COMMAND), segment);
+    assert.ok(segment.includes(CANONICAL_WINDOWS_RELEASE_RUN_COMMAND), segment);
+    assert.ok(
+      segment.indexOf(CANONICAL_WINDOWS_RELEASE_REF_COMMAND) < segment.indexOf(CANONICAL_WINDOWS_RELEASE_RUN_COMMAND),
+      segment
+    );
+  }
+});
+
+test('README documents Windows cleanup roots and Codex skill loading boundaries', () => {
+  const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
+  const uninstallSection = readme.match(/<summary><strong>Uninstall<\/strong><\/summary>[\s\S]*?<\/details>/)?.[0] || '';
+
+  assert.match(uninstallSection, /%LOCALAPPDATA%\\CodexOverleaf/i);
+  assert.match(uninstallSection, /%USERPROFILE%\\.codex-overleaf/i);
+  assert.doesNotMatch(
+    uninstallSection,
+    /\$env:LOCALAPPDATA\\CodexOverleaf` on Windows to remove local mirrors, native runtime files, and plugin history/i
+  );
+  assert.match(readme, /Remove-Item -Recurse -Force "\$env:LOCALAPPDATA\\CodexOverleaf", "\$env:USERPROFILE\\.codex-overleaf"/);
+
+  assert.match(readme, /`Load local Codex skills`[\s\S]{0,800}~\/\.codex\/skills/);
+  assert.match(readme, /`Load local Codex skills`[\s\S]{0,800}plugins/);
+  assert.match(readme, /`Load Codex Overleaf skills`[\s\S]{0,800}~\/\.codex-overleaf\/skills/);
+  assert.match(readme, /skill loading toggles default to enabled/i);
+  assert.match(readme, /isolated `~\/\.codex-overleaf\/codex-home`/i);
+  assert.match(readme, /does not write to or reuse global `~\/\.codex\/sessions`/i);
 });
 
 test('one-command installer works on macOS Bash 3.2 when extension id is unset', t => {

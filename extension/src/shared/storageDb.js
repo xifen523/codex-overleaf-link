@@ -11,6 +11,43 @@
   var DB_NAME = 'codex-overleaf';
   var CUSTOM_INSTRUCTIONS_MAX_CHARS = 12000;
   var PROJECT_PREF_KEY_MAX_CHARS = 160;
+  var LEGACY_DEFAULT_SESSION_TITLE = 'New task';
+  var REDACTED_SECRET = '[REDACTED_SECRET]';
+  var SESSION_STORAGE_LIMITS = {
+    maxHistory: 10,
+    maxRunsPerSession: 20,
+    maxEventsPerRun: 300,
+    maxAttachmentsPerRun: 8,
+    sessionTitleChars: 80,
+    taskChars: 12000,
+    historyTaskChars: 300,
+    historyResultChars: 1800,
+    eventTitleChars: 6000,
+    statusTextChars: 800,
+    detailChars: 3000,
+    reportDetailChars: 64000,
+    pathChars: 240
+  };
+  var VALID_EVENT_STATUSES = {
+    info: true,
+    running: true,
+    completed: true,
+    failed: true,
+    warning: true,
+    blocked: true,
+    skipped: true,
+    pending: true
+  };
+  var SECRET_REDACTION_PATTERNS = [
+    /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+    /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi,
+    /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{16,}\b/g,
+    /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+    /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gi,
+    /\bAKIA[0-9A-Z]{16}\b/g,
+    /\b(?:sk|pk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g,
+    /\b(?:api[_-]?key|token|password|passwd|secret)\b\s*[:=]\s*["']?[^"'\s,;]+["']?/gi
+  ];
 
   var STORES = {
     sessions: {
@@ -194,17 +231,18 @@
 
   function buildSessionRecord(input) {
     var now = new Date().toISOString();
+    var titleSource = input.titleSource === 'manual' ? 'manual' : 'auto';
     return {
       id: input.id || generateId('ses'),
       projectId: input.projectId || '',
-      title: typeof input.title === 'string' ? input.title : '',
-      titleSource: input.titleSource === 'manual' ? 'manual' : 'auto',
+      title: normalizeSessionTitleForStorage(input.title, titleSource),
+      titleSource: titleSource,
       codexThreadId: typeof input.codexThreadId === 'string' ? input.codexThreadId : '',
       status: typeof input.status === 'string' && input.status ? input.status : 'active',
-      focusFiles: Array.isArray(input.focusFiles) ? input.focusFiles.slice() : [],
-      history: Array.isArray(input.history) ? cloneJsonValue(input.history) : [],
-      runs: Array.isArray(input.runs) ? cloneJsonValue(input.runs) : [],
-      task: typeof input.task === 'string' ? input.task : '',
+      focusFiles: normalizePathList(input.focusFiles),
+      history: compactHistoryForStorage(input.history),
+      runs: compactRunsForStorage(input.runs),
+      task: normalizeDisplayTextForStorage(input.task, SESSION_STORAGE_LIMITS.taskChars),
       mode: typeof input.mode === 'string' ? input.mode : '',
       model: typeof input.model === 'string' ? input.model : '',
       reasoningEffort: typeof input.reasoningEffort === 'string' ? input.reasoningEffort : '',
@@ -220,14 +258,14 @@
     return {
       id: input.id || generateId('turn'),
       sessionId: input.sessionId || '',
-      task: typeof input.task === 'string' ? input.task : '',
+      task: summarizeTextForStorage(input.task, 'turn task'),
       mode: typeof input.mode === 'string' ? input.mode : '',
       model: typeof input.model === 'string' ? input.model : '',
       reasoningEffort: typeof input.reasoningEffort === 'string' ? input.reasoningEffort : '',
       speedTier: typeof input.speedTier === 'string' ? input.speedTier : '',
       createdAt: typeof input.createdAt === 'string' ? input.createdAt : now,
       completedAt: typeof input.completedAt === 'string' ? input.completedAt : '',
-      finalSummary: typeof input.finalSummary === 'string' ? input.finalSummary : ''
+      finalSummary: summarizeTextForStorage(input.finalSummary, 'turn summary')
     };
   }
 
@@ -238,8 +276,8 @@
       turnId: input.turnId || '',
       index: typeof input.index === 'number' ? input.index : 0,
       kind: typeof input.kind === 'string' ? input.kind : '',
-      text: typeof input.text === 'string' ? input.text : '',
-      detail: input.detail !== undefined ? input.detail : null,
+      text: summarizeTextForStorage(input.text, 'event text'),
+      detail: compactDetailForStorage(input.detail, SESSION_STORAGE_LIMITS.detailChars) ?? null,
       createdAt: typeof input.createdAt === 'string' ? input.createdAt : now
     };
   }
@@ -250,8 +288,8 @@
       id: input.id || generateId('art'),
       turnId: input.turnId || '',
       type: typeof input.type === 'string' ? input.type : '',
-      path: typeof input.path === 'string' ? input.path : '',
-      payload: input.payload !== undefined ? input.payload : null,
+      path: normalizePath(input.path, SESSION_STORAGE_LIMITS.pathChars),
+      payload: compactDetailForStorage(input.payload, SESSION_STORAGE_LIMITS.detailChars) ?? null,
       createdAt: typeof input.createdAt === 'string' ? input.createdAt : now
     };
   }
@@ -269,7 +307,7 @@
       model: typeof input.model === 'string' ? input.model : '',
       reasoningEffort: typeof input.reasoningEffort === 'string' ? input.reasoningEffort : '',
       speedTier: typeof input.speedTier === 'string' ? input.speedTier : '',
-      promptSummary: normalizeTextField(input.promptSummary, 240),
+      promptSummary: summarizeTextForStorage(input.promptSummary, 'audit prompt'),
       focusFiles: normalizeStringList(input.focusFiles),
       selectedSkillIds: normalizeStringList(input.selectedSkillIds),
       sensitiveFindings: normalizeSensitiveFindings(input.sensitiveFindings),
@@ -280,7 +318,7 @@
       skippedFiles: normalizeFileSummaries(input.skippedFiles),
       resultStatus: typeof input.resultStatus === 'string' && input.resultStatus ? input.resultStatus : 'draft',
       saveVerification: input.saveVerification && typeof input.saveVerification === 'object'
-        ? cloneJsonValue(input.saveVerification)
+        ? summarizeVerificationObject(input.saveVerification)
         : null
     };
   }
@@ -420,10 +458,279 @@
         detectorId: typeof finding.detectorId === 'string' ? finding.detectorId : '',
         path: typeof finding.path === 'string' ? finding.path : '',
         source: typeof finding.source === 'string' ? finding.source : '',
-        preview: normalizeTextField(finding.preview, 240)
+        preview: summarizeTextForStorage(finding.preview, 'sensitive preview')
       }));
     }
     return result;
+  }
+
+  function summarizeVerificationObject(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return null;
+    }
+    var summary = {
+      state: normalizeTextField(value.state, 80),
+      status: normalizeTextField(value.status, 80),
+      ok: typeof value.ok === 'boolean' ? value.ok : undefined,
+      errorCode: normalizeTextField(value.errorCode || value.code, 120),
+      errorCategory: categorizeError(value.errorCode || value.code || value.reason || value.message || value.error)
+    };
+    if (value.diagnostics && typeof value.diagnostics === 'object' && !Array.isArray(value.diagnostics)) {
+      summary.diagnostics = summarizeStatusObject(value.diagnostics);
+    }
+    return removeEmptySummaryFields(summary);
+  }
+
+  function summarizeStatusObject(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+    return removeEmptySummaryFields({
+      state: normalizeTextField(value.state, 80),
+      status: normalizeTextField(value.status, 80),
+      ok: typeof value.ok === 'boolean' ? value.ok : undefined,
+      errorCode: normalizeTextField(value.errorCode || value.code, 120),
+      errorCategory: categorizeError(value.errorCode || value.code || value.message || value.error)
+    });
+  }
+
+  function normalizeSessionTitleForStorage(value, titleSource) {
+    var title = typeof value === 'string' ? value.trim() : '';
+    if (titleSource === 'manual') {
+      return normalizeTextField(title === LEGACY_DEFAULT_SESSION_TITLE ? '' : title, SESSION_STORAGE_LIMITS.sessionTitleChars);
+    }
+    return normalizeTextField(title === LEGACY_DEFAULT_SESSION_TITLE ? '' : title, SESSION_STORAGE_LIMITS.sessionTitleChars);
+  }
+
+  function compactHistoryForStorage(history) {
+    return (Array.isArray(history) ? history : [])
+      .slice(-SESSION_STORAGE_LIMITS.maxHistory)
+      .map(function (entry) {
+        return {
+          task: normalizeDisplayTextForStorage(entry && entry.task, SESSION_STORAGE_LIMITS.historyTaskChars),
+          result: normalizeDisplayTextForStorage(entry && entry.result, SESSION_STORAGE_LIMITS.historyResultChars),
+          at: typeof (entry && entry.at) === 'string' ? redactSecretLikeText(entry.at) : ''
+        };
+      });
+  }
+
+  function compactRunsForStorage(runs) {
+    return (Array.isArray(runs) ? runs : [])
+      .filter(function (run) { return run && typeof run.id === 'string'; })
+      .slice(-SESSION_STORAGE_LIMITS.maxRunsPerSession)
+      .map(compactRunForStorage);
+  }
+
+  function compactRunForStorage(run) {
+    return {
+      id: run.id,
+      task: normalizeDisplayTextForStorage(run.task || 'untitled task', SESSION_STORAGE_LIMITS.taskChars),
+      mode: typeof run.mode === 'string' ? redactSecretLikeText(run.mode) : '',
+      model: normalizeTextField(run.model, 80),
+      reasoningEffort: typeof run.reasoningEffort === 'string' ? redactSecretLikeText(run.reasoningEffort) : '',
+      speedTier: typeof run.speedTier === 'string' ? redactSecretLikeText(run.speedTier) : '',
+      status: normalizeRunStatus(run.status),
+      statusText: normalizeDisplayTextForStorage(run.statusText, SESSION_STORAGE_LIMITS.statusTextChars),
+      startedAt: typeof run.startedAt === 'string' ? redactSecretLikeText(run.startedAt) : '',
+      finishedAt: typeof run.finishedAt === 'string' ? redactSecretLikeText(run.finishedAt) : '',
+      events: compactRunEventsForStorage(run.events),
+      attachments: compactRunAttachmentsForStorage(run.attachments),
+      appliedOperations: [],
+      undoOperations: [],
+      undoBaseFiles: [],
+      undoTrackedChanges: [],
+      undoExpectedFiles: [],
+      undoStatus: normalizeDisplayTextForStorage(run.undoStatus, SESSION_STORAGE_LIMITS.statusTextChars)
+    };
+  }
+
+  function compactRunEventsForStorage(events) {
+    return (Array.isArray(events) ? events : [])
+      .filter(function (event) { return event && typeof event.title === 'string'; })
+      .slice(-SESSION_STORAGE_LIMITS.maxEventsPerRun)
+      .map(function (event) {
+        var compact = {
+          title: normalizeDisplayTextForStorage(event.title, SESSION_STORAGE_LIMITS.eventTitleChars) || 'Event',
+          status: normalizeEventStatus(event.status),
+          timestamp: typeof event.timestamp === 'string' ? redactSecretLikeText(event.timestamp) : '',
+          kind: typeof event.kind === 'string' ? redactSecretLikeText(event.kind) : 'activity',
+          streamKey: typeof event.streamKey === 'string' ? redactSecretLikeText(event.streamKey) : '',
+          streamRole: typeof event.streamRole === 'string' ? redactSecretLikeText(event.streamRole) : ''
+        };
+        var detail = compactDisplayDetailForStorage(event.detail, getEventDetailLimit(event));
+        if (detail !== undefined) {
+          compact.detail = detail;
+        }
+        return compact;
+      });
+  }
+
+  function getEventDetailLimit(event) {
+    return event && event.kind === 'report'
+      ? SESSION_STORAGE_LIMITS.reportDetailChars
+      : SESSION_STORAGE_LIMITS.detailChars;
+  }
+
+  function compactDetailForStorage(detail, maxChars) {
+    if (detail === undefined) {
+      return undefined;
+    }
+    if (typeof detail === 'string') {
+      return summarizeTextForStorage(detail, 'detail');
+    }
+    if (detail === null || typeof detail === 'number' || typeof detail === 'boolean') {
+      return detail;
+    }
+    return summarizeStructuredValueForStorage(detail, maxChars);
+  }
+
+  function compactDisplayDetailForStorage(detail, maxChars) {
+    if (detail === undefined) {
+      return undefined;
+    }
+    if (typeof detail === 'string') {
+      return normalizeDisplayTextForStorage(detail, maxChars);
+    }
+    if (detail === null || typeof detail === 'number' || typeof detail === 'boolean') {
+      return detail;
+    }
+    return summarizeStructuredValueForStorage(detail, maxChars);
+  }
+
+  function normalizeDisplayTextForStorage(value, maxChars) {
+    return normalizeTextField(value, maxChars);
+  }
+
+  function summarizeStructuredValueForStorage(value, maxChars) {
+    if (isStructuredStorageSummary(value)) {
+      return normalizeStructuredStorageSummary(value);
+    }
+    var serialized = safeJsonStringify(value);
+    var summary = {
+      redacted: true,
+      type: Array.isArray(value) ? 'array' : 'object',
+      chars: serialized.length,
+      hash: hashString(serialized)
+    };
+    var paths = collectPathMetadata(value, maxChars);
+    if (paths.items.length) {
+      summary.paths = paths.items;
+      summary.pathCount = paths.count;
+    }
+    return summary;
+  }
+
+  function normalizeStructuredStorageSummary(value) {
+    var result = {
+      redacted: true,
+      type: value.type === 'array' ? 'array' : 'object',
+      chars: nonNegativeInteger(value.chars),
+      hash: /^[a-f0-9]{8}$/.test(String(value.hash || '')) ? value.hash : hashString('')
+    };
+    var paths = normalizePathList(value.paths).slice(0, 5);
+    if (paths.length) {
+      result.paths = paths;
+      result.pathCount = nonNegativeInteger(value.pathCount) || paths.length;
+    }
+    return result;
+  }
+
+  function collectPathMetadata(value, maxChars, state) {
+    state = state || { seen: {}, items: [], count: 0 };
+    if (!value || typeof value !== 'object') {
+      return state;
+    }
+    if (Array.isArray(value)) {
+      for (var i = 0; i < value.length; i++) {
+        collectPathMetadata(value[i], maxChars, state);
+      }
+      return state;
+    }
+    var keys = Object.keys(value);
+    for (var j = 0; j < keys.length; j++) {
+      var key = keys[j];
+      var item = value[key];
+      if (/(^|[A-Z_])path$/i.test(key) && typeof item === 'string') {
+        var path = normalizePath(item, Math.min(maxChars || SESSION_STORAGE_LIMITS.pathChars, SESSION_STORAGE_LIMITS.pathChars));
+        if (path) {
+          state.count += 1;
+          if (!state.seen[path] && state.items.length < 5) {
+            state.seen[path] = true;
+            state.items.push(path);
+          }
+        }
+      } else {
+        collectPathMetadata(item, maxChars, state);
+      }
+    }
+    return state;
+  }
+
+  function compactRunAttachmentsForStorage(attachments) {
+    var result = [];
+    var items = Array.isArray(attachments) ? attachments : [];
+    for (var i = 0; i < items.length; i++) {
+      var attachment = items[i] || {};
+      var name = normalizeAttachmentName(attachment.name);
+      if (!name) {
+        continue;
+      }
+      var mimeType = normalizeTextField(attachment.mimeType, 120);
+      var size = Number(attachment.size);
+      var kind = attachment.kind === 'image' || /^image\//i.test(mimeType) ? 'image' : 'file';
+      result.push({
+        name: name,
+        mimeType: mimeType,
+        size: Number.isFinite(size) && size >= 0 ? Math.round(size) : 0,
+        kind: kind
+      });
+      if (result.length >= SESSION_STORAGE_LIMITS.maxAttachmentsPerRun) {
+        break;
+      }
+    }
+    return result;
+  }
+
+  function normalizeAttachmentName(value) {
+    return normalizeTextField(String(value || '')
+      .replace(/\0/g, '')
+      .replace(/\\/g, '/')
+      .split('/')
+      .filter(Boolean)
+      .pop() || '', 180);
+  }
+
+  function normalizePathList(values) {
+    var result = [];
+    var seen = {};
+    if (!Array.isArray(values)) {
+      return result;
+    }
+    for (var i = 0; i < values.length; i++) {
+      var path = normalizePath(values[i], SESSION_STORAGE_LIMITS.pathChars);
+      if (!path || seen[path]) {
+        continue;
+      }
+      seen[path] = true;
+      result.push(path);
+    }
+    return result;
+  }
+
+  function normalizePath(value, maxChars) {
+    return normalizeTextField(String(value || '')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/\/+/g, '/')
+      .trim(), maxChars || SESSION_STORAGE_LIMITS.pathChars);
+  }
+
+  function normalizeRunStatus(status) {
+    return ['running', 'completed', 'failed'].indexOf(status) !== -1 ? status : 'completed';
+  }
+
+  function normalizeEventStatus(status) {
+    return VALID_EVENT_STATUSES[status] ? status : 'info';
   }
 
   function normalizeFileSummaries(files) {
@@ -468,8 +775,44 @@
     return normalizeTextField(key, PROJECT_PREF_KEY_MAX_CHARS);
   }
 
+  function summarizeTextForStorage(value, label) {
+    if (typeof value !== 'string' || !value.trim()) {
+      return '';
+    }
+    var text = redactSecretLikeText(value);
+    if (isOmittedStorageSummary(text)) {
+      return text;
+    }
+    return '[' + label + ' omitted; chars=' + text.length + '; hash=' + hashString(text) + ']';
+  }
+
+  function isOmittedStorageSummary(value) {
+    return /^\[[^\]]+ omitted; chars=\d+; hash=[a-f0-9]{8}\]$/.test(String(value || '').trim());
+  }
+
+  function isStructuredStorageSummary(value) {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value)
+      && value.redacted === true
+      && (value.type === 'array' || value.type === 'object')
+      && Number.isFinite(Number(value.chars))
+      && /^[a-f0-9]{8}$/.test(String(value.hash || '')));
+  }
+
+  function redactSecretLikeText(value) {
+    if (typeof value !== 'string') {
+      return '';
+    }
+    var redacted = value;
+    for (var i = 0; i < SECRET_REDACTION_PATTERNS.length; i++) {
+      var pattern = SECRET_REDACTION_PATTERNS[i];
+      pattern.lastIndex = 0;
+      redacted = redacted.replace(pattern, REDACTED_SECRET);
+    }
+    return redacted;
+  }
+
   function normalizeTextField(value, maxChars) {
-    var text = typeof value === 'string' ? value : '';
+    var text = typeof value === 'string' ? redactSecretLikeText(value) : '';
     if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) {
       return text;
     }
@@ -479,6 +822,46 @@
   function nonNegativeInteger(value) {
     var number = Number(value);
     return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+  }
+
+  function categorizeError(value) {
+    var text = redactSecretLikeText(typeof value === 'string' ? value : '').toLowerCase();
+    if (!text) {
+      return undefined;
+    }
+    if (/timeout|timed out|etimedout/.test(text)) {
+      return 'timeout';
+    }
+    if (/permission|denied|eacces|eperm/.test(text)) {
+      return 'permission';
+    }
+    if (/not found|missing|enoent|unavailable/.test(text)) {
+      return 'missing';
+    }
+    if (/quota|too large|limit/.test(text)) {
+      return 'quota';
+    }
+    return 'error';
+  }
+
+  function removeEmptySummaryFields(value) {
+    var result = {};
+    var keys = Object.keys(value || {});
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      var item = value[key];
+      if (item === undefined || item === '' || item === null) {
+        continue;
+      }
+      if (Array.isArray(item) && item.length === 0) {
+        continue;
+      }
+      if (item && typeof item === 'object' && !Array.isArray(item) && Object.keys(item).length === 0) {
+        continue;
+      }
+      result[key] = item;
+    }
+    return result;
   }
 
   function removeEmptyFields(value) {
@@ -550,6 +933,24 @@
 
   function generateId(prefix) {
     return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+  }
+
+  function safeJsonStringify(value) {
+    try {
+      return JSON.stringify(value) || '';
+    } catch (_error) {
+      return '[unserializable]';
+    }
+  }
+
+  function hashString(value) {
+    var hash = 2166136261;
+    var text = String(value || '');
+    for (var i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
   }
 
   function cloneJsonValue(value) {

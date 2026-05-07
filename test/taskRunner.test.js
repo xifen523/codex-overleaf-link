@@ -18,6 +18,17 @@ const {
   REQUIRED_CAPABILITIES
 } = compatibility;
 
+const TEST_QUOTAS = {
+  maxProjectFiles: 1000,
+  maxProjectTextBytes: 32 * 1024 * 1024,
+  maxProjectBinaryBytes: 32 * 1024 * 1024,
+  maxOperations: 1000,
+  maxCompileLogBytes: 512 * 1024,
+  maxAttachmentCount: 8,
+  maxAttachmentBytes: 12 * 1024 * 1024,
+  maxSkillContentBytes: 64 * 1024
+};
+
 function fixtureAgentEnv(fixtureName, extra = {}) {
   return {
     CODEX_OVERLEAF_AGENT_FILE: process.execPath,
@@ -79,6 +90,14 @@ async function seedFreshOtFreshMirror({ projectId, rootDir }) {
 async function seedStaleOtFreshMirror({ projectId, rootDir }) {
   await seedFreshOtFreshMirror({ projectId, rootDir });
   makeMirrorStale(projectId, rootDir);
+}
+
+function assertQuotaError(response, { field, limit }) {
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, 'native_request_quota_exceeded');
+  assert.equal(response.error.field, field);
+  assert.equal(response.error.limit, limit);
+  assert.match(response.error.message, /too large|too many|quota/i);
 }
 
 function isVersionAtLeast(version, minimum) {
@@ -322,6 +341,474 @@ test('skills.install rejects unsafe ids and non-text content', async () => {
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
+});
+
+test('skills.install rejects oversized skill content with a structured quota error', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-skills-quota-'));
+  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir };
+  try {
+    const response = await handleRequest({
+      id: 'skill-content-quota',
+      method: 'skills.install',
+      params: {
+        projectId: 'skills-project',
+        skillId: 'too-large',
+        content: 'x'.repeat(TEST_QUOTAS.maxSkillContentBytes + 1)
+      }
+    }, env);
+
+    assertQuotaError(response, {
+      field: 'content',
+      limit: TEST_QUOTAS.maxSkillContentBytes
+    });
+    assert.equal(fs.existsSync(path.join(rootDir, 'skills-project')), false);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('skills.install rejects Codex Overleaf skill roots outside the plugin data root', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-skill-root-'));
+  const globalSkillRoot = path.join(home, '.codex', 'skills');
+  try {
+    const response = await handleRequest({
+      id: 'plugin-skill-global-root',
+      method: 'skills.install',
+      params: {
+        scope: 'codex-overleaf',
+        skillId: 'escape',
+        content: '# Escape\n'
+      }
+    }, {
+      HOME: home,
+      CODEX_OVERLEAF_SKILLS_ROOT: globalSkillRoot
+    });
+
+    assert.equal(response.ok, false);
+    assert.equal(response.error.code, 'skills_install_failed');
+    assert.match(response.error.message, /Codex Overleaf skill root/i);
+    assert.equal(fs.existsSync(path.join(globalSkillRoot, 'escape', 'SKILL.md')), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('skills.install rejects Codex Overleaf skill roots that symlink outside the plugin data root', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-skill-root-link-'));
+  const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-outside-skills-'));
+  const defaultSkillRoot = path.join(home, '.codex-overleaf', 'skills');
+  try {
+    fs.mkdirSync(path.dirname(defaultSkillRoot), { recursive: true });
+    fs.symlinkSync(outsideRoot, defaultSkillRoot, process.platform === 'win32' ? 'junction' : 'dir');
+
+    const response = await handleRequest({
+      id: 'plugin-skill-symlink-root',
+      method: 'skills.install',
+      params: {
+        scope: 'codex-overleaf',
+        skillId: 'escape',
+        content: '# Escape\n'
+      }
+    }, { HOME: home });
+
+    assert.equal(response.ok, false);
+    assert.equal(response.error.code, 'skills_install_failed');
+    assert.match(response.error.message, /Codex Overleaf skill root/i);
+    assert.equal(fs.existsSync(path.join(outsideRoot, 'escape', 'SKILL.md')), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(outsideRoot, { recursive: true, force: true });
+  }
+});
+
+test('codex.run rejects too many project files before starting Codex', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-file-quota',
+    method: 'codex.run',
+    params: {
+      projectId: 'quota-files',
+      mode: 'ask',
+      task: 'Check project',
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: Array.from({ length: TEST_QUOTAS.maxProjectFiles + 1 }, (_, index) => ({
+          path: `file-${index}.tex`,
+          content: 'x'
+        }))
+      }
+    }
+  }, {});
+
+  assertQuotaError(response, {
+    field: 'project.files',
+    limit: TEST_QUOTAS.maxProjectFiles
+  });
+  assert.equal(calls, 0);
+});
+
+test('codex.run rejects oversized project text before starting Codex', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-text-quota',
+    method: 'codex.run',
+    params: {
+      projectId: 'quota-text',
+      mode: 'ask',
+      task: 'Check project',
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'x'.repeat(TEST_QUOTAS.maxProjectTextBytes + 1) }]
+      }
+    }
+  }, {});
+
+  assertQuotaError(response, {
+    field: 'project.files.content',
+    limit: TEST_QUOTAS.maxProjectTextBytes
+  });
+  assert.equal(calls, 0);
+});
+
+test('codex.run rejects oversized project binary snapshots before starting Codex', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-binary-quota',
+    method: 'codex.run',
+    params: {
+      projectId: 'quota-binary',
+      mode: 'ask',
+      task: 'Check project',
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{
+          path: 'figures/plot.pdf',
+          kind: 'binary',
+          size: TEST_QUOTAS.maxProjectBinaryBytes + 1,
+          contentBase64: Buffer.from([1]).toString('base64')
+        }]
+      }
+    }
+  }, {});
+
+  assertQuotaError(response, {
+    field: 'project.files.contentBase64',
+    limit: TEST_QUOTAS.maxProjectBinaryBytes
+  });
+  assert.equal(calls, 0);
+});
+
+test('codex.run rejects oversized text file overlays before mirror mutation', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-overlay-text-quota',
+    method: 'codex.run',
+    params: {
+      projectId: 'quota-overlay-text',
+      mode: 'ask',
+      task: 'Check overlay',
+      useExistingMirror: true,
+      fileOverlays: [{
+        path: 'main.tex',
+        content: 'x'.repeat(TEST_QUOTAS.maxProjectTextBytes + 1)
+      }]
+    }
+  }, {});
+
+  assertQuotaError(response, {
+    field: 'fileOverlays.content',
+    limit: TEST_QUOTAS.maxProjectTextBytes
+  });
+  assert.equal(calls, 0);
+});
+
+test('codex.run rejects oversized binary file overlays before mirror mutation', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-overlay-binary-quota',
+    method: 'codex.run',
+    params: {
+      projectId: 'quota-overlay-binary',
+      mode: 'ask',
+      task: 'Check overlay',
+      useExistingMirror: true,
+      fileOverlays: [{
+        path: 'figures/plot.pdf',
+        size: TEST_QUOTAS.maxProjectBinaryBytes + 1,
+        contentBase64: Buffer.from([1]).toString('base64')
+      }]
+    }
+  }, {});
+
+  assertQuotaError(response, {
+    field: 'fileOverlays.contentBase64',
+    limit: TEST_QUOTAS.maxProjectBinaryBytes
+  });
+  assert.equal(calls, 0);
+});
+
+test('codex.run rejects oversized compile log context before starting Codex', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const response = await handleWithFakeRunner({
+    id: 'codex-compile-log-quota',
+    method: 'codex.run',
+    params: {
+      projectId: 'quota-compile-log',
+      mode: 'ask',
+      task: 'Check @compile-log',
+      compileLog: 'x'.repeat(TEST_QUOTAS.maxCompileLogBytes + 1),
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'hello' }]
+      }
+    }
+  }, {});
+
+  assertQuotaError(response, {
+    field: 'compileLog',
+    limit: TEST_QUOTAS.maxCompileLogBytes
+  });
+  assert.equal(calls, 0);
+});
+
+test('codex.run rejects attachment quota violations before starting Codex', async () => {
+  let calls = 0;
+  const { handleRequest: handleWithFakeRunner } = loadTaskRunnerWithFakeRunner(async () => {
+    calls++;
+    return { status: 'completed', syncChanges: [] };
+  });
+
+  const tooMany = await handleWithFakeRunner({
+    id: 'codex-attachment-count-quota',
+    method: 'codex.run',
+    params: {
+      projectId: 'quota-attachment-count',
+      mode: 'ask',
+      task: 'Check attachments',
+      attachments: Array.from({ length: TEST_QUOTAS.maxAttachmentCount + 1 }, (_, index) => ({
+        name: `attachment-${index}.txt`,
+        contentBase64: Buffer.from('x').toString('base64')
+      })),
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'hello' }]
+      }
+    }
+  }, {});
+
+  const tooLarge = await handleWithFakeRunner({
+    id: 'codex-attachment-byte-quota',
+    method: 'codex.run',
+    params: {
+      projectId: 'quota-attachment-bytes',
+      mode: 'ask',
+      task: 'Check attachments',
+      attachments: [{
+        name: 'large.pdf',
+        size: TEST_QUOTAS.maxAttachmentBytes + 1,
+        contentBase64: Buffer.from([1]).toString('base64')
+      }],
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'hello' }]
+      }
+    }
+  }, {});
+
+  assertQuotaError(tooMany, {
+    field: 'attachments',
+    limit: TEST_QUOTAS.maxAttachmentCount
+  });
+  assertQuotaError(tooLarge, {
+    field: 'attachments.contentBase64',
+    limit: TEST_QUOTAS.maxAttachmentBytes
+  });
+  assert.equal(calls, 0);
+});
+
+test('task.run rejects oversized operation lists before external agent work', async () => {
+  const response = await handleRequest({
+    id: 'task-operation-quota',
+    method: 'task.run',
+    params: {
+      mode: 'confirm',
+      task: 'Prepare edits',
+      project: { id: 'abc', files: [{ path: 'main.tex', content: 'hello' }] },
+      proposedOperations: Array.from({ length: TEST_QUOTAS.maxOperations + 1 }, (_, index) => ({
+        type: 'edit',
+        path: `file-${index}.tex`,
+        hunks: []
+      }))
+    }
+  }, fixtureAgentEnv('agentNotes.cjs'));
+
+  assertQuotaError(response, {
+    field: 'proposedOperations',
+    limit: TEST_QUOTAS.maxOperations
+  });
+});
+
+test('task.run rejects oversized secondary operations lists even when proposedOperations is present', async () => {
+  const response = await handleRequest({
+    id: 'task-secondary-operation-quota',
+    method: 'task.run',
+    params: {
+      mode: 'confirm',
+      task: 'Prepare edits',
+      project: { id: 'abc', files: [{ path: 'main.tex', content: 'hello' }] },
+      proposedOperations: [],
+      operations: Array.from({ length: TEST_QUOTAS.maxOperations + 1 }, (_, index) => ({
+        type: 'edit',
+        path: `file-${index}.tex`,
+        hunks: []
+      }))
+    }
+  }, fixtureAgentEnv('agentNotes.cjs'));
+
+  assertQuotaError(response, {
+    field: 'operations',
+    limit: TEST_QUOTAS.maxOperations
+  });
+});
+
+test('task.run rejects oversized proposed operation text before creating a confirm plan', async () => {
+  const response = await handleRequest({
+    id: 'task-proposed-operation-text-quota',
+    method: 'task.run',
+    params: {
+      mode: 'confirm',
+      task: 'Prepare edits',
+      project: { id: 'abc', files: [{ path: 'main.tex', content: 'hello' }] },
+      proposedOperations: [{
+        type: 'create',
+        path: 'large.tex',
+        content: 'x'.repeat(TEST_QUOTAS.maxProjectTextBytes + 1)
+      }]
+    }
+  }, fixtureAgentEnv('agentNotes.cjs'));
+
+  assertQuotaError(response, {
+    field: 'proposedOperations.content',
+    limit: TEST_QUOTAS.maxProjectTextBytes
+  });
+  assert.equal(response.result?.planId, undefined);
+});
+
+test('task.run rejects oversized secondary operation binary payloads before creating a confirm plan', async () => {
+  const oversizedBase64 = 'A'.repeat(Math.ceil((TEST_QUOTAS.maxProjectBinaryBytes + 1) * 4 / 3) + 4);
+  const response = await handleRequest({
+    id: 'task-secondary-operation-binary-quota',
+    method: 'task.run',
+    params: {
+      mode: 'confirm',
+      task: 'Prepare edits',
+      project: { id: 'abc', files: [{ path: 'main.tex', content: 'hello' }] },
+      proposedOperations: [{
+        type: 'edit',
+        path: 'main.tex',
+        find: 'hello',
+        replace: 'hello world'
+      }],
+      operations: [{
+        type: 'overwrite-binary',
+        path: 'figures/large.pdf',
+        contentBase64: oversizedBase64
+      }]
+    }
+  }, fixtureAgentEnv('agentNotes.cjs'));
+
+  assertQuotaError(response, {
+    field: 'operations.contentBase64',
+    limit: TEST_QUOTAS.maxProjectBinaryBytes
+  });
+  assert.equal(response.result?.planId, undefined);
+});
+
+test('task.run rejects oversized text file overlays before creating a confirm plan', async () => {
+  const response = await handleRequest({
+    id: 'task-file-overlay-text-quota',
+    method: 'task.run',
+    params: {
+      mode: 'confirm',
+      task: 'Prepare edits',
+      project: { id: 'abc', files: [{ path: 'main.tex', content: 'hello' }] },
+      fileOverlays: [{
+        path: 'main.tex',
+        content: 'x'.repeat(TEST_QUOTAS.maxProjectTextBytes + 1)
+      }],
+      proposedOperations: [{
+        type: 'edit',
+        path: 'main.tex',
+        find: 'hello',
+        replace: 'hello world'
+      }]
+    }
+  }, {});
+
+  assertQuotaError(response, {
+    field: 'fileOverlays.content',
+    limit: TEST_QUOTAS.maxProjectTextBytes
+  });
+  assert.equal(response.result?.planId, undefined);
+});
+
+test('task.run rejects oversized binary file overlays before creating a confirm plan', async () => {
+  const oversizedBase64 = 'A'.repeat(Math.ceil((TEST_QUOTAS.maxProjectBinaryBytes + 1) * 4 / 3) + 4);
+  const response = await handleRequest({
+    id: 'task-file-overlay-binary-quota',
+    method: 'task.run',
+    params: {
+      mode: 'confirm',
+      task: 'Prepare edits',
+      project: { id: 'abc', files: [{ path: 'main.tex', content: 'hello' }] },
+      fileOverlays: [{
+        path: 'figures/large.pdf',
+        contentBase64: oversizedBase64
+      }],
+      proposedOperations: [{
+        type: 'edit',
+        path: 'main.tex',
+        find: 'hello',
+        replace: 'hello world'
+      }]
+    }
+  }, {});
+
+  assertQuotaError(response, {
+    field: 'fileOverlays.contentBase64',
+    limit: TEST_QUOTAS.maxProjectBinaryBytes
+  });
+  assert.equal(response.result?.planId, undefined);
 });
 
 test('mirror.scanSensitive reports redacted findings from the local mirror workspace', async () => {

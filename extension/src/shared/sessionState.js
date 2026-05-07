@@ -31,6 +31,7 @@
   const VALID_REASONING = new Set(['low', 'medium', 'high', 'xhigh']);
   const VALID_SPEED_TIERS = new Set(['standard', 'fast']);
   const VALID_LOCALES = new Set(['en', 'zh']);
+  const VALID_EVENT_STATUSES = new Set(['info', 'running', 'completed', 'failed', 'warning', 'blocked', 'skipped', 'pending']);
   const VALID_TITLE_SOURCES = new Set(['auto', 'manual']);
   const LEGACY_DEFAULT_SESSION_TITLE = 'New task';
   const SESSION_AUTO_TITLE_CHARS = 24;
@@ -69,6 +70,17 @@
     statusTextChars: 400,
     attachmentPreviewChars: 160 * 1024
   };
+  const REDACTED_SECRET = '[REDACTED_SECRET]';
+  const SECRET_REDACTION_PATTERNS = [
+    /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+    /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi,
+    /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{16,}\b/g,
+    /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+    /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/gi,
+    /\bAKIA[0-9A-Z]{16}\b/g,
+    /\b(?:sk|pk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g,
+    /\b(?:api[_-]?key|token|password|passwd|secret)\b\s*[:=]\s*["']?[^"'\s,;]+["']?/gi
+  ];
 
   function normalizePanelState(input = {}, options = {}) {
     const state = {
@@ -510,12 +522,16 @@
       undoBaseFiles: normalizeRunFiles(run.undoBaseFiles),
       undoTrackedChanges: normalizeRunTrackedChanges(run.undoTrackedChanges),
       undoExpectedFiles: normalizeRunFiles(run.undoExpectedFiles),
-      undoStatus: typeof run.undoStatus === 'string' ? run.undoStatus : ''
+      undoStatus: typeof run.undoStatus === 'string' ? redactSecretLikeText(run.undoStatus) : ''
     };
   }
 
   function normalizeRunStatus(status) {
     return ['running', 'completed', 'failed'].includes(status) ? status : 'completed';
+  }
+
+  function normalizeEventStatus(status) {
+    return VALID_EVENT_STATUSES.has(status) ? status : 'info';
   }
 
   function normalizeRunEvents(events) {
@@ -559,6 +575,15 @@
       }
     }
     return normalized;
+  }
+
+  function compactRunAttachmentsForStorage(attachments, limits = STORAGE_DEFAULT_LIMITS) {
+    return normalizeRunAttachments(attachments, limits).map(attachment => ({
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      size: attachment.size,
+      kind: attachment.kind
+    }));
   }
 
   function normalizeAttachmentName(value) {
@@ -613,7 +638,7 @@
       if (typeof item !== 'string') {
         continue;
       }
-      const path = item.trim();
+      const path = redactSecretLikeText(item.trim());
       if (!path || seen.has(path)) {
         continue;
       }
@@ -687,7 +712,7 @@
       loadCodexLocalSkills: source.loadCodexLocalSkills !== false,
       loadCodexOverleafSkills: source.loadCodexOverleafSkills !== false,
       panelWidth: normalizePanelWidth(source.panelWidth),
-      task: normalizeTextField(active?.task || source.task || '', limits.taskChars),
+      task: summarizeTextForStorage(active?.task || source.task || '', 'task'),
       focusFiles: normalizeFocusFiles(active?.focusFiles || source.focusFiles),
       session: active ? {
         id: active.id,
@@ -748,18 +773,16 @@
 
   function compactSessionForStorage(session, fallbackState, limits) {
     const runs = compactRunsForStorage(session.runs, limits);
-    const title = typeof session.title === 'string' && session.title.trim()
-      ? session.title.trim()
-      : deriveSessionTitle(runs, session.task);
+    const titleSource = VALID_TITLE_SOURCES.has(session.titleSource) ? session.titleSource : 'auto';
     return {
       id: session.id,
-      title: normalizeTextField(title, limits.sessionTitleChars),
-      titleSource: VALID_TITLE_SOURCES.has(session.titleSource) ? session.titleSource : 'auto',
+      title: compactSessionTitleForStorage(session, titleSource, limits),
+      titleSource,
       createdAt: typeof session.createdAt === 'string' ? session.createdAt : new Date().toISOString(),
       updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : new Date().toISOString(),
       history: compactHistory(session.history, limits),
       runs,
-      task: normalizeTextField(session.task, limits.taskChars),
+      task: summarizeTextForStorage(session.task, 'task'),
       mode: normalizeMode(session.mode || fallbackState.mode),
       model: normalizeTextField(session.model || fallbackState.model || DEFAULT_PANEL_STATE.model, 80),
       reasoningEffort: normalizeReasoning(session.reasoningEffort || fallbackState.reasoningEffort),
@@ -769,12 +792,27 @@
     };
   }
 
+  function compactSessionTitleForStorage(session, titleSource, limits) {
+    const rawTitle = typeof session.title === 'string' ? session.title.trim() : '';
+    if (titleSource === 'manual') {
+      return normalizeTextField(rawTitle === LEGACY_DEFAULT_SESSION_TITLE ? '' : rawTitle, limits.sessionTitleChars);
+    }
+    if (isOmittedStorageSummary(rawTitle)) {
+      return normalizeTextField(rawTitle, limits.sessionTitleChars);
+    }
+    const firstRunTask = Array.isArray(session.runs) && session.runs.length ? session.runs[0]?.task : '';
+    const seed = rawTitle && rawTitle !== LEGACY_DEFAULT_SESSION_TITLE
+      ? rawTitle
+      : (session.task || firstRunTask || '');
+    return summarizeTextForStorage(seed, 'session title');
+  }
+
   function compactHistory(history, limits) {
     return (Array.isArray(history) ? history : [])
       .slice(-10)
       .map(entry => ({
-        task: normalizeTextField(entry?.task, 300),
-        result: normalizeTextField(entry?.result, limits.historyChars),
+        task: summarizeTextForStorage(entry?.task, 'history task'),
+        result: summarizeTextForStorage(entry?.result, 'history result'),
         at: typeof entry?.at === 'string' ? entry.at : ''
       }));
   }
@@ -796,23 +834,23 @@
     const undoPayload = compactUndoPayload(run, limits, keepUndoPayload);
     return {
       id: run.id,
-      task: normalizeTextField(run.task || 'untitled task', limits.taskChars),
+      task: summarizeTextForStorage(run.task || 'untitled task', 'run task'),
       mode: typeof run.mode === 'string' ? run.mode : '',
       model: normalizeTextField(run.model, 80),
       reasoningEffort: typeof run.reasoningEffort === 'string' ? run.reasoningEffort : '',
       speedTier: typeof run.speedTier === 'string' ? run.speedTier : '',
       status: normalizeRunStatus(run.status),
-      statusText: normalizeTextField(run.statusText, limits.statusTextChars),
+      statusText: summarizeTextForStorage(run.statusText, 'status text'),
       startedAt: typeof run.startedAt === 'string' ? run.startedAt : '',
       finishedAt: typeof run.finishedAt === 'string' ? run.finishedAt : '',
       events: compactRunEvents(run.events, limits),
-      attachments: normalizeRunAttachments(run.attachments, limits),
+      attachments: compactRunAttachmentsForStorage(run.attachments, limits),
       appliedOperations: [],
       undoOperations: undoPayload.undoOperations,
       undoBaseFiles: undoPayload.undoBaseFiles,
       undoTrackedChanges: undoPayload.undoTrackedChanges,
       undoExpectedFiles: undoPayload.undoExpectedFiles,
-      undoStatus: typeof run.undoStatus === 'string' ? run.undoStatus : ''
+      undoStatus: summarizeTextForStorage(run.undoStatus, 'undo status')
     };
   }
 
@@ -822,8 +860,8 @@
       .slice(-limits.maxEventsPerRun)
       .map(event => {
         const compact = {
-          title: normalizeTextField(event.title, limits.titleChars),
-          status: typeof event.status === 'string' ? event.status : 'info',
+          title: summarizeTextForStorage(event.title, 'event title') || 'Event',
+          status: normalizeEventStatus(event.status),
           timestamp: typeof event.timestamp === 'string' ? event.timestamp : '',
           kind: typeof event.kind === 'string' ? event.kind : 'activity',
           streamKey: typeof event.streamKey === 'string' ? event.streamKey : '',
@@ -848,47 +886,80 @@
       return undefined;
     }
     if (typeof detail === 'string') {
-      return normalizeTextField(detail, maxChars);
+      return summarizeTextForStorage(detail, 'detail');
     }
     if (detail === null || typeof detail === 'number' || typeof detail === 'boolean') {
       return detail;
     }
-    try {
-      return normalizeTextField(JSON.stringify(detail), maxChars);
-    } catch (_error) {
-      return '[detail omitted]';
+    return summarizeStructuredValueForStorage(detail, maxChars);
+  }
+
+  function summarizeStructuredValueForStorage(value, maxChars) {
+    const serialized = safeJsonStringify(value);
+    const summary = {
+      redacted: true,
+      type: Array.isArray(value) ? 'array' : 'object',
+      chars: serialized.length,
+      hash: hashString(serialized)
+    };
+    const paths = collectPathMetadata(value, maxChars);
+    if (paths.items.length) {
+      summary.paths = paths.items;
+      summary.pathCount = paths.count;
     }
+    return summary;
+  }
+
+  function summarizeTextForStorage(value, label) {
+    if (typeof value !== 'string' || !value.trim()) {
+      return '';
+    }
+    const text = redactSecretLikeText(value);
+    if (isOmittedStorageSummary(text)) {
+      return text;
+    }
+    return `[${label} omitted; chars=${text.length}; hash=${hashString(text)}]`;
+  }
+
+  function isOmittedStorageSummary(value) {
+    return /^\[[^\]]+ omitted; chars=\d+; hash=[a-f0-9]{8}\]$/.test(String(value || '').trim());
+  }
+
+  function collectPathMetadata(value, maxChars, state = { seen: new Set(), items: [], count: 0 }) {
+    if (!value || typeof value !== 'object') {
+      return state;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        collectPathMetadata(item, maxChars, state);
+      }
+      return state;
+    }
+    for (const key of Object.keys(value)) {
+      const item = value[key];
+      if (/(^|[A-Z_])path$/i.test(key) && typeof item === 'string') {
+        const path = redactSecretLikeText(item).replace(/\\/g, '/').replace(/^\/+/, '').trim();
+        if (path) {
+          state.count += 1;
+          if (!state.seen.has(path) && state.items.length < 5) {
+            state.seen.add(path);
+            state.items.push(normalizeTextField(path, Math.min(maxChars || 240, 240)));
+          }
+        }
+      } else {
+        collectPathMetadata(item, maxChars, state);
+      }
+    }
+    return state;
   }
 
   function compactUndoPayload(run, limits, keepUndoPayload) {
-    if (!keepUndoPayload) {
-      return {
-        undoOperations: [],
-        undoBaseFiles: [],
-        undoTrackedChanges: [],
-        undoExpectedFiles: []
-      };
-    }
-
-    const undoOperations = safeJsonClone(Array.isArray(run.undoOperations) ? run.undoOperations : []);
-    const undoBaseFiles = normalizeRunFiles(run.undoBaseFiles);
-    const undoTrackedChanges = normalizeRunTrackedChanges(run.undoTrackedChanges);
-    const undoExpectedFiles = normalizeRunFiles(run.undoExpectedFiles);
-    const payload = {
-      undoOperations,
-      undoBaseFiles,
-      undoTrackedChanges,
-      undoExpectedFiles
+    return {
+      undoOperations: [],
+      undoBaseFiles: [],
+      undoTrackedChanges: [],
+      undoExpectedFiles: []
     };
-    if ((!undoOperations.length && !undoTrackedChanges.length) || estimateJsonBytes(payload) > limits.maxUndoBytesPerRun) {
-      return {
-        undoOperations: [],
-        undoBaseFiles: [],
-        undoTrackedChanges: [],
-        undoExpectedFiles: []
-      };
-    }
-    return payload;
   }
 
   function normalizeMode(mode) {
@@ -920,11 +991,47 @@
   }
 
   function normalizeTextField(value, maxChars) {
-    const text = typeof value === 'string' ? value : '';
+    const text = typeof value === 'string' ? redactSecretLikeText(value) : '';
     if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) {
       return text;
     }
     return `${text.slice(0, Math.max(0, maxChars - 1))}…`;
+  }
+
+  function redactSecretLikeText(value) {
+    if (typeof value !== 'string') {
+      return '';
+    }
+    let redacted = value;
+    for (const pattern of SECRET_REDACTION_PATTERNS) {
+      pattern.lastIndex = 0;
+      redacted = redacted.replace(pattern, REDACTED_SECRET);
+    }
+    return redacted;
+  }
+
+  function containsSecretLikeText(value) {
+    if (typeof value === 'string') {
+      return SECRET_REDACTION_PATTERNS.some(pattern => {
+        pattern.lastIndex = 0;
+        return pattern.test(value);
+      });
+    }
+    if (Array.isArray(value)) {
+      return value.some(containsSecretLikeText);
+    }
+    if (value && typeof value === 'object') {
+      return Object.values(value).some(containsSecretLikeText);
+    }
+    return false;
+  }
+
+  function safeJsonStringify(value) {
+    try {
+      return JSON.stringify(value) || '';
+    } catch (_error) {
+      return '[unserializable]';
+    }
   }
 
   function safeJsonClone(value) {
@@ -933,6 +1040,16 @@
     } catch (_error) {
       return [];
     }
+  }
+
+  function hashString(value) {
+    let hash = 2166136261;
+    const text = String(value || '');
+    for (let i = 0; i < text.length; i++) {
+      hash ^= text.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16).padStart(8, '0');
   }
 
   function estimateJsonBytes(value) {
