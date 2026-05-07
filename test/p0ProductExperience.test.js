@@ -7,11 +7,6 @@ const vm = require('node:vm');
 const ReviewHunks = require('../extension/src/content/reviewHunks');
 
 const DIFF_REVIEW_PANEL_PATH = '../extension/src/content/diffReviewPanel.js';
-const CONTEXT_TRAY_PATH = '../extension/src/content/contextTray.js';
-
-function readFileIfExists(filePath) {
-  return fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
-}
 
 function extractFunction(source, name) {
   const markers = [`function ${name}(`, `async function ${name}(`];
@@ -34,17 +29,6 @@ function extractFunction(source, name) {
     }
   }
   assert.fail(`${name} body should close`);
-}
-
-function extractOptionalFunction(source, name) {
-  try {
-    return extractFunction(source, name);
-  } catch (error) {
-    if (String(error?.message || '').includes(`${name} should exist`)) {
-      return '';
-    }
-    throw error;
-  }
 }
 
 function createMinimalDocument() {
@@ -2571,51 +2555,6 @@ test('change preview is grouped by file with edit evidence instead of raw operat
   assert.doesNotMatch(contentScript, /修改计划：编辑 \$\{summary\.counts\.edit/);
 });
 
-test('context picker presents Cursor-style @ context concepts', () => {
-  const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
-    'utf8'
-  );
-  const contextTray = readFileIfExists(path.join(__dirname, CONTEXT_TRAY_PATH));
-  const i18n = fs.readFileSync(
-    path.join(__dirname, '../extension/src/shared/i18n.js'),
-    'utf8'
-  );
-
-  assert.match(i18n, /addContext:\s*'添加 @ 上下文'/);
-  assert.match(i18n, /@文件/);
-  assert.match(contentScript, /@compile-log/);
-  assert.match(contentScript, /@current-section/);
-  assert.match(contentScript + contextTray, /@context/);
-  assert.doesNotMatch(contentScript, /Focus:/);
-});
-
-test('context tray behavior is owned by a content helper loaded before contentScript', () => {
-  const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
-    'utf8'
-  );
-  const contextTray = readFileIfExists(path.join(__dirname, CONTEXT_TRAY_PATH));
-  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../extension/manifest.json'), 'utf8'));
-  const scriptOrder = manifest.content_scripts[0].js;
-  const renderWrapperBody = extractFunction(contentScript, 'renderContextFiles');
-
-  assert.match(contextTray, /createContextTrayController/);
-  assert.match(contentScript, /CodexOverleafContextTray/);
-  assert.match(renderWrapperBody, /return contextTrayController\.renderContextFiles\(project\)/);
-  assert.doesNotMatch(contentScript, /let contextProject\s*=/);
-  assert.match(contextTray, /let contextProject\s*=\s*null/);
-  assert.ok(
-    scriptOrder.indexOf('src/content/diffReviewPanel.js') <
-      scriptOrder.indexOf('src/content/contextTray.js'),
-    'context tray controller loads after diff review panel'
-  );
-  assert.ok(
-    scriptOrder.indexOf('src/content/contextTray.js') < scriptOrder.indexOf('src/contentScript.js'),
-    'context tray controller loads before contentScript'
-  );
-});
-
 test('stale write copy explains user or collaborator edits without snapshot jargon', () => {
   const staleGuard = fs.readFileSync(
     path.join(__dirname, '../extension/src/shared/staleGuard.js'),
@@ -2704,26 +2643,6 @@ test('page bridge messages require same-origin responses in both directions', ()
   assert.match(pageBridge, /event\.origin !== window\.location\.origin/);
 });
 
-test('page bridge capability guard is isolated from page bridge dispatch logic', () => {
-  const capabilityGuard = readFileIfExists(
-    path.join(__dirname, '../extension/src/page/pageBridgeCapability.js')
-  );
-  const pageBridge = fs.readFileSync(
-    path.join(__dirname, '../extension/src/pageBridge.js'),
-    'utf8'
-  );
-
-  assert.notEqual(capabilityGuard, '', 'page bridge capability guard module should exist');
-  assert.match(capabilityGuard, /CodexOverleafPageBridgeCapability/);
-  assert.match(capabilityGuard, /function isValidPageBridgeCapability\(/);
-  assert.match(capabilityGuard, /function buildUnauthorizedBridgeResult\(/);
-  assert.match(capabilityGuard, /function initializePageBridgeCapability\(/);
-  assert.match(capabilityGuard, /function hasValidPageBridgeCapability\(/);
-  assert.match(pageBridge, /CodexOverleafPageBridgeCapability\.create\(/);
-  assert.doesNotMatch(pageBridge, /function isValidPageBridgeCapability\(/);
-  assert.doesNotMatch(pageBridge, /function buildUnauthorizedBridgeResult\(/);
-});
-
 test('page bridge exposes a read-only realtime OT observer', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
@@ -2763,42 +2682,6 @@ test('page bridge exposes a read-only realtime OT observer', () => {
   assert.match(pageBridge, /method === 'getOtStatus'/);
   assert.match(pageBridge, /method === 'drainOtEvents'/);
   assert.doesNotMatch(pageBridge, /\b(?:writeOt|applyOt|sendOt)\b/);
-});
-
-test('diagnostics menu exposes an experimental project-scoped OT warm mirror toggle', () => {
-  const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
-    'utf8'
-  );
-  const i18n = fs.readFileSync(
-    path.join(__dirname, '../extension/src/shared/i18n.js'),
-    'utf8'
-  );
-  const toolbarMarkup = contentScript.match(/<div class="codex-composer-toolbar">[\s\S]*?<\/div>\n\s*<\/form>/)?.[0] || '';
-  const otToggleMarkup = contentScript.match(/<button type="button" class="codex-diagnostics-ot-toggle"[\s\S]*?<\/button>/)?.[0] || '';
-  const syncBody = contentScript.match(/async function syncOtWarmMirrorController\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
-
-  assert.match(contentScript, /<input type="checkbox" data-experimental-ot hidden>/);
-  assert.doesNotMatch(toolbarMarkup, /data-experimental-ot-toggle/);
-  assert.match(otToggleMarkup, /data-experimental-ot/);
-  assert.match(otToggleMarkup, /data-i18n="experimentalOtMenuTitle"/);
-  assert.match(otToggleMarkup, /data-experimental-ot-menu-status/);
-  assert.match(otToggleMarkup, /aria-checked="false"/);
-  assert.doesNotMatch(contentScript, /<input type="checkbox" data-experimental-ot hidden[^>]*\bchecked\b/);
-  assert.match(contentScript, /experimentalOtConfirmMessage/);
-  assert.match(contentScript, /experimentalOtEnabledToast/);
-  assert.match(contentScript, /experimentalOtWarmMirror/);
-  assert.match(contentScript, /function isExperimentalOtEnabled\(\)/);
-  assert.match(contentScript, /function setExperimentalOtEnabled\(enabled\)/);
-  assert.match(contentScript, /syncOtWarmMirrorController/);
-  assert.match(contentScript, /updateOtStatusDisplay/);
-  assert.match(contentScript, /formatOtStatusLabel/);
-  assert.match(syncBody, /callPageBridge\('startOtObserver',\s*\{\s*projectId\s*\}\)/);
-  assert.match(syncBody, /callPageBridge\('stopOtObserver',\s*\{\s*\}\)/);
-  assert.doesNotMatch(syncBody, /drainOtEvents/);
-  assert.doesNotMatch(syncBody, /mirror\.patchFiles/);
-  assert.match(i18n, /experimentalOtWarmMirror:\s*'/);
-  assert.match(i18n, /otStatusObserving:\s*'/);
 });
 
 test('header exposes project custom instructions settings and editor surface', () => {

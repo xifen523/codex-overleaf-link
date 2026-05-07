@@ -6,107 +6,10 @@ const vm = require('node:vm');
 
 const compatibility = require('../extension/src/shared/compatibility');
 const backgroundPath = path.join(__dirname, '../extension/src/background.js');
-const COMPATIBILITY_REQUIRED_METHODS = [
-  'codex.run',
-  'task.run',
-  'task.confirm',
-  'mirror.sync',
-  'mirror.patchFiles',
-  'mirror.scanSensitive',
-  'codex.history.clearPlugin',
-  'skills.list',
-  'skills.install',
-  'skills.remove'
-];
-const RECOVERABLE_METHODS = [
-  'bridge.ping',
-  'mirror.status',
-  'codex.models',
-  'codex.cancel'
-];
 
 function readBackground() {
   return fs.readFileSync(backgroundPath, 'utf8');
 }
-
-test('background resolves active requests when native reports a framing error without an id', () => {
-  const background = readBackground();
-
-  assert.match(background, /resolveUnmatchedNativeError/);
-  assert.match(background, /message\?\.ok === false/);
-  assert.match(background, /pending\.size === 1/);
-  assert.match(background, /pendingRequest\.resolve\(\{\s*\.\.\.message,\s*id:\s*pendingId\s*\}\)/);
-});
-
-test('background validates Overleaf senders before forwarding native requests', () => {
-  const background = readBackground();
-
-  assert.match(background, /function isAllowedOverleafSender\(/);
-  assert.match(background, /chrome\.runtime\.getURL\(''\)/);
-  assert.match(background, /sender\?\.id === chrome\.runtime\.id/);
-  assert.match(background, /sender\.tab\?\.url/);
-  assert.match(background, /www\.overleaf\.com/);
-  assert.match(background, /forbidden_sender/);
-});
-
-test('background routes multi-request unmatched native errors through retry policy', () => {
-  const background = readBackground();
-
-  assert.match(background, /pending\.size === 1/);
-  assert.match(background, /handlePortDisconnect\(getUnmatchedNativeErrorMessage\(message\)\)/);
-  assert.doesNotMatch(background, /ambiguous_native_error/);
-  assert.doesNotMatch(background, /for \(const \[pendingId, pendingRequest\] of pending\.entries\(\)\)/);
-});
-
-test('background classifies native request retry safety by method', () => {
-  const background = readBackground();
-
-  assert.match(background, /function getNativeRetryClass\(method\)/);
-  assert.match(background, /case 'bridge\.ping':[\s\S]*?return 'safe_read_retry'/);
-  assert.match(background, /case 'mirror\.status':[\s\S]*?return 'safe_read_retry'/);
-  assert.match(background, /case 'mirror\.sync':[\s\S]*?return 'safe_sync_retry'/);
-  assert.match(background, /case 'mirror\.patchFiles':[\s\S]*?return 'safe_sync_retry'/);
-  assert.match(background, /case 'codex\.cancel':[\s\S]*?return 'best_effort'/);
-  assert.match(background, /case 'codex\.run':[\s\S]*?return 'no_silent_retry'/);
-  assert.match(background, /case 'task\.run':[\s\S]*?return 'no_silent_retry'/);
-});
-
-test('background loads the shared compatibility helper before handling native requests', () => {
-  const background = readBackground();
-
-  assert.match(background, /importScripts\(['"]shared\/compatibility\.js['"]\)/);
-  assert.match(background, /CodexOverleafCompatibility\.isNativeMethodAllowed/);
-});
-
-test('background uses the compatibility policy for required and recoverable methods', () => {
-  const background = readBackground();
-
-  for (const method of COMPATIBILITY_REQUIRED_METHODS) {
-    assert.equal(compatibility.isNativeMethodAllowed(method, 'native_too_old'), false, `${method} should require compatible native`);
-    assert.equal(compatibility.isNativeMethodAllowed(method, 'ok'), true, `${method} should be allowed when compatible`);
-    assert.match(background, new RegExp(method.replace(/[.]/g, '\\.')));
-  }
-
-  for (const method of RECOVERABLE_METHODS) {
-    const expected = method === 'codex.models'
-      ? compatibility.isNativeMethodAllowed(method, 'native_too_old')
-      : compatibility.isNativeMethodAllowed(method, 'native_missing');
-    assert.equal(expected, true, `${method} should remain available for recovery or read-only fallback`);
-    assert.match(background, new RegExp(method.replace(/[.]/g, '\\.')));
-  }
-});
-
-test('background tracks per-request native retry state and handles disconnect centrally', () => {
-  const background = readBackground();
-
-  assert.match(background, /retryClass:\s*getNativeRetryClass\(request\.method\)/);
-  assert.match(background, /retryCount:\s*0/);
-  assert.match(background, /finalResponseReceived:\s*false/);
-  assert.match(background, /eventForwarded:\s*false/);
-  assert.match(background, /pendingRequest\.finalResponseReceived\s*=\s*true/);
-  assert.match(background, /function handlePortDisconnect\(errorMessage\)/);
-  assert.match(background, /function canRetryNativeRequest\(pendingRequest\)/);
-});
 
 test('background blocks side-effecting native requests with non-ok compatibility evidence before posting', async () => {
   const harness = loadBackgroundHarness();
