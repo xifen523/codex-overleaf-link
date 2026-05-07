@@ -64,7 +64,7 @@ test('run controller carries trimmed project custom instructions for normal snap
   assert.equal(params.customInstructions, 'Use project terminology. Prefer \\\\cref{} references.');
 });
 
-test('run controller forwards selected local skill ids to codex.run params', () => {
+test('run controller ignores legacy project-local selected skill ids', () => {
   const params = RunController.buildCodexRunParams({
     currentProjectId: 'project-123',
     state: {
@@ -79,7 +79,7 @@ test('run controller forwards selected local skill ids to codex.run params', () 
     selectedSkillIds: ['venue-style', 'latex-macros']
   });
 
-  assert.deepEqual(params.selectedSkillIds, ['venue-style', 'latex-macros']);
+  assert.equal(params.selectedSkillIds, undefined);
 });
 
 test('run controller forwards sanitized composer attachments as turn context', () => {

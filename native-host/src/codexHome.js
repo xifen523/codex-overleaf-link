@@ -6,7 +6,10 @@ const {
   getHomeDir,
   getNativeHostPlatform
 } = require('./nativeHostPlatform');
-const { getCodexOverleafSkillsRoot } = require('./localSkills');
+const {
+  getCodexOverleafSkillsRoot,
+  materializeProjectSkillsAsCodexSkills
+} = require('./localSkills');
 
 const COPIED_USER_CODEX_FILES = [
   'auth.json',
@@ -123,7 +126,8 @@ function preparePluginCodexHome(env = process.env, options = {}) {
     options,
     loadCodexLocalSkills,
     loadCodexOverleafSkills,
-    installCodexOverleafSkillsTarget
+    installCodexOverleafSkillsTarget,
+    projectLocalSkills: options.projectLocalSkills || null
   });
   if (skillsResult.linked) {
     linked.push('skills');
@@ -202,7 +206,8 @@ function composePluginSkillsDirectory({
   options = {},
   loadCodexLocalSkills = true,
   loadCodexOverleafSkills = true,
-  installCodexOverleafSkillsTarget = false
+  installCodexOverleafSkillsTarget = false,
+  projectLocalSkills = null
 } = {}) {
   const targetRoot = path.join(pluginHome, 'skills');
   if (!isSafePluginHomePath(targetRoot, pluginHome)) {
@@ -263,6 +268,31 @@ function composePluginSkillsDirectory({
         continue;
       }
       linked = true;
+    }
+  }
+
+  if (projectLocalSkills?.projectId) {
+    try {
+      const materialized = materializeProjectSkillsAsCodexSkills({
+        projectId: projectLocalSkills.projectId,
+        rootDir: projectLocalSkills.rootDir,
+        projectRoot: projectLocalSkills.projectRoot,
+        targetRoot
+      });
+      if (materialized.installed.length) {
+        linked = true;
+      }
+      for (const item of materialized.skipped) {
+        skippedLinks.push({
+          name: `skills/${item.id || 'project-local'}`,
+          reason: item.reason || 'project_skill_skipped'
+        });
+      }
+    } catch (error) {
+      skippedLinks.push({
+        name: 'skills/project-local',
+        reason: error.message || 'project_skill_materialize_failed'
+      });
     }
   }
 

@@ -13,6 +13,10 @@ const pageBridgeSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/pageBridge.js'),
   'utf8'
 );
+const pageBridgeCapabilityPath = path.join(__dirname, '../extension/src/page/pageBridgeCapability.js');
+const pageBridgeCapabilitySource = fs.existsSync(pageBridgeCapabilityPath)
+  ? fs.readFileSync(pageBridgeCapabilityPath, 'utf8')
+  : '';
 const otTextSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/shared/otText.js'),
   'utf8'
@@ -43,6 +47,36 @@ test('page bridge save-state source requires tri-state positive verification', (
   assert.match(pageBridgeSource, /verified_saved/);
   assert.match(pageBridgeSource, /unknown_timeout/);
   assert.match(pageBridgeSource, /unavailable/);
+});
+
+test('page bridge capability helper validates tokens and locks initialization', () => {
+  assert.notEqual(pageBridgeCapabilitySource, '', 'pageBridgeCapability.js should exist');
+
+  const window = {};
+  const context = vm.createContext({ window, globalThis: window });
+  vm.runInContext(pageBridgeCapabilitySource, context, { filename: 'pageBridgeCapability.js' });
+
+  const capabilityHelper = window.CodexOverleafPageBridgeCapability;
+  assert.equal(capabilityHelper.isValidPageBridgeCapability('short'), false);
+  assert.equal(capabilityHelper.isValidPageBridgeCapability(`valid-capability-${'x'.repeat(16)}`), true);
+  const unauthorized = capabilityHelper.buildUnauthorizedBridgeResult();
+  assert.equal(unauthorized.ok, false);
+  assert.equal(unauthorized.code, 'page_bridge_unauthorized');
+  assert.equal(unauthorized.error, 'Page bridge request is not authorized');
+
+  const guard = capabilityHelper.create();
+  const first = guard.initializePageBridgeCapability('valid-capability-1234567890');
+  const repeat = guard.initializePageBridgeCapability('valid-capability-1234567890');
+  const conflict = guard.initializePageBridgeCapability('valid-capability-conflict');
+
+  assert.equal(first.ok, true);
+  assert.equal(first.alreadyInitialized, undefined);
+  assert.equal(repeat.ok, true);
+  assert.equal(repeat.alreadyInitialized, true);
+  assert.equal(conflict.ok, false);
+  assert.equal(conflict.code, 'page_bridge_capability_already_initialized');
+  assert.equal(guard.hasValidPageBridgeCapability('valid-capability-1234567890'), true);
+  assert.equal(guard.hasValidPageBridgeCapability('valid-capability-conflict'), false);
 });
 
 test('page bridge maps a missing save indicator to unknown timeout', async () => {
@@ -1894,6 +1928,9 @@ function createPageBridgeHarness({
     window.CodexOverleafRealtimeObserver = { create: realtimeObserverFactory };
   } else {
     vm.runInContext(overleafRealtimeObserverSource, context, { filename: 'overleafRealtimeObserver.js' });
+  }
+  if (pageBridgeCapabilitySource) {
+    vm.runInContext(pageBridgeCapabilitySource, context, { filename: 'pageBridgeCapability.js' });
   }
   vm.runInContext(pageBridgeSource, context, { filename: 'pageBridge.js' });
 

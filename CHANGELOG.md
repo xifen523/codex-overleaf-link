@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.9.5 - 2026-05-07
+
+Architecture hardening release for the v0.9 release-candidate line. This version focuses on reducing maintenance risk in the largest files, correcting project skill activation semantics, and tightening release gates without adding major user-facing surface area.
+
+### Added
+
+- Focused content-script modules for composer attachments, diff review rendering, and the context tray while keeping `contentScript.js` as the composition root.
+- Focused page-bridge capability guard, native request quota, and native response-budget modules.
+- Architecture budget checks for the largest content, page-bridge, and native runner files, including explicit exceptions for files that still need follow-up splitting.
+- Regression tests for Codex Overleaf skill auto-trigger availability, slash-selected forced skill invocation, and hidden project-local skill non-exposure.
+- Release tracking tests that ensure manifest-loaded extension files and native relative `require()` targets are git-tracked before packaging.
+
+### Changed
+
+- Bumped package, extension, README, release artifact, and native compatibility metadata to `0.9.5`.
+- Codex Overleaf skills remain materialized into the plugin-scoped Codex home when enabled, so unselected plugin skills can participate in normal Codex skill triggering without exposing the user's global Codex local skills.
+- Slash-selected Codex Overleaf skills are treated as forced turn-scoped invocations, while stale selections are ignored when their skill scope is disabled.
+- Project-local skills are no longer shown in settings or exposed to normal UI runs; the legacy native API remains for compatibility.
+- Architecture checks now fail if oversized files grow beyond their documented v0.9.5 exception ceilings.
+
+### Fixed
+
+- Disabled user-local Codex skills no longer leak back into runs through the project skill path.
+- Release hygiene now catches newly split extension/native modules that would otherwise be omitted by `git ls-files`-based artifact packaging.
+
 ## v0.9.0 - 2026-05-07
 
 Release-candidate hardening release. This version focuses on release gates, real workflow smoke coverage, payload safety, security/privacy hardening, and public documentation accuracy rather than new product surface area.

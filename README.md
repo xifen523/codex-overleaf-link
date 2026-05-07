@@ -3,7 +3,7 @@
   <h1>Codex Overleaf Link</h1>
   <p><strong>Empower Overleaf with Codex.</strong></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.9.0-blue" alt="version">
+    <img src="https://img.shields.io/badge/version-0.9.5-blue" alt="version">
     <img src="https://img.shields.io/badge/platform-macOS%20%2F%20Windows%20%2F%20Linux-lightgrey" alt="platform">
     <img src="https://img.shields.io/badge/chrome-MV3-green" alt="chrome manifest v3">
     <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="node version">
@@ -35,17 +35,17 @@ macOS / Linux latest source install:
 curl -fsSL "https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh?$(date +%s)" | bash
 ```
 
-macOS / Linux version-pinned install or update for v0.9.0:
+macOS / Linux version-pinned install or update for v0.9.5:
 
 ```bash
-CODEX_OVERLEAF_REF=v0.9.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.sh)"
+CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)"
 ```
 
-Windows version-pinned install or update for v0.9.0 from PowerShell:
+Windows version-pinned install or update for v0.9.5 from PowerShell:
 
 ```powershell
-iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.ps1 -OutFile install.ps1
-$env:CODEX_OVERLEAF_REF='v0.9.0'
+iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.ps1 -OutFile install.ps1
+$env:CODEX_OVERLEAF_REF='v0.9.5'
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
@@ -73,19 +73,19 @@ Then load `extension/` as an unpacked extension in Chrome and run `npm run insta
 <details>
 <summary><strong>Update</strong></summary>
 
-For a deterministic v0.9.0 update, run the pinned command for your platform. This is also the native mismatch recovery command shown by the popup and panel when they report **Native host update required**.
+For a deterministic v0.9.5 update, run the pinned command for your platform. This is also the native mismatch recovery command shown by the popup and panel when they report **Native host update required**.
 
 macOS / Linux:
 
 ```bash
-CODEX_OVERLEAF_REF=v0.9.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.sh)"
+CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)"
 ```
 
 Windows PowerShell:
 
 ```powershell
-iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.ps1 -OutFile install.ps1
-$env:CODEX_OVERLEAF_REF='v0.9.0'
+iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.ps1 -OutFile install.ps1
+$env:CODEX_OVERLEAF_REF='v0.9.5'
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
@@ -95,12 +95,12 @@ Then reload the extension in `chrome://extensions` and refresh the Overleaf page
 
 ## GitHub Release Artifacts
 
-The v0.9.0 GitHub Release contains:
+The v0.9.5 GitHub Release contains:
 
-- `codex-overleaf-link-extension-v0.9.0.zip`: loadable Chrome extension package for unpacked or Web Store inspection.
-- `codex-overleaf-native-host-v0.9.0.tar.gz`: native host runtime files used by the installer and release verification.
-- `install.sh`: release-pinned macOS / Linux installer that defaults to `v0.9.0` when run directly from the release artifact.
-- `install.ps1`: release-pinned Windows PowerShell installer that defaults to `v0.9.0` when run directly from the release artifact.
+- `codex-overleaf-link-extension-v0.9.5.zip`: loadable Chrome extension package for unpacked or Web Store inspection.
+- `codex-overleaf-native-host-v0.9.5.tar.gz`: native host runtime files used by the installer and release verification.
+- `install.sh`: release-pinned macOS / Linux installer that defaults to `v0.9.5` when run directly from the release artifact.
+- `install.ps1`: release-pinned Windows PowerShell installer that defaults to `v0.9.5` when run directly from the release artifact.
 - `uninstall-native-host.mjs`: native host uninstaller that removes the Chrome Native Messaging manifest, bridge executable, and runtime copy.
 - `SHA256SUMS` and `release-manifest.json`: checksum and artifact metadata for release verification.
 
@@ -151,7 +151,7 @@ The uninstaller removes the Native Messaging registration, bridge executable, an
 Linux Chromium install or update:
 
 ```bash
-CODEX_OVERLEAF_REF=v0.9.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.sh)" -- --browser chromium
+CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)" -- --browser chromium
 ```
 
 Linux Chromium uninstall:
@@ -171,7 +171,7 @@ node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs --browser chromi
 - **Auto-recompile** — triggers Overleaf recompile after writeback; logs compile errors as context.
 - **@ context** — attach specific files, `@compile-log`, or `@current-section` to the prompt.
 - **Composer attachments and binary writeback** — paste or drop PDFs, images, and files into the composer as turn-scoped Codex context, and review Codex-created assets before creating or replacing them in Overleaf.
-- **Project-local skills** — install, enable, and remove project-scoped Markdown skills that are injected into Codex runs without modifying global Codex settings.
+- **Codex Overleaf skills** — install reusable plugin-scoped skills through the slash menu, then let Codex auto-trigger them or select one explicitly for the next turn.
 - **Governance rules** — configure project read-only and writable path rules that block unsafe writeback before browser mutation.
 - **Sensitive preflight** — scan selected project context for likely secrets before sending it to Codex.
 - **Audit and diagnostics** — keep local run records and export redacted diagnostic bundles for issue reports.
@@ -289,14 +289,14 @@ Run the pinned installer for your platform, reload the extension in `chrome://ex
 macOS/Linux:
 
 ```bash
-CODEX_OVERLEAF_REF=v0.9.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.sh)"
+CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)"
 ```
 
 Windows PowerShell:
 
 ```powershell
-iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.ps1 -OutFile install.ps1
-$env:CODEX_OVERLEAF_REF='v0.9.0'
+iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.ps1 -OutFile install.ps1
+$env:CODEX_OVERLEAF_REF='v0.9.5'
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
@@ -355,7 +355,7 @@ Use this matrix for release-candidate signoff and compatibility reports. Record 
 | Browser/channel/version | Google Chrome channel and version. | Google Chrome channel and version. | Google Chrome channel and version. | Chromium channel/package and version. |
 | Install mode | Unpacked extension or Web Store id once published. | Unpacked extension or Web Store id once published. | Unpacked extension or Web Store id once published. | Unpacked extension or Web Store id once published; native host installed with `--browser chromium`. |
 | Extension id | Default unpacked id `illdpneeeopfffmiepaejglgmhpmdhdc`, or recorded Web Store id. | Default unpacked id `illdpneeeopfffmiepaejglgmhpmdhdc`, or recorded Web Store id. | Default unpacked id `illdpneeeopfffmiepaejglgmhpmdhdc`, or recorded Web Store id. | Default unpacked id `illdpneeeopfffmiepaejglgmhpmdhdc`, or recorded Web Store id. |
-| Installer/update command | `CODEX_OVERLEAF_REF=v0.9.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.sh)"` | `iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.ps1 -OutFile install.ps1`; `$env:CODEX_OVERLEAF_REF='v0.9.0'`; then `powershell -ExecutionPolicy Bypass -File install.ps1` | `CODEX_OVERLEAF_REF=v0.9.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.sh)"` | `CODEX_OVERLEAF_REF=v0.9.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.sh)" -- --browser chromium` |
+| Installer/update command | `CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)"` | `iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.ps1 -OutFile install.ps1`; `$env:CODEX_OVERLEAF_REF='v0.9.5'`; then `powershell -ExecutionPolicy Bypass -File install.ps1` | `CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)"` | `CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)" -- --browser chromium` |
 | Uninstall command | `node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs` | `node $env:LOCALAPPDATA\CodexOverleaf\source\scripts\uninstall-native-host.mjs` | `node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs` | `node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs --browser chromium` |
 | Manifest/registry path | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.overleaf.json` | `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.codex.overleaf` -> `%LOCALAPPDATA%\CodexOverleaf\native-host-runtime\com.codex.overleaf.json` | `~/.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json` | `~/.config/chromium/NativeMessagingHosts/com.codex.overleaf.json` |
 | Bridge/runtime/source path | Bridge `~/.codex-overleaf/codex-overleaf-bridge`; runtime `~/.codex-overleaf/native-host-runtime`; source `~/.codex-overleaf/source`. | Bridge `%LOCALAPPDATA%\CodexOverleaf\codex-overleaf-bridge.cmd`; runtime `%LOCALAPPDATA%\CodexOverleaf\native-host-runtime`; source `%LOCALAPPDATA%\CodexOverleaf\source`. | Bridge `~/.codex-overleaf/codex-overleaf-bridge`; runtime `~/.codex-overleaf/native-host-runtime`; source `~/.codex-overleaf/source`. | Bridge `~/.codex-overleaf/codex-overleaf-bridge`; runtime `~/.codex-overleaf/native-host-runtime`; source `~/.codex-overleaf/source`. |

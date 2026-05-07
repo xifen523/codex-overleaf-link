@@ -178,6 +178,92 @@ function loadSelectedProjectSkills({ projectId, selectedSkillIds, rootDir, proje
   return { skills, missing };
 }
 
+function materializeProjectSkillsAsCodexSkills({
+  projectId,
+  rootDir,
+  projectRoot,
+  targetRoot
+} = {}) {
+  const target = path.resolve(String(targetRoot || ''));
+  if (!targetRoot) {
+    throw new Error('Codex skill target root is required');
+  }
+  const skillsDir = getProjectSkillsDir(projectId, { rootDir, projectRoot });
+  const result = { installed: [], skipped: [] };
+  if (!fs.existsSync(skillsDir)) {
+    return result;
+  }
+
+  fs.mkdirSync(target, { recursive: true });
+  for (const entry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) {
+      continue;
+    }
+    const id = entry.name.slice(0, -3);
+    if (!isSafeSkillId(id)) {
+      result.skipped.push({ id, reason: 'unsafe_id' });
+      continue;
+    }
+    const sourcePath = resolveSkillPath(projectId, id, { rootDir, projectRoot });
+    const stat = fs.statSync(sourcePath);
+    if (!stat.isFile() || stat.size > MAX_SKILL_CONTENT_BYTES) {
+      result.skipped.push({ id, reason: 'invalid_content' });
+      continue;
+    }
+    const skillDir = resolveInside(target, id, 'Unsafe materialized project skill path');
+    const skillPath = resolveInside(skillDir, 'SKILL.md', 'Unsafe materialized project skill path');
+    fs.rmSync(skillDir, { recursive: true, force: true });
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(skillPath, fs.readFileSync(sourcePath, 'utf8'), 'utf8');
+    result.installed.push(id);
+  }
+  return result;
+}
+
+function loadSelectedCodexOverleafSkill({
+  skillId,
+  loadCodexOverleafSkills = true,
+  env = process.env,
+  skillsRoot
+} = {}) {
+  const rawId = String(skillId || '').trim();
+  if (!rawId) {
+    return { skill: null, missing: [], ignored: [] };
+  }
+  const id = validateSkillId(rawId);
+  if (loadCodexOverleafSkills === false) {
+    return {
+      skill: null,
+      missing: [],
+      ignored: [{
+        id,
+        reason: 'codex_overleaf_skills_disabled'
+      }]
+    };
+  }
+
+  const filePath = resolveCodexOverleafSkillPath(id, { env, skillsRoot });
+  if (!fs.existsSync(filePath)) {
+    return { skill: null, missing: [id], ignored: [] };
+  }
+  const stat = fs.statSync(filePath);
+  if (!stat.isFile() || stat.size > MAX_SKILL_CONTENT_BYTES) {
+    return { skill: null, missing: [id], ignored: [] };
+  }
+  const content = fs.readFileSync(filePath, 'utf8');
+  return {
+    skill: {
+      id,
+      title: inferSkillTitle(content) || id,
+      scope: CODEX_OVERLEAF_SKILL_SCOPE,
+      path: filePath,
+      content: truncateText(content, MAX_SKILL_CONTENT_CHARS)
+    },
+    missing: [],
+    ignored: []
+  };
+}
+
 function normalizeSelectedSkillIds(selectedSkillIds) {
   const seen = new Set();
   const ids = [];
@@ -374,7 +460,9 @@ module.exports = {
   installProjectSkill,
   listCodexOverleafSkills,
   listProjectSkills,
+  loadSelectedCodexOverleafSkill,
   loadSelectedProjectSkills,
+  materializeProjectSkillsAsCodexSkills,
   removeCodexOverleafSkill,
   removeProjectSkill
 };

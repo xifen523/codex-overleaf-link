@@ -1,14 +1,14 @@
 # Roadmap to v1.0
 
-This roadmap describes the planned path from the current `v0.9.0` release candidate to a production-ready `v1.0.0`. The `v0.1` through `v0.8` sections are retained as historical milestones.
+This roadmap describes the planned path from the current `v0.9.5` release-candidate hardening line to a production-ready `v1.0.0`. The `v0.1` through `v0.8` sections are retained as historical milestones.
 
 The guiding principle is simple: make the existing bridge reliable first, then improve synchronization, then broaden distribution and platform support. Features that increase sync complexity or security surface area should stay behind explicit opt-in flags until they are proven stable.
 
 ## Release Discipline
 
 - `main` tracks release-candidate hardening, stable releases, and release hotfixes.
-- `next` tracks post-`v0.9.0` development toward `v1.0.0`.
-- `v0.9.x` is release-candidate hardening only: P0/P1 fixes, release gate corrections, documentation corrections, manual smoke signoff, and compatibility signoff.
+- `next` tracks post-`v0.9.5` development toward `v1.0.0`.
+- `v0.9.x` is release-candidate hardening only: P0/P1 fixes, architecture hardening, release gate corrections, documentation corrections, manual smoke signoff, and compatibility signoff.
 - Historical `v0.1.x` releases were the original hotfix-only stable preview line and are no longer the current release line.
 - Experimental sync features must preserve the current full-snapshot fallback path.
 - User project content must stay local to the bridge and the user's configured Codex CLI account. The project should not add a hosted backend.
@@ -259,6 +259,52 @@ recording P0/P1 signoff.
 - Release-candidate builds pass the full automated test suite and produce verified release artifacts.
 - The manual real Overleaf smoke-test checklist is completed before store or GitHub release publication.
 - Documentation matches the actual install, update, uninstall, compatibility, and local-data cleanup flow.
+
+## v0.9.5: Architecture Hardening
+
+**Goal:** Reduce release-candidate maintenance risk by splitting oversized implementation
+files, locking down skill activation semantics, and turning hardening expectations into
+automated gates without adding major user-facing features.
+
+### Planned Work
+
+- Split oversized files into focused modules while preserving the current runtime model:
+  - keep `extension/src/contentScript.js` as the content-script composition root,
+  - keep `extension/src/pageBridge.js` as the page-world bridge router,
+  - move native quota, response-budget, and skill-command approval logic into focused native modules.
+- Fix skill activation semantics:
+  - enabled Codex and Codex Overleaf skills remain available for normal Codex auto-triggering,
+  - a slash-selected skill is treated as a forced skill invocation for the current turn,
+  - stale selected skills are ignored when their scope is disabled,
+  - disabling local Codex skills must not expose the user's global local skills.
+- Add architecture budget checks for the largest files so future release-candidate work
+  cannot silently reintroduce the same single-file bloat.
+- Add native response-budget boundary tests around the Chrome native messaging frame limit.
+- Add skill-installer command red-team tests for unsupported git options, unsafe URL
+  schemes, shell wrappers, command substitution, redirection, and path escape attempts.
+- Preserve release artifact hygiene: extension and native host packages must not include
+  internal specs, plans, test fixtures, docs, previous release output, secrets, or logs.
+
+### Non-Goals
+
+- No new sync architecture.
+- No bundler or build-system migration.
+- No major UI surface beyond bug fixes required by the skill and settings semantics.
+- No change to the governed Overleaf writeback model.
+
+### Acceptance Criteria
+
+- `contentScript.js`, `pageBridge.js`, `codexSessionRunner.js`, and `taskRunner.js`
+  are either under their v0.9.5 architecture budgets or have a documented exception
+  that fails closed in the budget checker.
+- The slash skill flow distinguishes "available for auto-trigger" from "forced for
+  this turn" in tests and in native prompt construction.
+- Existing v0.9 behavior remains compatible: panel open/close, session history,
+  context selection, attachments, settings, diagnostics, ask mode, confirm mode,
+  writeback review, and native host compatibility continue to pass smoke testing.
+- `npm test`, `npm run verify:release`, and `npm run build:release` pass for `v0.9.5`.
+- Release artifacts for `v0.9.5` contain only the packaged extension, native host, and
+  installer inputs expected by the release checklist.
 
 ## v1.0.0: Production Stable
 

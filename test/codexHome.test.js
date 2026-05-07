@@ -168,6 +168,37 @@ test('plugin Codex home composes user and Codex Overleaf skills according to loa
   }
 });
 
+test('plugin Codex home materializes project-local skills for automatic Codex triggering', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-project-skill-home-'));
+  const mirrorRoot = path.join(home, 'mirrors');
+  const projectRoot = path.join(mirrorRoot, 'project-auto-skills', 'workspace');
+  try {
+    fs.mkdirSync(path.join(projectRoot, '.codex-overleaf', 'skills'), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectRoot, '.codex-overleaf', 'skills', 'paper-style.md'),
+      '# Paper Style\n\nPrefer concise paper edits.\n',
+      'utf8'
+    );
+
+    preparePluginCodexHome({ HOME: home }, {
+      loadCodexLocalSkills: false,
+      loadCodexOverleafSkills: false,
+      projectLocalSkills: {
+        projectId: 'project-auto-skills',
+        projectRoot
+      }
+    });
+
+    const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+    const skillPath = path.join(pluginHome, 'skills', 'paper-style', 'SKILL.md');
+    assert.equal(fs.lstatSync(skillPath).isFile(), true);
+    assert.match(fs.readFileSync(skillPath, 'utf8'), /Prefer concise paper edits/);
+    assert.equal(fs.existsSync(path.join(pluginHome, 'skills', 'global-style')), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('plugin Codex home strips local plugin config when Codex local skills are disabled', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-config-sanitize-'));
   const userCodexHome = path.join(home, '.codex');

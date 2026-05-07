@@ -12,12 +12,12 @@ artifact names aligned with `package.json` before running `npm run verify:releas
 
 ## Release Artifact Hygiene
 
-- Verify checksums from `dist/releases/v0.9.0/SHA256SUMS`.
-- Inspect extension zip `codex-overleaf-link-extension-v0.9.0.zip` before upload.
-- Inspect native host tarball `codex-overleaf-native-host-v0.9.0.tar.gz` before upload.
+- Verify checksums from `dist/releases/v0.9.5/SHA256SUMS`.
+- Inspect extension zip `codex-overleaf-link-extension-v0.9.5.zip` before upload.
+- Inspect native host tarball `codex-overleaf-native-host-v0.9.5.tar.gz` before upload.
 - Confirm release artifacts exclude `docs/`, `docs/superpowers/`, `.local/`, `.git/`, `test/`, `dist/`, `build/`, README, changelog, roadmap, specs, plans, keys, certificates, logs, sqlite files, and `.crx` files.
-- Confirm the release `install.sh` defaults `CODEX_OVERLEAF_REF` to `v0.9.0`.
-- Confirm the release `install.ps1` defaults `$DefaultRef` to `v0.9.0`.
+- Confirm the release `install.sh` defaults `CODEX_OVERLEAF_REF` to `v0.9.5`.
+- Confirm the release `install.ps1` defaults `$DefaultRef` to `v0.9.5`.
 
 ## Real Overleaf Smoke
 
@@ -97,7 +97,7 @@ For each supported row, record the fields below in the release notes or release-
 | Browser/channel/version |  |  |  |  |
 | Extension install mode | Unpacked / Web Store | Unpacked / Web Store | Unpacked / Web Store | Unpacked / Web Store |
 | Extension id |  |  |  |  |
-| Installer/update command | `CODEX_OVERLEAF_REF=v0.9.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.sh)"` | `iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.ps1 -OutFile install.ps1`; `$env:CODEX_OVERLEAF_REF='v0.9.0'`; `powershell -ExecutionPolicy Bypass -File install.ps1` | `CODEX_OVERLEAF_REF=v0.9.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.sh)"` | `CODEX_OVERLEAF_REF=v0.9.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.sh)" -- --browser chromium` |
+| Installer/update command | `CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)"` | `iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.ps1 -OutFile install.ps1`; `$env:CODEX_OVERLEAF_REF='v0.9.5'`; `powershell -ExecutionPolicy Bypass -File install.ps1` | `CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)"` | `CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)" -- --browser chromium` |
 | Uninstall command | `node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs` | `node $env:LOCALAPPDATA\CodexOverleaf\source\scripts\uninstall-native-host.mjs` | `node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs` | `node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs --browser chromium` |
 | Manifest/registry path | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.overleaf.json` | `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.codex.overleaf` -> `%LOCALAPPDATA%\CodexOverleaf\native-host-runtime\com.codex.overleaf.json` | `~/.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json` | `~/.config/chromium/NativeMessagingHosts/com.codex.overleaf.json` |
 | Bridge/runtime/source path | `~/.codex-overleaf/codex-overleaf-bridge`; `~/.codex-overleaf/native-host-runtime`; `~/.codex-overleaf/source` | `%LOCALAPPDATA%\CodexOverleaf\codex-overleaf-bridge.cmd`; `%LOCALAPPDATA%\CodexOverleaf\native-host-runtime`; `%LOCALAPPDATA%\CodexOverleaf\source` | `~/.codex-overleaf/codex-overleaf-bridge`; `~/.codex-overleaf/native-host-runtime`; `~/.codex-overleaf/source` | `~/.codex-overleaf/codex-overleaf-bridge`; `~/.codex-overleaf/native-host-runtime`; `~/.codex-overleaf/source` |

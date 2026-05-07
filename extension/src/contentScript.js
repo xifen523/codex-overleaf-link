@@ -7,14 +7,11 @@
   const RUN_SNAPSHOT_ZIP_TIMEOUT_MS = 30000;
   const SNAPSHOT_PAGE_BRIDGE_TIMEOUT_MS = 70000;
   const COMPILE_PAGE_BRIDGE_TIMEOUT_MS = 75000;
-  const CONTEXT_EXACT_FILE_LIST_ZIP_TIMEOUT_MS = 30000;
   const CONTEXT_FILE_LIST_PAGE_BRIDGE_TIMEOUT_MS = 35000;
   const STREAM_RENDER_FLUSH_MS = 80;
   const STREAM_SAVE_DELAY_MS = 1000;
   const MAX_RUN_EVENTS = 300;
   const MAX_SAFE_UNDO_REPLACEALL_CHARS = 2000;
-  const MAX_INITIAL_REVIEW_HUNKS = 20;
-  const MAX_INITIAL_HUNK_LINES = 80;
   const NATIVE_COMPATIBILITY_GATED_METHODS = new Set([
     'codex.run',
     'task.run',
@@ -68,6 +65,9 @@
   });
   const writebackController = window.CodexOverleafWritebackController;
   const ReviewHunks = window.CodexOverleafReviewHunks;
+  const DiffReviewPanel = window.CodexOverleafDiffReviewPanel;
+  const ContextTray = window.CodexOverleafContextTray;
+  const LocalSkillsPanel = window.CodexOverleafLocalSkillsPanel;
   const runController = window.CodexOverleafRunController;
   const mirrorHealth = window.CodexOverleafMirrorHealth;
   const otWarmMirrorController = window.CodexOverleafOtWarmMirrorController;
@@ -77,6 +77,75 @@
   const MAX_COMPOSER_ATTACHMENT_BYTES = 12 * 1024 * 1024;
   const MAX_COMPOSER_ATTACHMENTS = 8;
   const MAX_ATTACHMENT_PREVIEW_DATA_URL_CHARS = 768 * 1024;
+  const composerAttachmentController = window.CodexOverleafComposerAttachments.createComposerAttachmentController({
+    getPanel: () => panel,
+    tr,
+    tx,
+    appendPlainLog,
+    limits: {
+      maxAttachmentBytes: MAX_COMPOSER_ATTACHMENT_BYTES,
+      maxAttachments: MAX_COMPOSER_ATTACHMENTS,
+      maxPreviewDataUrlChars: MAX_ATTACHMENT_PREVIEW_DATA_URL_CHARS
+    }
+  });
+  const diffReviewPanel = DiffReviewPanel.createDiffReviewPanelController({
+    root: window,
+    document,
+    reviewHunks: ReviewHunks,
+    tr,
+    callPageBridge,
+    getRunEvents: () => currentRunView?.events,
+    appendRunEvent,
+    scrollLogToBottom
+  });
+  const contextTrayController = ContextTray.createContextTrayController({
+    root: window,
+    document,
+    getPanel: () => panel,
+    getState: () => state,
+    setState: nextState => {
+      state = nextState;
+    },
+    saveState,
+    saveStateSoon,
+    updateActiveSession,
+    callPageBridge,
+    getCurrentProjectId,
+    tr,
+    tx,
+    closeModelConfigPopover,
+    closeDiagnosticsMenu,
+    closeCustomInstructionsSettings,
+    closeSlashMenu,
+    projectFiles: window.CodexOverleafProjectFiles
+  });
+  const localSkillsPanel = LocalSkillsPanel.createLocalSkillsPanelController({
+    root: window,
+    document,
+    getPanel: () => panel,
+    getState: () => state,
+    setState: nextState => {
+      state = nextState;
+    },
+    saveState,
+    sendBackgroundNative,
+    getCurrentProjectId,
+    getSkillLoadingSettings,
+    setProjectSettingsStatus,
+    tr,
+    tx,
+    getComposerSkillInvocation: () => composerSkillInvocation,
+    normalizeComposerSkillInvocation,
+    clearComposerSkillInvocation,
+    setSlashCodexOverleafSkills: skills => {
+      slashCodexOverleafSkills = Array.isArray(skills) ? skills : [];
+      slashCodexOverleafSkillsLoaded = true;
+    },
+    clearSlashCodexOverleafSkills: () => {
+      slashCodexOverleafSkills = [];
+      slashCodexOverleafSkillsLoaded = false;
+    }
+  });
 
   let panel = null;
   let state = null;
@@ -86,11 +155,6 @@
   let streamRenderTimer = null;
   let pendingStreamRenderEvents = new Map();
   let storageNoticeKeys = new Set();
-  let contextProject = null;
-  let contextLoadId = 0;
-  let contextExpandedFolders = new Set();
-  let composerAttachments = [];
-  let pendingComposerAttachmentKeys = new Set();
   let composerSkillInvocation = null;
   let slashCodexOverleafSkills = [];
   let slashCodexOverleafSkillsLoaded = false;
@@ -730,6 +794,7 @@
     if (typeof closeSlashMenu === 'function') {
       closeSlashMenu();
     }
+    clearProjectSettingsStatus();
     syncCustomInstructionsEditorForProject(getCurrentProjectId(), { force: true });
     if (typeof syncProjectSettingsEditorForProject === 'function') {
       syncProjectSettingsEditorForProject(getCurrentProjectId());
@@ -764,6 +829,7 @@
     settingsPanel.hidden = true;
     button.dataset.active = 'false';
     button.setAttribute('aria-expanded', 'false');
+    clearProjectSettingsStatus();
   }
 
   async function saveCustomInstructionsSettings() {
@@ -774,9 +840,6 @@
     setCustomInstructionsForProject(getCurrentProjectId(), input.value);
     if (typeof setGovernanceRulesForCurrentProject === 'function' && typeof readGovernanceRulesFromSettings === 'function') {
       setGovernanceRulesForCurrentProject(readGovernanceRulesFromSettings());
-    }
-    if (typeof setSelectedLocalSkillIdsForCurrentProject === 'function' && typeof readSelectedLocalSkillIdsFromSettings === 'function') {
-      setSelectedLocalSkillIdsForCurrentProject(readSelectedLocalSkillIdsFromSettings());
     }
     if (typeof setSkillLoadingSettings === 'function' && typeof readSkillLoadingSettingsFromSettings === 'function') {
       setSkillLoadingSettings(readSkillLoadingSettingsFromSettings());
@@ -862,23 +925,6 @@
     };
   }
 
-  function normalizeSelectedLocalSkillIds(value) {
-    if (runController?.normalizeSelectedSkillIds) {
-      return runController.normalizeSelectedSkillIds(value);
-    }
-    const seen = new Set();
-    const result = [];
-    for (const item of Array.isArray(value) ? value : []) {
-      const id = String(item || '').trim();
-      if (!id || seen.has(id)) {
-        continue;
-      }
-      seen.add(id);
-      result.push(id);
-    }
-    return result;
-  }
-
   function normalizePatternTextList(value) {
     if (Array.isArray(value)) {
       return value.map(item => String(item || '').trim()).filter(Boolean);
@@ -901,25 +947,6 @@
       governanceRulesByProject: {
         ...normalizeGovernanceRulesByProject(state?.governanceRulesByProject),
         [projectId]: normalizeGovernanceRules(rules)
-      }
-    };
-  }
-
-  function getSelectedLocalSkillIdsForCurrentProject() {
-    const projectId = normalizeProjectPreferenceKey(getCurrentProjectId());
-    return normalizeSelectedLocalSkillIdsByProject(state?.selectedLocalSkillIdsByProject)[projectId] || [];
-  }
-
-  function setSelectedLocalSkillIdsForCurrentProject(skillIds) {
-    const projectId = normalizeProjectPreferenceKey(getCurrentProjectId());
-    if (!projectId) {
-      return;
-    }
-    state = {
-      ...state,
-      selectedLocalSkillIdsByProject: {
-        ...normalizeSelectedLocalSkillIdsByProject(state?.selectedLocalSkillIdsByProject),
-        [projectId]: normalizeSelectedLocalSkillIds(skillIds)
       }
     };
   }
@@ -953,12 +980,6 @@
       sensitiveCheckEnabled: panel?.querySelector('[data-sensitive-check-enabled]')?.checked !== false,
       sensitiveConfirmAllowed: panel?.querySelector('[data-sensitive-confirm-allowed]')?.checked === true
     });
-  }
-
-  function readSelectedLocalSkillIdsFromSettings() {
-    return Array.from(panel?.querySelectorAll('[data-local-skill-selected]') || [])
-      .filter(input => input.checked)
-      .map(input => input.value);
   }
 
   function syncProjectSettingsEditorForProject() {
@@ -1000,483 +1021,57 @@
     element.dataset.status = status;
   }
 
-  async function refreshLocalSkills() {
-    const response = await sendBackgroundNative({
-      method: 'skills.list',
-      params: { projectId: getCurrentProjectId() }
-    });
-    if (!response?.ok) {
-      throw new Error(response?.error?.message || 'native host did not return local skills');
+  function clearProjectSettingsStatus() {
+    const element = panel?.querySelector('[data-project-settings-status]');
+    if (!element) {
+      return;
     }
-    state = {
-      ...state,
-      localSkillsByProject: {
-        ...(state?.localSkillsByProject || {}),
-        [getCurrentProjectId()]: Array.isArray(response.result?.skills) ? response.result.skills : []
-      }
-    };
-    renderLocalSkillList();
+    element.textContent = '';
+    delete element.dataset.status;
   }
 
-  function getLocalSkillsForCurrentProject() {
-    return Array.isArray(state?.localSkillsByProject?.[getCurrentProjectId()])
-      ? state.localSkillsByProject[getCurrentProjectId()]
-      : [];
+  async function refreshLocalSkills() {
+    return localSkillsPanel.refreshLocalSkills();
   }
 
   function renderLocalSkillList() {
-    const list = panel?.querySelector('[data-local-skill-list]');
-    if (!list) {
-      return;
-    }
-    const selected = new Set(getSelectedLocalSkillIdsForCurrentProject());
-    const skills = getLocalSkillsForCurrentProject();
-    list.textContent = '';
-    if (!skills.length) {
-      const empty = document.createElement('div');
-      empty.className = 'codex-project-settings-empty';
-      empty.textContent = tr('localSkillsEmpty');
-      list.append(empty);
-      return;
-    }
-    for (const skill of skills) {
-      const id = String(skill?.id || '').trim();
-      if (!id) {
-        continue;
-      }
-      const row = document.createElement('label');
-      row.className = 'codex-local-skill-row';
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.value = id;
-      checkbox.checked = selected.has(id);
-      checkbox.setAttribute('data-local-skill-selected', '');
-      checkbox.addEventListener('change', () => {
-        setSelectedLocalSkillIdsForCurrentProject(readSelectedLocalSkillIdsFromSettings());
-        saveStateSoon();
-      });
-      const text = document.createElement('span');
-      text.textContent = skill.title ? `${skill.title} (${id})` : id;
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.textContent = tr('localSkillRemove');
-      remove.addEventListener('click', event => {
-        event.preventDefault();
-        removeLocalSkill(id).catch(error => setProjectSettingsStatus(tx(`Failed to remove local skill: ${error.message}`, `删除本地技能失败：${error.message}`), 'failed'));
-      });
-      row.append(checkbox, text, remove);
-      list.append(row);
-    }
-  }
-
-  async function removeLocalSkill(id) {
-    const response = await sendBackgroundNative({
-      method: 'skills.remove',
-      params: {
-        projectId: getCurrentProjectId(),
-        id
-      }
-    });
-    if (!response?.ok) {
-      throw new Error(response?.error?.message || 'native host did not remove local skill');
-    }
-    setSelectedLocalSkillIdsForCurrentProject(getSelectedLocalSkillIdsForCurrentProject().filter(skillId => skillId !== id));
-    setProjectSettingsStatus(tr('localSkillRemoveDone'), 'completed');
-    await refreshLocalSkills();
-    await saveState();
+    localSkillsPanel.renderLocalSkillList();
   }
 
   function handleComposerPaste(event) {
-    const files = collectFilesFromDataTransfer(event.clipboardData);
-    if (!files.length) {
-      return;
-    }
-    event.preventDefault();
-    addComposerAttachmentFiles(files).catch(error => {
-      appendPlainLog(tx(`Attachment was not added: ${error.message}`, `附件没有添加：${error.message}`));
-    });
+    composerAttachmentController.handlePaste(event);
   }
 
   function handleComposerDragOver(event) {
-    if (!hasFileDataTransfer(event.dataTransfer)) {
-      return;
-    }
-    event.preventDefault();
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = 'copy';
-    }
-    panel?.querySelector('[data-composer-form]')?.setAttribute('data-dragging-attachment', 'true');
+    composerAttachmentController.handleDragOver(event);
   }
 
   function handleComposerDragLeave(event) {
-    const composer = panel?.querySelector('[data-composer-form]');
-    if (!composer || (event.relatedTarget && composer.contains(event.relatedTarget))) {
-      return;
-    }
-    composer.removeAttribute('data-dragging-attachment');
+    composerAttachmentController.handleDragLeave(event);
   }
 
   function handleComposerDrop(event) {
-    const files = collectFilesFromDataTransfer(event.dataTransfer);
-    panel?.querySelector('[data-composer-form]')?.removeAttribute('data-dragging-attachment');
-    if (!files.length) {
-      return;
-    }
-    event.preventDefault();
-    addComposerAttachmentFiles(files).catch(error => {
-      appendPlainLog(tx(`Attachment was not added: ${error.message}`, `附件没有添加：${error.message}`));
-    });
-  }
-
-  function collectFilesFromDataTransfer(dataTransfer) {
-    const addFile = (target, seen, file) => {
-      if (!file) {
-        return;
-      }
-      const key = [
-        normalizeComposerAttachmentName(file.name).toLowerCase(),
-        String(file.type || '').trim().toLowerCase(),
-        Number(file.size) || 0,
-        Number(file.lastModified) || 0
-      ].join('\n');
-      if (seen.has(key)) {
-        return;
-      }
-      seen.add(key);
-      target.push(file);
-    };
-    const itemFiles = [];
-    const seenItemFiles = new Set();
-    for (const item of Array.from(dataTransfer?.items || [])) {
-      if (item?.kind !== 'file' || typeof item.getAsFile !== 'function') {
-        continue;
-      }
-      addFile(itemFiles, seenItemFiles, item.getAsFile());
-    }
-    if (itemFiles.length) {
-      return itemFiles;
-    }
-    const files = [];
-    const seenFiles = new Set();
-    for (const file of Array.from(dataTransfer?.files || [])) {
-      addFile(files, seenFiles, file);
-    }
-    return files;
-  }
-
-  function hasFileDataTransfer(dataTransfer) {
-    return Array.from(dataTransfer?.items || []).some(item => item?.kind === 'file') ||
-      Array.from(dataTransfer?.types || []).includes('Files') ||
-      Array.from(dataTransfer?.files || []).length > 0;
+    composerAttachmentController.handleDrop(event);
   }
 
   async function addComposerAttachmentFiles(files) {
-    for (const file of Array.from(files || [])) {
-      const dedupeKey = buildComposerAttachmentDedupeKey(file);
-      if (isDuplicateComposerAttachmentFile(dedupeKey)) {
-        continue;
-      }
-      if (composerAttachments.length + pendingComposerAttachmentKeys.size >= MAX_COMPOSER_ATTACHMENTS) {
-        appendPlainLog(tx(
-          `Attachment limit reached (${MAX_COMPOSER_ATTACHMENTS}).`,
-          `附件数量已达上限（${MAX_COMPOSER_ATTACHMENTS} 个）。`
-        ));
-        break;
-      }
-      validateComposerAttachmentFile(file);
-      pendingComposerAttachmentKeys.add(dedupeKey);
-      try {
-        const dataUrl = await readFileAsDataUrl(file);
-        const preview = await buildAttachmentPreviewData(file, dataUrl);
-        const attachment = {
-          id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-          name: normalizeComposerAttachmentName(file.name),
-          mimeType: String(file.type || ''),
-          size: Number(file.size) || 0,
-          kind: preview.kind,
-          previewDataUrl: preview.previewDataUrl,
-          contentBase64: extractBase64FromDataUrl(dataUrl),
-          dedupeKey
-        };
-        if (!composerAttachments.some(existing => buildComposerAttachmentDedupeKey(existing) === dedupeKey)) {
-          composerAttachments.push(attachment);
-        }
-      } finally {
-        pendingComposerAttachmentKeys.delete(dedupeKey);
-      }
-    }
-    renderComposerAttachments();
-  }
-
-  function buildComposerAttachmentDedupeKey(file) {
-    const input = file || {};
-    return [
-      normalizeComposerAttachmentName(input.name).toLowerCase(),
-      String(input.type || input.mimeType || '').trim().toLowerCase(),
-      Number(input.size) || 0
-    ].join('\n');
-  }
-
-  function isDuplicateComposerAttachmentFile(dedupeKey) {
-    const key = String(dedupeKey || '');
-    return pendingComposerAttachmentKeys.has(key) ||
-      composerAttachments.some(attachment => buildComposerAttachmentDedupeKey(attachment) === key);
-  }
-
-  function validateComposerAttachmentFile(file) {
-    if (!file || !normalizeComposerAttachmentName(file.name)) {
-      throw new Error(tx('The selected attachment has no readable file name.', '选择的附件没有可读取的文件名。'));
-    }
-    if (Number(file.size) <= 0) {
-      throw new Error(tx('Empty attachments are not supported.', '不支持空附件。'));
-    }
-    if (Number(file.size) > MAX_COMPOSER_ATTACHMENT_BYTES) {
-      throw new Error(tx('Selected attachment is too large.', '选择的附件太大。'));
-    }
-  }
-
-  function normalizeComposerAttachmentName(name) {
-    return String(name || '')
-      .replace(/\0/g, '')
-      .replace(/\\/g, '/')
-      .split('/')
-      .filter(Boolean)
-      .pop()
-      ?.trim()
-      .slice(0, 180) || '';
+    return composerAttachmentController.addFiles(files);
   }
 
   function getComposerAttachmentsForRun() {
-    return composerAttachments.map(attachment => ({
-      name: attachment.name,
-      mimeType: attachment.mimeType,
-      size: attachment.size,
-      kind: attachment.kind,
-      previewDataUrl: attachment.previewDataUrl,
-      contentBase64: attachment.contentBase64
-    }));
+    return composerAttachmentController.getAttachmentsForRun();
   }
 
   function createRunAttachmentSnapshots(attachments = []) {
-    return Array.from(attachments || []).map(attachment => ({
-      name: normalizeComposerAttachmentName(attachment.name),
-      mimeType: String(attachment.mimeType || '').trim(),
-      size: Number(attachment.size) || 0,
-      kind: attachment.kind === 'image' ? 'image' : 'file',
-      previewDataUrl: attachment.kind === 'image' && /^data:image\//i.test(String(attachment.previewDataUrl || ''))
-        ? String(attachment.previewDataUrl || '').slice(0, MAX_ATTACHMENT_PREVIEW_DATA_URL_CHARS)
-        : ''
-    })).filter(attachment => attachment.name).slice(0, MAX_COMPOSER_ATTACHMENTS);
+    return composerAttachmentController.createRunAttachmentSnapshots(attachments);
   }
 
   function renderComposerAttachments() {
-    const strip = panel?.querySelector('[data-attachment-strip]');
-    if (!strip) {
-      return;
-    }
-    strip.hidden = composerAttachments.length === 0;
-    renderAttachmentPreviewList(composerAttachments, strip, {
-      removable: true,
-      onRemove: removeComposerAttachment
-    });
+    composerAttachmentController.renderComposerAttachments();
   }
 
   function renderAttachmentPreviewList(attachments = [], container, options = {}) {
-    if (!container) {
-      return;
-    }
-    container.replaceChildren();
-    const items = Array.isArray(attachments) ? attachments : [];
-    container.hidden = items.length === 0;
-    for (const attachment of items) {
-      const isImage = attachment.kind === 'image' && attachment.previewDataUrl;
-      const card = document.createElement(isImage ? 'button' : 'div');
-      card.className = 'codex-attachment-preview-card';
-      card.dataset.kind = isImage ? 'image' : 'file';
-      if (isImage) {
-        card.type = 'button';
-        card.title = tx(`Open ${attachment.name}`, `打开 ${attachment.name}`);
-        card.addEventListener('click', () => showAttachmentPreviewDialog(attachment));
-        const image = document.createElement('img');
-        image.src = attachment.previewDataUrl;
-        image.alt = attachment.name || tx('Attached image', '已附加图片');
-        card.append(image);
-      } else {
-        const icon = document.createElement('span');
-        icon.className = 'codex-attachment-file-icon';
-        icon.textContent = getAttachmentIconLabel(attachment);
-        card.append(icon);
-      }
-
-      const meta = document.createElement('span');
-      meta.className = 'codex-attachment-preview-meta';
-      const name = document.createElement('span');
-      name.className = 'codex-attachment-preview-name';
-      name.textContent = attachment.name || tx('Attachment', '附件');
-      const size = document.createElement('span');
-      size.className = 'codex-attachment-preview-size';
-      size.textContent = formatFileSize(attachment.size);
-      meta.append(name, size);
-      card.append(meta);
-
-      if (options.removable) {
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'codex-attachment-preview-remove';
-        remove.textContent = '×';
-        remove.title = tx('Remove attachment', '移除附件');
-        remove.setAttribute('aria-label', tx(`Remove ${attachment.name}`, `移除 ${attachment.name}`));
-        remove.addEventListener('click', event => {
-          event.preventDefault();
-          event.stopPropagation();
-          options.onRemove?.(attachment.id);
-        });
-        card.append(remove);
-      }
-      container.append(card);
-    }
-  }
-
-  function showAttachmentPreviewDialog(attachment) {
-    if (!attachment?.previewDataUrl) {
-      return;
-    }
-    const overlay = document.createElement('div');
-    overlay.className = 'codex-attachment-preview-dialog';
-    overlay.setAttribute('data-attachment-preview-dialog', 'true');
-    overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-modal', 'true');
-    overlay.setAttribute('aria-label', attachment.name || tx('Attachment preview', '附件预览'));
-
-    const card = document.createElement('section');
-    card.className = 'codex-attachment-preview-dialog-card';
-    const close = document.createElement('button');
-    close.type = 'button';
-    close.className = 'codex-attachment-preview-dialog-close';
-    close.textContent = '×';
-    close.title = tr('close');
-    close.setAttribute('aria-label', tr('close'));
-    const image = document.createElement('img');
-    image.src = attachment.previewDataUrl;
-    image.alt = attachment.name || tx('Attached image', '已附加图片');
-    const caption = document.createElement('div');
-    caption.className = 'codex-attachment-preview-dialog-caption';
-    caption.textContent = attachment.name || '';
-    card.append(close, image, caption);
-    overlay.append(card);
-
-    const cleanup = () => {
-      document.removeEventListener('keydown', onKeydown, true);
-      overlay.remove();
-    };
-    const onKeydown = event => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        cleanup();
-      }
-    };
-    overlay.addEventListener('click', event => {
-      if (event.target === overlay) {
-        cleanup();
-      }
-    });
-    close.addEventListener('click', cleanup);
-    document.addEventListener('keydown', onKeydown, true);
-    (panel || document.body).append(overlay);
-    close.focus();
-  }
-
-  function removeComposerAttachment(id) {
-    composerAttachments = composerAttachments.filter(attachment => attachment.id !== id);
-    renderComposerAttachments();
-  }
-
-  function getAttachmentIconLabel(attachment = {}) {
-    const name = String(attachment.name || '');
-    const extension = name.includes('.') ? name.split('.').pop().slice(0, 4).toUpperCase() : '';
-    if (/pdf/i.test(attachment.mimeType || '') || /\.pdf$/i.test(name)) {
-      return 'PDF';
-    }
-    return extension || 'FILE';
-  }
-
-  function formatFileSize(size) {
-    const bytes = Number(size) || 0;
-    if (bytes >= 1024 * 1024) {
-      return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
-    }
-    if (bytes >= 1024) {
-      return `${Math.round(bytes / 1024)} KB`;
-    }
-    return `${bytes} B`;
-  }
-
-  async function buildAttachmentPreviewData(file, dataUrl) {
-    const mimeType = String(file?.type || '');
-    const name = normalizeComposerAttachmentName(file?.name);
-    if (!isImageAttachment({ name, mimeType })) {
-      return { kind: 'file', previewDataUrl: '' };
-    }
-    const scaled = await createScaledImagePreviewDataUrl(dataUrl).catch(() => '');
-    const fallback = String(dataUrl || '').length <= MAX_ATTACHMENT_PREVIEW_DATA_URL_CHARS ? String(dataUrl || '') : '';
-    return {
-      kind: 'image',
-      previewDataUrl: scaled || fallback
-    };
-  }
-
-  function createScaledImagePreviewDataUrl(dataUrl) {
-    return new Promise(resolve => {
-      if (typeof Image === 'undefined' || typeof document === 'undefined' || !/^data:image\//i.test(String(dataUrl || ''))) {
-        resolve('');
-        return;
-      }
-      const image = new Image();
-      image.onload = () => {
-        const width = Number(image.naturalWidth || image.width);
-        const height = Number(image.naturalHeight || image.height);
-        if (!width || !height) {
-          resolve('');
-          return;
-        }
-        const maxEdge = 960;
-        const scale = Math.min(1, maxEdge / Math.max(width, height));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(width * scale));
-        canvas.height = Math.max(1, Math.round(height * scale));
-        const context = canvas.getContext('2d');
-        if (!context) {
-          resolve('');
-          return;
-        }
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        const value = canvas.toDataURL('image/png');
-        resolve(value.length <= MAX_ATTACHMENT_PREVIEW_DATA_URL_CHARS ? value : '');
-      };
-      image.onerror = () => resolve('');
-      image.src = dataUrl;
-    });
-  }
-
-  function isImageAttachment(attachment = {}) {
-    return /^image\//i.test(String(attachment.mimeType || '')) ||
-      /\.(?:png|jpe?g|gif|webp|bmp|svg)$/i.test(String(attachment.name || ''));
-  }
-
-  function readFileAsDataUrl(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        resolve(String(reader.result || ''));
-      };
-      reader.onerror = () => reject(reader.error || new Error('Could not read selected file'));
-      reader.readAsDataURL(file);
-    });
-  }
-
-  function extractBase64FromDataUrl(value) {
-    const text = String(value || '');
-    return text.includes(',') ? text.slice(text.indexOf(',') + 1) : text;
+    return composerAttachmentController.renderAttachmentPreviewList(attachments, container, options);
   }
 
   function toggleModelConfigPopover() {
@@ -1754,12 +1349,7 @@
   }
 
   function installContextDismiss() {
-    document.addEventListener('click', event => {
-      if (isContextTrayClickTarget(event.target)) {
-        return;
-      }
-      closeContextTray();
-    }, true);
+    return contextTrayController.installContextDismiss();
   }
 
   function installModelConfigDismiss() {
@@ -1914,453 +1504,99 @@
   }
 
   function isContextTrayClickTarget(target) {
-    const tray = panel?.querySelector('[data-context-tray]');
-    const button = panel?.querySelector('[data-add-context]');
-    return Boolean(
-      (tray && tray.contains(target)) ||
-      (button && button.contains(target))
-    );
+    return contextTrayController.isContextTrayClickTarget(target);
   }
 
   function toggleContextTray() {
-    const tray = panel?.querySelector('[data-context-tray]');
-    const button = panel?.querySelector('[data-add-context]');
-    if (!tray || !button) {
-      return;
-    }
-
-    const open = tray.hidden;
-    if (open) {
-      closeModelConfigPopover();
-      closeDiagnosticsMenu();
-      closeCustomInstructionsSettings();
-      if (typeof closeSlashMenu === 'function') {
-        closeSlashMenu();
-      }
-    }
-    tray.hidden = !open;
-    button.dataset.active = open ? 'true' : 'false';
-    button.setAttribute('aria-expanded', open ? 'true' : 'false');
-    renderContextSelection();
-    if (open) {
-      loadContextFiles({ force: false });
-    }
+    return contextTrayController.toggleContextTray();
   }
 
   function closeContextTray() {
-    const tray = panel?.querySelector('[data-context-tray]');
-    const button = panel?.querySelector('[data-add-context]');
-    if (!tray || !button) {
-      return;
-    }
-    tray.hidden = true;
-    button.dataset.active = 'false';
-    button.setAttribute('aria-expanded', 'false');
+    return contextTrayController.closeContextTray();
   }
 
   async function loadContextFiles(options = {}) {
-    const list = panel?.querySelector('[data-context-file-list]');
-    if (!list) {
-      return;
-    }
-    if (isExactContextFileListProject(contextProject) && !options.force) {
-      renderContextFiles(contextProject);
-      return;
-    }
-
-    const loadId = ++contextLoadId;
-    setContextStatus(tr('contextLoadingFiles'));
-    list.textContent = '';
-
-    try {
-      const project = await requestExactContextFiles({ force: Boolean(options.force) });
-      if (!project?.ok) {
-        throw new Error(project?.error || project?.reason || tr('unknownReason'));
-      }
-      if (loadId !== contextLoadId) {
-        return;
-      }
-      contextProject = project;
-      renderContextFiles(project);
-    } catch (error) {
-      if (loadId !== contextLoadId) {
-        return;
-      }
-      setContextStatus(tr('contextReadFailed', { message: error.message }));
-    }
+    return contextTrayController.loadContextFiles(options);
   }
 
   async function requestExactContextFiles({ force = false } = {}) {
-    const project = await callPageBridge('getProjectSnapshot', {
-      force,
-      preferLightweight: true,
-      allowZipFallback: false,
-      allowEditorNavigation: false,
-      requireFullProject: true,
-      zipOnly: true,
-      includeBinaryFiles: true,
-      includeContent: false,
-      zipTimeoutMs: CONTEXT_EXACT_FILE_LIST_ZIP_TIMEOUT_MS
-    });
-    return normalizeContextFileListFromZipSnapshot(project);
+    return contextTrayController.requestExactContextFiles({ force });
   }
 
   function isExactContextFileListProject(project) {
-    return project?.ok && project?.capabilities?.method === 'overleaf-zip-file-list';
+    return contextTrayController.isExactContextFileListProject(project);
   }
 
   function isContextFileListProject(project) {
-    const method = project?.capabilities?.method;
-    return method === 'overleaf-zip-file-list' || method === 'overleaf-file-tree';
+    return contextTrayController.isContextFileListProject(project);
   }
 
   function normalizeContextFileListFromZipSnapshot(project) {
-    const files = Array.isArray(project?.files) ? project.files : [];
-    if (project?.capabilities?.method !== 'overleaf-zip' || !files.length) {
-      return {
-        ok: false,
-        id: project?.id || getCurrentProjectId(),
-        url: project?.url || window.location.href,
-        activePath: project?.activePath || '',
-        files: [],
-        error: getZipSnapshotFailureReason(project),
-        capabilities: {
-          ...(project?.capabilities || {}),
-          method: project?.capabilities?.method || 'overleaf-zip-file-list-unavailable',
-          fullProjectSnapshot: false
-        }
-      };
-    }
-
-    return {
-      ok: true,
-      id: project.id || getCurrentProjectId(),
-      url: project.url || window.location.href,
-      activePath: project.activePath || '',
-      files: files
-        .map(file => normalizeContextFileFromZipSnapshot(file, project.activePath || ''))
-        .filter(Boolean),
-      capabilities: {
-        ...(project.capabilities || {}),
-        method: 'overleaf-zip-file-list',
-        fullProjectSnapshot: true,
-        note: 'Listed Overleaf project files from the exact source ZIP snapshot used by project-read diagnostics.'
-      }
-    };
+    return contextTrayController.normalizeContextFileListFromZipSnapshot(project);
   }
 
   function normalizeContextFileFromZipSnapshot(file, activePath) {
-    const path = window.CodexOverleafProjectFiles?.normalizePath?.(file?.path) || '';
-    if (!path) {
-      return null;
-    }
-    const isText = window.CodexOverleafProjectFiles.isTextProjectPath(path);
-    return {
-      path,
-      active: path === activePath,
-      source: 'overleaf-zip',
-      kind: isText ? 'text' : 'binary',
-      selectable: isText
-    };
+    return contextTrayController.normalizeContextFileFromZipSnapshot(file, activePath);
   }
 
   function getZipSnapshotFailureReason(project) {
-    const skipped = Array.isArray(project?.capabilities?.skipped) ? project.capabilities.skipped : [];
-    const zipFailure = skipped.find(item => item?.path === 'project.zip' && item.reason);
-    return project?.error
-      || project?.reason
-      || zipFailure?.reason
-      || tr('unknownReason');
+    return contextTrayController.getZipSnapshotFailureReason(project);
   }
 
   function renderContextFiles(project) {
-    const list = panel?.querySelector('[data-context-file-list]');
-    if (!list) {
-      return;
-    }
-
-    list.textContent = '';
-    const files = getContextProjectFiles(project?.files || []);
-    renderContextSelection();
-
-    if (!files.length) {
-      setContextStatus(tr('contextNoFiles'));
-      return;
-    }
-
-    const selected = getActiveFocusFiles();
-    setContextStatus(selected.length
-      ? tr('contextSelectedFiles', { count: selected.length })
-      : tr('contextDefaultWholeProject'));
-
-    const tree = buildContextTree(files);
-    for (const child of tree.children) {
-      renderContextTreeNode(child, list, selected, 0);
-    }
+    return contextTrayController.renderContextFiles(project);
   }
 
   function getContextProjectFiles(files = []) {
-    const seen = new Set();
-    const result = [];
-    for (const file of files) {
-      if (!file?.path || seen.has(file.path)) {
-        continue;
-      }
-      seen.add(file.path);
-      result.push(file);
-    }
-    return result;
+    return contextTrayController.getContextProjectFiles(files);
   }
 
   function buildContextTree(files = []) {
-    const root = { type: 'folder', name: '', path: '', children: [] };
-    const folderByPath = new Map([['', root]]);
-
-    for (const file of files) {
-      if (!file?.path) {
-        continue;
-      }
-      const parts = file.path.split('/').filter(Boolean);
-      if (!parts.length) {
-        continue;
-      }
-      let parent = root;
-      let folderPath = '';
-      for (const part of parts.slice(0, -1)) {
-        folderPath = folderPath ? `${folderPath}/${part}` : part;
-        let folder = folderByPath.get(folderPath);
-        if (!folder) {
-          folder = { type: 'folder', name: part, path: folderPath, children: [] };
-          folderByPath.set(folderPath, folder);
-          parent.children.push(folder);
-        }
-        parent = folder;
-      }
-      parent.children.push({
-        type: 'file',
-        name: parts[parts.length - 1],
-        path: file.path,
-        file
-      });
-    }
-
-    sortContextTree(root);
-    return root;
+    return contextTrayController.buildContextTree(files);
   }
 
   function sortContextTree(node) {
-    node.children.sort((left, right) => {
-      if (left.type !== right.type) {
-        return left.type === 'folder' ? -1 : 1;
-      }
-      return left.name.localeCompare(right.name);
-    });
-    for (const child of node.children) {
-      if (child.type === 'folder') {
-        sortContextTree(child);
-      }
-    }
+    return contextTrayController.sortContextTree(node);
   }
 
   function renderContextTreeNode(node, container, selected, depth) {
-    if (node.type === 'folder') {
-      const folder = document.createElement('details');
-      folder.className = 'codex-context-folder';
-      folder.dataset.path = node.path;
-      folder.open = contextExpandedFolders.has(node.path);
-      folder.addEventListener('toggle', () => {
-        if (folder.open) {
-          contextExpandedFolders.add(node.path);
-        } else {
-          contextExpandedFolders.delete(node.path);
-        }
-      });
-
-      const label = document.createElement('summary');
-      label.className = 'codex-context-folder-name';
-      label.style.paddingLeft = `${depth * 14 + 7}px`;
-      label.textContent = node.name;
-
-      const children = document.createElement('div');
-      children.className = 'codex-context-folder-children';
-
-      for (const child of node.children) {
-        renderContextTreeNode(child, children, selected, depth + 1);
-      }
-      folder.append(label, children);
-      container.append(folder);
-      return;
-    }
-
-    const file = node.file;
-    const selectable = file.selectable !== false;
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'codex-context-file';
-    button.dataset.path = file.path;
-    button.dataset.selected = selectable && selected.includes(file.path) ? 'true' : 'false';
-    button.dataset.selectable = selectable ? 'true' : 'false';
-    button.disabled = !selectable;
-    button.setAttribute('aria-pressed', selectable && selected.includes(file.path) ? 'true' : 'false');
-    button.style.paddingLeft = `${depth * 14 + 7}px`;
-    button.title = selectable ? file.path : tr('contextResourceTitle', { path: file.path });
-    if (selectable) {
-      button.addEventListener('click', () => selectFocusFile(file.path));
-    }
-
-    const name = document.createElement('span');
-    name.className = 'codex-context-file-name';
-    name.textContent = node.name;
-
-    const meta = document.createElement('span');
-    meta.className = 'codex-context-file-meta';
-    meta.textContent = selectable
-      ? (file.content ? `${String(file.content).length} chars` : file.source || '')
-      : tr('resource');
-
-    button.append(name, meta);
-    container.append(button);
+    return contextTrayController.renderContextTreeNode(node, container, selected, depth);
   }
 
   function renderContextSelection() {
-    const selection = panel?.querySelector('[data-context-selection]');
-    const addButton = panel?.querySelector('[data-add-context]');
-    if (!selection || !addButton) {
-      return;
-    }
-
-    selection.textContent = '';
-    const selected = getActiveFocusFiles();
-    addButton.dataset.hasFocus = selected.length ? 'true' : 'false';
-    addButton.title = selected.length ? `@context: ${selected.map(path => `@file:${path}`).join(', ')}` : tr('addContext');
-
-    const chip = document.createElement('div');
-    chip.className = 'codex-context-chip';
-
-    const dot = document.createElement('span');
-    dot.className = 'codex-context-dot';
-    dot.setAttribute('aria-hidden', 'true');
-
-    const label = document.createElement('span');
-    label.textContent = selected.length ? selected.map(path => `@file:${path}`).join(', ') : tr('contextWholeProjectChip');
-    chip.append(dot, label);
-
-    if (selected.length) {
-      const clear = document.createElement('button');
-      clear.type = 'button';
-      clear.dataset.contextClear = '';
-      clear.title = tr('clearFiles');
-      clear.setAttribute('aria-label', tr('clearFiles'));
-      clear.textContent = '×';
-      clear.addEventListener('click', clearFocusFile);
-      chip.append(clear);
-    }
-
-    selection.append(chip);
-    renderContextSummary();
+    return contextTrayController.renderContextSelection();
   }
 
   function renderContextSummary() {
-    const summary = panel?.querySelector('[data-context-summary]');
-    if (!summary) {
-      return;
-    }
-
-    const selected = getActiveFocusFiles();
-    summary.textContent = '';
-    summary.hidden = selected.length === 0;
-    if (!selected.length) {
-      return;
-    }
-
-    const prefix = document.createElement('span');
-    prefix.className = 'codex-context-summary-label';
-    prefix.textContent = '@context';
-    summary.append(prefix);
-
-    for (const path of selected) {
-      const chip = document.createElement('span');
-      chip.className = 'codex-context-summary-chip';
-      chip.textContent = path;
-      summary.append(chip);
-    }
-
-    const clear = document.createElement('button');
-    clear.type = 'button';
-    clear.className = 'codex-context-summary-clear';
-    clear.setAttribute('data-context-summary-clear', '');
-    clear.title = tr('clearFiles');
-    clear.setAttribute('aria-label', tr('clearFiles'));
-    clear.textContent = '×';
-    clear.addEventListener('click', clearFocusFile);
-    summary.append(clear);
+    return contextTrayController.renderContextSummary();
   }
 
   async function selectFocusFile(path) {
-    if (typeof path !== 'string' || !path.trim()) {
-      return;
-    }
-    const normalizedPath = path.trim();
-    const currentFocusFiles = getActiveFocusFiles();
-    const nextFocusFiles = currentFocusFiles.includes(normalizedPath)
-      ? currentFocusFiles.filter(item => item !== normalizedPath)
-      : [...currentFocusFiles, normalizedPath].slice(-5);
-    state = updateActiveSession(state, {
-      focusFiles: nextFocusFiles
-    });
-    await saveState();
-    renderContextSelection();
-    renderContextFiles(contextProject);
+    return contextTrayController.selectFocusFile(path);
   }
 
   async function clearFocusFile() {
-    state = updateActiveSession(state, {
-      focusFiles: []
-    });
-    await saveState();
-    renderContextSelection();
-    renderContextFiles(contextProject);
+    return contextTrayController.clearFocusFile();
   }
 
   function getActiveFocusFiles() {
-    return Array.isArray(state?.session?.focusFiles) ? state.session.focusFiles : [];
+    return contextTrayController.getActiveFocusFiles();
   }
 
   function sortContextFiles(files, activePath) {
-    return files
-      .filter(file => typeof file?.path === 'string' && file.path.trim())
-      .sort((left, right) => {
-        if (left.path === activePath) {
-          return -1;
-        }
-        if (right.path === activePath) {
-          return 1;
-        }
-        const leftRank = getContextFileRank(left.path);
-        const rightRank = getContextFileRank(right.path);
-        if (leftRank !== rightRank) {
-          return leftRank - rightRank;
-        }
-        return left.path.localeCompare(right.path);
-      });
+    return contextTrayController.sortContextFiles(files, activePath);
   }
 
   function getContextFileRank(path) {
-    if (/\.tex$/i.test(path)) {
-      return 0;
-    }
-    if (/\.bib$/i.test(path)) {
-      return 1;
-    }
-    return 2;
+    return contextTrayController.getContextFileRank(path);
   }
 
   function setContextStatus(text) {
-    const status = panel?.querySelector('[data-context-status]');
-    if (status) {
-      status.textContent = text;
-      status.dataset.customStatus = 'true';
-    }
+    return contextTrayController.setContextStatus(text);
+  }
+
+  function resetContextProject() {
+    return contextTrayController.resetContextProject();
   }
 
   async function inspectProjectSnapshot() {
@@ -2855,7 +2091,6 @@
     const submittedMode = state.mode;
     const submittedRequireReviewing = state.requireReviewing === true;
     const submittedCustomInstructions = getCustomInstructionsForCurrentProject();
-    const submittedSelectedSkillIds = getSelectedLocalSkillIdsForCurrentProject();
     const submittedSkillLoadingSettings = getSkillLoadingSettings();
     const submittedAttachments = getComposerAttachmentsForRun();
     const submittedSkillInvocation = getComposerSkillInvocationForRun();
@@ -2882,8 +2117,7 @@
       task,
       sessionId: runSessionId,
       mode: submittedMode,
-      focusFiles: getActiveFocusFiles(),
-      selectedSkillIds: submittedSelectedSkillIds
+      focusFiles: getActiveFocusFiles()
     });
     clearTaskComposer();
     appendRunEvent({
@@ -3081,7 +2315,6 @@
           codexThreadId,
           compileLogContext,
           customInstructions: submittedCustomInstructions,
-          selectedSkillIds: submittedSelectedSkillIds,
           skillLoadingSettings: submittedSkillLoadingSettings,
           attachments: submittedAttachments,
           skillInvocation: submittedSkillInvocation,
@@ -3117,7 +2350,6 @@
             codexThreadId,
             compileLogContext,
             customInstructions: submittedCustomInstructions,
-            selectedSkillIds: submittedSelectedSkillIds,
             skillLoadingSettings: submittedSkillLoadingSettings,
             attachments: submittedAttachments,
             skillInvocation: submittedSkillInvocation,
@@ -3152,7 +2384,6 @@
               codexThreadId: '',
               compileLogContext,
               customInstructions: submittedCustomInstructions,
-              selectedSkillIds: submittedSelectedSkillIds,
               skillLoadingSettings: submittedSkillLoadingSettings,
               attachments: submittedAttachments,
               skillInvocation: submittedSkillInvocation,
@@ -3219,7 +2450,6 @@
       await finalizeAuditRecord(runAuditDraft, {
         ...(syncOutcome.audit || {}),
         sensitiveFindings: sensitiveFindings.findings,
-        selectedSkillIds: submittedSelectedSkillIds,
         resultStatus: syncOutcome.hasSkippedOperations ? 'completed_with_skips' : 'completed'
       });
 
@@ -3697,7 +2927,6 @@
     codexThreadId,
     compileLogContext,
     customInstructions,
-    selectedSkillIds,
     skillLoadingSettings,
     attachments,
     skillInvocation,
@@ -3717,11 +2946,6 @@
       customInstructions: customInstructions === undefined
         ? getCustomInstructionsForCurrentProject()
         : customInstructions,
-      selectedSkillIds: selectedSkillIds === undefined
-        ? (typeof getSelectedLocalSkillIdsForCurrentProject === 'function'
-          ? getSelectedLocalSkillIdsForCurrentProject()
-          : undefined)
-        : selectedSkillIds,
       skillLoadingSettings: skillLoadingSettings === undefined
         ? (typeof getSkillLoadingSettings === 'function'
           ? getSkillLoadingSettings()
@@ -4258,689 +3482,15 @@
   }
 
   function createDiffReviewElement(syncChanges, options = {}) {
-    const readonly = Boolean(options.readonly);
-    const container = document.createElement('div');
-    container.className = 'codex-diff-review';
-    container.tabIndex = 0;
-    container.setAttribute('role', 'region');
-    container.setAttribute('data-diff-review-container', '');
-    if (readonly) {
-      container.dataset.readonly = 'true';
-    }
-    const reviewHunks = window.CodexOverleafReviewHunks || ReviewHunks;
-    const reviewModel = reviewHunks?.buildReviewModel?.(syncChanges) || { files: [], hunks: [] };
-    const reviewFilesByIndex = new Map(reviewModel.files.map(file => [file.index, file]));
-    const fileStates = new Map();
-    const hunkStates = new Map();
-    const fileViews = new Map();
-    const hunkViews = new Map();
-    const decisionListeners = new Set();
-    let focusedHunkKey = null;
-    let remainingInitialReviewHunks = MAX_INITIAL_REVIEW_HUNKS;
-
-    function notifyDecisionChanged() {
-      for (const listener of decisionListeners) {
-        listener();
-      }
-    }
-
-    function setDecisionStatus(actions, accepted) {
-      const status = document.createElement('span');
-      status.className = 'codex-diff-decision-label';
-      status.textContent = accepted ? tr('diffAccepted') : tr('diffRejected');
-      actions.replaceChildren(status);
-    }
-
-    function setHunkDecisionStatus(actions, accepted) {
-      const status = document.createElement('span');
-      status.className = 'codex-diff-hunk-status';
-      status.setAttribute('data-diff-hunk-status', '');
-      status.textContent = accepted ? tr('diffHunkAccepted') : tr('diffHunkRejected');
-      actions.replaceChildren(status);
-    }
-
-    function setHunkCollapsed(view, collapsed) {
-      if (view?.hunkEl) {
-        view.hunkEl.dataset.collapsed = collapsed ? 'true' : 'false';
-      }
-    }
-
-    function setHunkDecisionView(hunk, accepted, options = {}) {
-      const hunkView = hunkViews.get(hunk.decisionKey);
-      if (!hunkView) {
-        return;
-      }
-      hunkView.hunkEl.dataset.decision = accepted ? 'accepted' : 'rejected';
-      setHunkDecisionStatus(hunkView.actions, accepted);
-      if (options.collapse) {
-        setHunkCollapsed(hunkView, true);
-      }
-    }
-
-    function setHunkJumpStatus(view, status, message = '') {
-      if (!view) {
-        return;
-      }
-      view.hunkEl.dataset.jumpStatus = status;
-      let statusEl = view.hunkEl.querySelector?.('[data-diff-hunk-jump-status]');
-      if (!statusEl) {
-        statusEl = document.createElement('span');
-        statusEl.className = 'codex-diff-hunk-jump-status';
-        statusEl.setAttribute('data-diff-hunk-jump-status', '');
-        view.actions.append(statusEl);
-      }
-      statusEl.textContent = message;
-    }
-
-    function setHunkFocused(hunkEl, focused) {
-      hunkEl.dataset.focused = focused ? 'true' : 'false';
-      const baseClass = 'codex-diff-hunk';
-      hunkEl.className = focused ? `${baseClass} codex-diff-hunk-focused` : baseClass;
-    }
-
-    function getFocusableHunks() {
-      return Array.from(hunkViews.values()).filter(view => view.reviewHunk);
-    }
-
-    function focusHunkByIndex(index) {
-      const hunks = getFocusableHunks();
-      if (!hunks.length) {
-        return false;
-      }
-      const nextIndex = Math.max(0, Math.min(index, hunks.length - 1));
-      const next = hunks[nextIndex];
-      if (focusedHunkKey && focusedHunkKey !== next.reviewHunk.decisionKey) {
-        const previous = hunkViews.get(focusedHunkKey);
-        if (previous) {
-          setHunkFocused(previous.hunkEl, false);
-        }
-      }
-      focusedHunkKey = next.reviewHunk.decisionKey;
-      setHunkFocused(next.hunkEl, true);
-      return true;
-    }
-
-    function moveFocusedHunk(delta) {
-      const hunks = getFocusableHunks();
-      if (!hunks.length) {
-        return false;
-      }
-      const currentIndex = Math.max(0, hunks.findIndex(view => view.reviewHunk.decisionKey === focusedHunkKey));
-      return focusHunkByIndex(currentIndex + delta);
-    }
-
-    function getFocusedHunk() {
-      if (!focusedHunkKey) {
-        focusHunkByIndex(0);
-      }
-      return hunkViews.get(focusedHunkKey)?.reviewHunk || null;
-    }
-
-    function focusNextPendingHunkAfter(decisionKey) {
-      const hunks = getFocusableHunks();
-      if (!hunks.length) {
-        return false;
-      }
-      const startIndex = hunks.findIndex(view => view.reviewHunk.decisionKey === decisionKey);
-      const anchorIndex = startIndex >= 0 ? startIndex : -1;
-      for (let offset = 1; offset <= hunks.length; offset += 1) {
-        const index = (anchorIndex + offset) % hunks.length;
-        const view = hunks[index];
-        if (hunkStates.get(view.reviewHunk.decisionKey) === null) {
-          const focused = focusHunkByIndex(index);
-          view.hunkEl.scrollIntoView?.({ block: 'nearest' });
-          return focused;
-        }
-      }
-      if (focusedHunkKey) {
-        const previous = hunkViews.get(focusedHunkKey);
-        if (previous) {
-          setHunkFocused(previous.hunkEl, false);
-        }
-        focusedHunkKey = null;
-      }
-      return false;
-    }
-
-    function getHunkJumpRange(reviewHunk) {
-      const from = Number(reviewHunk?.startOffset);
-      const to = Number(reviewHunk?.endOffset);
-      return {
-        path: reviewHunk?.path,
-        from: Number.isInteger(from) && from >= 0 ? from : 0,
-        to: Number.isInteger(to) && to >= 0 ? to : (Number.isInteger(from) && from >= 0 ? from : 0)
-      };
-    }
-
-    async function jumpToHunk(reviewHunk) {
-      if (!reviewHunk) {
-        return;
-      }
-      const { path, from, to } = getHunkJumpRange(reviewHunk);
-      const view = hunkViews.get(reviewHunk.decisionKey);
-      setHunkJumpStatus(view, 'pending', '');
-      try {
-        const result = await callPageBridge('jumpToPosition', { path, from, to });
-        if (result?.ok === false) {
-          setHunkJumpStatus(view, 'failed', result.reason || tr('diffHunkJumpFailed'));
-        } else {
-          setHunkJumpStatus(view, 'done', '');
-        }
-      } catch (error) {
-        setHunkJumpStatus(view, 'failed', error?.message || tr('diffHunkJumpFailed'));
-      }
-    }
-
-    function isDiffReviewEditableTarget(target) {
-      const tagName = String(target?.tagName || '').toUpperCase();
-      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' ||
-          tagName === 'BUTTON' || tagName === 'SUMMARY') {
-        return true;
-      }
-      if (tagName === 'A' && target?.getAttribute?.('href')) {
-        return true;
-      }
-      const role = String(target?.getAttribute?.('role') || '').toLowerCase();
-      if (['button', 'link', 'menuitem', 'checkbox', 'radio', 'switch', 'tab'].includes(role)) {
-        return true;
-      }
-      if (target?.isContentEditable || target?.getAttribute?.('contenteditable') === 'true') {
-        return true;
-      }
-      return Boolean(target?.closest?.(
-        'input, textarea, select, button, summary, a[href], [contenteditable="true"], [role="button"], [role="link"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"]'
-      ));
-    }
-
-    function handleDiffReviewKeydown(event) {
-      if (isDiffReviewEditableTarget(event.target)) {
-        return;
-      }
-      let handled = false;
-      switch (event.key) {
-        case 'j':
-          handled = moveFocusedHunk(1);
-          break;
-        case 'k':
-          handled = moveFocusedHunk(-1);
-          break;
-        case 'a': {
-          const hunk = getFocusedHunk();
-          if (hunk && !readonly) {
-            decideHunkChange(hunk, true);
-            handled = true;
-          }
-          break;
-        }
-        case 'r': {
-          const hunk = getFocusedHunk();
-          if (hunk && !readonly) {
-            decideHunkChange(hunk, false);
-            handled = true;
-          }
-          break;
-        }
-        case 'Enter': {
-          const hunk = getFocusedHunk();
-          if (hunk) {
-            jumpToHunk(hunk);
-            handled = true;
-          }
-          break;
-        }
-        case 'Escape':
-          if (focusedHunkKey) {
-            const previous = hunkViews.get(focusedHunkKey);
-            if (previous) {
-              setHunkFocused(previous.hunkEl, false);
-            }
-            focusedHunkKey = null;
-          }
-          container.blur?.();
-          handled = true;
-          break;
-        default:
-          break;
-      }
-      if (handled) {
-        event.preventDefault?.();
-      }
-    }
-
-    function updateReviewableFileDecision(view, fileModel) {
-      const decisions = fileModel.hunks.map(hunk => hunkStates.get(hunk.decisionKey));
-      const allAccepted = decisions.every(value => value === true);
-      const allRejected = decisions.every(value => value === false);
-      if (allAccepted || allRejected) {
-        view.card.dataset.accepted = allAccepted ? 'true' : 'false';
-        view.card.dataset.decision = allAccepted ? 'accepted' : 'rejected';
-        setDecisionStatus(view.actions, allAccepted);
-        return;
-      }
-      view.card.dataset.decision = 'pending';
-      delete view.card.dataset.accepted;
-    }
-
-    function decideHunkChange(hunk, accepted) {
-      if (readonly || hunkStates.get(hunk.decisionKey) !== null) {
-        return;
-      }
-      hunkStates.set(hunk.decisionKey, accepted);
-      setHunkDecisionView(hunk, accepted, { collapse: true });
-      focusNextPendingHunkAfter(hunk.decisionKey);
-      const fileView = fileViews.get(hunk.path);
-      const fileModel = reviewModel.files.find(file => file.path === hunk.path);
-      if (fileView && fileModel) {
-        updateReviewableFileDecision(fileView, fileModel);
-      }
-      notifyDecisionChanged();
-    }
-
-    function decideReviewableFilePendingHunks(fileModel, accepted) {
-      let changed = false;
-      for (const hunk of fileModel.hunks) {
-        if (hunkStates.get(hunk.decisionKey) !== null) {
-          continue;
-        }
-        hunkStates.set(hunk.decisionKey, accepted);
-        setHunkDecisionView(hunk, accepted, { collapse: true });
-        changed = true;
-      }
-      return changed;
-    }
-
-    function decidePendingChanges(accepted) {
-      if (readonly) {
-        return false;
-      }
-      let changed = false;
-      for (const [path, value] of fileStates.entries()) {
-        if (value !== null) {
-          continue;
-        }
-        fileStates.set(path, accepted);
-        const view = fileViews.get(path);
-        if (view) {
-          view.card.dataset.accepted = accepted ? 'true' : 'false';
-          view.card.dataset.decision = accepted ? 'accepted' : 'rejected';
-          setDecisionStatus(view.actions, accepted);
-        }
-        changed = true;
-      }
-      for (const fileModel of reviewModel.files) {
-        if (!fileModel.reviewable) {
-          continue;
-        }
-        changed = decideReviewableFilePendingHunks(fileModel, accepted) || changed;
-        const fileView = fileViews.get(fileModel.path);
-        if (fileView) {
-          updateReviewableFileDecision(fileView, fileModel);
-        }
-      }
-      focusNextPendingHunkAfter(focusedHunkKey);
-      if (changed) {
-        notifyDecisionChanged();
-      }
-      return changed;
-    }
-
-    function decideFileChange(path, accepted) {
-      if (readonly) {
-        return;
-      }
-      const view = fileViews.get(path);
-      if (!view) {
-        return;
-      }
-      const fileModel = view.fileModel;
-      if (fileModel?.reviewable) {
-        const changed = decideReviewableFilePendingHunks(fileModel, accepted);
-        updateReviewableFileDecision(view, fileModel);
-        focusNextPendingHunkAfter(focusedHunkKey);
-        if (changed) {
-          notifyDecisionChanged();
-        }
-        return;
-      }
-      if (fileStates.get(path) !== null) {
-        return;
-      }
-      fileStates.set(path, accepted);
-      view.card.dataset.accepted = accepted ? 'true' : 'false';
-      view.card.dataset.decision = accepted ? 'accepted' : 'rejected';
-      setDecisionStatus(view.actions, accepted);
-      notifyDecisionChanged();
-    }
-
-    function getPendingCount() {
-      let count = 0;
-      for (const value of fileStates.values()) {
-        if (value === null) {
-          count += 1;
-        }
-      }
-      for (const value of hunkStates.values()) {
-        if (value === null) {
-          count += 1;
-        }
-      }
-      return count;
-    }
-
-    function getDecisions() {
-      const decisions = {};
-      for (const [path, value] of fileStates.entries()) {
-        decisions[reviewHunks?.normalizeReviewDecisionKey?.(path) || `${path}::file`] = value;
-      }
-      for (const [key, value] of hunkStates.entries()) {
-        decisions[key] = value;
-      }
-      return decisions;
-    }
-
-    function getAcceptedChanges() {
-      const decisions = getDecisions();
-      if (reviewHunks?.buildAcceptedSyncChanges) {
-        return reviewHunks.buildAcceptedSyncChanges(syncChanges, decisions);
-      }
-      return syncChanges.filter(change => fileStates.get(change.path) === true);
-    }
-
-    function createDiffLineElement(line) {
-      const lineEl = document.createElement('div');
-      lineEl.className = 'codex-diff-line';
-      lineEl.dataset.type = line.type;
-      lineEl.setAttribute('data-diff-line', '');
-      lineEl.textContent = line.text;
-      return lineEl;
-    }
-
-    function createPatchDiffLines(patch = {}) {
-      const lines = [];
-      appendPatchDiffText(lines, 'remove', patch.expected);
-      appendPatchDiffText(lines, 'add', patch.insert);
-      return lines;
-    }
-
-    function appendPatchDiffText(lines, type, text) {
-      const value = String(text ?? '');
-      if (!value) {
-        return;
-      }
-      for (const line of value.split('\n')) {
-        lines.push({ type, text: line });
-      }
-    }
-
-    function getReviewDisplayHunk(change, diffHunks, fileModel, hunkIndex) {
-      const diffHunk = diffHunks[hunkIndex] || { lines: [] };
-      if (!fileModel?.reviewable) {
-        return diffHunk;
-      }
-      if (diffHunks.length === fileModel.hunks.length && Array.isArray(diffHunk.lines) && diffHunk.lines.length) {
-        return diffHunk;
-      }
-      const patchIndex = fileModel.hunks[hunkIndex]?.patchIndexes?.[0] ?? hunkIndex;
-      const patch = Array.isArray(change.patches) ? change.patches[patchIndex] : null;
-      const patchLines = createPatchDiffLines(patch);
-      return patchLines.length ? { ...diffHunk, lines: patchLines } : diffHunk;
-    }
-
-    function appendHunkLines(hunkEl, lines = []) {
-      const lineWrap = document.createElement('div');
-      lineWrap.className = 'codex-diff-hunk-lines';
-      const normalizedLines = Array.isArray(lines) ? lines : [];
-
-      function renderLines(expanded) {
-        const visibleLines = expanded ? normalizedLines : normalizedLines.slice(0, MAX_INITIAL_HUNK_LINES);
-        const children = visibleLines.map(createDiffLineElement);
-        if (!expanded && normalizedLines.length > MAX_INITIAL_HUNK_LINES) {
-          const expandBtn = document.createElement('button');
-          expandBtn.type = 'button';
-          expandBtn.className = 'codex-diff-hunk-expand';
-          expandBtn.setAttribute('data-diff-hunk-expand', '');
-          expandBtn.textContent = tr('diffHunkExpandLines', {
-            count: normalizedLines.length - MAX_INITIAL_HUNK_LINES
-          });
-          expandBtn.addEventListener('click', () => renderLines(true));
-          children.push(expandBtn);
-        }
-        lineWrap.replaceChildren(...children);
-      }
-
-      renderLines(false);
-      hunkEl.append(lineWrap);
-    }
-
-    function createDiffHunkElement(hunk, reviewHunk, fileModel, hunkIndex) {
-      const hunkEl = document.createElement('div');
-      hunkEl.className = 'codex-diff-hunk';
-      hunkEl.setAttribute('data-diff-review-hunk', '');
-      hunkEl.dataset.hunkIndex = String(hunkIndex);
-      if (reviewHunk) {
-        const hunkDecision = hunkStates.get(reviewHunk.decisionKey);
-        hunkEl.dataset.decision = readonly ? 'accepted' : (hunkDecision === true ? 'accepted' : hunkDecision === false ? 'rejected' : 'pending');
-        if (!readonly && (hunkDecision === true || hunkDecision === false)) {
-          hunkEl.dataset.collapsed = 'true';
-        }
-        setHunkFocused(hunkEl, focusedHunkKey === reviewHunk.decisionKey);
-        const hunkActions = document.createElement('div');
-        hunkActions.className = 'codex-diff-hunk-actions';
-        if (readonly || hunkDecision === true || hunkDecision === false) {
-          setHunkDecisionStatus(hunkActions, readonly ? true : hunkDecision);
-        } else {
-          const acceptHunkBtn = document.createElement('button');
-          acceptHunkBtn.type = 'button';
-          acceptHunkBtn.setAttribute('data-diff-hunk-accept', '');
-          acceptHunkBtn.textContent = '✓';
-          acceptHunkBtn.title = tr('diffHunkAccept');
-          const rejectHunkBtn = document.createElement('button');
-          rejectHunkBtn.type = 'button';
-          rejectHunkBtn.setAttribute('data-diff-hunk-reject', '');
-          rejectHunkBtn.textContent = '✗';
-          rejectHunkBtn.title = tr('diffHunkReject');
-          const jumpHunkBtn = document.createElement('button');
-          jumpHunkBtn.type = 'button';
-          jumpHunkBtn.setAttribute('data-diff-hunk-jump', '');
-          jumpHunkBtn.textContent = '↗';
-          jumpHunkBtn.title = tr('diffHunkJump');
-
-          acceptHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, true));
-          rejectHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, false));
-          jumpHunkBtn.addEventListener('click', () => jumpToHunk(reviewHunk));
-
-          hunkActions.append(acceptHunkBtn, rejectHunkBtn, jumpHunkBtn);
-        }
-        hunkEl.append(hunkActions);
-        hunkViews.set(reviewHunk.decisionKey, { hunkEl, actions: hunkActions, reviewHunk });
-      } else if (!readonly && fileModel && !fileModel.reviewable && hunkIndex === 0) {
-        const fallback = document.createElement('div');
-        fallback.className = 'codex-diff-fallback-label';
-        fallback.textContent = tr('diffFallbackFileOnly');
-        hunkEl.append(fallback);
-      }
-      appendHunkLines(hunkEl, hunk.lines);
-      return hunkEl;
-    }
-
-    for (const [changeIndex, change] of syncChanges.entries()) {
-      const fileModel = reviewFilesByIndex.get(changeIndex);
-      if (fileModel?.reviewable) {
-        for (const hunk of fileModel.hunks) {
-          hunkStates.set(hunk.decisionKey, readonly ? true : null);
-        }
-      } else {
-        fileStates.set(change.path, readonly ? true : null);
-      }
-      const card = document.createElement('div');
-      card.className = 'codex-diff-file';
-      card.dataset.path = change.path;
-      card.dataset.decision = readonly ? 'accepted' : 'pending';
-      if (readonly) {
-        card.dataset.accepted = 'true';
-      }
-
-      const header = document.createElement('div');
-      header.className = 'codex-diff-file-header';
-      const pathEl = document.createElement('span');
-      pathEl.className = 'codex-diff-file-path';
-      pathEl.textContent = change.type === 'delete' ? `[delete] ${change.path}` : change.path;
-      const actions = document.createElement('div');
-      actions.className = 'codex-diff-file-actions';
-
-      if (readonly) {
-        const status = document.createElement('span');
-        status.className = 'codex-diff-readonly-label';
-        status.textContent = tr('diffWritten');
-        actions.append(status);
-      } else {
-        const acceptBtn = document.createElement('button');
-        acceptBtn.type = 'button';
-        acceptBtn.dataset.diffAccept = '';
-        acceptBtn.textContent = '✓';
-        acceptBtn.title = tr('diffAccept');
-        const rejectBtn = document.createElement('button');
-        rejectBtn.type = 'button';
-        rejectBtn.dataset.diffReject = '';
-        rejectBtn.textContent = '✗';
-        rejectBtn.title = tr('diffReject');
-
-        acceptBtn.addEventListener('click', () => decideFileChange(change.path, true));
-        rejectBtn.addEventListener('click', () => decideFileChange(change.path, false));
-
-        actions.append(acceptBtn, rejectBtn);
-      }
-
-      header.append(pathEl, actions);
-      card.append(header);
-
-      const diffHunks = Array.isArray(change.diff) ? change.diff : [];
-      if (diffHunks.length || fileModel?.reviewable) {
-        const body = document.createElement('div');
-        body.className = 'codex-diff-body';
-        const hunkCount = fileModel?.reviewable ? Math.max(diffHunks.length, fileModel.hunks.length) : diffHunks.length;
-        const initialHunkCount = Math.min(hunkCount, remainingInitialReviewHunks);
-        remainingInitialReviewHunks -= initialHunkCount;
-        function renderHunks(visibleCount) {
-          const children = [];
-          for (let hunkIndex = 0; hunkIndex < visibleCount; hunkIndex += 1) {
-            const reviewHunk = fileModel?.reviewable ? fileModel.hunks[hunkIndex] : null;
-            const hunk = getReviewDisplayHunk(change, diffHunks, fileModel, hunkIndex);
-            children.push(createDiffHunkElement(hunk, reviewHunk, fileModel, hunkIndex));
-          }
-          if (visibleCount < hunkCount) {
-            const showMoreBtn = document.createElement('button');
-            showMoreBtn.type = 'button';
-            showMoreBtn.className = 'codex-diff-show-more-hunks';
-            showMoreBtn.setAttribute('data-diff-show-more-hunks', '');
-            showMoreBtn.textContent = tr('diffShowMoreHunks', {
-              count: hunkCount - visibleCount
-            });
-            showMoreBtn.addEventListener('click', () => renderHunks(hunkCount));
-            children.push(showMoreBtn);
-          }
-          body.replaceChildren(...children);
-        }
-        renderHunks(initialHunkCount);
-        card.append(body);
-      }
-
-      container.append(card);
-      fileViews.set(change.path, { card, actions, fileModel });
-    }
-
-    container.addEventListener('keydown', handleDiffReviewKeydown);
-
-    return {
-      container,
-      fileStates,
-      decideFileChange,
-      decidePendingChanges,
-      getPendingCount,
-      getDecisions,
-      getAcceptedChanges,
-      onDecision(callback) {
-        decisionListeners.add(callback);
-        return () => decisionListeners.delete(callback);
-      }
-    };
+    return diffReviewPanel.createDiffReviewElement(syncChanges, options);
   }
 
   function renderDiffReview(syncChanges) {
-    return new Promise(resolve => {
-      const review = createDiffReviewElement(syncChanges);
-      const { container } = review;
-      let finished = false;
-
-      const toolbar = document.createElement('div');
-      toolbar.className = 'codex-diff-toolbar';
-      const summary = document.createElement('span');
-      summary.className = 'codex-diff-toolbar-summary';
-      const rejectAllBtn = document.createElement('button');
-      rejectAllBtn.type = 'button';
-      rejectAllBtn.textContent = tr('diffRejectAll');
-      const acceptAllBtn = document.createElement('button');
-      acceptAllBtn.type = 'button';
-      acceptAllBtn.dataset.diffAcceptAll = '';
-      acceptAllBtn.textContent = tr('diffAcceptAll');
-
-      function finish(accepted) {
-        if (finished) {
-          return;
-        }
-        finished = true;
-        container.remove();
-        resolve(accepted);
-      }
-
-      function updateSummary() {
-        const pending = review.getPendingCount();
-        summary.textContent = pending ? tr('diffPendingCount', { count: pending }) : tr('diffSelectionDone');
-      }
-
-      function finishIfAllDecided() {
-        updateSummary();
-        if (review.getPendingCount() === 0) {
-          finish(ReviewHunks?.buildAcceptedSyncChanges
-            ? ReviewHunks.buildAcceptedSyncChanges(syncChanges, review.getDecisions())
-            : review.getAcceptedChanges());
-        }
-      }
-
-      acceptAllBtn.addEventListener('click', () => {
-        review.decidePendingChanges(true);
-        finishIfAllDecided();
-      });
-      rejectAllBtn.addEventListener('click', () => {
-        review.decidePendingChanges(false);
-        finishIfAllDecided();
-      });
-      review.onDecision(finishIfAllDecided);
-
-      updateSummary();
-      toolbar.append(summary, rejectAllBtn, acceptAllBtn);
-      container.append(toolbar);
-
-      if (currentRunView?.events) {
-        currentRunView.events.append(container);
-        scrollLogToBottom();
-      }
-    });
+    return diffReviewPanel.renderDiffReview(syncChanges);
   }
 
   function renderReadOnlyDiffReview(syncChanges, title = tr('diffWrittenChangesTitle')) {
-    const visibleChanges = (syncChanges || []).filter(change => change?.diff?.length);
-    if (!visibleChanges.length || !currentRunView?.events) {
-      return;
-    }
-
-    appendRunEvent({
-      title,
-      status: 'completed'
-    });
-    const { container } = createDiffReviewElement(visibleChanges, { readonly: true });
-    currentRunView.events.append(container);
-    scrollLogToBottom();
+    return diffReviewPanel.renderReadOnlyDiffReview(syncChanges, title);
   }
 
   async function applySyncChangesToOverleaf(syncChanges = [], project = {}, options = {}) {
@@ -5358,7 +3908,7 @@
     }
 
     const syncedProject = mergeVerifiedAppliedFiles(freshProject, project, applied);
-    contextProject = null;
+    resetContextProject();
     const response = await sendBackgroundNative({
       method: 'mirror.sync',
       params: {
@@ -7776,6 +6326,7 @@
     await injectScriptOnce('src/page/overleafEditor.js', 'codex-overleaf-editor-script');
     await injectScriptOnce('src/page/overleafProjectSnapshot.js', 'codex-overleaf-project-snapshot-script');
     await injectOptionalOtDependencies();
+    await injectScriptOnce('src/page/pageBridgeCapability.js', 'codex-overleaf-page-bridge-capability-script');
     await injectScriptOnce('src/pageBridge.js', 'codex-overleaf-page-bridge-script');
     await initializePageBridgeCapability();
   }
@@ -7860,7 +6411,6 @@
         experimentalOtByProject: prefs.experimentalOtByProject || {},
         customInstructionsByProject: prefs.customInstructionsByProject || {},
         governanceRulesByProject: normalizeGovernanceRulesByProject(prefs.governanceRulesByProject),
-        selectedLocalSkillIdsByProject: normalizeSelectedLocalSkillIdsByProject(prefs.selectedLocalSkillIdsByProject),
         panelWidth: prefs.panelWidth || PANEL_DEFAULT_WIDTH,
         sessions: sessions.map(session => ({
           id: session.id,
@@ -7906,7 +6456,6 @@
       compactState.experimentalOtByProject = state.experimentalOtByProject;
       compactState.customInstructionsByProject = state.customInstructionsByProject;
       compactState.governanceRulesByProject = state.governanceRulesByProject;
-      compactState.selectedLocalSkillIdsByProject = state.selectedLocalSkillIdsByProject;
 
       // Save lightweight prefs to chrome.storage.local
       const latestPrefs = typeof Migration.loadPrefs === 'function'
@@ -7929,16 +6478,9 @@
       const normalizedGovernanceByProject = typeof normalizeGovernanceRulesByProject === 'function'
         ? normalizeGovernanceRulesByProject(state?.governanceRulesByProject)
         : (state?.governanceRulesByProject || {});
-      const normalizedSelectedSkillIdsByProject = typeof normalizeSelectedLocalSkillIdsByProject === 'function'
-        ? normalizeSelectedLocalSkillIdsByProject(state?.selectedLocalSkillIdsByProject)
-        : (state?.selectedLocalSkillIdsByProject || {});
       prefs.governanceRulesByProject = {
         ...(latestPrefs?.governanceRulesByProject || {}),
         ...normalizedGovernanceByProject
-      };
-      prefs.selectedLocalSkillIdsByProject = {
-        ...(latestPrefs?.selectedLocalSkillIdsByProject || {}),
-        ...normalizedSelectedSkillIdsByProject
       };
       const normalizedCustomProject = normalizeCustomInstructionsByProject({ [projectId]: '' });
       const normalizedCustomProjectId = Object.keys(normalizedCustomProject)[0] || '';
@@ -8089,7 +6631,6 @@
     }
     if (panel?.querySelector('[data-project-settings-panel]')?.hidden === false) {
       setGovernanceRulesForCurrentProject(readGovernanceRulesFromSettings());
-      setSelectedLocalSkillIdsForCurrentProject(readSelectedLocalSkillIdsFromSettings());
       setSkillLoadingSettings(readSkillLoadingSettingsFromSettings());
     }
   }
@@ -8490,10 +7031,8 @@
     if (taskInput) {
       taskInput.value = '';
     }
-    composerAttachments = [];
-    pendingComposerAttachmentKeys.clear();
+    composerAttachmentController.clear();
     composerSkillInvocation = null;
-    renderComposerAttachments();
     renderComposerSkillInvocation();
     state = updateActiveSession(state, { task: '' });
     saveStateSoon();
@@ -8537,7 +7076,7 @@
     renderComposerSkillInvocation();
     applyLocaleToPanel();
     if (!panel.querySelector('[data-context-tray]')?.hidden) {
-      renderContextFiles(contextProject);
+      renderContextFiles();
     }
   }
 

@@ -432,8 +432,16 @@
 #codex-overleaf-panel .codex-local-skill-list {
   display: grid;
   gap: 6px;
-  max-height: 128px;
+  max-height: 180px;
   overflow: auto;
+}
+
+#codex-overleaf-panel .codex-local-skill-group-title {
+  color: #f0f0f0;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+  margin-top: 2px;
 }
 
 #codex-overleaf-panel .codex-local-skill-row {
@@ -443,6 +451,14 @@
   align-items: center;
   color: #d4d4d4;
   font-size: 12px;
+}
+
+#codex-overleaf-panel .codex-local-skill-row[data-scope="codex-overleaf"] {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+#codex-overleaf-panel .codex-local-skill-row[data-disabled="true"] {
+  opacity: 0.6;
 }
 
 #codex-overleaf-panel .codex-local-skill-row span {
@@ -1381,34 +1397,60 @@
 }
 
 #codex-overleaf-panel .codex-context-summary-chip {
+  display: inline-flex;
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 118px;
-  overflow: hidden;
+  max-width: 142px;
+  align-items: center;
+  gap: 4px;
   border: 1px solid #34383c;
   border-radius: 999px;
   background: #252526;
   color: #c8c8c8;
-  padding: 2px 7px;
+  padding: 2px 3px 2px 7px;
   font-size: 11px;
+}
+
+#codex-overleaf-panel .codex-context-summary-chip-label {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-#codex-overleaf-panel .codex-context-summary-clear {
+#codex-overleaf-panel .codex-context-summary-remove {
   flex: 0 0 auto;
-  width: 20px;
-  height: 20px;
-  margin-left: auto;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   color: #9d9d9d;
-  opacity: 0;
   transition: opacity 120ms ease, background-color 120ms ease;
 }
 
-#codex-overleaf-panel .codex-context-summary:hover .codex-context-summary-clear,
-#codex-overleaf-panel .codex-context-summary:focus-within .codex-context-summary-clear {
-  opacity: 1;
+#codex-overleaf-panel .codex-context-summary-remove:hover,
+#codex-overleaf-panel .codex-context-summary-remove:focus-visible {
+  background: #3a3d41;
+  color: #f0f0f0;
+}
+
+#codex-overleaf-panel .codex-context-summary-tooltip {
+  position: absolute;
+  z-index: 6;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #464b52;
+  border-radius: 6px;
+  background: #1f1f1f;
+  color: #eeeeee;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+
+#codex-overleaf-panel .codex-context-summary-tooltip[hidden] {
+  display: none;
 }
 
 #codex-overleaf-panel .codex-attachment-strip {

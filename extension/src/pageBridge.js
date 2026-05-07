@@ -11,10 +11,7 @@
   const MAX_BINARY_FILE_BYTES = 10 * 1024 * 1024;
   const MAX_BINARY_TOTAL_BYTES = 80 * 1024 * 1024;
   const PAGE_BRIDGE_CAPABILITY_METHOD = 'initializeCapability';
-  // The page bridge runs in Overleaf's page world so it can reach editor state.
-  // The capability reduces unauthenticated postMessage calls, but same-page
-  // Overleaf code remains inside the trusted page boundary.
-  let pageBridgeCapability = '';
+  const pageBridgeCapabilityGuard = window.CodexOverleafPageBridgeCapability.create();
   const compileBridge = window.CodexOverleafCompileBridge.create({
     document,
     getActiveFilePath,
@@ -75,9 +72,9 @@
     let result;
     try {
       if (method === PAGE_BRIDGE_CAPABILITY_METHOD) {
-        result = initializePageBridgeCapability(capability);
-      } else if (!hasValidPageBridgeCapability(capability)) {
-        result = buildUnauthorizedBridgeResult();
+        result = pageBridgeCapabilityGuard.initializePageBridgeCapability(capability);
+      } else if (!pageBridgeCapabilityGuard.hasValidPageBridgeCapability(capability)) {
+        result = window.CodexOverleafPageBridgeCapability.buildUnauthorizedBridgeResult();
       } else {
         result = await dispatch(method, params || {});
       }
@@ -94,47 +91,6 @@
       result
     }, window.location.origin);
   });
-
-  function initializePageBridgeCapability(capability) {
-    if (!isValidPageBridgeCapability(capability)) {
-      return {
-        ok: false,
-        code: 'invalid_page_bridge_capability',
-        error: 'Invalid page bridge capability'
-      };
-    }
-    if (!pageBridgeCapability) {
-      pageBridgeCapability = capability;
-      return { ok: true };
-    }
-    if (capability === pageBridgeCapability) {
-      return { ok: true, alreadyInitialized: true };
-    }
-    return {
-      ok: false,
-      code: 'page_bridge_capability_already_initialized',
-      error: 'Page bridge capability is already initialized'
-    };
-  }
-
-  function hasValidPageBridgeCapability(capability) {
-    return Boolean(pageBridgeCapability && capability === pageBridgeCapability);
-  }
-
-  function isValidPageBridgeCapability(capability) {
-    return typeof capability === 'string'
-      && capability.length >= 16
-      && capability.length <= 256
-      && !/[\u0000-\u001f\u007f]/.test(capability);
-  }
-
-  function buildUnauthorizedBridgeResult() {
-    return {
-      ok: false,
-      code: 'page_bridge_unauthorized',
-      error: 'Page bridge request is not authorized'
-    };
-  }
 
   async function dispatch(method, params) {
     if (method === 'probe') {

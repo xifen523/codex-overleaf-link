@@ -22,11 +22,11 @@ function compatibleNative(overrides = {}) {
     result: {
       host: 'com.codex.overleaf',
       platform: 'darwin',
-      version: '0.9.0',
+      version: '0.9.5',
       protocolVersion: 1,
       supportedProtocol: { min: 1, max: 1 },
       capabilities: Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true])),
-      minExtensionVersion: '0.9.0',
+      minExtensionVersion: '0.9.5',
       environment: {
         codex: { ok: true }
       },
@@ -35,20 +35,20 @@ function compatibleNative(overrides = {}) {
   };
 }
 
-function statusFor(response, metadata = { version: '0.9.0' }) {
+function statusFor(response, metadata = { version: '0.9.5' }) {
   return compatibility.evaluateNativeCompatibility(response, metadata).status;
 }
 
 function canonicalInstallCommand() {
-  return 'CODEX_OVERLEAF_REF=v0.9.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.0/install.sh)"';
+  return 'CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)"';
 }
 
 test('buildBridgePingParams returns v0.9 extension protocol metadata', () => {
-  assert.equal(compatibility.MIN_NATIVE_VERSION, '0.9.0');
-  assert.equal(compatibility.BUILD_TARGET_VERSION, '0.9.0');
+  assert.equal(compatibility.MIN_NATIVE_VERSION, '0.9.5');
+  assert.equal(compatibility.BUILD_TARGET_VERSION, '0.9.5');
   assert.equal(compatibility.EXTENSION_PROTOCOL_VERSION, 1);
-  assert.deepEqual(compatibility.buildBridgePingParams({ version: '0.9.0' }), {
-    extensionVersion: '0.9.0',
+  assert.deepEqual(compatibility.buildBridgePingParams({ version: '0.9.5' }), {
+    extensionVersion: '0.9.5',
     extensionProtocolVersion: 1,
     supportedNativeProtocol: { min: 1, max: 1 },
     requiredCapabilities: REQUIRED_CAPABILITIES
@@ -106,7 +106,7 @@ test('evaluateNativeCompatibility classifies missing required capabilities as to
 
 test('evaluateNativeCompatibility classifies extension versions below native minimum as too old', () => {
   assert.equal(
-    statusFor(compatibleNative({ minExtensionVersion: '0.9.0' }), { version: '0.7.0' }),
+    statusFor(compatibleNative({ minExtensionVersion: '0.9.5' }), { version: '0.7.0' }),
     'extension_too_old'
   );
 });
@@ -145,20 +145,20 @@ test('evaluateNativeCompatibility allows healthy v0.9 native metadata', () => {
 
 test('buildInstallCommand returns the canonical version-pinned installer', () => {
   assert.equal(
-    compatibility.buildInstallCommand('0.9.0'),
+    compatibility.buildInstallCommand('0.9.5'),
     canonicalInstallCommand()
   );
-  assert.equal(compatibility.buildInstallCommand('v0.9.0'), canonicalInstallCommand());
+  assert.equal(compatibility.buildInstallCommand('v0.9.5'), canonicalInstallCommand());
 });
 
 test('buildInstallCommand falls back to the canonical target for unsafe versions', () => {
   for (const version of [
-    '0.9.0; touch /tmp/pwned',
-    '0.9.0 && touch /tmp/pwned',
-    ' 0.9.0',
-    '0.9.0 ',
-    '0.9.0/bad',
-    'v0.9.0$(id)',
+    '0.9.5; touch /tmp/pwned',
+    '0.9.5 && touch /tmp/pwned',
+    ' 0.9.5',
+    '0.9.5 ',
+    '0.9.5/bad',
+    'v0.9.5$(id)',
     '',
     null
   ]) {

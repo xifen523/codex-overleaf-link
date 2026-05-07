@@ -20,7 +20,6 @@
     otWarmStart,
     codexThreadId,
     customInstructions,
-    selectedSkillIds,
     skillLoadingSettings,
     attachments,
     skillInvocation,
@@ -29,7 +28,6 @@
     restrictToFocusFiles
   } = {}) {
     const normalizedCustomInstructions = String(customInstructions || '').trim();
-    const normalizedSelectedSkillIds = normalizeSelectedSkillIds(selectedSkillIds);
     const normalizedAttachments = normalizeComposerAttachments(attachments);
     const normalizedSkillInvocation = normalizeSkillInvocation(skillInvocation);
     const params = {
@@ -50,7 +48,6 @@
       session: state.session,
       threadId: codexThreadId || undefined,
       customInstructions: normalizedCustomInstructions || undefined,
-      selectedSkillIds: normalizedSelectedSkillIds.length ? normalizedSelectedSkillIds : undefined,
       loadCodexLocalSkills: skillLoadingSettings?.loadCodexLocalSkills !== false,
       loadCodexOverleafSkills: skillLoadingSettings?.loadCodexOverleafSkills !== false,
       skillInvocation: normalizedSkillInvocation || undefined,
@@ -157,20 +154,6 @@
       .replace(/^\/+/, '');
   }
 
-  function normalizeSelectedSkillIds(value) {
-    const seen = new Set();
-    const result = [];
-    for (const item of Array.isArray(value) ? value : []) {
-      const id = String(item || '').trim();
-      if (!id || seen.has(id)) {
-        continue;
-      }
-      seen.add(id);
-      result.push(id);
-    }
-    return result;
-  }
-
   function normalizeComposerAttachments(value) {
     const result = [];
     for (const item of Array.isArray(value) ? value : []) {
@@ -248,7 +231,6 @@
     shouldRestrictWritebackToFocus,
     buildSessionHistoryResult,
     truncateSessionHistoryText,
-    normalizeSelectedSkillIds,
     normalizeComposerAttachments,
     normalizeSkillInvocation
   };

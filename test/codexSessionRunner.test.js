@@ -141,6 +141,42 @@ test('runCodexSession degrades oversized text writeback before native response e
   }
 });
 
+test('runCodexSession keeps native ok responses under the Chrome frame limit near boundary sizes', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-response-budget-'));
+  const sizes = [
+    MAX_NATIVE_OUTPUT_MESSAGE_BYTES - 1024,
+    MAX_NATIVE_OUTPUT_MESSAGE_BYTES,
+    MAX_NATIVE_OUTPUT_MESSAGE_BYTES + 1024
+  ];
+  try {
+    for (const size of sizes) {
+      const result = await runCodexSession({
+        params: {
+          projectId: `project-response-budget-${size}`,
+          task: 'Answer only.',
+          mode: 'ask',
+          project: {
+            files: [
+              { path: 'main.tex', content: 'Before' }
+            ]
+          }
+        },
+        rootDir,
+        emit: () => {},
+        executeCodex: async () => ({
+          assistantMessage: 'A'.repeat(size)
+        })
+      });
+
+      assert.doesNotThrow(() => encodeMessage({ id: `budget-${size}`, ok: true, result }));
+      const encodedBytes = Buffer.byteLength(JSON.stringify({ id: `budget-${size}`, ok: true, result }), 'utf8');
+      assert.equal(encodedBytes <= MAX_NATIVE_OUTPUT_MESSAGE_BYTES, true);
+    }
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test('codex app-server exit before turn completion rejects instead of hanging', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-exit-'));
   try {
@@ -436,6 +472,104 @@ test('runCodexSession carries Codex skill loading toggles to the app-server boun
   }
 });
 
+test('runCodexSession keeps Codex Overleaf registry skills available without forcing an unselected skill', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-registry-home-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  let received = null;
+  try {
+    fs.mkdirSync(path.join(overleafSkillsRoot, 'registry-style'), { recursive: true });
+    fs.writeFileSync(
+      path.join(overleafSkillsRoot, 'registry-style', 'SKILL.md'),
+      '# Registry Style\n\nThis skill should remain available to Codex native activation.',
+      'utf8'
+    );
+
+    await runCodexSession({
+      params: {
+        projectId: 'registry-no-selected-skill',
+        task: '检查全文风格',
+        mode: 'ask',
+        loadCodexLocalSkills: false,
+        loadCodexOverleafSkills: true,
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      env: {
+        HOME: home,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
+      executeCodex: async input => {
+        received = input;
+        const childEnv = buildCodexHomeEnv(input.env, {
+          loadCodexLocalSkills: input.loadCodexLocalSkills,
+          loadCodexOverleafSkills: input.loadCodexOverleafSkills
+        });
+        const registryEntry = path.join(childEnv.CODEX_HOME, 'skills', 'registry-style');
+        assert.equal(fs.lstatSync(registryEntry).isSymbolicLink(), true);
+        assert.equal(path.resolve(fs.readlinkSync(registryEntry)), path.join(overleafSkillsRoot, 'registry-style'));
+      }
+    });
+
+    assert.equal(received.skillInvocation, null);
+    assert.equal(received.loadCodexOverleafSkills, true);
+    assert.match(received.task, /Selected Codex skill:\n- none\./);
+    assert.doesNotMatch(received.task, /REQUIRED.*selected Codex Overleaf skill/i);
+    assert.doesNotMatch(received.task, /This skill should remain available to Codex native activation/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession does not expose unselected project-local skills as hidden registry skills', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-project-local-hidden-'));
+  let received = null;
+  try {
+    const mirror = getProjectMirror('hidden-project-local-skill', { rootDir });
+    const skillsDir = path.join(mirror.projectRoot, '.codex-overleaf', 'skills');
+    fs.mkdirSync(skillsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillsDir, 'hidden-style.md'),
+      '# Hidden Style\n\nThis legacy project-local skill should not auto-trigger from hidden UI state.',
+      'utf8'
+    );
+
+    await runCodexSession({
+      params: {
+        projectId: 'hidden-project-local-skill',
+        task: '检查全文风格',
+        mode: 'ask',
+        loadCodexLocalSkills: false,
+        loadCodexOverleafSkills: true,
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      env: {
+        HOME: home
+      },
+      executeCodex: async input => {
+        received = input;
+        const childEnv = buildCodexHomeEnv(input.env, {
+          loadCodexLocalSkills: input.loadCodexLocalSkills,
+          loadCodexOverleafSkills: input.loadCodexOverleafSkills,
+          projectLocalSkills: input.projectLocalSkills || null
+        });
+        assert.equal(fs.existsSync(path.join(childEnv.CODEX_HOME, 'skills', 'hidden-style')), false);
+      }
+    });
+
+    assert.equal(received.skillInvocation, null);
+    assert.equal(received.projectLocalSkills, null);
+    assert.doesNotMatch(received.task, /Hidden Style/);
+    assert.doesNotMatch(received.task, /project-local skill should not auto-trigger/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('runCodexSession treats skill installer invocations as Codex Overleaf skill-install turns', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-installer-home-'));
@@ -486,8 +620,17 @@ test('runCodexSession treats skill installer invocations as Codex Overleaf skill
 
 test('runCodexSession carries selected Codex Overleaf skill invocations without installer privileges', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-selected-home-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
   let received = null;
   try {
+    fs.mkdirSync(path.join(overleafSkillsRoot, 'auto-rebuttal'), { recursive: true });
+    fs.writeFileSync(
+      path.join(overleafSkillsRoot, 'auto-rebuttal', 'SKILL.md'),
+      '# Auto Rebuttal\n\nRespond reviewer-by-reviewer and keep claims evidence-backed.',
+      'utf8'
+    );
+
     await runCodexSession({
       params: {
         projectId: 'normal-skill-turn',
@@ -501,6 +644,10 @@ test('runCodexSession carries selected Codex Overleaf skill invocations without 
         project: { files: [{ path: 'main.tex', content: 'Hello' }] }
       },
       rootDir,
+      env: {
+        HOME: home,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
       executeCodex: async input => {
         received = input;
         return {
@@ -518,10 +665,187 @@ test('runCodexSession carries selected Codex Overleaf skill invocations without 
       scope: 'codex-overleaf'
     });
     assert.match(received.task, /Selected Codex skill:\n- auto-rebuttal \(Auto Rebuttal\)/);
-    assert.match(received.task, /Use this selected Codex Overleaf skill for the current turn/);
+    assert.match(received.task, /REQUIRED.*selected Codex Overleaf skill/i);
+    assert.match(received.task, /Selected Codex Overleaf SKILL\.md:/);
+    assert.match(received.task, /Respond reviewer-by-reviewer and keep claims evidence-backed/);
     assert.doesNotMatch(received.task, /skill-install turn/);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession reports missing selected Codex Overleaf skills without forcing them', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-missing-home-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const events = [];
+  let received = null;
+  try {
+    fs.mkdirSync(overleafSkillsRoot, { recursive: true });
+
+    await runCodexSession({
+      params: {
+        projectId: 'missing-selected-overleaf-skill',
+        task: '用 missing skill 处理',
+        mode: 'ask',
+        skillInvocation: {
+          id: 'missing-skill',
+          title: 'Missing Skill',
+          scope: 'codex-overleaf'
+        },
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      env: {
+        HOME: home,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
+      emit: event => events.push(event),
+      executeCodex: async input => {
+        received = input;
+      }
+    });
+
+    assert.equal(received.skillInvocation, null);
+    assert.match(received.task, /Selected Codex skill:[\s\S]*Missing selected Codex Overleaf skill/);
+    assert.match(received.task, /- missing-skill/);
+    assert.doesNotMatch(received.task, /REQUIRED.*selected Codex Overleaf skill/i);
+    assert.deepEqual(events.filter(event => event.type === 'codex.overleaf_skills.missing').map(event => ({
+      title: event.title,
+      status: event.status,
+      missing: event.detail.missingSkillIds
+    })), [
+      {
+        title: 'Selected Codex Overleaf skill was missing',
+        status: 'failed',
+        missing: ['missing-skill']
+      }
+    ]);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession ignores selected Codex Overleaf skills when their loading toggle is disabled', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-disabled-home-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const events = [];
+  let received = null;
+  try {
+    fs.mkdirSync(path.join(overleafSkillsRoot, 'disabled-skill'), { recursive: true });
+    fs.writeFileSync(
+      path.join(overleafSkillsRoot, 'disabled-skill', 'SKILL.md'),
+      '# Disabled Skill\n\nThis disabled content must not be injected.',
+      'utf8'
+    );
+
+    await runCodexSession({
+      params: {
+        projectId: 'disabled-selected-overleaf-skill',
+        task: '用 disabled skill 处理',
+        mode: 'ask',
+        loadCodexOverleafSkills: false,
+        skillInvocation: {
+          id: 'disabled-skill',
+          title: 'Disabled Skill',
+          scope: 'codex-overleaf'
+        },
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      env: {
+        HOME: home,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
+      emit: event => events.push(event),
+      executeCodex: async input => {
+        received = input;
+      }
+    });
+
+    assert.equal(received.skillInvocation, null);
+    assert.equal(received.loadCodexOverleafSkills, false);
+    assert.match(received.task, /Selected Codex skill:[\s\S]*Ignored selected Codex Overleaf skill/);
+    assert.match(received.task, /Codex Overleaf skills are disabled/);
+    assert.doesNotMatch(received.task, /This disabled content must not be injected/);
+    assert.deepEqual(events.filter(event => event.type === 'codex.overleaf_skill_invocation.ignored').map(event => ({
+      title: event.title,
+      status: event.status,
+      ignored: event.detail.ignoredSkillIds,
+      reason: event.detail.reason
+    })), [
+      {
+        title: 'Selected Codex Overleaf skill was ignored',
+        status: 'warning',
+        ignored: ['disabled-skill'],
+        reason: 'codex_overleaf_skills_disabled'
+      }
+    ]);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession does not re-expose user Codex skills when local skills are disabled', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-local-disabled-home-'));
+  const userCodexHome = path.join(home, '.codex');
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  let received = null;
+  try {
+    fs.mkdirSync(path.join(userCodexHome, 'skills', 'private-user-skill'), { recursive: true });
+    fs.writeFileSync(
+      path.join(userCodexHome, 'skills', 'private-user-skill', 'SKILL.md'),
+      '# Private User Skill\n\nDo not expose this when local skills are disabled.',
+      'utf8'
+    );
+    fs.mkdirSync(path.join(overleafSkillsRoot, 'overleaf-forced'), { recursive: true });
+    fs.writeFileSync(
+      path.join(overleafSkillsRoot, 'overleaf-forced', 'SKILL.md'),
+      '# Overleaf Forced\n\nUse only the plugin-side skill.',
+      'utf8'
+    );
+
+    await runCodexSession({
+      params: {
+        projectId: 'local-disabled-selected-overleaf-skill',
+        task: '用 overleaf skill 处理',
+        mode: 'ask',
+        loadCodexLocalSkills: false,
+        loadCodexOverleafSkills: true,
+        skillInvocation: {
+          id: 'overleaf-forced',
+          title: 'Overleaf Forced',
+          scope: 'codex-overleaf'
+        },
+        project: { files: [{ path: 'main.tex', content: 'Hello' }] }
+      },
+      rootDir,
+      env: {
+        HOME: home,
+        CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot
+      },
+      executeCodex: async input => {
+        received = input;
+        const childEnv = buildCodexHomeEnv(input.env, {
+          loadCodexLocalSkills: input.loadCodexLocalSkills,
+          loadCodexOverleafSkills: input.loadCodexOverleafSkills
+        });
+        assert.equal(fs.existsSync(path.join(childEnv.CODEX_HOME, 'skills', 'private-user-skill')), false);
+        assert.equal(fs.lstatSync(path.join(childEnv.CODEX_HOME, 'skills', 'overleaf-forced')).isSymbolicLink(), true);
+      }
+    });
+
+    assert.equal(received.loadCodexLocalSkills, false);
+    assert.match(received.task, /Use only the plugin-side skill/);
+    assert.doesNotMatch(received.task, /Do not expose this when local skills are disabled/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

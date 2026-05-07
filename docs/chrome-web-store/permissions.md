@@ -4,7 +4,7 @@
 
 `nativeMessaging` connects the extension to the local native bridge only. The bridge runs on the user's own macOS, Windows, or Linux machine and is required for local project mirroring, Codex CLI execution, compatibility checks, and native diagnostics. Native host manifests restrict `allowed_origins` to the installed extension id.
 
-`storage` stores local extension preferences and session UI state in `chrome.storage.local`, including panel settings, selected model options, project-scoped feature preferences, governance rules, selected local skill ids, audit summaries, and task list metadata. Larger local history and diagnostics records use the extension IndexedDB database `codex-overleaf`.
+`storage` stores local extension preferences and session UI state in `chrome.storage.local`, including panel settings, selected model options, project-scoped feature preferences, governance rules, skill loading toggles, audit summaries, and task list metadata. Larger local history and diagnostics records use the extension IndexedDB database `codex-overleaf`.
 
 `https://www.overleaf.com/project/*` and `https://overleaf.com/project/*` let the extension inject the panel only on Overleaf project pages, read project snapshots, observe editor/compile state, and write accepted changes back through the guarded browser writeback path.
 

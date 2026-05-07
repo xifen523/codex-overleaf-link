@@ -19,19 +19,19 @@ const {
 } = require('../native-host/src/nativeHostPlatform');
 const extensionManifest = require('../extension/manifest.json');
 
-test('release metadata is prepared for v0.9.0', () => {
-  assert.equal(packageJson.version, '0.9.0');
+test('release metadata is prepared for v0.9.5', () => {
+  assert.equal(packageJson.version, '0.9.5');
   assert.equal(extensionManifest.version, packageJson.version);
 });
 
-test('release docs carry exact v0.9.0 badge and changelog heading', () => {
+test('release docs carry exact v0.9.5 badge and changelog heading', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
   const changelog = fs.readFileSync(path.join(__dirname, '../CHANGELOG.md'), 'utf8');
 
-  assert.match(readme, /version-0\.9\.0-blue/);
+  assert.match(readme, /version-0\.9\.5-blue/);
   assert.doesNotMatch(readme, /version-0\.8\.0-blue/);
-  assert.match(changelog, /^## v0\.9\.0 - 2026-05-07$/m);
-  assert.doesNotMatch(changelog, /^## v0\.8\.0 - 2026-05-06[\s\S]*version-0\.9\.0-blue/m);
+  assert.match(changelog, /^## v0\.9\.5 - 2026-05-07$/m);
+  assert.doesNotMatch(changelog, /^## v0\.8\.0 - 2026-05-06[\s\S]*version-0\.9\.5-blue/m);
 });
 
 test('validates Chrome extension ids', () => {
@@ -202,6 +202,16 @@ test('page bridge injection can load governance, sensitive scan, and audit share
   ]) {
     assert.ok(resources.includes(helper), `${helper} should be web accessible`);
   }
+});
+
+test('page bridge capability guard loads before the page bridge from web accessible resources', () => {
+  const resources = extensionManifest.web_accessible_resources[0].resources;
+  const capabilityIndex = resources.indexOf('src/page/pageBridgeCapability.js');
+  const pageBridgeIndex = resources.indexOf('src/pageBridge.js');
+
+  assert.ok(capabilityIndex > -1, 'page bridge capability guard should be web accessible');
+  assert.ok(pageBridgeIndex > -1, 'page bridge should be web accessible');
+  assert.ok(capabilityIndex < pageBridgeIndex, 'page bridge capability guard should load before pageBridge.js');
 });
 
 test('manifest loads and exposes read-only OT page dependencies', () => {

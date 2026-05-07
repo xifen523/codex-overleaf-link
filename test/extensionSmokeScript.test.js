@@ -137,7 +137,7 @@ test('redactSmokeResult keeps only allowlisted fields and strips sensitive conte
       urlOrigin: 'https://www.overleaf.com',
       projectId: 'raw-project-id',
       projectIdHash: 'sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-      extensionVersion: '0.9.0',
+      extensionVersion: '0.9.5',
       chromeVersion: 'Chrome/125.0.0.0',
       nativeCompatibility: {
         status: 'native_missing',
@@ -336,7 +336,7 @@ test('runProbe calls the content smoke helper for native status', () => {
               status: 'ok',
               nativeCompatibility: {
                 status: 'ok',
-                nativeVersion: '0.9.0',
+                nativeVersion: '0.9.5',
                 protocolVersion: '1'
               }
             }

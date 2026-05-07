@@ -6,6 +6,13 @@ const vm = require('node:vm');
 
 const ReviewHunks = require('../extension/src/content/reviewHunks');
 
+const DIFF_REVIEW_PANEL_PATH = '../extension/src/content/diffReviewPanel.js';
+const CONTEXT_TRAY_PATH = '../extension/src/content/contextTray.js';
+
+function readFileIfExists(filePath) {
+  return fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
+}
+
 function extractFunction(source, name) {
   const markers = [`function ${name}(`, `async function ${name}(`];
   const start = markers
@@ -135,22 +142,21 @@ function createMinimalDocument() {
   };
 }
 
+function collectElementText(node) {
+  return [
+    node?.textContent || '',
+    ...(node?.children || []).map(child => collectElementText(child))
+  ].join('');
+}
+
 function loadCreateDiffReviewElementForTest(options = {}) {
-  const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
-    'utf8'
-  );
-  const source = contentScript
-    .match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderDiffReview/)?.[0]
-    ?.replace(/\n  function renderDiffReview$/, '');
-  assert.ok(source, 'createDiffReviewElement should be extractable for behavior tests');
+  delete require.cache[require.resolve(DIFF_REVIEW_PANEL_PATH)];
   const pageBridgeCalls = [];
-  const createDiffReviewElement = vm.runInNewContext(`(${source})`, {
+  const DiffReviewPanel = require(DIFF_REVIEW_PANEL_PATH);
+  const controller = DiffReviewPanel.createDiffReviewPanelController({
     document: createMinimalDocument(),
-    ReviewHunks,
-    MAX_INITIAL_REVIEW_HUNKS: 20,
-    MAX_INITIAL_HUNK_LINES: 80,
-    window: { CodexOverleafReviewHunks: ReviewHunks },
+    root: { CodexOverleafReviewHunks: ReviewHunks },
+    reviewHunks: ReviewHunks,
     callPageBridge(method, params) {
       pageBridgeCalls.push({ method, params });
       return Promise.resolve(options.pageBridgeResult || { ok: true });
@@ -159,6 +165,7 @@ function loadCreateDiffReviewElementForTest(options = {}) {
       return key;
     }
   });
+  const createDiffReviewElement = controller.createDiffReviewElement;
   createDiffReviewElement.pageBridgeCalls = pageBridgeCalls;
   return createDiffReviewElement;
 }
@@ -171,6 +178,10 @@ test('composer defaults to English task modes and keeps Chinese translations ava
 
   const i18n = fs.readFileSync(
     path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
+  const localSkillsPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/localSkillsPanel.js'),
     'utf8'
   );
 
@@ -246,12 +257,20 @@ test('project settings expose governed rules and local skills without Overleaf a
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const attachmentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerAttachments.js'),
+    'utf8'
+  );
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
   const i18n = fs.readFileSync(
     path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
+  const localSkillsPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/localSkillsPanel.js'),
     'utf8'
   );
 
@@ -263,6 +282,12 @@ test('project settings expose governed rules and local skills without Overleaf a
   assert.match(contentScript, /data-load-codex-local-skills/);
   assert.match(contentScript, /data-load-codex-overleaf-skills/);
   assert.match(contentScript, /data-local-skill-list/);
+  assert.match(contentScript, /CodexOverleafLocalSkillsPanel/);
+  assert.match(contentScript, /localSkillsPanel\.refreshLocalSkills/);
+  assert.match(localSkillsPanel, /codexOverleafSkills/);
+  assert.match(localSkillsPanel, /function getCodexOverleafSkillsForSettings/);
+  assert.match(localSkillsPanel, /function removeCodexOverleafSkill/);
+  assert.match(localSkillsPanel, /params:\s*\{\s*scope:\s*'codex-overleaf'\s*\}/);
   assert.doesNotMatch(contentScript, /data-local-skill-install-id/);
   assert.doesNotMatch(contentScript, /data-local-skill-install-content/);
   assert.doesNotMatch(contentScript, /installLocalSkillFromSettings/);
@@ -275,9 +300,11 @@ test('project settings expose governed rules and local skills without Overleaf a
   assert.match(contentScript, /loadCodexLocalSkills/);
   assert.match(contentScript, /loadCodexOverleafSkills/);
   assert.match(contentScript, /governanceRulesByProject/);
-  assert.match(contentScript, /selectedLocalSkillIdsByProject/);
   assert.match(contentScript, /method:\s*'skills\.list'/);
-  assert.match(contentScript, /method:\s*'skills\.remove'/);
+  assert.match(localSkillsPanel, /method:\s*'skills\.remove'/);
+  assert.doesNotMatch(localSkillsPanel, /projectLocalSkillsTitle/);
+  assert.doesNotMatch(localSkillsPanel, /localSkillsEmpty/);
+  assert.doesNotMatch(localSkillsPanel, /data-local-skill-selected/);
   assert.match(css, /\.codex-project-settings-panel/);
   assert.match(css, /\.codex-local-skill-list/);
   assert.doesNotMatch(css, /\.codex-local-skill-install-row/);
@@ -285,9 +312,82 @@ test('project settings expose governed rules and local skills without Overleaf a
   assert.match(i18n, /projectSettingsTitle/);
   assert.match(i18n, /governanceReadonlyPatterns/);
   assert.match(i18n, /localSkillsTitle/);
+  assert.doesNotMatch(i18n, /projectLocalSkillsTitle/);
+  assert.doesNotMatch(i18n, /localSkillsEmpty/);
+  assert.match(i18n, /codexOverleafSkillsTitle/);
+  assert.match(i18n, /codexOverleafSkillsEmpty/);
   assert.match(i18n, /loadCodexLocalSkills/);
   assert.match(i18n, /loadCodexOverleafSkills/);
   assert.doesNotMatch(i18n, /assetUploadTitle/);
+});
+
+test('project settings renders only Codex Overleaf managed skills', async () => {
+  delete require.cache[require.resolve('../extension/src/content/localSkillsPanel')];
+  const LocalSkillsPanel = require('../extension/src/content/localSkillsPanel');
+  const document = createMinimalDocument();
+  const panel = document.createElement('div');
+  const list = document.createElement('div');
+  list.setAttribute('data-local-skill-list', '');
+  panel.append(list);
+  const requests = [];
+  let state = {};
+  let overleafEnabled = true;
+  let slashSkills = [];
+  const labels = {
+    codexOverleafSkillsTitle: 'Codex Overleaf skills',
+    codexOverleafSkillsEmpty: 'No Codex Overleaf skills installed.',
+    codexOverleafSkillsDisabled: 'Codex Overleaf skills are disabled.',
+    localSkillRemove: 'Remove'
+  };
+  const controller = LocalSkillsPanel.createLocalSkillsPanelController({
+    document,
+    getPanel: () => panel,
+    getState: () => state,
+    setState: nextState => {
+      state = nextState;
+    },
+    getCurrentProjectId: () => 'project-1',
+    getSkillLoadingSettings: () => ({ loadCodexOverleafSkills: overleafEnabled }),
+    tr: key => labels[key] || key,
+    sendBackgroundNative(request) {
+      requests.push(request);
+      if (request.params?.scope === 'codex-overleaf') {
+        return Promise.resolve({
+          ok: true,
+          result: {
+            skills: [
+              {
+                id: 'auto-rebuttal',
+                title: 'Auto Rebuttal',
+                scope: 'codex-overleaf'
+              }
+            ]
+          }
+        });
+      }
+      return Promise.resolve({ ok: true, result: { skills: [] } });
+    },
+    setSlashCodexOverleafSkills(skills) {
+      slashSkills = skills;
+    }
+  });
+
+  await controller.refreshLocalSkills();
+
+  assert.deepEqual(
+    requests.map(request => request.params),
+    [{ scope: 'codex-overleaf' }]
+  );
+  assert.equal(slashSkills[0]?.id, 'auto-rebuttal');
+  assert.doesNotMatch(collectElementText(list), /project-local/i);
+  assert.match(collectElementText(list), /Codex Overleaf skills/);
+  assert.match(collectElementText(list), /Auto Rebuttal \(auto-rebuttal\)/);
+
+  overleafEnabled = false;
+  controller.renderLocalSkillList();
+
+  assert.match(collectElementText(list), /Codex Overleaf skills are disabled/);
+  assert.match(collectElementText(list), /Auto Rebuttal \(auto-rebuttal\)/);
 });
 
 test('composer slash menu offers Codex Overleaf skill installation and installed skills', () => {
@@ -340,7 +440,7 @@ test('composer slash menu offers Codex Overleaf skill installation and installed
   assert.match(i18n, /skillInstallerComposerClear/);
 });
 
-test('task runs use sensitive preflight, selected skills, governance gating, binary confirmation, and audit summaries', () => {
+test('task runs use sensitive preflight, skill toggles, governance gating, binary confirmation, and audit summaries', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
@@ -351,12 +451,12 @@ test('task runs use sensitive preflight, selected skills, governance gating, bin
   assert.match(contentScript, /CodexOverleafGovernanceRules/);
   assert.match(contentScript, /CodexOverleafSensitiveScan/);
   assert.match(contentScript, /CodexOverleafAuditRecords/);
-  assert.match(runTaskBody, /const submittedSelectedSkillIds = getSelectedLocalSkillIdsForCurrentProject\(\)/);
+  assert.doesNotMatch(runTaskBody, /submittedSelectedSkillIds/);
   assert.match(runTaskBody, /const submittedSkillLoadingSettings = getSkillLoadingSettings\(\)/);
   assert.match(runTaskBody, /createAuditDraftForRun/);
   assert.match(runTaskBody, /runSensitivePreflight\(\{\s*task,\s*project/);
   assert.match(runTaskBody, /runSensitivePreflight\(\{[\s\S]*useExistingMirror/);
-  assert.match(runTaskBody, /selectedSkillIds:\s*submittedSelectedSkillIds/);
+  assert.doesNotMatch(runTaskBody, /selectedSkillIds:\s*submittedSelectedSkillIds/);
   assert.match(runTaskBody, /skillLoadingSettings:\s*submittedSkillLoadingSettings/);
   assert.match(runTaskBody, /finalizeAuditRecord/);
   assert.match(runTaskBody, /sensitiveFindings/);
@@ -377,33 +477,42 @@ test('composer supports pasted or dropped turn attachments without Overleaf asse
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const attachmentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerAttachments.js'),
+    'utf8'
+  );
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../extension/manifest.json'), 'utf8'));
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
   const clearBody = extractFunction(contentScript, 'clearTaskComposer');
+  const scriptOrder = manifest.content_scripts[0].js;
 
   assert.match(contentScript, /data-attachment-strip/);
+  assert.ok(
+    scriptOrder.indexOf('src/content/composerAttachments.js') < scriptOrder.indexOf('src/contentScript.js'),
+    'composer attachment controller loads before contentScript'
+  );
   assert.match(contentScript, /\[data-task\]'\)\.addEventListener\('paste', handleComposerPaste\)/);
   assert.match(contentScript, /\[data-composer-form\]'\)\.addEventListener\('dragover', handleComposerDragOver\)/);
   assert.match(contentScript, /\[data-composer-form\]'\)\.addEventListener\('drop', handleComposerDrop\)/);
+  assert.match(attachmentScript, /createComposerAttachmentController/);
   assert.match(contentScript, /function addComposerAttachmentFiles/);
   assert.match(contentScript, /function renderComposerAttachments/);
   assert.match(runTaskBody, /const submittedAttachments = getComposerAttachmentsForRun\(\)/);
   assert.match(runTaskBody, /attachments:\s*submittedAttachments/);
-  assert.match(clearBody, /composerAttachments = \[\]/);
+  assert.match(clearBody, /composerAttachmentController\.clear\(\)/);
   assert.doesNotMatch(contentScript, /User-selected asset upload/);
   assert.doesNotMatch(contentScript, /asset_upload_rejected/);
   assert.doesNotMatch(contentScript, /mode:\s*'asset-upload'/);
 });
 
 test('composer paste collects clipboard file items once when files and items both expose the same paste', () => {
-  const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+  const attachmentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerAttachments.js'),
     'utf8'
   );
   const collectFilesFromDataTransfer = vm.runInNewContext(`
-    function normalizeComposerAttachmentName(name) {
-      return String(name || '').replace(/\\0/g, '').replace(/\\\\/g, '/').split('/').filter(Boolean).pop()?.trim().slice(0, 180) || '';
-    }
-    (${extractFunction(contentScript, 'collectFilesFromDataTransfer')})
+    ${extractFunction(attachmentScript, 'normalizeAttachmentName')}
+    (${extractFunction(attachmentScript, 'collectFilesFromDataTransfer')})
   `);
   const filesEntry = { name: 'image.png', type: 'image/png', size: 128, lastModified: 1 };
   const itemEntry = { name: 'clipboard-image.png', type: 'image/png', size: 128, lastModified: 2 };
@@ -421,57 +530,52 @@ test('composer paste collects clipboard file items once when files and items bot
 });
 
 test('composer attachment adds dedupe the same file while async reads are pending', async () => {
-  const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+  const attachmentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerAttachments.js'),
     'utf8'
   );
-  const harness = vm.runInNewContext(`
-    let composerAttachments = [];
-    let pendingComposerAttachmentKeys = new Set();
-    const MAX_COMPOSER_ATTACHMENTS = 8;
-    const MAX_COMPOSER_ATTACHMENT_BYTES = 12 * 1024 * 1024;
-    const pendingReads = [];
-    function tx(en) { return en; }
-    function appendPlainLog() {}
-    function renderComposerAttachments() {}
-    function readFileAsDataUrl() {
-      return new Promise(resolve => pendingReads.push(() => resolve('data:image/png;base64,aGVsbG8=')));
+  const sandbox = {
+    window: {},
+    document: {},
+    console,
+    setTimeout,
+    clearTimeout
+  };
+  const pendingReads = [];
+  sandbox.FileReader = class FakeFileReader {
+    readAsDataURL() {
+      pendingReads.push(() => {
+        this.result = 'data:image/png;base64,aGVsbG8=';
+        this.onload?.();
+      });
     }
-    async function buildAttachmentPreviewData() {
-      return { kind: 'image', previewDataUrl: 'data:image/png;base64,aGVsbG8=' };
-    }
-    function extractBase64FromDataUrl(value) {
-      const text = String(value || '');
-      return text.includes(',') ? text.slice(text.indexOf(',') + 1) : text;
-    }
-    ${extractFunction(contentScript, 'normalizeComposerAttachmentName')}
-    ${extractFunction(contentScript, 'validateComposerAttachmentFile')}
-    ${extractOptionalFunction(contentScript, 'buildComposerAttachmentDedupeKey')}
-    ${extractOptionalFunction(contentScript, 'isDuplicateComposerAttachmentFile')}
-    ${extractFunction(contentScript, 'addComposerAttachmentFiles')}
-    ({
-      addComposerAttachmentFiles,
-      attachments: () => composerAttachments,
-      flushReads: () => {
-        for (const resolve of pendingReads.splice(0)) {
-          resolve();
-        }
-      }
-    })
-  `);
+  };
+  vm.runInNewContext(attachmentScript, sandbox);
+  const controller = sandbox.window.CodexOverleafComposerAttachments.createComposerAttachmentController({
+    getPanel: () => ({ querySelector: () => null }),
+    tx: (en) => en,
+    tr: (key) => key,
+    appendPlainLog() {}
+  });
   const file = { name: 'image.png', type: 'image/png', size: 128 };
 
-  const first = harness.addComposerAttachmentFiles([file]);
-  const second = harness.addComposerAttachmentFiles([file]);
-  harness.flushReads();
+  const first = controller.addFiles([file]);
+  const second = controller.addFiles([file]);
+  for (const resolve of pendingReads.splice(0)) {
+    resolve();
+  }
   await Promise.all([first, second]);
 
-  assert.equal(harness.attachments().length, 1);
+  assert.equal(controller.getAttachmentsForRun().length, 1);
 });
 
 test('composer and run history render image previews and file attachment icons', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const attachmentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerAttachments.js'),
     'utf8'
   );
   const css = fs.readFileSync(
@@ -481,13 +585,13 @@ test('composer and run history render image previews and file attachment icons',
   const composerMarkup = contentScript.match(/<form class="codex-composer" data-composer-form>[\s\S]*?<\/form>/)?.[0] || '';
   const startRunBody = contentScript.match(/function startRunView\(\{[\s\S]*?\n  function finishRunView/)?.[0] || '';
   const renderCardBody = contentScript.match(/function renderRunCard\(run\) \{[\s\S]*?\n  function getRunStatusText/)?.[0] || '';
-  const renderAttachmentsBody = contentScript.match(/function renderAttachmentPreviewList[\s\S]*?\n  function showAttachmentPreviewDialog/)?.[0] || '';
+  const renderAttachmentsBody = attachmentScript.match(/function renderAttachmentPreviewList[\s\S]*?\n  function showAttachmentPreviewDialog/)?.[0] || '';
 
   assert.ok(
     composerMarkup.indexOf('data-attachment-strip') < composerMarkup.indexOf('<textarea data-task'),
     'attachment previews render above the composer textarea'
   );
-  assert.match(contentScript, /function buildAttachmentPreviewData/);
+  assert.match(attachmentScript, /function buildAttachmentPreviewData/);
   assert.match(contentScript, /function createRunAttachmentSnapshots/);
   assert.match(startRunBody, /attachments = \[\]/);
   assert.match(startRunBody, /attachments:\s*createRunAttachmentSnapshots\(attachments\)/);
@@ -495,9 +599,9 @@ test('composer and run history render image previews and file attachment icons',
   assert.match(renderCardBody, /renderAttachmentPreviewList\(run\.attachments/);
   assert.match(renderAttachmentsBody, /document\.createElement\('img'\)/);
   assert.match(renderAttachmentsBody, /codex-attachment-file-icon/);
-  assert.match(renderAttachmentsBody, /showAttachmentPreviewDialog\(attachment\)/);
-  assert.match(contentScript, /function showAttachmentPreviewDialog\(attachment\)/);
-  assert.match(contentScript, /data-attachment-preview-dialog/);
+  assert.match(renderAttachmentsBody, /showAttachmentPreviewDialog\(attachment/);
+  assert.match(attachmentScript, /function showAttachmentPreviewDialog\(attachment/);
+  assert.match(attachmentScript, /data-attachment-preview-dialog/);
   assert.match(css, /\.codex-attachment-preview-list/);
   assert.match(css, /\.codex-attachment-preview-card/);
   assert.match(css, /\.codex-attachment-preview-dialog/);
@@ -1631,6 +1735,10 @@ test('auto mode shows a readonly diff after applying Codex changes', () => {
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const diffReviewPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/diffReviewPanel.js'),
+    'utf8'
+  );
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
@@ -1638,9 +1746,10 @@ test('auto mode shows a readonly diff after applying Codex changes', () => {
   const applySyncBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
 
   assert.match(contentScript, /function renderReadOnlyDiffReview\(/);
+  assert.match(contentScript, /diffReviewPanel\.renderReadOnlyDiffReview\(syncChanges,\s*title\)/);
   assert.match(applySyncBody, /const applied = operations\.length[\s\S]*renderReadOnlyDiffReview\(getAppliedSyncChanges\(syncChanges, applied\)/);
   assert.match(contentScript, /function getAppliedSyncChanges\(/);
-  assert.match(contentScript, /dataset\.readonly = 'true'/);
+  assert.match(diffReviewPanel, /dataset\.readonly = 'true'/);
   assert.match(css, /\.codex-diff-review\[data-readonly="true"\]/);
   assert.doesNotMatch(applySyncBody, /本地 Codex 改动预览：\$\{syncChanges\.filter/);
 });
@@ -1650,13 +1759,20 @@ test('confirm diff review uses immediate per-file decisions and batch accept rej
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const diffReviewPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/diffReviewPanel.js'),
+    'utf8'
+  );
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
-  const createDiffBody = contentScript.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderDiffReview/)?.[0] || '';
-  const renderDiffBody = contentScript.match(/function renderDiffReview\(syncChanges\) \{[\s\S]*?\n  function renderReadOnlyDiffReview/)?.[0] || '';
+  const wrapperBody = contentScript.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderReadOnlyDiffReview/)?.[0] || '';
+  const createDiffBody = diffReviewPanel.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n    function renderDiffReview/)?.[0] || '';
+  const renderDiffBody = diffReviewPanel.match(/function renderDiffReview\(syncChanges\) \{[\s\S]*?\n    function renderReadOnlyDiffReview/)?.[0] || '';
 
+  assert.match(wrapperBody, /return diffReviewPanel\.createDiffReviewElement\(syncChanges,\s*options\)/);
+  assert.match(wrapperBody, /return diffReviewPanel\.renderDiffReview\(syncChanges\)/);
   assert.match(createDiffBody, /card\.dataset\.decision = readonly \? 'accepted' : 'pending'/);
   assert.match(createDiffBody, /function decideFileChange\(path, accepted\)/);
   assert.match(createDiffBody, /status\.textContent = accepted \? tr\('diffAccepted'\) : tr\('diffRejected'\)/);
@@ -1677,8 +1793,12 @@ test('confirm diff review renders hunk controls and resolves accepted hunk patch
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
-  const createDiffBody = contentScript.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderDiffReview/)?.[0] || '';
-  const renderDiffBody = contentScript.match(/function renderDiffReview\(syncChanges\) \{[\s\S]*?\n  function renderReadOnlyDiffReview/)?.[0] || '';
+  const diffReviewPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/diffReviewPanel.js'),
+    'utf8'
+  );
+  const createDiffBody = diffReviewPanel.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n    function renderDiffReview/)?.[0] || '';
+  const renderDiffBody = diffReviewPanel.match(/function renderDiffReview\(syncChanges\) \{[\s\S]*?\n    function renderReadOnlyDiffReview/)?.[0] || '';
 
   assert.match(contentScript, /CodexOverleafReviewHunks/);
   assert.match(createDiffBody, /window\.CodexOverleafReviewHunks/);
@@ -1695,10 +1815,14 @@ test('confirm diff review exposes editor-native hunk review limits and shortcuts
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
-  const createDiffBody = contentScript.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderDiffReview/)?.[0] || '';
+  const diffReviewPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/diffReviewPanel.js'),
+    'utf8'
+  );
+  const createDiffBody = diffReviewPanel.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n    function renderDiffReview/)?.[0] || '';
 
-  assert.match(contentScript, /const MAX_INITIAL_REVIEW_HUNKS = 20/);
-  assert.match(contentScript, /const MAX_INITIAL_HUNK_LINES = 80/);
+  assert.match(diffReviewPanel, /const MAX_INITIAL_REVIEW_HUNKS = 20/);
+  assert.match(diffReviewPanel, /const MAX_INITIAL_HUNK_LINES = 80/);
   assert.match(createDiffBody, /container\.tabIndex = 0/);
   assert.match(createDiffBody, /handleDiffReviewKeydown/);
   assert.match(createDiffBody, /addEventListener\('keydown', handleDiffReviewKeydown\)/);
@@ -2452,6 +2576,7 @@ test('context picker presents Cursor-style @ context concepts', () => {
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const contextTray = readFileIfExists(path.join(__dirname, CONTEXT_TRAY_PATH));
   const i18n = fs.readFileSync(
     path.join(__dirname, '../extension/src/shared/i18n.js'),
     'utf8'
@@ -2461,8 +2586,34 @@ test('context picker presents Cursor-style @ context concepts', () => {
   assert.match(i18n, /@文件/);
   assert.match(contentScript, /@compile-log/);
   assert.match(contentScript, /@current-section/);
-  assert.match(contentScript, /@context/);
+  assert.match(contentScript + contextTray, /@context/);
   assert.doesNotMatch(contentScript, /Focus:/);
+});
+
+test('context tray behavior is owned by a content helper loaded before contentScript', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const contextTray = readFileIfExists(path.join(__dirname, CONTEXT_TRAY_PATH));
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../extension/manifest.json'), 'utf8'));
+  const scriptOrder = manifest.content_scripts[0].js;
+  const renderWrapperBody = extractFunction(contentScript, 'renderContextFiles');
+
+  assert.match(contextTray, /createContextTrayController/);
+  assert.match(contentScript, /CodexOverleafContextTray/);
+  assert.match(renderWrapperBody, /return contextTrayController\.renderContextFiles\(project\)/);
+  assert.doesNotMatch(contentScript, /let contextProject\s*=/);
+  assert.match(contextTray, /let contextProject\s*=\s*null/);
+  assert.ok(
+    scriptOrder.indexOf('src/content/diffReviewPanel.js') <
+      scriptOrder.indexOf('src/content/contextTray.js'),
+    'context tray controller loads after diff review panel'
+  );
+  assert.ok(
+    scriptOrder.indexOf('src/content/contextTray.js') < scriptOrder.indexOf('src/contentScript.js'),
+    'context tray controller loads before contentScript'
+  );
 });
 
 test('stale write copy explains user or collaborator edits without snapshot jargon', () => {
@@ -2513,13 +2664,16 @@ test('English locale is applied to dialogs, diff review, undo controls, and tran
     path.join(__dirname, '../extension/src/contentScript.js'),
     'utf8'
   );
+  const diffReviewPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/diffReviewPanel.js'),
+    'utf8'
+  );
   const i18n = fs.readFileSync(
     path.join(__dirname, '../extension/src/shared/i18n.js'),
     'utf8'
   );
 
   const confirmBody = contentScript.match(/async function showPluginConfirm\([\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
-  const diffBody = contentScript.match(/function createDiffReviewElement\(syncChanges[\s\S]*?\n  function renderReadOnlyDiffReview/)?.[0] || '';
   const undoBody = contentScript.match(/function configureUndoButton\(root, run\) \{[\s\S]*?\n  function refreshRunCard/)?.[0] || '';
   const transcriptCallBody = contentScript.match(/function appendNativeEvent\(event\) \{[\s\S]*?\n  function appendRunEvent/)?.[0] || '';
   const completionBody = contentScript.match(/function appendCompletionReport\(input = \{\}\) \{[\s\S]*?\n  function formatCompletionWork/)?.[0] || '';
@@ -2528,8 +2682,8 @@ test('English locale is applied to dialogs, diff review, undo controls, and tran
   assert.match(i18n, /diffAcceptAll:\s*'Accept all'/);
   assert.match(i18n, /undoRun:\s*'Undo changes'/);
   assert.match(confirmBody, /brand\.textContent = tr\('confirmBrand'\)/);
-  assert.match(diffBody, /tr\('diffAccepted'\)/);
-  assert.match(diffBody, /tr\('diffAcceptAll'\)/);
+  assert.match(diffReviewPanel, /tr\('diffAccepted'\)/);
+  assert.match(diffReviewPanel, /tr\('diffAcceptAll'\)/);
   assert.match(undoBody, /tr\('undoRun'\)/);
   assert.match(undoBody, /tr\('undoApplied'\)/);
   assert.match(transcriptCallBody, /mapAgentEventToActivity\(event,\s*\{\s*locale:\s*getLocale\(\)\s*\}\)/);
@@ -2548,6 +2702,26 @@ test('page bridge messages require same-origin responses in both directions', ()
 
   assert.match(contentScript, /event\.origin !== window\.location\.origin/);
   assert.match(pageBridge, /event\.origin !== window\.location\.origin/);
+});
+
+test('page bridge capability guard is isolated from page bridge dispatch logic', () => {
+  const capabilityGuard = readFileIfExists(
+    path.join(__dirname, '../extension/src/page/pageBridgeCapability.js')
+  );
+  const pageBridge = fs.readFileSync(
+    path.join(__dirname, '../extension/src/pageBridge.js'),
+    'utf8'
+  );
+
+  assert.notEqual(capabilityGuard, '', 'page bridge capability guard module should exist');
+  assert.match(capabilityGuard, /CodexOverleafPageBridgeCapability/);
+  assert.match(capabilityGuard, /function isValidPageBridgeCapability\(/);
+  assert.match(capabilityGuard, /function buildUnauthorizedBridgeResult\(/);
+  assert.match(capabilityGuard, /function initializePageBridgeCapability\(/);
+  assert.match(capabilityGuard, /function hasValidPageBridgeCapability\(/);
+  assert.match(pageBridge, /CodexOverleafPageBridgeCapability\.create\(/);
+  assert.doesNotMatch(pageBridge, /function isValidPageBridgeCapability\(/);
+  assert.doesNotMatch(pageBridge, /function buildUnauthorizedBridgeResult\(/);
 });
 
 test('page bridge exposes a read-only realtime OT observer', () => {
@@ -2571,13 +2745,16 @@ test('page bridge exposes a read-only realtime OT observer', () => {
   );
   const otTextIndex = optionalScripts.indexOf('src/shared/otText.js');
   const observerIndex = optionalScripts.indexOf('src/page/overleafRealtimeObserver.js');
+  const capabilityIndex = pageBridgeScripts.indexOf('src/page/pageBridgeCapability.js');
   const pageBridgeIndex = pageBridgeScripts.indexOf('src/pageBridge.js');
 
   assert.ok(optionalOtBody, 'content script keeps optional OT dependency loading separate from page bridge loading');
   assert.ok(otTextIndex > -1, 'content script explicitly injects the OT text helper into the page world when available');
   assert.ok(observerIndex > -1, 'content script explicitly injects the realtime observer into the page world when available');
+  assert.ok(capabilityIndex > -1, 'content script injects the page bridge capability guard');
   assert.ok(pageBridgeIndex > -1, 'content script injects the page bridge');
   assert.ok(otTextIndex < observerIndex, 'OT text helper loads before the realtime observer');
+  assert.ok(capabilityIndex < pageBridgeIndex, 'page bridge capability guard loads before the page bridge');
   assert.match(injectPageBridgeBody, /await injectOptionalOtDependencies\(\)[\s\S]*await injectScriptOnce\('src\/pageBridge\.js'/);
   assert.match(optionalOtBody, /try\s*\{[\s\S]*src\/shared\/otText\.js[\s\S]*src\/page\/overleafRealtimeObserver\.js[\s\S]*\}\s*catch \(_error\) \{/);
   assert.match(pageBridge, /CodexOverleafRealtimeObserver\.create/);
@@ -2726,6 +2903,7 @@ test('project custom instructions editor saves and restores by project', async (
     ${extractFunction(contentScript, 'getCustomInstructionsForCurrentProject')}
     ${extractFunction(contentScript, 'setCustomInstructionsForProject')}
     ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
+    ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
     ${extractFunction(contentScript, 'openCustomInstructionsSettings')}
     ${extractFunction(contentScript, 'closeCustomInstructionsSettings')}
     ${extractFunction(contentScript, 'saveCustomInstructionsSettings')}
@@ -2812,6 +2990,7 @@ test('project settings gear toggles the settings panel closed when already open'
     function tr(key) { return key; }
     ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
     ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
+    ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
     ${extractFunction(contentScript, 'openCustomInstructionsSettings')}
     ${extractFunction(contentScript, 'closeCustomInstructionsSettings')}
     ${extractFunction(contentScript, 'toggleCustomInstructionsSettings')}
@@ -2833,6 +3012,84 @@ test('project settings gear toggles the settings panel closed when already open'
   assert.equal(harness.settingsPanel.hidden, true);
   assert.equal(harness.settingsButton.dataset.active, 'false');
   assert.equal(harness.settingsButton['aria-expanded'], 'false');
+});
+
+test('project settings transient status is cleared when reopening the panel', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/contentScript.js'),
+    'utf8'
+  );
+  const harness = Function(`
+    let currentProjectId = 'project_a';
+    let focused = false;
+    let customInstructionsEditorProjectId = '';
+    let customInstructionsEditorValue = '';
+    let state = {
+      customInstructionsByProject: {}
+    };
+    const customInstructionsInput = {
+      value: '',
+      placeholder: '',
+      focus() { focused = true; }
+    };
+    const customInstructionsPanel = {
+      hidden: true
+    };
+    const settingsButton = {
+      dataset: {},
+      setAttribute(name, value) { this[name] = value; }
+    };
+    const projectSettingsStatus = {
+      textContent: '',
+      dataset: {}
+    };
+    const controls = {
+      '[data-custom-instructions-input]': customInstructionsInput,
+      '[data-custom-instructions-panel]': customInstructionsPanel,
+      '[data-custom-instructions-settings]': settingsButton,
+      '[data-project-settings-status]': projectSettingsStatus
+    };
+    const panel = {
+      querySelector(selector) {
+        return controls[selector] || null;
+      }
+    };
+    function getCurrentProjectId() { return currentProjectId; }
+    function closeDiagnosticsMenu() {}
+    function closeDiagnosticsResult() {}
+    function closeModelConfigPopover() {}
+    function closeContextTray() {}
+    function closeSlashMenu() {}
+    function tx(english) { return english; }
+    function tr(key) { return key; }
+    function syncProjectSettingsEditorForProject() {}
+    function refreshLocalSkills() { return Promise.resolve(); }
+    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
+    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
+    ${extractFunction(contentScript, 'setProjectSettingsStatus')}
+    ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
+    ${extractFunction(contentScript, 'openCustomInstructionsSettings')}
+    ${extractFunction(contentScript, 'closeCustomInstructionsSettings')}
+    return {
+      status: projectSettingsStatus,
+      openCustomInstructionsSettings,
+      closeCustomInstructionsSettings,
+      setProjectSettingsStatus,
+      wasFocused: () => focused
+    };
+  `)();
+
+  harness.openCustomInstructionsSettings();
+  harness.setProjectSettingsStatus('Codex Overleaf skill removed.', 'completed');
+  assert.equal(harness.status.textContent, 'Codex Overleaf skill removed.');
+  assert.equal(harness.status.dataset.status, 'completed');
+
+  harness.closeCustomInstructionsSettings();
+  harness.openCustomInstructionsSettings();
+
+  assert.equal(harness.status.textContent, '');
+  assert.notEqual(harness.status.dataset.status, 'completed');
+  assert.equal(harness.wasFocused(), true);
 });
 
 test('mirror prefetch state sync preserves unsaved custom instructions for same project', () => {
