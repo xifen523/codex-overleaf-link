@@ -59,6 +59,7 @@ jobs:
             echo "Release tag ${GITHUB_REF_NAME} does not match package version ${expected_tag}."
             exit 1
           fi
+          echo "PACKAGE_VERSION=${package_version}" >> "${GITHUB_ENV}"
 
       - name: Build release artifacts
         run: npm run build:release
@@ -73,6 +74,7 @@ jobs:
           files: |
             dist/releases/${{ github.ref_name }}/codex-overleaf-link-extension-${{ github.ref_name }}.zip
             dist/releases/${{ github.ref_name }}/codex-overleaf-native-host-${{ github.ref_name }}.tar.gz
+            dist/releases/${{ github.ref_name }}/codex-overleaf-link-${{ env.PACKAGE_VERSION }}.tgz
             dist/releases/${{ github.ref_name }}/install.sh
             dist/releases/${{ github.ref_name }}/install.ps1
             dist/releases/${{ github.ref_name }}/uninstall-native-host.mjs

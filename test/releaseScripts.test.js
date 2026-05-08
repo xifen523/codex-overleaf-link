@@ -238,6 +238,7 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   const packageVersion = Object.hasOwn(overrides, 'packageVersion') ? overrides.packageVersion : '0.6.0';
   const packageName = Object.hasOwn(overrides, 'packageName') ? overrides.packageName : 'codex-overleaf-link';
   const packageManager = Object.hasOwn(overrides, 'packageManager') ? overrides.packageManager : 'npm@11.11.0';
+  const lockfileVersion = Object.hasOwn(overrides, 'lockfileVersion') ? overrides.lockfileVersion : 3;
   const manifestVersion = Object.hasOwn(overrides, 'manifestVersion') ? overrides.manifestVersion : packageVersion;
   const readmeVersion = Object.hasOwn(overrides, 'readmeVersion') ? overrides.readmeVersion : packageVersion;
   const changelogVersion = Object.hasOwn(overrides, 'changelogVersion') ? overrides.changelogVersion : packageVersion;
@@ -264,7 +265,7 @@ function writeReleaseFixture(rootDir, overrides = {}) {
     `${JSON.stringify({
       name: packageName,
       version: packageVersion,
-      lockfileVersion: 3,
+      lockfileVersion,
       requires: true,
       packages: {
         '': {
@@ -366,6 +367,13 @@ test('package exposes release verification and artifact build commands', () => {
   assert.equal(pkg.scripts['build:release'], 'node scripts/build-release.mjs');
 });
 
+test('README documents the npm tarball in GitHub Release artifacts', () => {
+  const pkg = readJson(path.join(repoRoot, 'package.json'));
+  const readme = readText(path.join(repoRoot, 'README.md'));
+
+  assert.match(readme, new RegExp(`codex-overleaf-link-${pkg.version.replace(/\./g, '\\.')}\\.tgz`));
+});
+
 test('release workflow only publishes semver-like version tags', () => {
   const workflow = readReleaseWorkflow();
   const triggerSection = getTopLevelYamlSection(workflow, 'on');
@@ -400,6 +408,7 @@ test('release workflow fails early when tag and package version differ', () => {
   assert.match(workflow, /expected_tag="v\$\{package_version\}"/);
   assert.match(workflow, /\[ "\$\{GITHUB_REF_NAME\}" != "\$\{expected_tag\}" \]/);
   assert.match(workflow, /Release tag \$\{GITHUB_REF_NAME\} does not match package version \$\{expected_tag\}\./);
+  assert.match(workflow, /echo "PACKAGE_VERSION=\$\{package_version\}" >> "\$\{GITHUB_ENV\}"/);
   assertContainsInOrder(workflow, [
     'run: npm run verify:release',
     'name: Verify release tag matches package version',
@@ -499,6 +508,7 @@ test('release workflow publishes generated notes and built artifacts', () => {
   const filesSection = workflow.match(/^\s+files:\s+\|\s*$([\s\S]*?)^\s+fail_on_unmatched_files:/m)?.[1] || '';
   assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/codex-overleaf-link-extension-\$\{\{ github\.ref_name \}\}\.zip/);
   assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/codex-overleaf-native-host-\$\{\{ github\.ref_name \}\}\.tar\.gz/);
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/codex-overleaf-link-\$\{\{ env\.PACKAGE_VERSION \}\}\.tgz/);
   assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/install\.sh/);
   assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/install\.ps1/);
   assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/uninstall-native-host\.mjs/);
@@ -620,12 +630,38 @@ test('release verifier requires npm package metadata, lockfile, exact manifest, 
     });
 
     assert.ok(errors.some((error) => /package\.json must define packageManager/i.test(error)), errors.join('\n'));
+    assert.ok(errors.some((error) => /package-lock\.json lockfileVersion <missing> must be 3/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /package-lock\.json version 1\.2\.2 must match package\.json version 1\.2\.3/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /scripts\/npm-package-files-v1\.2\.3\.txt/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /README\.md.*npm exec --yes codex-overleaf-link@1\.2\.3 -- install-native/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /release-checklist\.md.*npm run verify:npm-package/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /release-checklist\.md.*codex-overleaf-link-1\.2\.3\.tgz/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /release-checklist\.md.*npm package upload/i.test(error)), errors.join('\n'));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('release verifier rejects invalid package-lock lockfileVersion', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-lockfile-version-'));
+  try {
+    writeReleaseFixture(tempDir, {
+      packageVersion: '1.2.3',
+      lockfileVersion: 2
+    });
+    writeChromeWebStoreDocs(tempDir, { version: '1.2.3', includeV09Coverage: true });
+    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
+    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+
+    const errors = collectReleaseVerificationErrors({
+      rootDir: tempDir,
+      releaseDate: '2026-05-06'
+    });
+
+    assert.ok(
+      errors.some((error) => /package-lock\.json lockfileVersion 2 must be 3/i.test(error)),
+      errors.join('\n')
+    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

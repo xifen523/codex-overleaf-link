@@ -133,6 +133,7 @@ The v1.1.0 GitHub Release contains:
 
 - `codex-overleaf-link-extension-v1.1.0.zip`: loadable Chrome extension package for unpacked or Web Store inspection.
 - `codex-overleaf-native-host-v1.1.0.tar.gz`: native host runtime files used by the installer and release verification.
+- `codex-overleaf-link-1.1.0.tgz`: npm native host CLI package for pinned install, doctor, and uninstall flows.
 - `install.sh`: release-pinned macOS / Linux installer that defaults to `v1.1.0` when run directly from the release artifact.
 - `install.ps1`: release-pinned Windows PowerShell installer that defaults to `v1.1.0` when run directly from the release artifact.
 - `uninstall-native-host.mjs`: native host uninstaller that removes the Chrome Native Messaging manifest, bridge executable, and runtime copy.

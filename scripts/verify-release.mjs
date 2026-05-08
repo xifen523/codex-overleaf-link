@@ -11,6 +11,7 @@ const CHROME_WEB_STORE_DOCS = [
   'release-checklist.md'
 ];
 const EXPECTED_PACKAGE_NAME = 'codex-overleaf-link';
+const EXPECTED_PACKAGE_LOCK_VERSION = 3;
 export const FORBIDDEN_TRACKED_PATH_PATTERNS = [
   /^\.local\//,
   /^docs\/superpowers\//,
@@ -118,6 +119,11 @@ function collectPackageMetadataErrors({ rootDir, pkg, packageLock }) {
   }
   if (typeof pkg.packageManager !== 'string' || pkg.packageManager.trim() === '') {
     errors.push('package.json must define packageManager for reproducible npm release tooling.');
+  }
+  if (packageLock.lockfileVersion !== EXPECTED_PACKAGE_LOCK_VERSION) {
+    errors.push(
+      `package-lock.json lockfileVersion ${formatValue(packageLock.lockfileVersion)} must be ${EXPECTED_PACKAGE_LOCK_VERSION}.`
+    );
   }
 
   if (version) {
