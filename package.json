@@ -1,6 +1,6 @@
 {
   "name": "codex-overleaf-link",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Cross-platform Chrome bridge that connects Codex to the active Overleaf project.",
   "license": "MIT",
@@ -19,5 +19,19 @@
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "packageManager": "npm@11.11.0",
+  "bin": {
+    "codex-overleaf-link": "bin/codex-overleaf-link.mjs"
+  },
+  "files": [
+    "bin/",
+    "native-host/src/",
+    "extension/src/shared/",
+    "scripts/install-native-host.mjs",
+    "scripts/uninstall-native-host.mjs",
+    "scripts/verify-npm-package.mjs",
+    "README.md",
+    "package.json"
+  ]
 }
