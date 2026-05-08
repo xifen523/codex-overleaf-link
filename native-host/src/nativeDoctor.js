@@ -575,7 +575,7 @@ function buildDoctorBridgeSpawnInvocation(bridgePath, options = {}) {
 
   return {
     command: options.env?.ComSpec || options.env?.COMSPEC || 'cmd.exe',
-    args: ['/d', '/s', '/c', quoteWindowsCommandPath(bridgePath)]
+    args: ['/d', '/c', 'call', quoteWindowsCommandPath(bridgePath)]
   };
 }
 

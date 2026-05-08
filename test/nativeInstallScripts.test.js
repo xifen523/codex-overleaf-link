@@ -259,7 +259,7 @@ test('doctor launches Windows command bridge through cmd.exe', () => {
   const invocation = buildDoctorBridgeSpawnInvocation(bridgePath, { platform: 'win32' });
 
   assert.match(path.win32.basename(invocation.command).toLowerCase(), /^cmd(?:\.exe)?$/);
-  assert.deepEqual(invocation.args.slice(0, 3), ['/d', '/s', '/c']);
+  assert.deepEqual(invocation.args.slice(0, 3), ['/d', '/c', 'call']);
   assert.equal(invocation.args[3], `"${bridgePath}"`);
 
   const exeInvocation = buildDoctorBridgeSpawnInvocation('C:\\Tools\\codex-overleaf-bridge.exe', { platform: 'win32' });
