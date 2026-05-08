@@ -1,6 +1,9 @@
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..');
@@ -63,4 +66,81 @@ test('install-native command is not implemented yet', () => {
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /install-native is not implemented yet\./);
+});
+
+
+test('npm package verifier rejects forbidden package paths and allows runtime paths', async () => {
+  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-npm-package.mjs')).href;
+  const { findForbiddenNpmPackagePaths } = await import(moduleUrl);
+
+  const forbiddenPaths = [
+    'package/docs/guide.md',
+    'package/specs/api.md',
+    'package/superpowers/internal.md',
+    'package/private/token.txt',
+    'package/test/npmDistribution.test.js',
+    'package/tests/fixture.test.js',
+    'package/fixtures/sample.json',
+    'package/dist/bundle.js',
+    'package/.github/workflows/release.yml',
+    'package/node_modules/dependency/index.js',
+    'package/config/.env',
+    'package/certificates/dev.pem',
+    'package/certificates/dev.key',
+    'package/certificates/profile.p12'
+  ];
+  const allowedPaths = [
+    'package/native-host/src/index.js',
+    'package/extension/src/shared/compatibility.js'
+  ];
+
+  assert.deepEqual(findForbiddenNpmPackagePaths([...forbiddenPaths, ...allowedPaths]), [...forbiddenPaths].sort());
+});
+
+test('npm package exact manifest checker reports missing and extra files', async () => {
+  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-npm-package.mjs')).href;
+  const { compareExactManifest, verifyPackagePaths } = await import(moduleUrl);
+  const expected = [
+    'package/package.json',
+    'package/native-host/src/index.js',
+    'package/extension/src/shared/compatibility.js'
+  ];
+  const actual = [
+    'package/package.json',
+    'package/extension/src/shared/compatibility.js',
+    'package/bin/extra.mjs'
+  ];
+
+  assert.deepEqual(compareExactManifest(actual, expected), {
+    missing: ['package/native-host/src/index.js'],
+    extra: ['package/bin/extra.mjs']
+  });
+
+  const result = verifyPackagePaths(actual, expected);
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.missing, ['package/native-host/src/index.js']);
+  assert.deepEqual(result.extra, ['package/bin/extra.mjs']);
+});
+
+test('npm package verifier CLI checks newline file lists', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-npm-package-'));
+  try {
+    const fileListPath = path.join(tempDir, 'files.txt');
+    fs.writeFileSync(fileListPath, fs.readFileSync(path.join(repoRoot, 'scripts/npm-package-files-v1.1.0.txt'), 'utf8'));
+
+    const result = spawnSync(process.execPath, [
+      path.join(repoRoot, 'scripts/verify-npm-package.mjs'),
+      '--file-list',
+      fileListPath
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8'
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Verified npm package manifest/);
+    assert.equal(result.stderr, '');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });

@@ -14,7 +14,9 @@
     "build:release": "node scripts/build-release.mjs",
     "install:native": "node scripts/install-native-host.mjs",
     "uninstall:native": "node scripts/uninstall-native-host.mjs",
-    "bridge": "node native-host/src/index.js"
+    "bridge": "node native-host/src/index.js",
+    "verify:npm-package": "node scripts/verify-npm-package.mjs",
+    "pack:npm": "npm pack --dry-run --json > .npm-pack-dry-run.json && npm run verify:npm-package -- --pack-json .npm-pack-dry-run.json && npm pack && npm run verify:npm-package -- --tarball \"$(node -p 'require(\"./package.json\").name + \"-\" + require(\"./package.json\").version + \".tgz\"')\" && rm .npm-pack-dry-run.json"
   },
   "engines": {
     "node": ">=20"
@@ -30,6 +32,7 @@
     "scripts/install-native-host.mjs",
     "scripts/uninstall-native-host.mjs",
     "scripts/verify-npm-package.mjs",
+    "scripts/npm-package-files-v1.1.0.txt",
     "README.md",
     "package.json"
   ]
