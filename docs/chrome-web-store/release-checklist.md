@@ -7,23 +7,25 @@ artifact names aligned with `package.json` before running `npm run verify:releas
 
 - Run `npm test`.
 - Run `npm run check:architecture`.
-- Run `npm run benchmark:large -- --output .local/benchmarks/v1.0-large-project.json`.
+- Run `npm run benchmark:large -- --output .local/benchmarks/v1.1-large-project.json`.
 - Run `npm run verify:release`.
 - Run `npm run build:release`.
 - Confirm the GitHub release workflow has passing macOS, Linux, and Windows jobs for tests, architecture budget enforcement, and the synthetic large-project regression gate.
 
 ## Release Artifact Hygiene
 
-- Verify checksums from `dist/releases/v1.0.0/SHA256SUMS`.
-- Inspect extension zip `codex-overleaf-link-extension-v1.0.0.zip` before upload.
-- Inspect native host tarball `codex-overleaf-native-host-v1.0.0.tar.gz` before upload.
+- Verify checksums from `dist/releases/v1.1.0/SHA256SUMS`.
+- Inspect extension zip `codex-overleaf-link-extension-v1.1.0.zip` before upload.
+- Inspect native host tarball `codex-overleaf-native-host-v1.1.0.tar.gz` before upload.
 - Confirm release artifacts exclude `docs/`, `docs/superpowers/`, `.local/`, `.git/`, `test/`, `dist/`, `build/`, README, changelog, roadmap, specs, plans, keys, certificates, logs, sqlite files, and `.crx` files.
-- Confirm the release `install.sh` defaults `CODEX_OVERLEAF_REF` to `v1.0.0`.
-- Confirm the release `install.ps1` defaults `$DefaultRef` to `v1.0.0`.
+- Confirm the release `install.sh` defaults `CODEX_OVERLEAF_REF` to `v1.1.0`.
+- Confirm the release `install.ps1` defaults `$DefaultRef` to `v1.1.0`.
 - Confirm the privacy policy URL is live and linked from the Chrome Web Store listing.
-- Confirm screenshots and listing copy are captured from the v1.0.0 build.
+- Confirm screenshots and listing copy are captured from the v1.1.0 build.
 - Record the Chrome Web Store extension id.
 - Confirm native host installer guidance includes the Web Store extension id in `allowed_origins` in addition to the unpacked id before Web Store publication.
+- Confirm npm native installer guidance is pinned for v1.1.0 and uses the final Web Store or dev/unpacked extension id before publication: `npm exec --yes codex-overleaf-link@1.1.0 -- install-native --extension-id <chrome-extension-id>`.
+- Confirm npm native diagnostics guidance is pinned for v1.1.0: `npm exec --yes codex-overleaf-link@1.1.0 -- doctor`.
 
 ## Real Overleaf Smoke
 
@@ -31,7 +33,7 @@ artifact names aligned with `package.json` before running `npm run verify:releas
 - Open a real Overleaf project and confirm panel injection, native bridge compatibility, project snapshot availability, and diagnostics access.
 - Record the project URL origin, hashed project id, extension version, native compatibility result, timing notes, and pass/fail status without recording project text, prompts, compile logs, diffs, secrets, or binary data.
 
-### Platform-Aware v1.0 Smoke Matrix
+### Platform-Aware v1.1 Smoke Matrix
 
 For every row below, record: platform, browser version, extension id/install mode,
 native version, Codex CLI version, Overleaf project shape, pass/fail, notes, timing observations where applicable, and artifact or screenshot reference. Artifacts must not contain project text, prompt
@@ -40,9 +42,9 @@ text, compile logs, diffs, binary data, raw secrets, or unredacted project ids.
 | # | Scenario | Platform | Browser version | Extension id / install mode | Native version | Codex CLI version | Project shape | Pass/Fail | Notes | Artifact/screenshot |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Install native host with the platform-specific installer |  |  |  |  |  |  |  |  |  |
-| 2 | Update native host by re-running the pinned v1.0.0 installer |  |  |  |  |  |  |  |  |  |
+| 2 | Update native host by re-running the pinned v1.1.0 installer |  |  |  |  |  |  |  |  |  |
 | 3 | Native host missing recovery |  |  |  |  |  |  |  |  |  |
-| 4 | Native host update-required recovery from a v0.9.5 native host with v1.0 extension UI |  |  |  |  |  |  |  |  |  |
+| 4 | Native host update-required recovery from a v0.9.5 native host with v1.1 extension UI |  |  |  |  |  |  |  |  |  |
 | 5 | Open real Overleaf project and verify panel appears |  |  |  |  |  |  |  |  |  |
 | 6 | Ask-only task does not write to Overleaf |  |  |  |  |  |  |  |  |  |
 | 7 | Suggest task shows diff and writes only after approval |  |  |  |  |  |  |  |  |  |
@@ -68,14 +70,14 @@ text, compile logs, diffs, binary data, raw secrets, or unredacted project ids.
 Recommended smoke command for a logged-in profile:
 
 ```bash
-npm run smoke:extension -- --url https://www.overleaf.com/project/<project-id> --profile-dir <logged-in-profile> --probe all --json .local/smoke/v1.0-signoff.json
+npm run smoke:extension -- --url https://www.overleaf.com/project/<project-id> --profile-dir <logged-in-profile> --probe all --json .local/smoke/v1.1-signoff.json
 ```
 
-Record results in `.local/smoke/v1.0-signoff.json` and do not commit it. The file must not contain project text, prompts, compile logs, raw diffs, binary data, raw secrets, or unredacted project ids.
+Record results in `.local/smoke/v1.1-signoff.json` and do not commit it. The file must not contain project text, prompts, compile logs, raw diffs, binary data, raw secrets, or unredacted project ids.
 
 ## Large-Project Performance Baseline
 
-- Run `npm run benchmark:large -- --output .local/benchmarks/v1.0-large-project.json`.
+- Run `npm run benchmark:large -- --output .local/benchmarks/v1.1-large-project.json`.
 - Assert `snapshot.total_ms < 5000`, `mirror.sync_ms < 3000`, `diff.compute_ms + patch.compute_ms < 1000`, `native.output_frame_bytes <= 1 MiB`, `context_tray.render_ms < 500`, `storage.prepare_ms < 500`, and an empty `failures` array.
 - Treat these as generous synthetic regression ceilings, not real-world latency promises.
 - CI runs the gate on macOS, Windows, and Linux with one automatic retry for runner variance.
@@ -97,7 +99,7 @@ Record results in `.local/smoke/v1.0-signoff.json` and do not commit it. The fil
 - Confirm listing copy, privacy notes, and permission notes match the packaged manifest.
 - Confirm `docs/privacy-policy.html` mirrors `docs/chrome-web-store/privacy.md`, contains no tracking scripts, and is published at a stable URL.
 - Confirm install, update, uninstall, data-directory, FAQ, troubleshooting, compatibility, native mismatch, Quick Start, and Common Workflows docs match the release behavior.
-- Capture v1.0.0 screenshots, small promo image, and optional marquee image from the final UI.
+- Capture v1.1.0 screenshots, small promo image, and optional marquee image from the final UI.
 
 ## Compatibility Matrix
 
@@ -108,7 +110,7 @@ Record results in `.local/smoke/v1.0-signoff.json` and do not commit it. The fil
 
 ### Documentation And Compatibility Signoff
 
-For each supported row, record the fields below in the release notes or v1.0 signoff artifact bundle. Do not record project text, prompts, compile logs, raw diffs, binary content, raw secrets, or unredacted project ids.
+For each supported row, record the fields below in the release notes or v1.1 signoff artifact bundle. Do not record project text, prompts, compile logs, raw diffs, binary content, raw secrets, or unredacted project ids.
 
 | Field | macOS Chrome | Windows Chrome | Linux Chrome | Linux Chromium |
 | --- | --- | --- | --- | --- |
@@ -116,7 +118,7 @@ For each supported row, record the fields below in the release notes or v1.0 sig
 | Browser/channel/version |  |  |  |  |
 | Extension install mode | Unpacked / Web Store | Unpacked / Web Store | Unpacked / Web Store | Unpacked / Web Store |
 | Extension id |  |  |  |  |
-| Installer/update command | `CODEX_OVERLEAF_REF=v1.0.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.0.0/install.sh)"` | `iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.0.0/install.ps1 -OutFile install.ps1`; `$env:CODEX_OVERLEAF_REF='v1.0.0'`; `powershell -ExecutionPolicy Bypass -File install.ps1` | `CODEX_OVERLEAF_REF=v1.0.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.0.0/install.sh)"` | `CODEX_OVERLEAF_REF=v1.0.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.0.0/install.sh)" -- --browser chromium` |
+| Installer/update command | `CODEX_OVERLEAF_REF=v1.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.1.0/install.sh)"` | `iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.1.0/install.ps1 -OutFile install.ps1`; `$env:CODEX_OVERLEAF_REF='v1.1.0'`; `powershell -ExecutionPolicy Bypass -File install.ps1` | `CODEX_OVERLEAF_REF=v1.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.1.0/install.sh)"` | `CODEX_OVERLEAF_REF=v1.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.1.0/install.sh)" -- --browser chromium` |
 | Uninstall command | `node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs` | `node $env:LOCALAPPDATA\CodexOverleaf\source\scripts\uninstall-native-host.mjs` | `node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs` | `node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs --browser chromium` |
 | Manifest/registry path | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.overleaf.json` | `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.codex.overleaf` -> `%LOCALAPPDATA%\CodexOverleaf\native-host-runtime\com.codex.overleaf.json` | `~/.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json` | `~/.config/chromium/NativeMessagingHosts/com.codex.overleaf.json` |
 | Bridge/runtime/source path | `~/.codex-overleaf/codex-overleaf-bridge`; `~/.codex-overleaf/native-host-runtime`; `~/.codex-overleaf/source` | `%LOCALAPPDATA%\CodexOverleaf\codex-overleaf-bridge.cmd`; `%LOCALAPPDATA%\CodexOverleaf\native-host-runtime`; `%LOCALAPPDATA%\CodexOverleaf\source` | `~/.codex-overleaf/codex-overleaf-bridge`; `~/.codex-overleaf/native-host-runtime`; `~/.codex-overleaf/source` | `~/.codex-overleaf/codex-overleaf-bridge`; `~/.codex-overleaf/native-host-runtime`; `~/.codex-overleaf/source` |
@@ -141,6 +143,6 @@ Documentation signoff:
 ## Scope
 
 Actual Chrome Web Store submission remains a manual store-console step after the
-release artifacts pass verification and all v1.0 production-stable gates above are
+release artifacts pass verification and all v1.1 production-stable gates above are
 signed off. Approval is a soft gate: if review rejects the package, fix and
-resubmit as a v1.0.1 patch without holding the GitHub Release path.
+resubmit as a v1.1.1 patch without holding the GitHub Release path.

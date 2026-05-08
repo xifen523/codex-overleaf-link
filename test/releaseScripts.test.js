@@ -834,6 +834,9 @@ test('release verifier rejects stale Chrome Web Store release checklist instruct
 });
 
 test('Chrome Web Store prep docs describe manual release permissions and privacy posture', () => {
+  const packageVersion = readJson(path.join(repoRoot, 'package.json')).version;
+  const releaseRef = `v${packageVersion}`;
+  const escapedReleaseRef = releaseRef.replace(/\./g, '\\.');
   const docsDir = path.join(repoRoot, 'docs/chrome-web-store');
   const permissions = readText(path.join(docsDir, 'permissions.md'));
   const privacy = readText(path.join(docsDir, 'privacy.md'));
@@ -872,9 +875,7 @@ test('Chrome Web Store prep docs describe manual release permissions and privacy
   assert.match(checklist, /npm test/);
   assert.match(checklist, /npm run verify:release/);
   assert.match(checklist, /npm run build:release/);
-  const documentedReleaseRef = checklist.match(/dist\/releases\/(v\d+\.\d+\.\d+)\/SHA256SUMS/)?.[1];
-  assert.ok(documentedReleaseRef, 'release checklist should document a concrete GitHub release ref');
-  const escapedReleaseRef = documentedReleaseRef.replace(/\./g, '\\.');
+  assert.match(checklist, new RegExp(`dist/releases/${escapedReleaseRef}/SHA256SUMS`));
   assert.match(checklist, new RegExp(`codex-overleaf-link-extension-${escapedReleaseRef}\\.zip`));
   assert.match(checklist, new RegExp(`codex-overleaf-native-host-${escapedReleaseRef}\\.tar\\.gz`));
   assert.match(checklist, /install\.ps1/);
@@ -884,6 +885,8 @@ test('Chrome Web Store prep docs describe manual release permissions and privacy
     new RegExp(`\\$env:CODEX_OVERLEAF_REF='${escapedReleaseRef}'[\\s\\S]{0,180}powershell -ExecutionPolicy Bypass -File install\\.ps1`)
   );
   assert.match(checklist, /Web Store extension id/i);
+  assert.match(checklist, new RegExp(`npm exec --yes codex-overleaf-link@${packageVersion.replace(/\./g, '\\.')} -- install-native --extension-id <chrome-extension-id>`));
+  assert.match(checklist, new RegExp(`npm exec --yes codex-overleaf-link@${packageVersion.replace(/\./g, '\\.')} -- doctor`));
   assert.match(checklist, /page-bridge threat model/i);
   assert.doesNotMatch(checklist, /v0\.6\.0/);
   assert.doesNotMatch(checklist, /v0\.5\.0/);
