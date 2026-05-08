@@ -33,19 +33,36 @@ export function uninstallNativeHost(options = {}) {
   });
   const manifestPath = registrationTarget.manifestPath;
 
+  let runtimeResult;
+  if (options.keepRuntime) {
+    runtimeResult = {
+      ok: true,
+      action: fs.existsSync(installRoot) ? 'kept' : 'not-found',
+      runtimeRoot: installRoot,
+      removed: false,
+      kept: fs.existsSync(installRoot)
+    };
+  } else {
+    uninstallManagedRuntime({
+      runtimeRoot: installRoot,
+      defaultRuntimeRoot: defaultInstallRoot,
+      platformPath: runtimePlatformPath,
+      keepRuntime: true
+    });
+  }
+
   const manifest = removeManifestPath(manifestPath);
   const registry = registrationTarget.kind === 'registry'
     ? removeRegistryValue(registrationTarget.registryKey)
     : undefined;
-  const bridge = options.keepRuntime
-    ? { path: bridgePath, action: 'kept', removed: false, kept: true }
-    : removeBridgePath(bridgePath);
-  const runtimeResult = uninstallManagedRuntime({
-    runtimeRoot: installRoot,
-    defaultRuntimeRoot: defaultInstallRoot,
-    platformPath: runtimePlatformPath,
-    keepRuntime: Boolean(options.keepRuntime)
-  });
+  const bridge = removeBridgePath(bridgePath);
+  if (!options.keepRuntime) {
+    runtimeResult = uninstallManagedRuntime({
+      runtimeRoot: installRoot,
+      defaultRuntimeRoot: defaultInstallRoot,
+      platformPath: runtimePlatformPath
+    });
+  }
   const runtime = summarizeRuntimeResult(runtimeResult);
 
   return {

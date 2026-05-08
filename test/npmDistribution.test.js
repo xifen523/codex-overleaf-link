@@ -43,6 +43,13 @@ function manifestPathForHome(tempDir, browser = 'chrome') {
   throw new Error(`Unsupported test platform: ${process.platform}`);
 }
 
+function bridgePathForHome(tempDir) {
+  if (process.platform === 'win32') {
+    return path.join(tempDir, 'LocalAppData', 'CodexOverleaf', 'codex-overleaf-bridge.cmd');
+  }
+  return path.join(tempDir, '.codex-overleaf', 'codex-overleaf-bridge');
+}
+
 test('package metadata is configured for npm distribution', () => {
   assert.equal(packageJson.name, 'codex-overleaf-link');
   assert.equal(packageJson.version, '1.1.0');
@@ -210,6 +217,42 @@ test('uninstall-native --keep-runtime removes manifest and keeps runtime', () =>
     assert.equal(body.keepRuntime, true);
     assert.equal(body.manifest.removed, true);
     assert.equal(fs.existsSync(manifestPathForHome(tempDir)), false);
+    assert.equal(fs.existsSync(bridgePathForHome(tempDir)), false);
+    assert.equal(fs.existsSync(runtimeRoot), true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('uninstall-native full failure leaves manifest and bridge intact for unmarked runtime', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-cli-uninstall-unmarked-'));
+  try {
+    const runtimeRoot = path.join(tempDir, 'runtime');
+    const env = makeIsolatedCliEnv(tempDir);
+    const install = runCli([
+      'install-native',
+      '--extension-id',
+      validExtensionId,
+      '--runtime-root',
+      runtimeRoot,
+      '--json'
+    ], { env });
+    assert.equal(install.status, 0, install.stderr || install.stdout);
+    assert.equal(fs.existsSync(manifestPathForHome(tempDir)), true);
+    assert.equal(fs.existsSync(bridgePathForHome(tempDir)), true);
+    fs.rmSync(path.join(runtimeRoot, '.codex-overleaf-runtime.json'), { force: true });
+
+    const uninstall = runCli([
+      'uninstall-native',
+      '--runtime-root',
+      runtimeRoot,
+      '--json'
+    ], { env });
+
+    assert.equal(uninstall.status, 1);
+    assert.match(uninstall.stderr, /Refusing to remove unmarked runtime root/);
+    assert.equal(fs.existsSync(manifestPathForHome(tempDir)), true);
+    assert.equal(fs.existsSync(bridgePathForHome(tempDir)), true);
     assert.equal(fs.existsSync(runtimeRoot), true);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
