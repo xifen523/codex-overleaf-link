@@ -14,6 +14,7 @@ const { handleRequest } = require('../native-host/src/taskRunner');
 const compatibility = require('../extension/src/shared/compatibility');
 const {
   BUILD_TARGET_VERSION,
+  MIN_COMPATIBLE_EXTENSION_VERSION,
   MIN_NATIVE_VERSION,
   REQUIRED_CAPABILITIES
 } = compatibility;
@@ -138,7 +139,7 @@ test('bridge.ping returns bridge metadata', async () => {
     response.result.capabilities,
     Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true]))
   );
-  assert.equal(response.result.minExtensionVersion, BUILD_TARGET_VERSION);
+  assert.equal(response.result.minExtensionVersion, MIN_COMPATIBLE_EXTENSION_VERSION);
   assert.equal(response.result.environment.codex.ok, true);
   assert.deepEqual(response.result.environment.latex.available, ['latexmk']);
 });

@@ -4,7 +4,7 @@ const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const { buildOperationSummary, splitDeletePlan } = require('../../extension/src/shared/summary');
 const {
-  BUILD_TARGET_VERSION,
+  MIN_COMPATIBLE_EXTENSION_VERSION,
   REQUIRED_CAPABILITIES,
   SUPPORTED_NATIVE_PROTOCOL
 } = require('../../extension/src/shared/compatibility');
@@ -46,7 +46,7 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
       protocolVersion: 1,
       supportedProtocol: { ...SUPPORTED_NATIVE_PROTOCOL },
       capabilities: Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true])),
-      minExtensionVersion: BUILD_TARGET_VERSION,
+      minExtensionVersion: MIN_COMPATIBLE_EXTENSION_VERSION,
       version: PACKAGE_VERSION,
       environment: summarizeNativeEnvironment(env)
     });

@@ -24,6 +24,7 @@ const {
   uninstallManagedRuntime
 } = require('../native-host/src/runtimeInstaller');
 const {
+  MIN_COMPATIBLE_EXTENSION_VERSION,
   REQUIRED_CAPABILITIES,
   UPDATE_AVAILABLE_CAPABILITIES
 } = require('../extension/src/shared/compatibility');
@@ -129,7 +130,7 @@ function buildDoctorNativePayload(overrides = {}) {
     protocolVersion: 1,
     supportedProtocol: { min: 1, max: 1 },
     capabilities: Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true])),
-    minExtensionVersion: CURRENT_PACKAGE_VERSION,
+    minExtensionVersion: MIN_COMPATIBLE_EXTENSION_VERSION,
     version: CURRENT_PACKAGE_VERSION,
     environment: { codex: { ok: true } },
     ...overrides

@@ -9,7 +9,9 @@
 
   const EXTENSION_PROTOCOL_VERSION = 1;
   const SUPPORTED_NATIVE_PROTOCOL = Object.freeze({ min: 1, max: 1 });
-  const MIN_NATIVE_VERSION = '0.9.5';
+  const MIN_NATIVE_VERSION = '1.0.0';
+  const MIN_COMPATIBLE_NATIVE_VERSION = '1.0.0';
+  const MIN_COMPATIBLE_EXTENSION_VERSION = '1.0.0';
   const BUILD_TARGET_VERSION = '1.1.0';
   const REQUIRED_CAPABILITIES = Object.freeze([
     'bridgePing',
@@ -123,6 +125,7 @@
     const nativeVersion = native && typeof native === 'object' ? native.version : undefined;
     const platform = native && typeof native === 'object' ? native.platform : undefined;
     const updateCommand = buildInstallCommand(BUILD_TARGET_VERSION, platform);
+    const updateAvailable = isOlderReleaseVersion(nativeVersion, BUILD_TARGET_VERSION);
     return {
       status,
       classification,
@@ -130,7 +133,10 @@
       nativeVersion,
       currentNativeVersion: nativeVersion,
       extensionVersion: extensionVersion.normalized,
+      minimumNativeVersion: MIN_COMPATIBLE_NATIVE_VERSION,
       requiredVersion: BUILD_TARGET_VERSION,
+      recommendedVersion: BUILD_TARGET_VERSION,
+      updateAvailable,
       installCommand: updateCommand,
       updateCommand,
       releaseUrl: buildReleaseUrl(BUILD_TARGET_VERSION),
@@ -143,7 +149,7 @@
   function analyzeNativeCompatibility(native, metadata = {}) {
     const extensionVersion = resolveMetadataVersion(metadata);
     const nativeVersion = parseSemver(native.version);
-    const targetVersion = parseSemver(BUILD_TARGET_VERSION);
+    const minimumNativeVersion = parseSemver(MIN_COMPATIBLE_NATIVE_VERSION);
 
     if (!native.version || !nativeVersion) {
       return { status: 'native_too_old', classification: 'incompatible' };
@@ -169,7 +175,7 @@
       return { status: 'native_unhealthy', classification: 'incompatible' };
     }
 
-    if (compareSemver(nativeVersion, targetVersion) >= 0) {
+    if (compareSemver(nativeVersion, minimumNativeVersion) >= 0) {
       return hasCapabilities(native.capabilities, REQUIRED_CAPABILITIES)
         ? { status: 'ok', classification: 'compatible' }
         : { status: 'native_too_old', classification: 'incompatible' };
@@ -289,6 +295,12 @@
     return match ? match[1] : '';
   }
 
+  function isOlderReleaseVersion(version, targetVersion) {
+    const parsedVersion = parseSemver(version);
+    const parsedTarget = parseSemver(targetVersion);
+    return Boolean(parsedVersion && parsedTarget && compareSemver(parsedVersion, parsedTarget) < 0);
+  }
+
   function normalizePlatform(platform) {
     const normalized = String(platform || '').toLowerCase();
     if (!normalized) {
@@ -339,6 +351,8 @@
     EXTENSION_PROTOCOL_VERSION,
     SUPPORTED_NATIVE_PROTOCOL,
     MIN_NATIVE_VERSION,
+    MIN_COMPATIBLE_NATIVE_VERSION,
+    MIN_COMPATIBLE_EXTENSION_VERSION,
     REQUIRED_CAPABILITIES,
     UPDATE_AVAILABLE_CAPABILITIES,
     BUILD_TARGET_VERSION,
