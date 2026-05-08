@@ -46,10 +46,12 @@ function makeIsolatedNpmEnv(tempDir) {
 function makeTarballSmokeEnv(tempDir, options = {}) {
   const platform = options.platform || process.platform;
   const env = makeIsolatedNpmEnv(tempDir);
+  const fakeCodex = createFakeCodexCommand(tempDir, platform);
   const fakeRegistry = platform === 'win32'
     ? createFakeWindowsRegistryCommand(tempDir)
     : null;
 
+  prependPath(env, fakeCodex.binDir);
   if (fakeRegistry) {
     prependPath(env, fakeRegistry.binDir);
     env.CODEX_OVERLEAF_REG_EXE = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
@@ -93,6 +95,31 @@ function createFakeWindowsRegistryCommand(tempDir) {
   ].join('\r\n'));
 
   return { binDir, cmdPath, logPath, recorderPath };
+}
+
+function createFakeCodexCommand(tempDir, platform = process.platform) {
+  const binDir = path.join(tempDir, 'fake-codex-bin');
+  fs.mkdirSync(binDir, { recursive: true });
+  if (platform === 'win32') {
+    const cmdPath = path.join(binDir, 'codex.cmd');
+    fs.writeFileSync(cmdPath, [
+      '@echo off',
+      'echo codex 1.0.0',
+      'exit /b 0',
+      ''
+    ].join('\r\n'));
+    return { binDir, cmdPath };
+  }
+
+  const scriptPath = path.join(binDir, 'codex');
+  fs.writeFileSync(scriptPath, [
+    '#!/bin/sh',
+    'echo "codex 1.0.0"',
+    'exit 0',
+    ''
+  ].join('\n'));
+  fs.chmodSync(scriptPath, 0o755);
+  return { binDir, scriptPath };
 }
 
 function readFakeRegistryCalls(logPath) {
@@ -401,8 +428,8 @@ test('install-native rejects invalid extension id', () => {
   }
 });
 
-test('install-native rejects missing extension id', () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-cli-install-missing-id-'));
+test('install-native without extension id defaults to bundled extension id', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-cli-install-default-id-'));
   try {
     const result = runCli([
       'install-native',
@@ -413,8 +440,10 @@ test('install-native rejects missing extension id', () => {
       env: makeIsolatedCliEnv(tempDir)
     });
 
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /Missing required --extension-id/);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    const body = JSON.parse(result.stdout);
+    assert.equal(body.extensionId, 'illdpneeeopfffmiepaejglgmhpmdhdc');
+    assert.deepEqual(body.manifest.allowedOrigins, ['chrome-extension://illdpneeeopfffmiepaejglgmhpmdhdc/']);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

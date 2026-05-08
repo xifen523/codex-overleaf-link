@@ -1,6 +1,6 @@
 # Manual Extension Release Checklist
 
-Current release path: publish the GitHub Release artifacts, load the extension manually as an unpacked Chrome extension, and install the native host with the actual extension id shown by Chrome.
+Current release path: publish the GitHub Release artifacts, install the native host with the release-pinned installer, and load the extension manually as an unpacked Chrome extension. The official extension build uses the bundled stable id by default.
 
 ## Automated Verification
 
@@ -23,9 +23,9 @@ Current release path: publish the GitHub Release artifacts, load the extension m
 
 - Download `codex-overleaf-link-extension-v1.1.0.zip` from the draft GitHub Release and unzip it to a stable local folder.
 - Open `chrome://extensions`, enable Developer mode, click **Load unpacked**, and select the folder containing `manifest.json`.
-- Copy the actual extension id shown by Chrome.
-- Install the native host with `npm exec --yes codex-overleaf-link@1.1.0 -- install-native --extension-id <chrome-extension-id>`.
-- Run `npm exec --yes codex-overleaf-link@1.1.0 -- doctor` and confirm the status is compatible.
+- Install or update the native host with `CODEX_OVERLEAF_REF=v1.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.1.0/install.sh)"` on macOS/Linux, or with the documented `install.ps1` command on Windows.
+- After npm publish, the equivalent native-host install command is `npm exec --yes codex-overleaf-link@1.1.0 -- install-native`.
+- Optionally run `npm exec --yes codex-overleaf-link@1.1.0 -- doctor` after npm publish and confirm the status is compatible.
 - Open a real Overleaf project and smoke Ask, Suggest, Auto writeback, stale-write guard, undo checkpoint, compile capture, attachments, governance block, sensitive preflight, model picker, and diagnostics export.
 - On Windows, repeat the install path with `install.ps1` and confirm the native doctor command still reports the registered host.
 
@@ -38,19 +38,19 @@ Current release path: publish the GitHub Release artifacts, load the extension m
 
 - Confirm no default telemetry or hosted backend is introduced.
 - Confirm diagnostics redact project text, prompts, compile logs, raw diffs, binary content, and raw secrets by default.
-- Confirm native host `allowed_origins` contains only the actual manually loaded extension id used for this install.
+- Confirm native host `allowed_origins` contains only the bundled stable extension id, or the explicit custom id supplied with `--extension-id`.
 - Confirm page-bridge threat model assumptions remain unchanged: extension/content issued capabilities gate browser mutation; this is not a defense against malicious Overleaf first-party code.
 
 ## Documentation Pass
 
-- Confirm README v1.1.0 install guidance uses GitHub Release plus manual `Load unpacked` plus explicit `--extension-id <chrome-extension-id>`.
+- Confirm README v1.1.0 install guidance uses the release-pinned installer plus manual `Load unpacked`, without requiring users to copy an extension id for official builds.
 - Confirm README does not require browser store availability for the current release.
 - Confirm update, recovery, Linux Chromium, Windows, uninstall, local data, and compatibility matrix commands reference v1.1.0.
 
 ## Compatibility Matrix
 
 - Record macOS Chrome, Windows Chrome, Linux Chrome, and Linux Chromium results in the README compatibility matrix format.
-- For Linux Chromium, install native host with `--browser chromium` and the same explicit `--extension-id <chrome-extension-id>`.
+- For Linux Chromium, install native host with `--browser chromium`; use `--extension-id <chrome-extension-id>` only for custom builds with a different id.
 
 ## P0/P1 Signoff
 

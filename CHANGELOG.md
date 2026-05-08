@@ -15,9 +15,9 @@ Version alignment and manual GitHub Release distribution guidance for the v1.1 n
 
 - Bumped package, extension manifest, compatibility target, and native ping metadata to `1.1.0` while keeping native protocol `1`.
 - Documented that npm installs, updates, uninstalls, and diagnoses the native host only, and that the Chrome extension must be installed separately.
-- Required native-host installs to pass the actual Chrome extension id with `--extension-id`; the installer no longer falls back to a default extension id.
+- Kept official native-host installs one-command by defaulting to the bundled stable extension id, while preserving `--extension-id` for custom or mismatched unpacked builds.
 - Documented the safe runtime root copy used by the npm/native installer path.
-- Shifted v1.1.0 release guidance to GitHub Release artifacts plus manual unpacked extension loading, with native-host binding to the id shown in `chrome://extensions`.
+- Shifted v1.1.0 release guidance to GitHub Release artifacts plus manual unpacked extension loading without requiring normal users to copy an extension id.
 
 ## v1.0.0 - 2026-05-07
 

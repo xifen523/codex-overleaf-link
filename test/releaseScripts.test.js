@@ -329,7 +329,7 @@ function writeReleaseFixture(rootDir, overrides = {}) {
     path.join(rootDir, 'README.md'),
     overrides.readmeText || [
       `<img src="https://img.shields.io/badge/version-${readmeVersion}-blue" alt="version">`,
-      `npm exec --yes codex-overleaf-link@${packageVersion} -- install-native --extension-id <chrome-extension-id>`
+      `npm exec --yes codex-overleaf-link@${packageVersion} -- install-native`
     ].join('\n')
   );
   fs.writeFileSync(
@@ -376,7 +376,7 @@ function writeManualExtensionDocs(rootDir, { version = '0.6.0', includeV09Covera
       'GitHub Release',
       'chrome://extensions',
       'Load unpacked',
-      `npm exec --yes codex-overleaf-link@${version} -- install-native --extension-id <chrome-extension-id>`,
+      `npm exec --yes codex-overleaf-link@${version} -- install-native`,
       `npm exec --yes codex-overleaf-link@${version} -- doctor`,
       'current release scope',
       ...coverageSections
@@ -1015,7 +1015,7 @@ test('manual extension release docs describe GitHub Release unpacked-extension i
   assert.match(checklist, /chrome:\/\/extensions/i);
   assert.match(checklist, /Load unpacked/i);
   assert.match(checklist, /allowed_origins/i);
-  assert.match(checklist, new RegExp(`npm exec --yes codex-overleaf-link@${packageVersion.replace(/\./g, '\\.')} -- install-native --extension-id <chrome-extension-id>`));
+  assert.match(checklist, new RegExp(`npm exec --yes codex-overleaf-link@${packageVersion.replace(/\./g, '\\.')} -- install-native`));
   assert.match(checklist, new RegExp(`npm exec --yes codex-overleaf-link@${packageVersion.replace(/\./g, '\\.')} -- doctor`));
   assert.match(checklist, /page-bridge threat model/i);
   assert.doesNotMatch(checklist, /Chrome Web Store/i);
@@ -1441,7 +1441,7 @@ test('build-release creates expected artifacts and metadata', (t) => {
 
     const releaseNotes = fs.readFileSync(path.join(outputDir, 'release-notes.md'), 'utf8');
     assert.match(releaseNotes, new RegExp(`^## v${version.replace(/\./g, '\\.')} - `));
-    assert.match(releaseNotes, new RegExp(`npm exec --yes codex-overleaf-link@${version.replace(/\./g, '\\.')} -- install-native --extension-id <chrome-extension-id>`));
+    assert.match(releaseNotes, new RegExp(`npm exec --yes codex-overleaf-link@${version.replace(/\./g, '\\.')} -- install-native`));
     assert.match(releaseNotes, new RegExp(`npm exec --yes codex-overleaf-link@${version.replace(/\./g, '\\.')} -- doctor`));
     assert.match(releaseNotes, new RegExp(`npm exec --yes codex-overleaf-link@${version.replace(/\./g, '\\.')} -- uninstall-native`));
     assert.doesNotMatch(releaseNotes, /\n## v0\.2\.0 - /);

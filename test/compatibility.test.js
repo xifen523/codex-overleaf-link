@@ -158,15 +158,15 @@ test('classifyNativeCompatibility returns incompatible for missing native, unsup
 test('buildInstallCommand returns platform-specific release-pinned update commands', () => {
   assert.equal(
     compatibility.buildInstallCommand('1.1.0', 'darwin'),
-    'CODEX_OVERLEAF_REF=v1.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.1.0/install.sh)" -- --extension-id <chrome-extension-id>'
+    'CODEX_OVERLEAF_REF=v1.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.1.0/install.sh)"'
   );
   assert.equal(
     compatibility.buildInstallCommand('v1.1.0', 'linux'),
-    'CODEX_OVERLEAF_REF=v1.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.1.0/install.sh)" -- --extension-id <chrome-extension-id>'
+    'CODEX_OVERLEAF_REF=v1.1.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.1.0/install.sh)"'
   );
   assert.equal(
     compatibility.buildInstallCommand('1.1.0', 'win32'),
-    "iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.1.0/install.ps1 -OutFile install.ps1; $env:CODEX_OVERLEAF_REF='v1.1.0'; powershell -ExecutionPolicy Bypass -File install.ps1 --extension-id <chrome-extension-id>"
+    "iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.1.0/install.ps1 -OutFile install.ps1; $env:CODEX_OVERLEAF_REF='v1.1.0'; powershell -ExecutionPolicy Bypass -File install.ps1"
   );
 });
 

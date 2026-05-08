@@ -81,7 +81,7 @@ export function collectReleaseVerificationErrors(options = {}) {
       errors.push(`README.md must contain the release badge fragment "${expectedBadge}".`);
     }
 
-    const pinnedNpmInstallCommand = `npm exec --yes ${EXPECTED_PACKAGE_NAME}@${version} -- install-native --extension-id <chrome-extension-id>`;
+    const pinnedNpmInstallCommand = `npm exec --yes ${EXPECTED_PACKAGE_NAME}@${version} -- install-native`;
     if (!readme.includes(pinnedNpmInstallCommand)) {
       errors.push(`README.md must contain the pinned npm install command "${pinnedNpmInstallCommand}".`);
     }
@@ -203,7 +203,7 @@ function collectReleaseChecklistErrors(docsDir, version) {
     'GitHub Release',
     'chrome://extensions',
     'Load unpacked',
-    `npm exec --yes ${EXPECTED_PACKAGE_NAME}@${version} -- install-native --extension-id <chrome-extension-id>`,
+    `npm exec --yes ${EXPECTED_PACKAGE_NAME}@${version} -- install-native`,
     `npm exec --yes ${EXPECTED_PACKAGE_NAME}@${version} -- doctor`
   ];
 

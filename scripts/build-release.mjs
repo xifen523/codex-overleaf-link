@@ -517,9 +517,9 @@ function getReleaseNotesForBuild({ rootDir, version }) {
 
 function appendNpmReleaseGuidance(releaseNotes, version) {
   return `${releaseNotes.trimEnd()}\n\n### npm native host package\n\n` +
-    'Install the extension manually from the GitHub Release zip, copy the id shown in chrome://extensions, then install or update the native host with the pinned npm package:\n\n' +
+    'Install or update the native host with the pinned npm package. Official release builds use the bundled stable extension id by default; pass `--extension-id` only for a custom or mismatched unpacked extension id:\n\n' +
     '```bash\n' +
-    `npm exec --yes codex-overleaf-link@${version} -- install-native --extension-id <chrome-extension-id>\n` +
+    `npm exec --yes codex-overleaf-link@${version} -- install-native\n` +
     '```\n\n' +
     'Run native diagnostics with the same pinned package:\n\n' +
     '```bash\n' +
