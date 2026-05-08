@@ -7,15 +7,18 @@ const test = require('node:test');
 const packageJson = require('../package.json');
 const {
   DEFAULT_CHROME_EXTENSION_ID,
+  HOST_NAME,
+  buildAllowedOrigin,
   buildHostManifest,
   getChromeNativeHostManifestPath,
-  validateChromeExtensionId
+  getNativeHostManifestPath,
+  getWindowsRegistryMetadata,
+  validateChromeExtensionId,
+  validateExtensionId
 } = require('../native-host/src/manifest');
 const {
   getDefaultBridgePath,
-  getDefaultRuntimeRoot,
-  getNativeHostRegistrationTarget,
-  getNativeManifestPath
+  getDefaultRuntimeRoot
 } = require('../native-host/src/nativeHostPlatform');
 const extensionManifest = require('../extension/manifest.json');
 
@@ -34,12 +37,31 @@ test('release docs carry exact v1.0.0 badge and changelog heading', () => {
   assert.doesNotMatch(changelog, /^## v0\.9\.5 - 2026-05-07[\s\S]*version-1\.0\.0-blue/m);
 });
 
-test('validates Chrome extension ids', () => {
-  assert.equal(validateChromeExtensionId('abcdefghijklmnopabcdefghijklmnop'), true);
-  assert.equal(validateChromeExtensionId(DEFAULT_CHROME_EXTENSION_ID), true);
-  assert.equal(validateChromeExtensionId('ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP'), false);
-  assert.equal(validateChromeExtensionId('short'), false);
-  assert.equal(validateChromeExtensionId('abcdefghijklmnopabcdefghijklmno1'), false);
+test('pins the Native Messaging host name', () => {
+  assert.equal(HOST_NAME, 'com.codex.overleaf');
+});
+
+test('validates Chrome extension ids with the exact lowercase a-p alphabet', () => {
+  assert.equal(validateExtensionId('abcdefghijklmnopabcdefghijklmnop'), true);
+  assert.equal(validateExtensionId(DEFAULT_CHROME_EXTENSION_ID), true);
+  assert.equal(validateExtensionId('ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP'), false);
+  assert.equal(validateExtensionId('short'), false);
+  assert.equal(validateExtensionId('abcdefghijklmnopabcdefghijklmnopq'), false);
+  assert.equal(validateExtensionId('abcdefghijklmnopabcdefghijklmno1'), false);
+  assert.equal(validateExtensionId('abcdefghijklmnopabcdefghijklmnoq'), false);
+  assert.equal(validateExtensionId(' abcdefghijklmnopabcdefghijklmno'), false);
+  assert.equal(validateChromeExtensionId, validateExtensionId);
+});
+
+test('builds allowed Chrome extension origins exactly', () => {
+  assert.equal(
+    buildAllowedOrigin('abcdefghijklmnopabcdefghijklmnop'),
+    'chrome-extension://abcdefghijklmnopabcdefghijklmnop/'
+  );
+  assert.throws(
+    () => buildAllowedOrigin('abcdefghijklmnopabcdefghijklmnoq'),
+    /Invalid Chrome extension id/
+  );
 });
 
 test('builds a Chrome Native Messaging host manifest locked to one extension origin', () => {
@@ -84,27 +106,44 @@ test('returns the macOS Chrome native host manifest path from injected environme
   );
 });
 
-test('returns injectable Linux Chrome and Chromium native host manifest paths', () => {
+test('returns exact macOS Chrome and Chromium native host manifest paths', () => {
   assert.equal(
-    getNativeManifestPath({ platform: 'linux', homeDir: '/home/alice', browser: 'chrome' }),
+    getNativeHostManifestPath({ platform: 'darwin', homeDir: '/Users/alice', browser: 'chrome' }),
+    '/Users/alice/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.overleaf.json'
+  );
+  assert.equal(
+    getNativeHostManifestPath({ platform: 'darwin', homeDir: '/Users/alice', browser: 'chromium' }),
+    '/Users/alice/Library/Application Support/Chromium/NativeMessagingHosts/com.codex.overleaf.json'
+  );
+});
+
+test('returns exact Linux Chrome and Chromium native host manifest paths', () => {
+  assert.equal(
+    getNativeHostManifestPath({ platform: 'linux', homeDir: '/home/alice', browser: 'chrome' }),
     '/home/alice/.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json'
   );
   assert.equal(
-    getNativeManifestPath({ platform: 'linux', homeDir: '/home/alice', browser: 'chromium' }),
+    getNativeHostManifestPath({ platform: 'linux', homeDir: '/home/alice', browser: 'chromium' }),
     '/home/alice/.config/chromium/NativeMessagingHosts/com.codex.overleaf.json'
   );
 });
 
 test('returns native host paths from an injected HOME environment', () => {
   assert.equal(
-    getNativeManifestPath({ platform: 'linux', env: { HOME: '/home/env-user' } }),
+    getNativeHostManifestPath({ platform: 'linux', env: { HOME: '/home/env-user' } }),
     '/home/env-user/.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json'
   );
 });
 
-test('returns Windows Chrome native host registry metadata with a local app data manifest path', () => {
-  const target = getNativeHostRegistrationTarget({
-    platform: 'win32',
+test('accepts auto browser by resolving it to Chrome manifest paths', () => {
+  assert.equal(
+    getNativeHostManifestPath({ platform: 'linux', homeDir: '/home/alice', browser: 'auto' }),
+    '/home/alice/.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json'
+  );
+});
+
+test('returns exact Windows Chrome native host manifest path and quoted registry metadata', () => {
+  const metadata = getWindowsRegistryMetadata({
     browser: 'chrome',
     homeDir: 'C:\\Users\\Alice',
     env: {
@@ -112,17 +151,33 @@ test('returns Windows Chrome native host registry metadata with a local app data
     }
   });
 
-  assert.equal(target.kind, 'registry');
-  assert.equal(target.root, 'HKCU');
+  assert.equal(metadata.kind, 'registry');
+  assert.equal(metadata.root, 'HKCU');
   assert.equal(
-    target.registryKey,
+    metadata.registryKey,
     'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.codex.overleaf'
   );
   assert.equal(
-    target.manifestPath,
-    'C:\\Users\\Alice\\AppData\\Local\\CodexOverleaf\\native-host-runtime\\com.codex.overleaf.json'
+    metadata.manifestPath,
+    'C:\\Users\\Alice\\AppData\\Local\\codex-overleaf\\native-messaging-hosts\\com.codex.overleaf.json'
   );
-  assert.equal(path.win32.isAbsolute(target.manifestPath), true);
+  assert.equal(path.win32.isAbsolute(metadata.manifestPath), true);
+  assert.equal(
+    metadata.quotedRegistryKey,
+    '"HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.codex.overleaf"'
+  );
+  assert.equal(
+    metadata.quotedManifestPath,
+    '"C:\\Users\\Alice\\AppData\\Local\\codex-overleaf\\native-messaging-hosts\\com.codex.overleaf.json"'
+  );
+  assert.equal(
+    metadata.addCommand,
+    'reg.exe add "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.codex.overleaf" /ve /t REG_SZ /d "C:\\Users\\Alice\\AppData\\Local\\codex-overleaf\\native-messaging-hosts\\com.codex.overleaf.json" /f'
+  );
+  assert.equal(
+    metadata.deleteCommand,
+    'reg.exe delete "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.codex.overleaf" /f'
+  );
 });
 
 test('uses Windows USERPROFILE before HOME when local app data is not injected', () => {
@@ -151,7 +206,7 @@ test('returns injectable default runtime and bridge paths without mutating proce
 
 test('rejects unsupported native host platforms before registration', () => {
   assert.throws(
-    () => getNativeHostRegistrationTarget({ platform: 'freebsd', homeDir: '/home/alice' }),
+    () => getNativeHostManifestPath({ platform: 'freebsd', homeDir: '/home/alice' }),
     /Unsupported native host platform: freebsd/
   );
 });

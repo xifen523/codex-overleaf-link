@@ -5,7 +5,11 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
-const { DEFAULT_CHROME_EXTENSION_ID } = require('../native-host/src/manifest');
+const {
+  DEFAULT_CHROME_EXTENSION_ID,
+  getNativeHostManifestPath,
+  getWindowsRegistryMetadata
+} = require('../native-host/src/manifest');
 const { getDefaultBridgePath } = require('../native-host/src/nativeHostPlatform');
 const {
   assertSafeManagedRuntimeRoot,
@@ -275,6 +279,36 @@ test('package exposes install and uninstall native host commands', () => {
 
   assert.equal(pkg.scripts['install:native'], 'node scripts/install-native-host.mjs');
   assert.equal(pkg.scripts['uninstall:native'], 'node scripts/uninstall-native-host.mjs');
+});
+
+test('native install helpers pin Linux and Windows Native Messaging manifest locations', () => {
+  assert.equal(
+    getNativeHostManifestPath({ platform: 'linux', browser: 'chrome', homeDir: '/home/alice' }),
+    '/home/alice/.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json'
+  );
+  assert.equal(
+    getNativeHostManifestPath({ platform: 'linux', browser: 'chromium', homeDir: '/home/alice' }),
+    '/home/alice/.config/chromium/NativeMessagingHosts/com.codex.overleaf.json'
+  );
+
+  const windowsMetadata = getWindowsRegistryMetadata({
+    browser: 'chrome',
+    env: {
+      LOCALAPPDATA: 'C:\\Users\\Alice\\AppData\\Local'
+    }
+  });
+  assert.equal(
+    windowsMetadata.manifestPath,
+    'C:\\Users\\Alice\\AppData\\Local\\codex-overleaf\\native-messaging-hosts\\com.codex.overleaf.json'
+  );
+  assert.equal(
+    windowsMetadata.registryKey,
+    'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.codex.overleaf'
+  );
+  assert.equal(
+    windowsMetadata.addCommand,
+    'reg.exe add "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.codex.overleaf" /ve /t REG_SZ /d "C:\\Users\\Alice\\AppData\\Local\\codex-overleaf\\native-messaging-hosts\\com.codex.overleaf.json" /f'
+  );
 });
 
 test('repository ships a one-command Windows installer', () => {
