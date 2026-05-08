@@ -2,8 +2,11 @@
   'use strict';
 
   const CodexOverleafCompatibility = window.CodexOverleafCompatibility;
-  const DEFAULT_INSTALL_COMMAND = CodexOverleafCompatibility?.buildInstallCommand?.() ||
-    'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash';
+  const DEFAULT_INSTALL_COMMAND = CodexOverleafCompatibility?.buildInstallCommand?.(
+    undefined,
+    undefined,
+    getCurrentExtensionId()
+  ) || 'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash -s -- --extension-id <chrome-extension-id>';
   const button = document.getElementById('open-panel');
   const status = document.getElementById('status');
   const compatStatusIcon = document.getElementById('compat-status-icon');
@@ -159,8 +162,15 @@
     return {
       version: CodexOverleafCompatibility?.BUILD_TARGET_VERSION ||
         chrome.runtime.getManifest?.().version ||
-        ''
+        '',
+      extensionId: getCurrentExtensionId()
     };
+  }
+
+  function getCurrentExtensionId() {
+    return typeof chrome === 'object' && chrome?.runtime?.id
+      ? chrome.runtime.id
+      : '';
   }
 
   function getCompatibilityClassification(compatibility = {}) {
@@ -178,13 +188,11 @@
   }
 
   function getCompatibilityUpdateCommand(compatibility = {}) {
-    if (compatibility.updateCommand || compatibility.installCommand) {
-      return compatibility.updateCommand || compatibility.installCommand;
-    }
     return CodexOverleafCompatibility?.buildInstallCommand?.(
-      CodexOverleafCompatibility.BUILD_TARGET_VERSION,
-      compatibility.native?.platform || compatibility.platform
-    ) || DEFAULT_INSTALL_COMMAND;
+      compatibility.recommendedVersion || CodexOverleafCompatibility.BUILD_TARGET_VERSION,
+      compatibility.native?.platform || compatibility.platform,
+      getCurrentExtensionId()
+    ) || compatibility.updateCommand || compatibility.installCommand || DEFAULT_INSTALL_COMMAND;
   }
 
   function getStatusIconText(classification) {

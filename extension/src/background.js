@@ -255,13 +255,21 @@ importScripts('shared/compatibility.js');
   }
 
   function getNativeUpdateCommand(evidence = {}) {
-    if (evidence.updateCommand || evidence.installCommand) {
-      return evidence.updateCommand || evidence.installCommand;
-    }
-    return CodexOverleafCompatibility?.buildInstallCommand?.(
+    const command = CodexOverleafCompatibility?.buildInstallCommand?.(
       getNativeRecommendedVersion(evidence),
-      evidence.native?.platform || evidence.platform
+      evidence.native?.platform || evidence.platform,
+      getCurrentExtensionId()
     );
+    if (command) {
+      return command;
+    }
+    return evidence.updateCommand || evidence.installCommand;
+  }
+
+  function getCurrentExtensionId() {
+    return typeof chrome === 'object' && chrome?.runtime?.id
+      ? chrome.runtime.id
+      : '';
   }
 
   function sanitizeNativeRequest(request) {

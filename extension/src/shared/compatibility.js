@@ -47,6 +47,7 @@
   const INCOMPATIBLE_ALLOWED_METHODS = new Set([
     'bridge.ping'
   ]);
+  const EXTENSION_ID_PLACEHOLDER = '<chrome-extension-id>';
 
   function buildBridgePingParams(metadata = {}) {
     const extensionVersion = resolveMetadataVersion(metadata);
@@ -81,17 +82,18 @@
     return analyzeNativeCompatibility(native, metadata).classification;
   }
 
-  function buildInstallCommand(version = BUILD_TARGET_VERSION, platform) {
+  function buildInstallCommand(version = BUILD_TARGET_VERSION, platform, extensionId) {
     const normalized = normalizeReleaseVersion(version) || BUILD_TARGET_VERSION;
     const ref = `v${normalized}`;
     const installPlatform = normalizePlatform(platform) || detectCurrentPlatform();
     const releaseBaseUrl = `https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${ref}`;
+    const allowedExtensionId = normalizeInstallExtensionId(extensionId);
 
     if (installPlatform === 'windows') {
-      return `iwr ${releaseBaseUrl}/install.ps1 -OutFile install.ps1; $env:CODEX_OVERLEAF_REF='${ref}'; powershell -ExecutionPolicy Bypass -File install.ps1`;
+      return `iwr ${releaseBaseUrl}/install.ps1 -OutFile install.ps1; $env:CODEX_OVERLEAF_REF='${ref}'; powershell -ExecutionPolicy Bypass -File install.ps1 --extension-id ${allowedExtensionId}`;
     }
 
-    return `CODEX_OVERLEAF_REF=${ref} bash -c "$(curl -fsSL ${releaseBaseUrl}/install.sh)"`;
+    return `CODEX_OVERLEAF_REF=${ref} bash -c "$(curl -fsSL ${releaseBaseUrl}/install.sh)" -- --extension-id ${allowedExtensionId}`;
   }
 
   function buildReleaseUrl(version = BUILD_TARGET_VERSION) {
@@ -124,7 +126,7 @@
     const extensionVersion = resolveMetadataVersion(metadata);
     const nativeVersion = native && typeof native === 'object' ? native.version : undefined;
     const platform = native && typeof native === 'object' ? native.platform : undefined;
-    const updateCommand = buildInstallCommand(BUILD_TARGET_VERSION, platform);
+    const updateCommand = buildInstallCommand(BUILD_TARGET_VERSION, platform, metadata.extensionId);
     const updateAvailable = isOlderReleaseVersion(nativeVersion, BUILD_TARGET_VERSION);
     return {
       status,
@@ -316,6 +318,12 @@
       return 'linux';
     }
     return '';
+  }
+
+  function normalizeInstallExtensionId(extensionId) {
+    return typeof extensionId === 'string' && /^[a-p]{32}$/.test(extensionId)
+      ? extensionId
+      : EXTENSION_ID_PLACEHOLDER;
   }
 
   function detectCurrentPlatform() {

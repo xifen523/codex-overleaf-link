@@ -5,6 +5,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const compatibility = require('../extension/src/shared/compatibility');
+const TEST_EXTENSION_ID = 'abcdefghijklmnopabcdefghijklmnop';
 
 test('popup sends compatibility-aware bridge ping params', async () => {
   let sentMessage = null;
@@ -49,7 +50,7 @@ test('popup treats an older capability-compatible native response as update-avai
   assert.match(harness.elements.status.textContent, /Native host update available/i);
   assert.equal(
     harness.elements.installCommand.textContent,
-    compatibility.buildInstallCommand(compatibility.BUILD_TARGET_VERSION, 'darwin')
+    compatibility.buildInstallCommand(compatibility.BUILD_TARGET_VERSION, 'darwin', TEST_EXTENSION_ID)
   );
 });
 
@@ -63,7 +64,7 @@ test('popup shows platform-specific Windows update command for incompatible nati
   assert.equal(harness.elements.compatStatusIcon.dataset.status, 'incompatible');
   assert.equal(
     harness.elements.installCommand.textContent,
-    compatibility.buildInstallCommand(compatibility.BUILD_TARGET_VERSION, 'win32')
+    compatibility.buildInstallCommand(compatibility.BUILD_TARGET_VERSION, 'win32', TEST_EXTENSION_ID)
   );
 });
 
@@ -226,6 +227,7 @@ async function loadPopupHarness({ nativeResponse, activeTab = null, onSendMessag
   const sandbox = {
     chrome: {
       runtime: {
+        id: TEST_EXTENSION_ID,
         getManifest() {
           return { version: compatibility.BUILD_TARGET_VERSION };
         },

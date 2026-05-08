@@ -36,8 +36,11 @@
   const PANEL_MAX_WIDTH = 760;
   const PAGE_MIN_WIDTH = 520;
   const CodexOverleafCompatibility = window.CodexOverleafCompatibility;
-  const INSTALL_COMMAND = CodexOverleafCompatibility?.buildInstallCommand?.() ||
-    'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash';
+  const INSTALL_COMMAND = CodexOverleafCompatibility?.buildInstallCommand?.(
+    undefined,
+    undefined,
+    getCurrentExtensionId()
+  ) || 'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash -s -- --extension-id <chrome-extension-id>';
   const PAGE_BRIDGE_CAPABILITY = createPageBridgeCapability();
   const pageBridgeReady = injectPageBridge();
   const {
@@ -265,8 +268,15 @@
     return {
       version: CodexOverleafCompatibility?.BUILD_TARGET_VERSION ||
         chrome.runtime.getManifest?.().version ||
-        ''
+        '',
+      extensionId: getCurrentExtensionId()
     };
+  }
+
+  function getCurrentExtensionId() {
+    return typeof chrome === 'object' && chrome?.runtime?.id
+      ? chrome.runtime.id
+      : '';
   }
 
   function exposeSmokeHelper() {
