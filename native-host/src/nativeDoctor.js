@@ -162,10 +162,7 @@ function classifyDoctorResult(body = {}) {
     };
   }
 
-  if (
-    body.compatibility?.classification === 'update-available' ||
-    body.compatibility?.status === 'native_too_old'
-  ) {
+  if (body.compatibility?.classification === 'update-available') {
     return {
       exitCode: 3,
       ok: false,
@@ -520,14 +517,24 @@ function pingNativeBridge(bridgePath, message, options = {}) {
         return;
       }
 
-      const response = decoded.messages.find(item => item?.id === message.id) || decoded.messages[0];
+      if (decoded.remainder.length) {
+        settle({
+          ok: false,
+          exitCode,
+          signal: signal || undefined,
+          error: 'Bridge returned trailing partial native output'
+        });
+        return;
+      }
+
+      const response = decoded.messages.find(item => item?.id === message.id);
       if (response) {
         settle({
           ok: true,
           exitCode,
           signal: signal || undefined,
           rawResponse: response,
-          response: sanitizePingResponse(response)
+          response: sanitizePingResponse(response, options.pathOptions)
         });
         return;
       }
@@ -536,7 +543,7 @@ function pingNativeBridge(bridgePath, message, options = {}) {
         ok: false,
         exitCode,
         signal: signal || undefined,
-        error: summarizeBridgeFailure(exitCode, signal, stderr)
+        error: `Bridge did not return a response for ${message.id}`
       });
     });
 
@@ -552,7 +559,7 @@ function pingNativeBridge(bridgePath, message, options = {}) {
   });
 }
 
-function sanitizePingResponse(response) {
+function sanitizePingResponse(response, pathOptions) {
   if (!response || typeof response !== 'object') {
     return response;
   }
@@ -560,7 +567,7 @@ function sanitizePingResponse(response) {
     return {
       id: response.id,
       ok: response.ok,
-      error: sanitizeNativeError(response.error)
+      error: sanitizeNativeError(response.error, pathOptions)
     };
   }
   const native = response.result && typeof response.result === 'object' ? response.result : {};
@@ -589,13 +596,15 @@ function sanitizeNativePingResult(native) {
   };
 }
 
-function sanitizeNativeError(error) {
+function sanitizeNativeError(error, pathOptions) {
   if (!error || typeof error !== 'object') {
     return undefined;
   }
   return {
     code: typeof error.code === 'string' ? error.code : undefined,
-    message: typeof error.message === 'string' ? firstDiagnosticLine(error.message) : undefined
+    message: typeof error.message === 'string'
+      ? sanitizeDiagnosticMessage(error.message, pathOptions)
+      : undefined
   };
 }
 
@@ -663,11 +672,49 @@ function sanitizePathInMessage(message, targetPath, pathOptions) {
   return firstLine.split(targetPath).join(normalizeDiagnosticPath(targetPath, pathOptions));
 }
 
+function sanitizeDiagnosticMessage(message, pathOptions = {}) {
+  const firstLine = firstDiagnosticLine(message);
+  if (pathOptions.revealPaths) {
+    return firstLine;
+  }
+
+  const platform = pathOptions.platform || process.platform;
+  const platformPath = getPlatformPath(platform);
+  const homeDir = pathOptions.homeDir || getHomeFromEnv(pathOptions.env || process.env, platform);
+  if (!homeDir) {
+    return firstLine;
+  }
+
+  const normalizedHome = platformPath.normalize(String(homeDir));
+  if (platform === 'win32') {
+    return replaceCaseInsensitive(firstLine, normalizedHome, '~');
+  }
+  return firstLine.split(normalizedHome).join('~');
+}
+
 function firstDiagnosticLine(message) {
   return String(message || '')
     .split(/\r?\n/)
     .find(line => line.trim() && !/^\s*at\s+/.test(line)) ||
     'unknown error';
+}
+
+function replaceCaseInsensitive(value, needle, replacement) {
+  const lowerValue = String(value).toLowerCase();
+  const lowerNeedle = String(needle).toLowerCase();
+  if (!lowerNeedle) {
+    return value;
+  }
+
+  let result = '';
+  let offset = 0;
+  let index = lowerValue.indexOf(lowerNeedle, offset);
+  while (index !== -1) {
+    result += value.slice(offset, index) + replacement;
+    offset = index + needle.length;
+    index = lowerValue.indexOf(lowerNeedle, offset);
+  }
+  return result + value.slice(offset);
 }
 
 function normalizeTimeoutMs(timeoutMs) {

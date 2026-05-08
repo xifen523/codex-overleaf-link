@@ -152,17 +152,18 @@ function writeFakeDoctorBridge(tempDir, options = {}) {
     '  const frame = Buffer.alloc(4 + payload.length);',
     '  frame.writeUInt32LE(payload.length, 0);',
     '  payload.copy(frame, 4);',
-    '  process.stdout.write(frame, () => process.exit(Number.isFinite(exitCode) ? exitCode : 0));',
+    '  const trailing = process.env.DOCTOR_BRIDGE_TRAILING_PARTIAL === "1" ? Buffer.from([1, 2]) : Buffer.alloc(0);',
+    '  process.stdout.write(Buffer.concat([frame, trailing]), () => process.exit(Number.isFinite(exitCode) ? exitCode : 0));',
     '});',
     ''
   ].join('\n'), 'utf8');
 
   if (process.platform === 'win32') {
-    fs.writeFileSync(launcherPath, `@echo off\r\nset DOCTOR_BRIDGE_RESPONSE=${JSON.stringify(JSON.stringify(response))}\r\nset DOCTOR_BRIDGE_MODE=${options.mode || 'response'}\r\nset DOCTOR_BRIDGE_EXIT_CODE=${options.exitCode ?? 0}\r\n"${process.execPath}" "${scriptPath}"\r\n`, 'utf8');
+    fs.writeFileSync(launcherPath, `@echo off\r\nset DOCTOR_BRIDGE_RESPONSE=${JSON.stringify(JSON.stringify(response))}\r\nset DOCTOR_BRIDGE_MODE=${options.mode || 'response'}\r\nset DOCTOR_BRIDGE_EXIT_CODE=${options.exitCode ?? 0}\r\nset DOCTOR_BRIDGE_TRAILING_PARTIAL=${options.trailingPartial ? '1' : '0'}\r\n"${process.execPath}" "${scriptPath}"\r\n`, 'utf8');
   } else {
     fs.writeFileSync(launcherPath, [
       '#!/bin/sh',
-      `DOCTOR_BRIDGE_RESPONSE=${shellSingleQuote(JSON.stringify(response))} DOCTOR_BRIDGE_MODE=${shellSingleQuote(options.mode || 'response')} DOCTOR_BRIDGE_EXIT_CODE=${shellSingleQuote(options.exitCode ?? 0)} exec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(scriptPath)}`,
+      `DOCTOR_BRIDGE_RESPONSE=${shellSingleQuote(JSON.stringify(response))} DOCTOR_BRIDGE_MODE=${shellSingleQuote(options.mode || 'response')} DOCTOR_BRIDGE_EXIT_CODE=${shellSingleQuote(options.exitCode ?? 0)} DOCTOR_BRIDGE_TRAILING_PARTIAL=${shellSingleQuote(options.trailingPartial ? '1' : '0')} exec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(scriptPath)}`,
       ''
     ].join('\n'), 'utf8');
     fs.chmodSync(launcherPath, 0o755);
@@ -202,6 +203,14 @@ test('classifyDoctorResult maps native doctor states to deterministic exit codes
     exitCode: 3,
     ok: false,
     status: 'native_stale'
+  });
+  assert.deepEqual(classifyDoctorResult({
+    ...base,
+    compatibility: { classification: 'incompatible', status: 'native_too_old' }
+  }), {
+    exitCode: 3,
+    ok: false,
+    status: 'native_incompatible'
   });
   assert.deepEqual(classifyDoctorResult({
     ...base,
@@ -303,7 +312,7 @@ test('runDoctor reports stale native ping as native_stale', async () => {
       browser: 'chrome',
       env,
       homeDir: tempDir,
-      timeoutMs: 3000
+      timeoutMs: 5000
     });
 
     assert.equal(result.exitCode, 3);
@@ -325,7 +334,7 @@ test('runDoctor reports compatible native ping as ok', async () => {
       browser: 'chrome',
       env,
       homeDir: tempDir,
-      timeoutMs: 3000
+      timeoutMs: 5000
     });
 
     assert.equal(result.exitCode, 0);
@@ -347,7 +356,7 @@ test('runDoctor rejects a compatible native frame from a non-zero bridge exit', 
       browser: 'chrome',
       env,
       homeDir: tempDir,
-      timeoutMs: 3000
+      timeoutMs: 5000
     });
 
     assert.equal(result.exitCode, 3);
@@ -363,6 +372,96 @@ test('runDoctor rejects a compatible native frame from a non-zero bridge exit', 
   }
 });
 
+test('runDoctor rejects compatible native frames with the wrong response id', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-wrong-id-'));
+  try {
+    const wrongIdResponse = {
+      id: 'not-doctor-ping',
+      ok: true,
+      result: buildDoctorNativePayload()
+    };
+    const bridgePath = writeFakeDoctorBridge(tempDir, { response: wrongIdResponse });
+    const { env } = writeDoctorManifest(tempDir, bridgePath);
+    const result = await runDoctor({
+      browser: 'chrome',
+      env,
+      homeDir: tempDir,
+      timeoutMs: 5000
+    });
+
+    assert.equal(result.exitCode, 3);
+    assert.equal(result.body.ok, false);
+    assert.equal(result.body.status, 'execution_failure');
+    assert.equal(result.body.ping.ok, false);
+    assert.equal(result.body.compatibility, null);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('runDoctor rejects trailing partial native output after a valid frame', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-partial-output-'));
+  try {
+    const bridgePath = writeFakeDoctorBridge(tempDir, { trailingPartial: true });
+    const { env } = writeDoctorManifest(tempDir, bridgePath);
+    const result = await runDoctor({
+      browser: 'chrome',
+      env,
+      homeDir: tempDir,
+      timeoutMs: 5000
+    });
+
+    assert.equal(result.exitCode, 3);
+    assert.equal(result.body.ok, false);
+    assert.equal(result.body.status, 'execution_failure');
+    assert.equal(result.body.ping.ok, false);
+    assert.equal(result.body.compatibility, null);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('runDoctor redacts home paths from native error response messages by default', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-error-redaction-'));
+  try {
+    const leakedPath = path.join(tempDir, 'private', 'project.tex');
+    const errorResponse = {
+      id: 'doctor-ping',
+      ok: false,
+      error: {
+        code: 'native_error',
+        message: `Failed to read ${leakedPath}`
+      }
+    };
+    const bridgePath = writeFakeDoctorBridge(tempDir, { response: errorResponse });
+    const { env } = writeDoctorManifest(tempDir, bridgePath);
+    const redacted = await runDoctor({
+      browser: 'chrome',
+      env,
+      homeDir: tempDir,
+      timeoutMs: 5000
+    });
+
+    assert.equal(redacted.exitCode, 3);
+    assert.equal(redacted.body.ok, false);
+    assert.equal(redacted.body.ping.response.error.message, `Failed to read ~${path.sep}private${path.sep}project.tex`);
+    assert.doesNotMatch(JSON.stringify(redacted.body), new RegExp(escapeRegExp(tempDir)));
+
+    const revealed = await runDoctor({
+      browser: 'chrome',
+      env,
+      homeDir: tempDir,
+      revealPaths: true,
+      timeoutMs: 5000
+    });
+
+    assert.equal(revealed.exitCode, 3);
+    assert.equal(revealed.body.ping.response.error.message, `Failed to read ${leakedPath}`);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('runDoctor reports bridge execution failure with static diagnostics', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-exec-failure-'));
   try {
@@ -372,7 +471,7 @@ test('runDoctor reports bridge execution failure with static diagnostics', async
       browser: 'chrome',
       env,
       homeDir: tempDir,
-      timeoutMs: 3000
+      timeoutMs: 5000
     });
 
     assert.equal(result.exitCode, 3);
