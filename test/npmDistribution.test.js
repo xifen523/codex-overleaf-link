@@ -262,6 +262,7 @@ test('packed npm tarball installs executable CLI and manages temp native host', 
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-npm-tarball-smoke-'));
   const installPrefix = path.join(tempDir, 'prefix');
   const runtimeRoot = path.join(tempDir, 'runtime');
+  const runtimeRootArgs = process.platform === 'win32' ? [] : ['--runtime-root', runtimeRoot];
   const tarballName = `${packageJson.name}-${packageJson.version}.tgz`;
   const tarballPath = path.join(repoRoot, tarballName);
   const { env, fakeRegistry } = makeTarballSmokeEnv(tempDir);
@@ -307,8 +308,7 @@ test('packed npm tarball installs executable CLI and manages temp native host', 
       'install-native',
       '--extension-id',
       validExtensionId,
-      '--runtime-root',
-      runtimeRoot,
+      ...runtimeRootArgs,
       '--json'
     ], { env });
     assert.equal(installNative.status, 0, installNative.stderr || installNative.stdout);
@@ -316,15 +316,13 @@ test('packed npm tarball installs executable CLI and manages temp native host', 
     const doctorAfterInstall = runInstalledCli(installPrefix, [
       'doctor',
       '--json',
-      '--runtime-root',
-      runtimeRoot
+      ...runtimeRootArgs
     ], { env });
     assert.equal(doctorAfterInstall.status, 0, doctorAfterInstall.stderr || doctorAfterInstall.stdout);
 
     const uninstallNative = runInstalledCli(installPrefix, [
       'uninstall-native',
-      '--runtime-root',
-      runtimeRoot,
+      ...runtimeRootArgs,
       '--json'
     ], { env });
     assert.equal(uninstallNative.status, 0, uninstallNative.stderr || uninstallNative.stdout);
@@ -332,8 +330,7 @@ test('packed npm tarball installs executable CLI and manages temp native host', 
     const doctorAfterUninstall = runInstalledCli(installPrefix, [
       'doctor',
       '--json',
-      '--runtime-root',
-      runtimeRoot
+      ...runtimeRootArgs
     ], { env });
     assert.equal(doctorAfterUninstall.status, 2, doctorAfterUninstall.stderr || doctorAfterUninstall.stdout);
     assert.equal(doctorAfterUninstall.stderr, '');
