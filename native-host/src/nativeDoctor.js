@@ -676,14 +676,21 @@ function appendBoundedBuffer(current, chunk, maxBytes) {
 }
 
 function summarizeBridgeFailure(exitCode, signal, stderr) {
+  const stderrSummary = stderr && stderr.length
+    ? firstDiagnosticLine(stderr.toString('utf8'))
+    : '';
   if (exitCode !== 0 && exitCode !== null) {
-    return `Bridge exited with status ${exitCode}`;
+    return stderrSummary
+      ? `Bridge exited with status ${exitCode}: ${stderrSummary}`
+      : `Bridge exited with status ${exitCode}`;
   }
   if (signal) {
-    return `Bridge exited with signal ${signal}`;
+    return stderrSummary
+      ? `Bridge exited with signal ${signal}: ${stderrSummary}`
+      : `Bridge exited with signal ${signal}`;
   }
-  if (stderr && stderr.length) {
-    return 'Bridge wrote stderr but no native response';
+  if (stderrSummary) {
+    return `Bridge wrote stderr but no native response: ${stderrSummary}`;
   }
   return 'Bridge produced no native response';
 }
