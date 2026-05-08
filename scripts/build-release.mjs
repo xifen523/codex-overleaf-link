@@ -91,7 +91,8 @@ export function buildRelease(options = {}) {
     npmTarballName,
     'install.sh',
     'install.ps1',
-    'uninstall-native-host.mjs'
+    'uninstall-native-host.mjs',
+    ...REQUIRED_NATIVE_UNINSTALL_HELPER_FILES
   ];
   const manifest = {
     version,

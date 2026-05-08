@@ -1376,6 +1376,11 @@ test('build-release creates expected artifacts and metadata', (t) => {
   const extensionZip = `codex-overleaf-link-extension-v${version}.zip`;
   const nativeTarball = `codex-overleaf-native-host-v${version}.tar.gz`;
   const npmTarball = `codex-overleaf-link-${version}.tgz`;
+  const helperArtifacts = [
+    'native-host/src/nativeHostPlatform.js',
+    'native-host/src/manifest.js',
+    'native-host/src/runtimeInstaller.js'
+  ];
 
   try {
     const result = spawnSync(process.execPath, [
@@ -1401,6 +1406,7 @@ test('build-release creates expected artifacts and metadata', (t) => {
       'install.sh',
       'install.ps1',
       'uninstall-native-host.mjs',
+      ...helperArtifacts,
       'release-manifest.json',
       'release-notes.md',
       'SHA256SUMS'
@@ -1415,7 +1421,15 @@ test('build-release creates expected artifacts and metadata', (t) => {
     assert.doesNotThrow(() => new Date(manifest.createdAt).toISOString());
     assert.deepEqual(
       manifest.artifacts.map((artifact) => artifact.name).sort(),
-      [extensionZip, nativeTarball, npmTarball, 'install.sh', 'install.ps1', 'uninstall-native-host.mjs'].sort()
+      [
+        extensionZip,
+        nativeTarball,
+        npmTarball,
+        'install.sh',
+        'install.ps1',
+        'uninstall-native-host.mjs',
+        ...helperArtifacts
+      ].sort()
     );
     for (const artifact of manifest.artifacts) {
       const artifactPath = path.join(outputDir, artifact.name);
@@ -1435,7 +1449,17 @@ test('build-release creates expected artifacts and metadata', (t) => {
     const checksumNames = sums.map((line) => line.replace(/^[0-9a-f]{64}\s+\*?/, ''));
     assert.deepEqual(
       checksumNames.sort(),
-      [extensionZip, nativeTarball, npmTarball, 'install.sh', 'install.ps1', 'uninstall-native-host.mjs', 'release-manifest.json', 'release-notes.md'].sort()
+      [
+        extensionZip,
+        nativeTarball,
+        npmTarball,
+        'install.sh',
+        'install.ps1',
+        'uninstall-native-host.mjs',
+        ...helperArtifacts,
+        'release-manifest.json',
+        'release-notes.md'
+      ].sort()
     );
     assert.equal(checksumNames.includes('SHA256SUMS'), false);
     for (const line of sums) {
