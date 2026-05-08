@@ -729,7 +729,7 @@ function hasUnredactedAbsolutePath(message) {
   if (/[A-Za-z]:[\\/]/.test(candidate)) {
     return true;
   }
-  if (/\\\\/.test(candidate)) {
+  if (candidate.includes('\\')) {
     return true;
   }
   return candidate.includes('/');
