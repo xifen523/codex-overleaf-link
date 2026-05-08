@@ -15,6 +15,7 @@ function buildRuntimeFileManifest(options = {}) {
     fileEntry(packageRoot, 'package.json'),
     ...directoryEntries(packageRoot, 'native-host/src'),
     ...directoryEntries(packageRoot, 'extension/src/shared'),
+    fileEntry(packageRoot, 'scripts/codex-json-agent.mjs'),
     fileEntry(packageRoot, 'scripts/install-native-host.mjs'),
     fileEntry(packageRoot, 'scripts/uninstall-native-host.mjs')
   ];
@@ -181,7 +182,8 @@ function verifyInstalledRuntime(stagingRoot, verifyRuntime) {
 
   const requiredFiles = [
     'package.json',
-    'native-host/src/index.js'
+    'native-host/src/index.js',
+    'scripts/codex-json-agent.mjs'
   ];
   for (const relativePath of requiredFiles) {
     if (!fs.existsSync(path.join(stagingRoot, relativePath))) {

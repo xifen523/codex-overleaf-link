@@ -29,6 +29,7 @@
     "bin/",
     "native-host/src/",
     "extension/src/shared/",
+    "scripts/codex-json-agent.mjs",
     "scripts/install-native-host.mjs",
     "scripts/uninstall-native-host.mjs",
     "scripts/verify-npm-package.mjs",

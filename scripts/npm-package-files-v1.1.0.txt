@@ -44,6 +44,7 @@ package/native-host/src/taskRunner.js
 package/native-host/src/taskRunnerRuntime.js
 package/native-host/src/textPatch.js
 package/package.json
+package/scripts/codex-json-agent.mjs
 package/scripts/install-native-host.mjs
 package/scripts/npm-package-files-v1.1.0.txt
 package/scripts/uninstall-native-host.mjs

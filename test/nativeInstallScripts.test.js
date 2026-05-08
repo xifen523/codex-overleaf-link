@@ -63,6 +63,7 @@ function writeRuntimePackageFixture(tempDir, version = '9.8.7') {
     'package.json': JSON.stringify({ name: 'codex-overleaf-link', version }, null, 2),
     'native-host/src/index.js': 'module.exports = {};\n',
     'extension/src/shared/compatibility.js': 'module.exports = {};\n',
+    'scripts/codex-json-agent.mjs': '#!/usr/bin/env node\n',
     'scripts/install-native-host.mjs': '#!/usr/bin/env node\n',
     'scripts/uninstall-native-host.mjs': '#!/usr/bin/env node\n'
   };
@@ -88,6 +89,7 @@ test('installRuntimeFromPackage creates stable managed runtime layout and marker
     assert.equal(fs.existsSync(path.join(runtimeRoot, 'package.json')), true);
     assert.equal(fs.existsSync(path.join(runtimeRoot, 'native-host/src/index.js')), true);
     assert.equal(fs.existsSync(path.join(runtimeRoot, 'extension/src/shared/compatibility.js')), true);
+    assert.equal(fs.existsSync(path.join(runtimeRoot, 'scripts/codex-json-agent.mjs')), true);
     assert.equal(fs.existsSync(path.join(runtimeRoot, 'scripts/install-native-host.mjs')), true);
     assert.equal(fs.existsSync(path.join(runtimeRoot, 'scripts/uninstall-native-host.mjs')), true);
 
@@ -330,7 +332,10 @@ test('native install runtime includes package metadata required by bridge ping',
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.match(result.stdout, new RegExp(`Runtime package version: ${escapeRegExp(CURRENT_PACKAGE_VERSION)}`));
     const runtimePackagePath = path.join(runtimeRoot, 'package.json');
+    const runtimeAgentPath = path.join(runtimeRoot, 'scripts/codex-json-agent.mjs');
     assert.equal(fs.existsSync(runtimePackagePath), true);
+    assert.equal(fs.existsSync(runtimeAgentPath), true);
+    assert.match(fs.readFileSync(bridgePath, 'utf8'), new RegExp(escapeRegExp(runtimeAgentPath)));
     const runtimePackage = JSON.parse(fs.readFileSync(runtimePackagePath, 'utf8'));
     const { handleRequest } = require(path.join(runtimeRoot, 'native-host/src/taskRunner.js'));
     const response = await handleRequest({ id: 'runtime-ping', method: 'bridge.ping', params: {} }, {});
