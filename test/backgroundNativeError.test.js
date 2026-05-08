@@ -40,9 +40,11 @@ test('background blocks side-effecting native requests with non-ok compatibility
   assert.equal(blockedRun.error.code, 'native_update_required');
   assert.equal(blockedRun.error.classification, 'update-available');
   assert.equal(blockedRun.error.currentNativeVersion, undefined);
-  assert.equal(blockedRun.error.requiredVersion, compatibility.BUILD_TARGET_VERSION);
+  assert.equal(blockedRun.error.requiredVersion, compatibility.MIN_COMPATIBLE_NATIVE_VERSION);
+  assert.equal(blockedRun.error.recommendedVersion, compatibility.BUILD_TARGET_VERSION);
   assert.equal(blockedRun.error.updateCommand, compatibility.buildInstallCommand());
   assert.match(blockedRun.error.message, /requires native host v1\.0\.0/i);
+  assert.match(blockedRun.error.message, /recommended update target is v1\.1\.0/i);
 });
 
 test('background blocks side-effecting native requests without compatibility evidence before posting', async () => {
@@ -66,8 +68,11 @@ test('background blocks side-effecting native requests without compatibility evi
   assert.equal(blockedRun.ok, false);
   assert.equal(blockedRun.error.code, 'native_update_required');
   assert.equal(blockedRun.error.classification, 'incompatible');
-  assert.equal(blockedRun.error.requiredVersion, compatibility.BUILD_TARGET_VERSION);
+  assert.equal(blockedRun.error.requiredVersion, compatibility.MIN_COMPATIBLE_NATIVE_VERSION);
+  assert.equal(blockedRun.error.recommendedVersion, compatibility.BUILD_TARGET_VERSION);
+  assert.equal(blockedRun.error.updateCommand, compatibility.buildInstallCommand());
   assert.match(blockedRun.error.message, /requires native host v1\.0\.0/i);
+  assert.match(blockedRun.error.message, /recommended update target is v1\.1\.0/i);
 });
 
 test('background allows only update-available methods when native evidence is older but capability-compatible', async () => {
@@ -111,7 +116,11 @@ test('background allows only update-available methods when native evidence is ol
   assert.equal(sync.error.code, 'native_update_required');
   assert.equal(sync.error.classification, 'update-available');
   assert.equal(sync.error.currentNativeVersion, '0.9.5');
-  assert.equal(sync.error.requiredVersion, compatibility.BUILD_TARGET_VERSION);
+  assert.equal(sync.error.requiredVersion, compatibility.MIN_COMPATIBLE_NATIVE_VERSION);
+  assert.equal(sync.error.recommendedVersion, compatibility.BUILD_TARGET_VERSION);
+  assert.equal(sync.error.updateCommand, compatibility.buildInstallCommand());
+  assert.match(sync.error.message, /requires native host v1\.0\.0/i);
+  assert.match(sync.error.message, /recommended update target is v1\.1\.0/i);
 });
 
 test('background blocks codex.cancel when compatibility evidence is incompatible', async () => {
@@ -832,7 +841,9 @@ function withUpdateAvailableNativeCompatibility(params = {}) {
       status: 'native_too_old',
       classification: 'update-available',
       nativeVersion: '0.9.5',
-      requiredVersion: compatibility.BUILD_TARGET_VERSION,
+      minimumNativeVersion: compatibility.MIN_COMPATIBLE_NATIVE_VERSION,
+      requiredVersion: compatibility.MIN_COMPATIBLE_NATIVE_VERSION,
+      recommendedVersion: compatibility.BUILD_TARGET_VERSION,
       installCommand: compatibility.buildInstallCommand()
     }
   };

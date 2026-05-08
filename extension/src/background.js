@@ -217,11 +217,12 @@ importScripts('shared/compatibility.js');
   function createNativeUpdateRequiredBlock(method, evidence = {}, status = getNativeCompatibilityStatus(evidence)) {
     const classification = getNativeCompatibilityClassification(evidence);
     const requiredVersion = getNativeRequiredVersion(evidence);
+    const recommendedVersion = getNativeRecommendedVersion(evidence);
     const updateCommand = getNativeUpdateCommand(evidence);
     const currentNativeVersion = getCurrentNativeVersion(evidence);
     return {
       code: 'native_update_required',
-      message: formatNativeCompatibilityBlockMessage(status, requiredVersion),
+      message: formatNativeCompatibilityBlockMessage(status, requiredVersion, recommendedVersion),
       method,
       status,
       classification,
@@ -229,14 +230,22 @@ importScripts('shared/compatibility.js');
       installCommand: updateCommand,
       currentNativeVersion,
       requiredVersion,
-      releaseUrl: evidence?.releaseUrl || CodexOverleafCompatibility?.buildReleaseUrl?.(requiredVersion)
+      recommendedVersion,
+      releaseUrl: evidence?.releaseUrl || CodexOverleafCompatibility?.buildReleaseUrl?.(recommendedVersion)
     };
   }
 
   function getNativeRequiredVersion(evidence = {}) {
     return evidence.requiredVersion ||
+      evidence.minimumNativeVersion ||
+      CodexOverleafCompatibility?.MIN_COMPATIBLE_NATIVE_VERSION ||
+      '1.0.0';
+  }
+
+  function getNativeRecommendedVersion(evidence = {}) {
+    return evidence.recommendedVersion ||
       CodexOverleafCompatibility?.BUILD_TARGET_VERSION ||
-      '1.1.0';
+      getNativeRequiredVersion(evidence);
   }
 
   function getCurrentNativeVersion(evidence = {}) {
@@ -250,7 +259,7 @@ importScripts('shared/compatibility.js');
       return evidence.updateCommand || evidence.installCommand;
     }
     return CodexOverleafCompatibility?.buildInstallCommand?.(
-      getNativeRequiredVersion(evidence),
+      getNativeRecommendedVersion(evidence),
       evidence.native?.platform || evidence.platform
     );
   }
@@ -269,7 +278,7 @@ importScripts('shared/compatibility.js');
     };
   }
 
-  function formatNativeCompatibilityBlockMessage(status, requiredVersion) {
+  function formatNativeCompatibilityBlockMessage(status, requiredVersion, recommendedVersion = requiredVersion) {
     switch (status) {
       case 'extension_too_old':
         return 'Extension update required before this request can run. Update the Chrome extension and try again.';
@@ -280,6 +289,9 @@ importScripts('shared/compatibility.js');
       case 'native_missing':
         return 'Native host is not connected. Install the local native host, reload the extension, and try again.';
       default:
+        if (recommendedVersion && recommendedVersion !== requiredVersion) {
+          return `This operation requires native host v${requiredVersion} or later. The recommended update target is v${recommendedVersion}. Run the update command to upgrade.`;
+        }
         return `This operation requires native host v${requiredVersion} or later. Run the update command to upgrade.`;
     }
   }

@@ -71,7 +71,9 @@ test('classifyNativeCompatibility returns compatible for minimum-or-newer protoc
   assert.equal(compatibility.classifyNativeCompatibility(nativeResponse(), '1.1.0'), 'compatible');
   assert.equal(result.status, 'ok');
   assert.equal(result.classification, 'compatible');
-  assert.equal(result.requiredVersion, '1.1.0');
+  assert.equal(result.requiredVersion, '1.0.0');
+  assert.equal(result.recommendedVersion, '1.1.0');
+  assert.equal(result.updateAvailable, false);
   assert.equal(result.updateCommand, canonicalInstallCommand('darwin'));
   assert.equal(result.releaseUrl, 'https://github.com/Ghqqqq/codex-overleaf-link/releases/tag/v1.1.0');
 });
@@ -87,7 +89,7 @@ test('classifyNativeCompatibility keeps v1.0 protocol 1 hosts with required capa
   assert.equal(result.status, 'ok');
   assert.equal(result.classification, 'compatible');
   assert.equal(result.minimumNativeVersion, '1.0.0');
-  assert.equal(result.requiredVersion, '1.1.0');
+  assert.equal(result.requiredVersion, '1.0.0');
   assert.equal(result.recommendedVersion, '1.1.0');
   assert.equal(result.updateAvailable, true);
   assert.equal(result.updateCommand, compatibility.buildInstallCommand('1.1.0', 'darwin'));

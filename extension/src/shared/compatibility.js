@@ -134,7 +134,7 @@
       currentNativeVersion: nativeVersion,
       extensionVersion: extensionVersion.normalized,
       minimumNativeVersion: MIN_COMPATIBLE_NATIVE_VERSION,
-      requiredVersion: BUILD_TARGET_VERSION,
+      requiredVersion: MIN_COMPATIBLE_NATIVE_VERSION,
       recommendedVersion: BUILD_TARGET_VERSION,
       updateAvailable,
       installCommand: updateCommand,
