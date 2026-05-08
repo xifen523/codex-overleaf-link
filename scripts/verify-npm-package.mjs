@@ -141,21 +141,6 @@ function runNpmPackDryRun() {
   return parsePackJsonText(runNpm(['pack', '--dry-run', '--json']));
 }
 
-function readCurrentPackageTarballAsDryRun(filePath) {
-  const actualName = path.basename(filePath);
-  const expectedName = getCurrentPackageTarballName();
-
-  if (actualName !== expectedName) {
-    throw new Error(
-      `Tarball listing is unsupported without a JavaScript tar reader. `
-      + `Use --pack or --pack-json for package verification. `
-      + `Expected current package tarball name ${expectedName}, received ${actualName}.`
-    );
-  }
-
-  return getFilePathsFromPackuments(runNpmPackDryRun());
-}
-
 function readNewlineFileList(filePath) {
   return fs.readFileSync(filePath, 'utf8').split(/\r?\n/).filter(Boolean);
 }
@@ -180,22 +165,38 @@ export function verifyNpmPackDryRun() {
 }
 
 export function packAndVerifyNpmPackage() {
-  const generatedTarballs = new Set();
+  const generatedTarballs = new Set([path.resolve(repoRoot, getCurrentPackageTarballName())]);
 
   try {
     const dryRunResult = verifyNpmPackDryRun();
     const packuments = parsePackJsonText(runNpm(['pack', '--json']));
 
+    if (packuments.length === 0) {
+      throw new Error('npm pack did not report a package artifact.');
+    }
+
     for (const packument of packuments) {
-      if (typeof packument?.filename === 'string') {
-        generatedTarballs.add(path.resolve(repoRoot, packument.filename));
+      if (typeof packument?.filename !== 'string' || packument.filename.length === 0) {
+        throw new Error('npm pack did not report a package filename.');
+      }
+
+      const tarballPath = path.resolve(repoRoot, packument.filename);
+      generatedTarballs.add(tarballPath);
+      if (!fs.existsSync(tarballPath)) {
+        throw new Error(`npm pack did not create expected tarball: ${packument.filename}`);
       }
     }
 
-    const packResult = verifyPackuments(packuments, 'npm pack --json verification');
     return {
       dryRun: dryRunResult,
-      packed: packResult,
+      packages: packuments.map((packument) => ({
+        name: packument.name,
+        version: packument.version,
+        filename: packument.filename,
+        size: packument.size,
+        shasum: packument.shasum,
+        integrity: packument.integrity
+      })),
       tarballs: [...generatedTarballs]
     };
   } finally {
@@ -211,7 +212,6 @@ function printUsage() {
     '  node scripts/verify-npm-package.mjs',
     '  node scripts/verify-npm-package.mjs --pack',
     '  node scripts/verify-npm-package.mjs --pack-json <path>',
-    '  node scripts/verify-npm-package.mjs --tarball <path>',
     '  node scripts/verify-npm-package.mjs --file-list <path>'
   ].join('\n'));
 }
@@ -227,7 +227,7 @@ function getMode(args) {
     return null;
   }
   const [mode, filePath] = args;
-  if (!['--pack-json', '--tarball', '--file-list'].includes(mode)) {
+  if (!['--pack-json', '--file-list'].includes(mode)) {
     return null;
   }
   return { mode, filePath };
@@ -239,9 +239,6 @@ function readActualPathsForMode(mode, filePath) {
   }
   if (mode === '--pack-json') {
     return readPackJsonFile(filePath);
-  }
-  if (mode === '--tarball') {
-    return readCurrentPackageTarballAsDryRun(filePath);
   }
   if (mode === '--file-list') {
     return readNewlineFileList(filePath);
@@ -261,7 +258,22 @@ async function main() {
     if (mode.mode === '--pack') {
       const result = packAndVerifyNpmPackage();
       console.log(`Verified npm pack dry-run manifest with ${result.dryRun.actual.length} files.`);
-      console.log(`Verified npm packed manifest with ${result.packed.actual.length} files.`);
+      for (const packageInfo of result.packages) {
+        const details = [
+          `${packageInfo.name}@${packageInfo.version}`,
+          `filename=${packageInfo.filename}`
+        ];
+        if (Number.isFinite(packageInfo.size)) {
+          details.push(`size=${packageInfo.size}`);
+        }
+        if (packageInfo.shasum) {
+          details.push(`shasum=${packageInfo.shasum}`);
+        }
+        if (packageInfo.integrity) {
+          details.push(`integrity=${packageInfo.integrity}`);
+        }
+        console.log(`Created npm package ${details.join(' ')}`);
+      }
       console.log('Removed generated npm tarball.');
       return;
     }

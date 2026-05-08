@@ -161,7 +161,7 @@ test('npm package verifier CLI checks newline file lists', () => {
 });
 
 
-test('npm package verifier rejects unsupported non-current tarball listing without system tar', () => {
+test('npm package verifier rejects removed tarball mode with usage', () => {
   const result = spawnSync(process.execPath, [
     path.join(repoRoot, 'scripts/verify-npm-package.mjs'),
     '--tarball',
@@ -171,6 +171,8 @@ test('npm package verifier rejects unsupported non-current tarball listing witho
     encoding: 'utf8'
   });
 
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /Tarball listing is unsupported without a JavaScript tar reader/);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /Usage:/);
+  assert.doesNotMatch(result.stderr, /--tarball/);
+  assert.equal(result.stdout, '');
 });
