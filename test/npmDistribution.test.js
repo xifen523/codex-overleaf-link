@@ -27,7 +27,7 @@ test('version command prints the package version', () => {
 
   assert.equal(result.status, 0);
   assert.equal(result.stderr, '');
-  assert.equal(result.stdout.trim(), '1.1.0');
+  assert.equal(result.stdout.trim(), packageJson.version);
 });
 
 test('version command supports json output', () => {
@@ -35,7 +35,7 @@ test('version command supports json output', () => {
 
   assert.equal(result.status, 0);
   assert.equal(result.stderr, '');
-  assert.deepEqual(JSON.parse(result.stdout), { packageVersion: '1.1.0' });
+  assert.deepEqual(JSON.parse(result.stdout), { packageVersion: packageJson.version });
 });
 
 test('help command lists available commands', () => {
