@@ -12,7 +12,8 @@
   const MIN_NATIVE_VERSION = '1.0.0';
   const MIN_COMPATIBLE_NATIVE_VERSION = '1.0.0';
   const MIN_COMPATIBLE_EXTENSION_VERSION = '1.0.0';
-  const BUILD_TARGET_VERSION = '1.1.0';
+  const BUILD_TARGET_VERSION = '1.1.1';
+  const DEFAULT_CHROME_EXTENSION_ID = 'illdpneeeopfffmiepaejglgmhpmdhdc';
   const REQUIRED_CAPABILITIES = Object.freeze([
     'bridgePing',
     'mirrorSync',
@@ -83,17 +84,12 @@
 
   function buildInstallCommand(version = BUILD_TARGET_VERSION, platform, extensionId) {
     const normalized = normalizeReleaseVersion(version) || BUILD_TARGET_VERSION;
-    const ref = `v${normalized}`;
-    const installPlatform = normalizePlatform(platform) || detectCurrentPlatform();
-    const releaseBaseUrl = `https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${ref}`;
     const allowedExtensionId = normalizeInstallExtensionId(extensionId);
-    const extensionIdArg = allowedExtensionId ? ` --extension-id ${allowedExtensionId}` : '';
+    const extensionIdArg = allowedExtensionId && allowedExtensionId !== DEFAULT_CHROME_EXTENSION_ID
+      ? ` --extension-id ${allowedExtensionId}`
+      : '';
 
-    if (installPlatform === 'windows') {
-      return `iwr ${releaseBaseUrl}/install.ps1 -OutFile install.ps1; $env:CODEX_OVERLEAF_REF='${ref}'; powershell -ExecutionPolicy Bypass -File install.ps1${extensionIdArg}`;
-    }
-
-    return `CODEX_OVERLEAF_REF=${ref} bash -c "$(curl -fsSL ${releaseBaseUrl}/install.sh)"${extensionIdArg ? ` --${extensionIdArg}` : ''}`;
+    return `npm exec --yes codex-overleaf-link@${normalized} -- install-native${extensionIdArg}`;
   }
 
   function buildReleaseUrl(version = BUILD_TARGET_VERSION) {

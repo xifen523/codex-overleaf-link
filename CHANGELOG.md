@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.1.1 - 2026-05-08
+
+Small native-host update guidance patch for npm-first local installs.
+
+### Changed
+
+- Popup and panel native-host mismatch guidance now recommends the pinned npm CLI command: `npm exec --yes codex-overleaf-link@1.1.1 -- install-native`.
+- Official release update commands omit `--extension-id` for the bundled stable extension id, while custom/dev unpacked extension ids still preserve the explicit `--extension-id` recovery path.
+- README and manual release checklist now treat GitHub Release `install.sh` / `install.ps1` scripts as fallback installers instead of the primary native-host update command.
+- Bumped package, extension manifest, compatibility target, and native ping metadata to `1.1.1` while keeping native protocol `1`.
+
 ## v1.1.0 - 2026-05-08
 
 Version alignment and manual GitHub Release distribution guidance for the v1.1 native-host package.

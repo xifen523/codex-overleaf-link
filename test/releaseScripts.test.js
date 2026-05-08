@@ -384,7 +384,7 @@ function writeManualExtensionDocs(rootDir, { version = '0.6.0', includeV09Covera
   );
 }
 
-test('CHANGELOG documents the current v1.1.0 npm distribution release in release tooling format', async () => {
+test('CHANGELOG documents the current v1.1.1 npm-first update guidance patch in release tooling format', async () => {
   const version = readJson(path.join(repoRoot, 'package.json')).version;
   const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
   const heading = `## v${version} - 2026-05-08`;
@@ -397,11 +397,12 @@ test('CHANGELOG documents the current v1.1.0 npm distribution release in release
   const { extractReleaseNotes } = await import(moduleUrl);
   const section = extractReleaseNotes(changelog, version);
 
-  assert.match(section, /npm native installer CLI/i);
-  assert.match(section, /native doctor command/i);
-  assert.match(section, /safe runtime root copy/i);
-  assert.match(section, /npm package content gates/i);
-  assert.match(section, /GitHub Release artifacts plus manual unpacked extension loading/i);
+  assert.match(section, /npm-first local installs/i);
+  assert.match(section, /npm exec --yes codex-overleaf-link@1\.1\.1 -- install-native/i);
+  assert.match(section, /bundled stable extension id/i);
+  assert.match(section, /custom\/dev unpacked extension ids/i);
+  assert.match(section, /fallback installers/i);
+  assert.match(section, /native protocol `1`/i);
 });
 
 test('package exposes release verification and artifact build commands', () => {

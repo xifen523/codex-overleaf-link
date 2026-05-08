@@ -12,7 +12,6 @@ const FORBIDDEN_NPM_PACKAGE_PATH_PATTERNS = [
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptDir = path.dirname(scriptPath);
 const repoRoot = path.resolve(scriptDir, '..');
-const defaultManifestPath = path.join(scriptDir, 'npm-package-files-v1.1.0.txt');
 
 export function normalizePackagePathList(paths) {
   const normalized = new Set();
@@ -58,7 +57,12 @@ export function compareExactManifest(actualPaths, expectedPaths) {
   };
 }
 
-export function readExpectedManifest(manifestPath = defaultManifestPath) {
+function getDefaultManifestPath() {
+  const packageJson = readPackageMetadata();
+  return path.join(scriptDir, `npm-package-files-v${packageJson.version}.txt`);
+}
+
+export function readExpectedManifest(manifestPath = getDefaultManifestPath()) {
   return normalizePackagePathList(
     fs.readFileSync(manifestPath, 'utf8')
       .split(/\r?\n/)
