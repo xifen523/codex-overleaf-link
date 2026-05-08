@@ -43,6 +43,66 @@ function makeIsolatedNpmEnv(tempDir) {
   };
 }
 
+function makeTarballSmokeEnv(tempDir, options = {}) {
+  const platform = options.platform || process.platform;
+  const env = makeIsolatedNpmEnv(tempDir);
+  const fakeRegistry = platform === 'win32'
+    ? createFakeWindowsRegistryCommand(tempDir)
+    : null;
+
+  if (fakeRegistry) {
+    prependPath(env, fakeRegistry.binDir);
+    env.CODEX_OVERLEAF_REG_EXE = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
+    env.CODEX_OVERLEAF_REG_EXE_ARGS_JSON = JSON.stringify(['/d', '/s', '/c', fakeRegistry.cmdPath]);
+    env.CODEX_OVERLEAF_FAKE_REG_LOG = fakeRegistry.logPath;
+    env.CODEX_OVERLEAF_FAKE_REG_RECORDER = fakeRegistry.recorderPath;
+    env.CODEX_OVERLEAF_FAKE_NODE_EXE = process.execPath;
+  }
+
+  return { env, fakeRegistry };
+}
+
+function prependPath(env, dir) {
+  const currentPath = env.PATH || env.Path || '';
+  env.PATH = currentPath ? `${dir}${path.delimiter}${currentPath}` : dir;
+  delete env.Path;
+}
+
+function createFakeWindowsRegistryCommand(tempDir) {
+  const binDir = path.join(tempDir, 'fake-registry-bin');
+  const logPath = path.join(tempDir, 'fake-registry-calls.jsonl');
+  const recorderPath = path.join(binDir, 'record-reg-call.cjs');
+  const cmdPath = path.join(binDir, 'reg.cmd');
+
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.writeFileSync(recorderPath, [
+    "const fs = require('node:fs');",
+    "const logPath = process.env.CODEX_OVERLEAF_FAKE_REG_LOG;",
+    "if (!logPath) {",
+    "  console.error('Missing CODEX_OVERLEAF_FAKE_REG_LOG');",
+    "  process.exit(2);",
+    "}",
+    "fs.appendFileSync(logPath, `${JSON.stringify(process.argv.slice(2))}\\n`);",
+    ''
+  ].join('\n'));
+  fs.writeFileSync(cmdPath, [
+    '@echo off',
+    '"%CODEX_OVERLEAF_FAKE_NODE_EXE%" "%CODEX_OVERLEAF_FAKE_REG_RECORDER%" %*',
+    'exit /b %ERRORLEVEL%',
+    ''
+  ].join('\r\n'));
+
+  return { binDir, cmdPath, logPath, recorderPath };
+}
+
+function readFakeRegistryCalls(logPath) {
+  return fs.readFileSync(logPath, 'utf8')
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
 function runNpm(args, options = {}) {
   return spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
     cwd: options.cwd || repoRoot,
@@ -181,13 +241,30 @@ test('unknown command exits with an error', () => {
   assert.match(result.stderr, /Unknown command/);
 });
 
+test('tarball smoke Windows registry isolation routes writes through fake reg command', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-reg-isolation-'));
+  try {
+    const { env, fakeRegistry } = makeTarballSmokeEnv(tempDir, { platform: 'win32' });
+
+    assert.ok(fakeRegistry);
+    assert.equal(path.basename(fakeRegistry.cmdPath).toLowerCase(), 'reg.cmd');
+    assert.equal(env.PATH.split(path.delimiter)[0], fakeRegistry.binDir);
+    assert.equal(JSON.parse(env.CODEX_OVERLEAF_REG_EXE_ARGS_JSON).at(-1), fakeRegistry.cmdPath);
+    assert.equal(env.CODEX_OVERLEAF_FAKE_REG_LOG, fakeRegistry.logPath);
+    assert.equal(fs.existsSync(fakeRegistry.cmdPath), true);
+    assert.equal(fs.existsSync(fakeRegistry.recorderPath), true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('packed npm tarball installs executable CLI and manages temp native host', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-npm-tarball-smoke-'));
   const installPrefix = path.join(tempDir, 'prefix');
   const runtimeRoot = path.join(tempDir, 'runtime');
   const tarballName = `${packageJson.name}-${packageJson.version}.tgz`;
   const tarballPath = path.join(repoRoot, tarballName);
-  const env = makeIsolatedNpmEnv(tempDir);
+  const { env, fakeRegistry } = makeTarballSmokeEnv(tempDir);
 
   try {
     fs.rmSync(tarballPath, { force: true });
@@ -263,6 +340,14 @@ test('packed npm tarball installs executable CLI and manages temp native host', 
     const afterUninstallBody = JSON.parse(doctorAfterUninstall.stdout);
     assert.equal(afterUninstallBody.ok, false);
     assert.equal(afterUninstallBody.status, 'missing_install');
+
+    if (process.platform === 'win32') {
+      assert.ok(fakeRegistry);
+      assert.equal(env.PATH.split(path.delimiter)[0], fakeRegistry.binDir);
+      const registryCalls = readFakeRegistryCalls(fakeRegistry.logPath);
+      assert.deepEqual(registryCalls.map((call) => call[0]), ['add', 'delete']);
+      assert.equal(registryCalls.every((call) => call[1].startsWith('HKCU\\')), true);
+    }
   } finally {
     fs.rmSync(tarballPath, { force: true });
     fs.rmSync(tempDir, { recursive: true, force: true });
