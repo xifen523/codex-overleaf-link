@@ -144,14 +144,12 @@ function writeFakeDoctorBridge(tempDir, options = {}) {
   const response = options.response === undefined
     ? { id: 'doctor-ping', ok: true, result: buildDoctorNativePayload() }
     : options.response;
-  const responsePath = path.join(tempDir, 'doctor-bridge-response.json');
-  fs.writeFileSync(responsePath, JSON.stringify(response), 'utf8');
+  const exitCode = Number.isInteger(options.exitCode) ? options.exitCode : 0;
   fs.writeFileSync(scriptPath, [
-    'const fs = require("node:fs");',
-    'const responseFile = process.env.DOCTOR_BRIDGE_RESPONSE_FILE;',
-    'const response = responseFile ? JSON.parse(fs.readFileSync(responseFile, "utf8")) : JSON.parse(process.env.DOCTOR_BRIDGE_RESPONSE || "null");',
-    'const mode = process.env.DOCTOR_BRIDGE_MODE || "response";',
-    'const exitCode = Number.parseInt(process.env.DOCTOR_BRIDGE_EXIT_CODE || "0", 10);',
+    `const response = ${JSON.stringify(response)};`,
+    `const mode = ${JSON.stringify(options.mode || 'response')};`,
+    `const exitCode = ${exitCode};`,
+    `const trailingPartial = ${options.trailingPartial ? 'true' : 'false'};`,
     'process.stdin.resume();',
     'process.stdin.once("data", () => {',
     '  if (mode === "exit") process.exit(7);',
@@ -159,8 +157,8 @@ function writeFakeDoctorBridge(tempDir, options = {}) {
     '  const frame = Buffer.alloc(4 + payload.length);',
     '  frame.writeUInt32LE(payload.length, 0);',
     '  payload.copy(frame, 4);',
-    '  const trailing = process.env.DOCTOR_BRIDGE_TRAILING_PARTIAL === "1" ? Buffer.from([1, 2]) : Buffer.alloc(0);',
-    '  process.stdout.write(Buffer.concat([frame, trailing]), () => process.exit(Number.isFinite(exitCode) ? exitCode : 0));',
+    '  const trailing = trailingPartial ? Buffer.from([1, 2]) : Buffer.alloc(0);',
+    '  process.stdout.write(Buffer.concat([frame, trailing]), () => process.exit(exitCode));',
     '});',
     ''
   ].join('\n'), 'utf8');
@@ -168,17 +166,14 @@ function writeFakeDoctorBridge(tempDir, options = {}) {
   if (process.platform === 'win32') {
     fs.writeFileSync(launcherPath, [
       '@echo off',
-      `set "DOCTOR_BRIDGE_RESPONSE_FILE=${responsePath}"`,
-      `set "DOCTOR_BRIDGE_MODE=${options.mode || 'response'}"`,
-      `set "DOCTOR_BRIDGE_EXIT_CODE=${options.exitCode ?? 0}"`,
-      `set "DOCTOR_BRIDGE_TRAILING_PARTIAL=${options.trailingPartial ? '1' : '0'}"`,
       `"${process.execPath}" "${scriptPath}"`,
+      'exit /b %ERRORLEVEL%',
       ''
     ].join('\r\n'), 'utf8');
   } else {
     fs.writeFileSync(launcherPath, [
       '#!/bin/sh',
-      `DOCTOR_BRIDGE_RESPONSE_FILE=${shellSingleQuote(responsePath)} DOCTOR_BRIDGE_MODE=${shellSingleQuote(options.mode || 'response')} DOCTOR_BRIDGE_EXIT_CODE=${shellSingleQuote(options.exitCode ?? 0)} DOCTOR_BRIDGE_TRAILING_PARTIAL=${shellSingleQuote(options.trailingPartial ? '1' : '0')} exec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(scriptPath)}`,
+      `exec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(scriptPath)}`,
       ''
     ].join('\n'), 'utf8');
     fs.chmodSync(launcherPath, 0o755);
@@ -977,7 +972,12 @@ test('native install runtime includes package metadata required by bridge ping',
     const runtimeAgentPath = path.join(runtimeRoot, 'scripts/codex-json-agent.mjs');
     assert.equal(fs.existsSync(runtimePackagePath), true);
     assert.equal(fs.existsSync(runtimeAgentPath), true);
-    assert.match(fs.readFileSync(bridgePath, 'utf8'), new RegExp(escapeRegExp(runtimeAgentPath)));
+    const bridgeContent = fs.readFileSync(bridgePath, 'utf8');
+    const jsonEscapedRuntimeAgentPath = JSON.stringify(runtimeAgentPath).slice(1, -1);
+    assert.ok(
+      bridgeContent.includes(runtimeAgentPath) || bridgeContent.includes(jsonEscapedRuntimeAgentPath),
+      bridgeContent
+    );
     const runtimePackage = JSON.parse(fs.readFileSync(runtimePackagePath, 'utf8'));
     const { handleRequest } = require(path.join(runtimeRoot, 'native-host/src/taskRunner.js'));
     const response = await handleRequest({ id: 'runtime-ping', method: 'bridge.ping', params: {} }, {});

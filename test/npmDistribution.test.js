@@ -70,6 +70,11 @@ function prependPath(env, dir) {
   env[pathKey] = currentPath ? `${dir}${path.delimiter}${currentPath}` : dir;
 }
 
+function getPathValue(env) {
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH';
+  return env[pathKey] || '';
+}
+
 function createFakeWindowsRegistryCommand(tempDir) {
   const binDir = path.join(tempDir, 'fake-registry-bin');
   const logPath = path.join(tempDir, 'fake-registry-calls.jsonl');
@@ -275,7 +280,7 @@ test('tarball smoke Windows registry isolation routes writes through fake reg co
 
     assert.ok(fakeRegistry);
     assert.equal(path.basename(fakeRegistry.cmdPath).toLowerCase(), 'reg.cmd');
-    assert.equal(env.PATH.split(path.delimiter)[0], fakeRegistry.binDir);
+    assert.equal(getPathValue(env).split(path.delimiter)[0], fakeRegistry.binDir);
     assert.equal(JSON.parse(env.CODEX_OVERLEAF_REG_EXE_ARGS_JSON).at(-1), fakeRegistry.cmdPath);
     assert.equal(env.CODEX_OVERLEAF_FAKE_REG_LOG, fakeRegistry.logPath);
     assert.equal(fs.existsSync(fakeRegistry.cmdPath), true);
@@ -376,7 +381,7 @@ test('packed npm tarball installs executable CLI and manages temp native host', 
 
     if (process.platform === 'win32') {
       assert.ok(fakeRegistry);
-      assert.equal(env.PATH.split(path.delimiter)[0], fakeRegistry.binDir);
+      assert.equal(getPathValue(env).split(path.delimiter)[0], fakeRegistry.binDir);
       const registryCalls = readFakeRegistryCalls(fakeRegistry.logPath);
       assert.deepEqual(registryCalls.map((call) => call[0]), ['add', 'delete']);
       assert.equal(registryCalls.every((call) => call[1].startsWith('HKCU\\')), true);
