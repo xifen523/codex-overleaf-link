@@ -1,6 +1,6 @@
 {
   "name": "codex-overleaf-link",
-  "version": "0.9.5",
+  "version": "1.0.0",
   "private": true,
   "description": "Cross-platform Chrome bridge that connects Codex to the active Overleaf project.",
   "license": "MIT",
@@ -8,7 +8,8 @@
   "scripts": {
     "agent:codex": "node scripts/codex-json-agent.mjs",
     "test": "node scripts/run-tests.mjs",
-    "check:architecture": "node scripts/check-architecture-budget.mjs",
+    "check:architecture": "node scripts/check-architecture-budget.mjs --enforce-target",
+    "benchmark:large": "node scripts/benchmark-large-project.mjs --gate",
     "smoke:extension": "node scripts/smoke-extension.mjs",
     "verify:release": "node scripts/verify-release.mjs",
     "build:release": "node scripts/build-release.mjs",

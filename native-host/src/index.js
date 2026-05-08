@@ -102,8 +102,20 @@ function summarizeRequest(message) {
     checkpointOk: params.checkpoint?.ok,
     activePath: params.project?.activePath,
     fileCount: Array.isArray(params.project?.files) ? params.project.files.length : 0,
-    files: params.project?.files
+    fileSummary: summarizeProjectFiles(params.project?.files)
   };
+}
+
+function summarizeProjectFiles(files) {
+  return (Array.isArray(files) ? files : []).slice(0, 50).map(file => ({
+    path: file?.path,
+    kind: file?.kind || (file?.contentBase64 ? 'binary' : 'text'),
+    size: Number(file?.size || file?.byteLength || 0) || stringByteLength(file?.content)
+  }));
+}
+
+function stringByteLength(value) {
+  return typeof value === 'string' ? Buffer.byteLength(value, 'utf8') : 0;
 }
 
 function summarizeResponse(response) {

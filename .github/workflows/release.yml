@@ -28,6 +28,12 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Run architecture budget check
+        run: npm run check:architecture
+
+      - name: Run synthetic large-project benchmark
+        run: npm run benchmark:large
+
   release:
     needs: test-matrix
     runs-on: ubuntu-latest

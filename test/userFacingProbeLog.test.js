@@ -5,7 +5,7 @@ const test = require('node:test');
 
 test('normal state refresh writes user-facing status instead of raw probe diagnostics', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const i18n = fs.readFileSync(
@@ -25,7 +25,7 @@ test('normal state refresh writes user-facing status instead of raw probe diagno
 
 test('manual refresh gives visible feedback without appending task transcript messages', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const i18n = fs.readFileSync(
@@ -38,7 +38,7 @@ test('manual refresh gives visible feedback without appending task transcript me
   );
   const refreshProbeBody = contentScript.match(/async function refreshProbe\(options = \{\}\) \{[\s\S]*?\n  function formatProbeStatusBar/)?.[0] || '';
 
-  assert.match(contentScript, /addEventListener\('click', \(\) => refreshProbe\(\{\s*userInitiated:\s*true\s*\}\)\)/);
+  assert.match(contentScript, /onRefresh:\s*\(\) => refreshProbe\(\{\s*userInitiated:\s*true\s*\}\)/);
   assert.match(refreshProbeBody, /const userInitiated = options\.userInitiated === true/);
   assert.match(refreshProbeBody, /tr\('refreshProbeLoading'\)/);
   assert.match(refreshProbeBody, /tr\('refreshProbeDone', \{ status: formatProbeStatusBar\(probe\) \}\)/);
@@ -54,7 +54,7 @@ test('manual refresh gives visible feedback without appending task transcript me
 
 test('initial panel probe only updates footer status and does not leave a stale empty-state notice', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const initBody = contentScript.match(/async function init\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -65,7 +65,7 @@ test('initial panel probe only updates footer status and does not leave a stale 
 
 test('probe status copy describes the next user action without internal editor wording', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const i18n = fs.readFileSync(
@@ -86,7 +86,7 @@ test('probe status copy describes the next user action without internal editor w
 
 test('probe status copy surfaces page capability downgrade without raw diagnostics', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -97,7 +97,7 @@ test('probe status copy surfaces page capability downgrade without raw diagnosti
 
 test('write modes are not mislabeled as analysis-only when editor writability probe is stale', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -108,7 +108,7 @@ test('write modes are not mislabeled as analysis-only when editor writability pr
 
 test('ask mode probe copy does not mention write verification or Reviewing requirements', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const statusBody = contentScript.match(/function formatProbeStatusBar\(probe\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -122,7 +122,7 @@ test('ask mode probe copy does not mention write verification or Reviewing requi
 
 test('probe status line shows OT state only when the experimental mirror is enabled', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const statusBody = contentScript.match(/function formatProbeStatusBar\(probe\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -136,7 +136,7 @@ test('probe status line shows OT state only when the experimental mirror is enab
 
 test('probe footer readiness follows current mode instead of requiring Reviewing for ask mode', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const refreshProbeBody = contentScript.match(/async function refreshProbe\(options = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -148,7 +148,7 @@ test('probe footer readiness follows current mode instead of requiring Reviewing
 
 test('mode switching refreshes the probe footer immediately', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const selectModeBody = contentScript.match(/async function selectMode\(mode\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -158,7 +158,7 @@ test('mode switching refreshes the probe footer immediately', () => {
 
 test('probe notice is replaced instead of leaving stale readiness messages in the task log', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -170,7 +170,7 @@ test('probe notice is replaced instead of leaving stale readiness messages in th
 
 test('quiet probe refresh updates an existing notice so the main task area cannot contradict the footer', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const refreshProbeBody = contentScript.match(/async function refreshProbe\(options = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -181,7 +181,7 @@ test('quiet probe refresh updates an existing notice so the main task area canno
 
 test('normal task flow logs a user-facing project read summary', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';

@@ -34,6 +34,18 @@ const overleafProjectSnapshotSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/page/overleafProjectSnapshot.js'),
   'utf8'
 );
+const treeOperationsSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/treeOperations.js'),
+  'utf8'
+);
+const snapshotRouterSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/snapshotRouter.js'),
+  'utf8'
+);
+const writebackRouterSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/writebackRouter.js'),
+  'utf8'
+);
 
 test('mock Codex changes flow from native mirror into the Overleaf page bridge', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-e2e-'));
@@ -157,7 +169,10 @@ function createMinimalPageBridgeHarness({ activePath, files }) {
   vm.runInContext(overleafCapabilitiesSource, context, { filename: 'overleafCapabilities.js' });
   vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
   vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
+  vm.runInContext(treeOperationsSource, context, { filename: 'treeOperations.js' });
+  vm.runInContext(snapshotRouterSource, context, { filename: 'snapshotRouter.js' });
   vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });
+  vm.runInContext(writebackRouterSource, context, { filename: 'writebackRouter.js' });
   vm.runInContext(pageBridgeCapabilitySource, context, { filename: 'pageBridgeCapability.js' });
   vm.runInContext(pageBridgeSource, context, { filename: 'pageBridge.js' });
 

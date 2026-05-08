@@ -60,7 +60,10 @@ function installProjectSkill({ projectId, skillId, content, rootDir } = {}) {
   }
 
   const filePath = resolveSkillPath(projectId, id, { rootDir });
+  const skillsDir = getProjectSkillsDir(projectId, { rootDir });
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  assertNoSymlinkEscape(path.dirname(filePath), skillsDir, 'Unsafe project skill path');
+  assertNoSymlinkEscape(filePath, skillsDir, 'Unsafe project skill path');
   fs.writeFileSync(filePath, content, 'utf8');
 
   const stat = fs.statSync(filePath);
@@ -79,6 +82,7 @@ function installProjectSkill({ projectId, skillId, content, rootDir } = {}) {
 function removeProjectSkill({ projectId, skillId, rootDir } = {}) {
   const id = validateSkillId(skillId);
   const filePath = resolveSkillPath(projectId, id, { rootDir });
+  assertNoSymlinkEscape(filePath, getProjectSkillsDir(projectId, { rootDir }), 'Unsafe project skill path');
   const removed = fs.existsSync(filePath);
   if (removed) {
     fs.rmSync(filePath, { force: true });
@@ -128,6 +132,7 @@ function installCodexOverleafSkill({ skillId, content, env = process.env, skills
   assertNoSymlinkEscape(skillDir, root, 'Unsafe Codex Overleaf skill path');
   fs.mkdirSync(skillDir, { recursive: true });
   assertNoSymlinkEscape(skillDir, root, 'Unsafe Codex Overleaf skill path');
+  assertNoSymlinkEscape(filePath, root, 'Unsafe Codex Overleaf skill path');
   fs.writeFileSync(filePath, content, 'utf8');
 
   const stat = fs.statSync(filePath);
@@ -158,6 +163,7 @@ function loadSelectedProjectSkills({ projectId, selectedSkillIds, rootDir, proje
 
   for (const id of ids) {
     const filePath = resolveSkillPath(projectId, id, { rootDir, projectRoot });
+    assertNoSymlinkEscape(filePath, getProjectSkillsDir(projectId, { rootDir, projectRoot }), 'Unsafe project skill path');
     if (!fs.existsSync(filePath)) {
       missing.push(id);
       continue;
@@ -205,6 +211,7 @@ function materializeProjectSkillsAsCodexSkills({
       continue;
     }
     const sourcePath = resolveSkillPath(projectId, id, { rootDir, projectRoot });
+    assertNoSymlinkEscape(sourcePath, skillsDir, 'Unsafe project skill path');
     const stat = fs.statSync(sourcePath);
     if (!stat.isFile() || stat.size > MAX_SKILL_CONTENT_BYTES) {
       result.skipped.push({ id, reason: 'invalid_content' });
@@ -323,6 +330,7 @@ function resolveSkillPath(projectId, skillId, options = {}) {
   if (target !== skillsDir && !target.startsWith(skillsDir + path.sep)) {
     throw new Error('Unsafe project skill path');
   }
+  assertNoSymlinkEscape(target, skillsDir, 'Unsafe project skill path');
   return target;
 }
 

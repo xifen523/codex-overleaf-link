@@ -9,9 +9,11 @@ const { getProjectMirror } = require('../native-host/src/mirrorWorkspace');
 function loadTaskRunnerWithFakeRunner(fakeRunner) {
   const runnerPath = require.resolve('../native-host/src/codexSessionRunner');
   const taskRunnerPath = require.resolve('../native-host/src/taskRunner');
+  const taskRunnerRuntimePath = require.resolve('../native-host/src/taskRunnerRuntime');
   const originalRunner = require(runnerPath);
 
   delete require.cache[taskRunnerPath];
+  delete require.cache[taskRunnerRuntimePath];
   require.cache[runnerPath].exports = {
     ...originalRunner,
     runCodexSession: fakeRunner
@@ -19,7 +21,14 @@ function loadTaskRunnerWithFakeRunner(fakeRunner) {
 
   const taskRunner = require(taskRunnerPath);
   require.cache[runnerPath].exports = originalRunner;
-  return taskRunner;
+  return {
+    ...taskRunner,
+    restore() {
+      require.cache[runnerPath].exports = originalRunner;
+      delete require.cache[taskRunnerPath];
+      delete require.cache[taskRunnerRuntimePath];
+    }
+  };
 }
 
 function createBlockingRunner() {
@@ -109,10 +118,12 @@ function loadTaskRunnerWithFakeModules({ fakeRunner, fakeSync }) {
   const runnerPath = require.resolve('../native-host/src/codexSessionRunner');
   const mirrorPath = require.resolve('../native-host/src/mirrorWorkspace');
   const taskRunnerPath = require.resolve('../native-host/src/taskRunner');
+  const taskRunnerRuntimePath = require.resolve('../native-host/src/taskRunnerRuntime');
   const originalRunner = require(runnerPath);
   const originalMirror = require(mirrorPath);
 
   delete require.cache[taskRunnerPath];
+  delete require.cache[taskRunnerRuntimePath];
   require.cache[runnerPath].exports = {
     ...originalRunner,
     runCodexSession: fakeRunner || originalRunner.runCodexSession
@@ -127,6 +138,8 @@ function loadTaskRunnerWithFakeModules({ fakeRunner, fakeSync }) {
     restore() {
       require.cache[runnerPath].exports = originalRunner;
       require.cache[mirrorPath].exports = originalMirror;
+      delete require.cache[taskRunnerPath];
+      delete require.cache[taskRunnerRuntimePath];
     }
   };
 }
@@ -186,7 +199,8 @@ test('mirror.sync is rejected while codex.run holds the project lock', async () 
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
   const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
   const runner = createBlockingRunner();
-  const { handleRequest } = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
+  const taskRunner = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
+  const { handleRequest } = taskRunner;
 
   try {
     const codexRunPromise = handleRequest({
@@ -231,6 +245,7 @@ test('mirror.sync is rejected while codex.run holds the project lock', async () 
     assert.equal(syncAfter.result.fileCount, 1);
   } finally {
     runner.releaseFirst();
+    taskRunner.restore();
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -239,7 +254,8 @@ test('mirror.sync works for a different project while codex.run is active', asyn
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
   const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
   const runner = createBlockingRunner();
-  const { handleRequest } = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
+  const taskRunner = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
+  const { handleRequest } = taskRunner;
 
   try {
     const codexRunPromise = handleRequest({
@@ -271,6 +287,7 @@ test('mirror.sync works for a different project while codex.run is active', asyn
     await codexRunPromise;
   } finally {
     runner.releaseFirst();
+    taskRunner.restore();
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -279,7 +296,8 @@ test('codex.run is rejected while another codex.run holds the same project lock'
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
   const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
   const runner = createBlockingRunner();
-  const { handleRequest } = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
+  const taskRunner = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
+  const { handleRequest } = taskRunner;
 
   try {
     const firstRun = handleRequest({
@@ -315,6 +333,7 @@ test('codex.run is rejected while another codex.run holds the same project lock'
     assert.equal(firstResponse.ok, true);
   } finally {
     runner.releaseFirst();
+    taskRunner.restore();
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
@@ -323,7 +342,8 @@ test('codex.cancel aborts an active codex.run and releases the project lock', as
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
   const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
   const runner = createAbortAwareRunner();
-  const { handleRequest } = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
+  const taskRunner = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
+  const { handleRequest } = taskRunner;
 
   try {
     const codexRunPromise = handleRequest({
@@ -364,6 +384,7 @@ test('codex.cancel aborts an active codex.run and releases the project lock', as
 
     assert.equal(syncAfter.ok, true);
   } finally {
+    taskRunner.restore();
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });

@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.0.0 - 2026-05-07
+
+Production-stable release documentation and gate hardening for regular academic writing workflows across macOS, Windows, Linux Chrome, and Linux Chromium.
+
+### Added
+
+- Synthetic large-project regression gate support for v1.0 CI, including snapshot, mirror sync, diff/patch, context tray, storage preparation, native frame size, and internal benchmark failure assertions.
+- Static HTML privacy policy page for Chrome Web Store listing and GitHub Pages publication.
+- README Quick Start and Common Workflows sections for first-time install, safe Ask/Suggest usage, compile-error repair, paragraph rewrite, and translation workflows.
+
+### Changed
+
+- Bumped package metadata, README install/update commands, release artifact names, Chrome Web Store checklist references, and release docs to `v1.0.0`.
+- `npm run check:architecture` now enforces final v1.0 `maxLines` budgets by default with no `currentCeiling` exceptions.
+- CI release gates now include architecture budget enforcement and the synthetic large-project regression gate on macOS, Windows, and Linux with one retry for runner variance.
+- ROADMAP v1.0 status now reflects production-stable release criteria and the required gate checklist.
+
+### Notes
+
+- Chrome Web Store approval remains a soft gate; rejection is handled as a follow-up `v1.0.1` patch while the GitHub Release path remains available.
+- Manual smoke signoff records startup timing as observations only; synthetic CI ceilings are regression guards, not real-world latency promises.
+
 ## v0.9.5 - 2026-05-07
 
 Architecture hardening release for the v0.9 release-candidate line. This version focuses on reducing maintenance risk in the largest files, correcting project skill activation semantics, and tightening release gates without adding major user-facing surface area.

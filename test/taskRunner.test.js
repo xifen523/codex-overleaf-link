@@ -40,9 +40,11 @@ function fixtureAgentEnv(fixtureName, extra = {}) {
 function loadTaskRunnerWithFakeRunner(fakeRunner) {
   const runnerPath = require.resolve('../native-host/src/codexSessionRunner');
   const taskRunnerPath = require.resolve('../native-host/src/taskRunner');
+  const taskRunnerRuntimePath = require.resolve('../native-host/src/taskRunnerRuntime');
   const originalRunner = require(runnerPath);
 
   delete require.cache[taskRunnerPath];
+  delete require.cache[taskRunnerRuntimePath];
   require.cache[runnerPath].exports = {
     ...originalRunner,
     runCodexSession: fakeRunner
@@ -51,6 +53,7 @@ function loadTaskRunnerWithFakeRunner(fakeRunner) {
   const taskRunner = require(taskRunnerPath);
   require.cache[runnerPath].exports = originalRunner;
   delete require.cache[taskRunnerPath];
+  delete require.cache[taskRunnerRuntimePath];
   return taskRunner;
 }
 

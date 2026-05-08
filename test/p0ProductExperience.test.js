@@ -156,9 +156,13 @@ function loadCreateDiffReviewElementForTest(options = {}) {
 
 test('composer defaults to English task modes and keeps Chinese translations available', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   ).replace(/\r\n/g, '\n');
+  const composerPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerPanel.js'),
+    'utf8'
+  );
 
   const i18n = fs.readFileSync(
     path.join(__dirname, '../extension/src/shared/i18n.js'),
@@ -169,9 +173,9 @@ test('composer defaults to English task modes and keeps Chinese translations ava
     'utf8'
   );
 
-  assert.match(contentScript, /<option value="ask">Ask<\/option>/);
-  assert.match(contentScript, /<option value="confirm">Suggest<\/option>/);
-  assert.match(contentScript, /<option value="auto">Auto<\/option>/);
+  assert.match(composerPanel, /data-mode-choice="ask"[\s\S]*>Ask<\/button>/);
+  assert.match(composerPanel, /data-mode-choice="confirm"[\s\S]*>Suggest<\/button>/);
+  assert.match(composerPanel, /data-mode-choice="auto"[\s\S]*>Auto<\/button>/);
   assert.match(i18n, /modeAsk:\s*'只问不改'/);
   assert.match(i18n, /modeConfirm:\s*'建议修改'/);
   assert.match(i18n, /modeAuto:\s*'自动写入'/);
@@ -179,19 +183,24 @@ test('composer defaults to English task modes and keeps Chinese translations ava
 
 test('composer shows confirm and auto as explicit visible write-mode choices', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const composerPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerPanel.js'),
     'utf8'
   );
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
+  const contentSurface = `${contentScript}\n${composerPanel}`;
 
-  assert.match(contentScript, /class="codex-mode-row"/);
-  assert.match(contentScript, /class="codex-mode-switch"/);
-  assert.match(contentScript, /data-mode-choice="ask"/);
-  assert.match(contentScript, /data-mode-choice="confirm"/);
-  assert.match(contentScript, /data-mode-choice="auto"/);
+  assert.match(contentSurface, /class="codex-mode-row"/);
+  assert.match(contentSurface, /class="codex-mode-switch"/);
+  assert.match(contentSurface, /data-mode-choice="ask"/);
+  assert.match(contentSurface, /data-mode-choice="confirm"/);
+  assert.match(contentSurface, /data-mode-choice="auto"/);
   assert.match(contentScript, /function selectMode\(/);
   assert.match(contentScript, /function syncModeControls\(/);
   assert.match(contentScript, /querySelectorAll\('\[data-mode-choice\]'\)/);
@@ -201,7 +210,7 @@ test('composer shows confirm and auto as explicit visible write-mode choices', (
 
 test('run timeline uses user-facing action transcript and undo language', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -219,7 +228,7 @@ test('run timeline uses user-facing action transcript and undo language', () => 
 
 test('task runs sync the full project only when a Codex run starts', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
@@ -238,7 +247,7 @@ test('task runs sync the full project only when a Codex run starts', () => {
 
 test('project settings expose governed rules and local skills without Overleaf asset upload controls', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const attachmentScript = fs.readFileSync(
@@ -257,15 +266,20 @@ test('project settings expose governed rules and local skills without Overleaf a
     path.join(__dirname, '../extension/src/content/localSkillsPanel.js'),
     'utf8'
   );
+  const settingsPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/settingsPanel.js'),
+    'utf8'
+  );
+  const settingsSource = `${contentScript}\n${settingsPanel}`;
 
-  assert.match(contentScript, /data-project-settings-panel/);
-  assert.match(contentScript, /data-governance-readonly-patterns/);
-  assert.match(contentScript, /data-governance-writable-patterns/);
-  assert.match(contentScript, /data-sensitive-check-enabled/);
-  assert.match(contentScript, /data-sensitive-confirm-allowed/);
-  assert.match(contentScript, /data-load-codex-local-skills/);
-  assert.match(contentScript, /data-load-codex-overleaf-skills/);
-  assert.match(contentScript, /data-local-skill-list/);
+  assert.match(settingsSource, /data-project-settings-panel/);
+  assert.match(settingsSource, /data-governance-readonly-patterns/);
+  assert.match(settingsSource, /data-governance-writable-patterns/);
+  assert.match(settingsSource, /data-sensitive-check-enabled/);
+  assert.match(settingsSource, /data-sensitive-confirm-allowed/);
+  assert.match(settingsSource, /data-load-codex-local-skills/);
+  assert.match(settingsSource, /data-load-codex-overleaf-skills/);
+  assert.match(settingsSource, /data-local-skill-list/);
   assert.match(contentScript, /CodexOverleafLocalSkillsPanel/);
   assert.match(contentScript, /localSkillsPanel\.refreshLocalSkills/);
   assert.match(localSkillsPanel, /codexOverleafSkills/);
@@ -376,7 +390,7 @@ test('project settings renders only Codex Overleaf managed skills', async () => 
 
 test('composer slash menu offers Codex Overleaf skill installation and installed skills', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const css = fs.readFileSync(
@@ -387,17 +401,22 @@ test('composer slash menu offers Codex Overleaf skill installation and installed
     path.join(__dirname, '../extension/src/shared/i18n.js'),
     'utf8'
   );
+  const composerPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerPanel.js'),
+    'utf8'
+  );
+  const composerSource = `${contentScript}\n${composerPanel}`;
   const keydownBody = contentScript.match(/function handleTaskInputKeydown\(event\) \{[\s\S]*?\n  function createDiffReviewElement/)?.[0] || '';
   const selectBody = extractFunction(contentScript, 'selectSlashCommand');
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
 
-  assert.match(contentScript, /data-slash-menu/);
-  assert.match(contentScript, /data-slash-command="install-skill"/);
-  assert.match(contentScript, /data-slash-command-kind/);
+  assert.match(composerSource, /data-slash-menu/);
+  assert.match(composerSource, /data-slash-command="install-skill"/);
+  assert.match(composerSource, /data-slash-command-kind/);
   assert.match(contentScript, /scope:\s*'codex-overleaf'/);
-  assert.match(contentScript, /data-composer-skill-context/);
-  assert.match(contentScript, /data-composer-skill-label/);
-  assert.match(contentScript, /data-composer-skill-clear/);
+  assert.match(composerSource, /data-composer-skill-context/);
+  assert.match(composerSource, /data-composer-skill-label/);
+  assert.match(composerSource, /data-composer-skill-clear/);
   assert.match(keydownBody, /handleSlashMenuKeydown\(event\)/);
   assert.match(contentScript, /function updateSlashMenuForTaskInput/);
   assert.match(contentScript, /function refreshCodexOverleafSkillsForSlashMenu/);
@@ -426,7 +445,7 @@ test('composer slash menu offers Codex Overleaf skill installation and installed
 
 test('task runs use sensitive preflight, skill toggles, governance gating, binary confirmation, and audit summaries', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
@@ -458,11 +477,15 @@ test('task runs use sensitive preflight, skill toggles, governance gating, binar
 
 test('composer supports pasted or dropped turn attachments without Overleaf asset writeback', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const attachmentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/composerAttachments.js'),
+    'utf8'
+  );
+  const composerPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerPanel.js'),
     'utf8'
   );
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../extension/manifest.json'), 'utf8'));
@@ -470,14 +493,17 @@ test('composer supports pasted or dropped turn attachments without Overleaf asse
   const clearBody = extractFunction(contentScript, 'clearTaskComposer');
   const scriptOrder = manifest.content_scripts[0].js;
 
-  assert.match(contentScript, /data-attachment-strip/);
+  assert.match(composerPanel, /data-attachment-strip/);
   assert.ok(
     scriptOrder.indexOf('src/content/composerAttachments.js') < scriptOrder.indexOf('src/contentScript.js'),
     'composer attachment controller loads before contentScript'
   );
-  assert.match(contentScript, /\[data-task\]'\)\.addEventListener\('paste', handleComposerPaste\)/);
-  assert.match(contentScript, /\[data-composer-form\]'\)\.addEventListener\('dragover', handleComposerDragOver\)/);
-  assert.match(contentScript, /\[data-composer-form\]'\)\.addEventListener\('drop', handleComposerDrop\)/);
+  assert.match(composerPanel, /'paste'/);
+  assert.match(composerPanel, /'dragover'/);
+  assert.match(composerPanel, /'drop'/);
+  assert.match(contentScript, /onPaste:\s*handleComposerPaste/);
+  assert.match(contentScript, /onDragOver:\s*handleComposerDragOver/);
+  assert.match(contentScript, /onDrop:\s*handleComposerDrop/);
   assert.match(attachmentScript, /createComposerAttachmentController/);
   assert.match(contentScript, /function addComposerAttachmentFiles/);
   assert.match(contentScript, /function renderComposerAttachments/);
@@ -555,18 +581,22 @@ test('composer attachment adds dedupe the same file while async reads are pendin
 
 test('composer and run history render image previews and file attachment icons', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const attachmentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/composerAttachments.js'),
     'utf8'
   );
+  const composerPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerPanel.js'),
+    'utf8'
+  );
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
-  const composerMarkup = contentScript.match(/<form class="codex-composer" data-composer-form>[\s\S]*?<\/form>/)?.[0] || '';
+  const composerMarkup = composerPanel.match(/<form class="codex-composer" data-composer-form>[\s\S]*?<\/form>/)?.[0] || '';
   const startRunBody = contentScript.match(/function startRunView\(\{[\s\S]*?\n  function finishRunView/)?.[0] || '';
   const renderCardBody = contentScript.match(/function renderRunCard\(run\) \{[\s\S]*?\n  function getRunStatusText/)?.[0] || '';
   const renderAttachmentsBody = attachmentScript.match(/function renderAttachmentPreviewList[\s\S]*?\n  function showAttachmentPreviewDialog/)?.[0] || '';
@@ -593,7 +623,7 @@ test('composer and run history render image previews and file attachment icons',
 
 test('reused mirror sensitive preflight scans native mirror before Codex dispatch', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const preflightBody = extractFunction(contentScript, 'runSensitivePreflight');
@@ -607,7 +637,7 @@ test('reused mirror sensitive preflight scans native mirror before Codex dispatc
 
 test('post-write compile summaries are included in the final completion report', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  async function verifyPostWriteSaveState/)?.[0] || '';
@@ -622,7 +652,7 @@ test('post-write compile summaries are included in the final completion report',
 
 test('task run snapshots request binary assets so local LaTeX can see Figures directories', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const getRunProjectSnapshotBody = contentScript.match(/async function getRunProjectSnapshot\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -634,7 +664,7 @@ test('task run snapshots request binary assets so local LaTeX can see Figures di
 
 test('task run snapshots bypass cache so Codex sees the latest Overleaf state', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const getRunProjectSnapshotBody = contentScript.match(/async function getRunProjectSnapshot\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -645,7 +675,7 @@ test('task run snapshots bypass cache so Codex sees the latest Overleaf state', 
 
 test('whole-project ZIP sync waits long enough before falling back to focused files', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const getRunProjectSnapshotBody = contentScript.match(/async function getRunProjectSnapshot\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -659,7 +689,7 @@ test('whole-project ZIP sync waits long enough before falling back to focused fi
 
 test('task run blocks unfocused partial project snapshots before they can rewrite the local mirror', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const warningsBody = contentScript.match(/function getProjectSnapshotWarnings\(project\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -672,7 +702,7 @@ test('task run blocks unfocused partial project snapshots before they can rewrit
 
 test('fresh warm mirror can carry a run when Overleaf only returns a partial snapshot', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const i18n = fs.readFileSync(
@@ -691,7 +721,7 @@ test('fresh warm mirror can carry a run when Overleaf only returns a partial sna
 
 test('successful Overleaf writeback refreshes page snapshot cache and native mirror baseline', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
@@ -703,7 +733,7 @@ test('successful Overleaf writeback refreshes page snapshot cache and native mir
 
 test('post-write side effects wait for verified Overleaf save state', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
@@ -727,7 +757,7 @@ test('post-write side effects wait for verified Overleaf save state', () => {
 
 test('empty or malformed apply results do not trigger save verification', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
@@ -754,7 +784,7 @@ test('empty or malformed apply results do not trigger save verification', () => 
 
 test('malformed skipped apply result entries are not treated as partial writeback', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  async function verifyPostWriteSaveState/)?.[0] || '';
@@ -778,7 +808,7 @@ test('malformed skipped apply result entries are not treated as partial writebac
 
 test('post-write mirror refresh waits for verified save but auto compile still delegates to compile bridge', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const refreshBody = contentScript.match(/async function refreshProjectMirrorAfterWriteback[\s\S]*?\n  function getAppliedOperationPaths/)?.[0] || '';
@@ -808,7 +838,7 @@ test('post-write mirror refresh waits for verified save but auto compile still d
 
 test('no-change writeback path does not wait for Overleaf save verification', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   ).replace(/\r\n/g, '\n');
   const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
@@ -823,7 +853,7 @@ test('no-change writeback path does not wait for Overleaf save verification', ()
 
 test('post-write mirror refresh refuses partial snapshots before touching native baseline', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const refreshBody = contentScript.match(/async function refreshProjectMirrorAfterWriteback[\s\S]*?\n  function mergeVerifiedAppliedFiles/)?.[0] || '';
@@ -835,7 +865,7 @@ test('post-write mirror refresh refuses partial snapshots before touching native
 
 test('idle background sync does not poll or touch the Overleaf editor', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const initBody = contentScript.match(/async function init\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -851,7 +881,7 @@ test('idle background sync does not poll or touch the Overleaf editor', () => {
 
 test('mirror prefetch is non-invasive and never enables editor navigation', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const prefetchBody = contentScript.match(/async function syncMirrorPrefetch[\s\S]*?\n  function/)?.[0] || '';
@@ -863,7 +893,7 @@ test('mirror prefetch is non-invasive and never enables editor navigation', () =
 
 test('warm send checks mirror status before full project snapshot fallback', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
@@ -874,7 +904,7 @@ test('warm send checks mirror status before full project snapshot fallback', () 
 
 test('send waits for in-flight mirror prefetch before starting codex run', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
@@ -891,7 +921,7 @@ test('send waits for in-flight mirror prefetch before starting codex run', () =>
 
 test('warm send verifies a non-invasive current or focus overlay before reusing mirror', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const warmStartBody = contentScript.match(/async function resolveWarmRunStart[\s\S]*?\n  async function prepareMirrorStaleRetry/)?.[0] || '';
@@ -908,7 +938,7 @@ test('warm send verifies a non-invasive current or focus overlay before reusing 
 
 test('focused OT freshness is checked before project-level warm mirror freshness', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const otWarmMirrorController = fs.readFileSync(
@@ -934,7 +964,7 @@ test('focused OT freshness is checked before project-level warm mirror freshness
 
 test('OT warm starts force focused run params for initial and thread-resume codex runs', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
@@ -951,7 +981,7 @@ test('OT warm starts force focused run params for initial and thread-resume code
 
 test('experimental OT warm mirror polls page OT events and patches the native mirror', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const pollBody = extractFunction(contentScript, 'pollOtEvents');
@@ -972,7 +1002,7 @@ test('experimental OT warm mirror polls page OT events and patches the native mi
 
 test('invalid native OT patch results mark the warm mirror inconsistent using skippedFiles fields', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const flushBody = extractFunction(contentScript, 'flushOtPatchBatch');
@@ -985,7 +1015,7 @@ test('invalid native OT patch results mark the warm mirror inconsistent using sk
 
 test('native OT patch success requires valid appliedCount and appliedFiles evidence', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const flushBody = extractFunction(contentScript, 'flushOtPatchBatch');
@@ -1010,7 +1040,7 @@ test('native OT patch success requires valid appliedCount and appliedFiles evide
 
 test('warm mirror overlays preserve active file alongside focused files', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const helperBody = contentScript.match(/function buildSnapshotFileOverlays\(project = \{\}, focusFiles = \[\], options = \{\}\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -1023,7 +1053,7 @@ test('warm mirror overlays preserve active file alongside focused files', () => 
 
 test('ask mode is not blocked by write-safety preconditions', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
@@ -1042,7 +1072,7 @@ test('ask mode is not blocked by write-safety preconditions', () => {
 
 test('ask mode ignores unexpected local Codex writeback changes without failing the answer', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const applySyncBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  async function verifyPostWriteSaveState/)?.[0] || '';
@@ -1065,7 +1095,7 @@ test('ask mode ignores unexpected local Codex writeback changes without failing 
 
 test('composer clears the submitted task as soon as Codex accepts the run', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
@@ -1079,7 +1109,7 @@ test('composer clears the submitted task as soon as Codex accepts the run', () =
 
 test('deleting a UI session also clears plugin-isolated Codex history', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
@@ -1093,21 +1123,30 @@ test('deleting a UI session also clears plugin-isolated Codex history', () => {
 
 test('session deletion status uses plugin toast instead of task transcript space', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const panelRenderer = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/panelRenderer.js'),
+    'utf8'
+  );
+  const sessionPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/sessionPanel.js'),
     'utf8'
   );
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
+  const contentSurface = `${contentScript}\n${sessionPanel}\n${panelRenderer}`;
   const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
   const plainLogBody = contentScript.match(/function appendPlainLog\(text\) \{[\s\S]*?\n  function updateProbeNotice/)?.[0] || '';
   const toastCss = css.match(/#codex-overleaf-panel \.codex-toast-region \{[\s\S]*?\n\}/)?.[0] || '';
-  const taskSectionIndex = contentScript.indexOf('<section class="codex-task-section">');
-  const toastRegionIndex = contentScript.indexOf('<div class="codex-toast-region" data-toast-region');
-  const threadSectionIndex = contentScript.indexOf('<section class="codex-thread-section">');
+  const taskSectionIndex = contentSurface.indexOf('<section class="codex-task-section">');
+  const toastRegionIndex = contentSurface.indexOf('<div class="codex-toast-region" data-toast-region');
+  const threadSectionIndex = contentSurface.indexOf('<section class="codex-thread-section">');
 
-  assert.match(contentScript, /data-toast-region/);
+  assert.match(contentSurface, /data-toast-region/);
   assert.match(contentScript, /function showPluginToast\(/);
   assert.ok(taskSectionIndex >= 0, 'task section exists');
   assert.ok(toastRegionIndex > taskSectionIndex, 'toast region renders below task section');
@@ -1121,7 +1160,7 @@ test('session deletion status uses plugin toast instead of task transcript space
 
 test('run history renders as a compact single-column transcript without persistent speaker rails', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const css = fs.readFileSync(
@@ -1147,7 +1186,7 @@ test('run history renders as a compact single-column transcript without persiste
 
 test('activity rows are compact lines, not per-event cards with persistent timestamps', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const css = fs.readFileSync(
@@ -1167,7 +1206,7 @@ test('activity rows are compact lines, not per-event cards with persistent times
 
 test('completed runs collapse processing history behind a processed summary', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const css = fs.readFileSync(
@@ -1186,7 +1225,7 @@ test('completed runs collapse processing history behind a processed summary', ()
 
 test('context compaction appears as a lightweight checkpoint inside processed history', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const agentTranscript = fs.readFileSync(
@@ -1209,7 +1248,7 @@ test('context compaction appears as a lightweight checkpoint inside processed hi
 
 test('run log autoscroll follows realtime output unless the user scrolls upward', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -1247,7 +1286,7 @@ test('task session navigation stays pinned while the transcript scrolls', () => 
 
 test('running Codex tasks do not block switching to another session for reading history', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const switchBody = contentScript.match(/async function switchSession\(sessionId\) \{[\s\S]*?\n  async function deleteSessionWithConfirm/)?.[0] || '';
@@ -1260,11 +1299,15 @@ test('running Codex tasks do not block switching to another session for reading 
 
 test('running Codex tasks only lock the running session, not the whole session list', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const sessionPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/sessionPanel.js'),
     'utf8'
   );
   const startNewBody = contentScript.match(/async function startNewSession\(\) \{[\s\S]*?\n  async function switchSession/)?.[0] || '';
@@ -1279,10 +1322,10 @@ test('running Codex tasks only lock the running session, not the whole session l
   assert.doesNotMatch(deleteBody, /Finish the current Codex task before deleting a session/);
   assert.match(sessionListBody, /pinnedSessionIds:\s*getRunningSessionIds\(\)/);
   assert.doesNotMatch(sessionListBody, /pinnedSessionIds:\s*\[currentRunView\?\.sessionId\]\.filter\(Boolean\)/);
-  assert.match(sessionListBody, /const isRunningSession = isSessionRunning\(session\)/);
-  assert.doesNotMatch(sessionListBody, /const isRunningSession = currentRunView\?\.sessionId === session\.id/);
-  assert.match(sessionListBody, /row\.dataset\.running = isRunningSession \? 'true' : 'false'/);
-  assert.match(sessionListBody, /deleteButton\.disabled = isRunningSession/);
+  assert.match(sessionPanel, /const isRunningSession = instance\.isSessionRunning\(session\)/);
+  assert.doesNotMatch(sessionPanel, /const isRunningSession = currentRunView\?\.sessionId === session\.id/);
+  assert.match(sessionPanel, /row\.dataset\.running = isRunningSession \? 'true' : 'false'/);
+  assert.match(sessionPanel, /deleteButton\.disabled = isRunningSession/);
   assert.match(contentScript, /function isSessionRunning\(session\) \{/);
   assert.match(contentScript, /run\.status === 'running'/);
   assert.match(css, /\.codex-session-row\[data-running="true"\]/);
@@ -1291,7 +1334,7 @@ test('running Codex tasks only lock the running session, not the whole session l
 
 test('running tasks are only marked interrupted when restoring persisted state after reload', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const sessionState = fs.readFileSync(
@@ -1308,7 +1351,7 @@ test('running tasks are only marked interrupted when restoring persisted state a
 
 test('session list keeps the selected historical session reachable', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const sessionState = fs.readFileSync(
@@ -1324,21 +1367,24 @@ test('session list keeps the selected historical session reachable', () => {
 
 test('session titles auto-name once and can be manually renamed inline', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
+  const sessionPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/sessionPanel.js'),
+    'utf8'
+  );
   const startRunBody = contentScript.match(/function startRunView\(\{ task, mode, model, reasoningEffort, speedTier \}\) \{[\s\S]*?\n  function finishRunView/)?.[0] || '';
-  const sessionListBody = contentScript.match(/function renderSessionList\(\{ showAll = false \} = \{\}\) \{[\s\S]*?\n  function getRunningSessionIds/)?.[0] || '';
 
   assert.match(startRunBody, /active\?\.titleSource !== 'manual'/);
   assert.match(startRunBody, /deriveSessionTitle/);
-  assert.match(sessionListBody, /codex-session-rename/);
-  assert.match(sessionListBody, /codex-session-title-input/);
-  assert.match(contentScript, /function beginSessionRename/);
+  assert.match(sessionPanel, /codex-session-rename/);
+  assert.match(sessionPanel, /codex-session-title-input/);
+  assert.match(sessionPanel, /function beginRename/);
   assert.match(contentScript, /cleanTitle \? 'manual' : 'auto'/);
   assert.match(css, /\.codex-session-rename/);
   assert.match(css, /\.codex-session-title-input/);
@@ -1346,7 +1392,7 @@ test('session titles auto-name once and can be manually renamed inline', () => {
 
 test('high-volume Codex stream output is throttled before panel rendering and storage writes', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const appendRunEventBody = contentScript.match(/function appendRunEvent\(input = \{\}\) \{[\s\S]*?\n  function getCurrentRunViewForRender/)?.[0] || '';
@@ -1364,7 +1410,11 @@ test('high-volume Codex stream output is throttled before panel rendering and st
 
 test('reviewing safety toggle is labeled instead of a mysterious check icon', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const composerPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerPanel.js'),
     'utf8'
   );
   const i18n = fs.readFileSync(
@@ -1376,7 +1426,7 @@ test('reviewing safety toggle is labeled instead of a mysterious check icon', ()
     'utf8'
   );
 
-  assert.match(contentScript, /data-i18n="requireReviewing">Track</);
+  assert.match(`${contentScript}\n${composerPanel}`, /data-i18n="requireReviewing">Track</);
   assert.match(i18n, /requireReviewing:\s*'留痕'/);
   assert.match(i18n, /开启后，写入前会确认并尝试切到 Overleaf Reviewing\/Track Changes；删除仍需确认。/);
   assert.match(css, /\.codex-review-label/);
@@ -1384,7 +1434,7 @@ test('reviewing safety toggle is labeled instead of a mysterious check icon', ()
 
 test('write paths enforce Overleaf Reviewing before applying changes when requested', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const pageBridge = fs.readFileSync(
@@ -1410,13 +1460,14 @@ test('write paths enforce Overleaf Reviewing before applying changes when reques
   assert.match(pageBridge, /function ensureEditing\(/);
   assert.match(pageBridge, /requireReviewing:\s*params\.requireReviewing === true/);
   assert.match(pageBridge, /requireEditing:\s*params\.requireEditing === true/);
-  assert.match(pageBridge, /buildReviewingRequiredBlockedResult/);
-  assert.match(pageBridge, /buildEditingRequiredBlockedResult/);
+  const writebackRouter = fs.readFileSync(path.join(__dirname, '../extension/src/page/writebackRouter.js'), 'utf8');
+  assert.match(writebackRouter, /buildReviewingRequiredBlockedResult/);
+  assert.match(writebackRouter, /buildEditingRequiredBlockedResult/);
 });
 
 test('write tasks preflight Reviewing or Editing before syncing or starting local Codex', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
@@ -1448,7 +1499,7 @@ test('write tasks preflight Reviewing or Editing before syncing or starting loca
 
 test('native side-effecting requests are gated on compatibility before dispatch', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const sendNativeBody = extractFunction(contentScript, 'sendNative');
@@ -1466,10 +1517,10 @@ test('native side-effecting requests are gated on compatibility before dispatch'
   ]) {
     assert.match(contentScript, new RegExp(method.replace(/[.]/g, '\\.')));
   }
-  assert.match(ensureBody, /CodexOverleafCompatibility\.buildBridgePingParams/);
-  assert.match(ensureBody, /CodexOverleafCompatibility\.evaluateNativeCompatibility/);
-  assert.match(ensureBody, /CodexOverleafCompatibility\.isNativeMethodAllowed/);
-  assert.match(ensureBody, /native_incompatible/);
+  assert.match(ensureBody, /CodexOverleafCompatibility\?\.buildBridgePingParams/);
+  assert.match(ensureBody, /CodexOverleafCompatibility\?\.evaluateNativeCompatibility/);
+  assert.match(ensureBody, /CodexOverleafCompatibility\?\.isNativeMethodAllowed/);
+  assert.match(ensureBody, /native_update_required/);
   assert.match(ensureBody, /formatNativeCompatibilityBlockedMessage/);
   assert.match(sendNativeBody, /await ensureNativeCompatibilityForMethod\(payload\?\.method\)/);
   assert.match(sendNativeBody, /attachNativeCompatibilityEvidence/);
@@ -1479,7 +1530,7 @@ test('native side-effecting requests are gated on compatibility before dispatch'
 
 test('cancellation during native compatibility gate prevents codex.run dispatch', async () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const sendNativeBody = extractFunction(contentScript, 'sendNative');
@@ -1522,7 +1573,7 @@ test('cancellation during native compatibility gate prevents codex.run dispatch'
 
 test('read-only native discovery and diagnostics bypass the compatibility run gate', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const loadModelBody = extractFunction(contentScript, 'loadModelOptions');
@@ -1539,7 +1590,7 @@ test('read-only native discovery and diagnostics bypass the compatibility run ga
 
 test('write preflight gives natural feedback for automatic Reviewing or Editing activation', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const preflightBody = contentScript.match(/async function preflightWriteSafety\([^)]*\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
@@ -1556,7 +1607,7 @@ test('write preflight gives natural feedback for automatic Reviewing or Editing 
 
 test('native and raw agent events go through the human transcript mapper', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const appendNativeEventBody = contentScript.match(/function appendNativeEvent\(event\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -1569,7 +1620,7 @@ test('native and raw agent events go through the human transcript mapper', () =>
 
 test('Codex JSONL messages and tool progress become visible without raw command labels', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const agentTranscript = fs.readFileSync(
@@ -1587,7 +1638,7 @@ test('Codex JSONL messages and tool progress become visible without raw command 
 
 test('Codex realtime deltas update one stream instead of appending raw event rows', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const agentTranscript = fs.readFileSync(
@@ -1614,7 +1665,7 @@ test('Codex realtime deltas update one stream instead of appending raw event row
 
 test('final assistant summary is collected from all assistant stream messages', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -1627,7 +1678,7 @@ test('final assistant summary is collected from all assistant stream messages', 
 
 test('same UI session records final assistant summary for the next Codex turn', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -1640,7 +1691,7 @@ test('same UI session records final assistant summary for the next Codex turn', 
 
 test('post-run session persistence failures do not turn ask results into failed analysis', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const successPath = contentScript.match(/const syncOutcome = await applySyncChangesToOverleaf[\s\S]*?Codex 结果已生成，但保存本地会话记录失败[\s\S]*?\}\);/)?.[0] || '';
@@ -1654,7 +1705,7 @@ test('post-run session persistence failures do not turn ask results into failed 
 
 test('completion report is structured around user outcomes rather than a one-line status', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const agentTranscript = fs.readFileSync(
@@ -1692,7 +1743,7 @@ test('completion report is structured around user outcomes rather than a one-lin
 
 test('writeback completion report keeps Codex final summary as the conclusion', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const applyBody = contentScript.match(/async function applySyncChangesToOverleaf[\s\S]*?\n  function buildSyncApplyOperations/)?.[0] || '';
@@ -1705,7 +1756,7 @@ test('writeback completion report keeps Codex final summary as the conclusion', 
 
 test('completion report renderer turns inline numbered findings into readable ordered lists', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -1716,7 +1767,7 @@ test('completion report renderer turns inline numbered findings into readable or
 
 test('auto mode shows a readonly diff after applying Codex changes', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const diffReviewPanel = fs.readFileSync(
@@ -1740,7 +1791,7 @@ test('auto mode shows a readonly diff after applying Codex changes', () => {
 
 test('confirm diff review uses immediate per-file decisions and batch accept reject actions', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const diffReviewPanel = fs.readFileSync(
@@ -1774,7 +1825,7 @@ test('confirm diff review uses immediate per-file decisions and batch accept rej
 
 test('confirm diff review renders hunk controls and resolves accepted hunk patches', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const diffReviewPanel = fs.readFileSync(
@@ -1796,7 +1847,7 @@ test('confirm diff review renders hunk controls and resolves accepted hunk patch
 
 test('confirm diff review exposes editor-native hunk review limits and shortcuts', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const diffReviewPanel = fs.readFileSync(
@@ -2232,7 +2283,7 @@ test('file-level hunk review action preserves previous hunk decisions for that f
 
 test('auto recompile is based on successfully applied Overleaf writes', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
@@ -2246,7 +2297,7 @@ test('auto recompile is based on successfully applied Overleaf writes', () => {
 
 test('@compile-log context is preserved across Codex run retries', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
@@ -2259,7 +2310,7 @@ test('@compile-log context is preserved across Codex run retries', () => {
 
 test('runTask freezes submitted custom instructions for initial and retry codex runs', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
@@ -2294,7 +2345,7 @@ test('runTask freezes submitted custom instructions for initial and retry codex 
 
 test('content script run-param wrapper uses explicit custom instructions before falling back to getter', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const wrapperBody = contentScript.match(/function buildCodexRunParams\(\{[\s\S]*?\n  function appendRunCancelledReport/)?.[0] || '';
@@ -2341,7 +2392,7 @@ test('content script run-param wrapper uses explicit custom instructions before 
 
 test('warm mirror stale retry fetches a real snapshot before full-sync retry', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const staleRetryBody = contentScript.match(/if \(!response\.ok && response\.error\?\.code === 'mirror_stale' && useExistingMirror\) \{[\s\S]*?\n      \}/)?.[0] || '';
@@ -2357,7 +2408,7 @@ test('warm mirror stale retry fetches a real snapshot before full-sync retry', (
 
 test('warm mirror writeback does not seed new empty files as existing base files', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const helperBody = contentScript.match(/function mergeProjectWithSyncChangeBaseFiles\(project = \{\}, syncChanges = \[\]\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -2377,7 +2428,7 @@ test('warm mirror writeback does not seed new empty files as existing base files
 
 test('mirror prefetch treats expected busy failures as non-retained skips', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const prefetchBody = contentScript.match(/async function syncMirrorPrefetch[\s\S]*?\n  function/)?.[0] || '';
@@ -2391,7 +2442,7 @@ test('mirror prefetch treats expected busy failures as non-retained skips', () =
 
 test('warm synthetic runs announce mirror reuse without logging empty snapshot copy', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
@@ -2406,7 +2457,7 @@ test('warm synthetic runs announce mirror reuse without logging empty snapshot c
 
 test('compile page bridge calls use long-running timeouts', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -2419,7 +2470,7 @@ test('compile page bridge calls use long-running timeouts', () => {
 
 test('tracked-change undo page bridge calls have enough time to reject many changes', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const timeoutBody = contentScript.match(/function getPageBridgeTimeoutMs\(method\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -2430,7 +2481,7 @@ test('tracked-change undo page bridge calls have enough time to reject many chan
 
 test('partial writeback report tells the user what already changed and how to recover', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const appendApplyResultBody = contentScript.match(/function appendApplyResult\(result\) \{[\s\S]*?\n  function formatOperationType/)?.[0] || '';
@@ -2454,7 +2505,7 @@ test('partial writeback report tells the user what already changed and how to re
 
 test('undo flow blocks legacy full-file replaceAll restores that would mark whole documents changed', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const undoRunBody = contentScript.match(/async function undoRun\(runId\) \{[\s\S]*?\n  function recordUndoFromApply/)?.[0] || '';
@@ -2468,7 +2519,7 @@ test('undo flow blocks legacy full-file replaceAll restores that would mark whol
 
 test('undo flow uses no-trace restoring instead of requiring Reviewing write mode', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const undoRunBody = contentScript.match(/async function undoRun\(runId\) \{[\s\S]*?\n  function findUnsafeFullFileUndoOperation/)?.[0] || '';
@@ -2480,7 +2531,7 @@ test('undo flow uses no-trace restoring instead of requiring Reviewing write mod
 
 test('no-trace undo restores original file snapshots in one operation per file', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const undoRunBody = contentScript.match(/async function undoRun\(runId\) \{[\s\S]*?\n  async function undoRunTrackedChanges/)?.[0] || '';
@@ -2499,7 +2550,7 @@ test('no-trace undo restores original file snapshots in one operation per file',
 
 test('reviewing write undo rejects Overleaf tracked changes instead of text patching', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const undoRunBody = contentScript.match(/async function undoRun\(runId\) \{[\s\S]*?\n  function appendUndoReviewingPolicyEvent/)?.[0] || '';
@@ -2514,11 +2565,15 @@ test('reviewing write undo rejects Overleaf tracked changes instead of text patc
 
 test('reviewing write undo passes post-run content so Overleaf native undo can revert the whole transaction', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const pageBridge = fs.readFileSync(
     path.join(__dirname, '../extension/src/pageBridge.js'),
+    'utf8'
+  );
+  const writebackRouter = fs.readFileSync(
+    path.join(__dirname, '../extension/src/page/writebackRouter.js'),
     'utf8'
   );
   const undoRunBody = contentScript.match(/async function undoRunTrackedChanges\(runId, run\) \{[\s\S]*?\n  function getRunUndoCount/)?.[0] || '';
@@ -2533,15 +2588,15 @@ test('reviewing write undo passes post-run content so Overleaf native undo can r
   assert.match(undoCountBody, /hasTrackedEditorUndo\(run\)\s*\?\s*1\s*:\s*0/);
   assert.match(recordUndoBody, /hasTrackedEditorUndo\(record\)/);
   assert.match(recordUndoBody, /undoCheckpointNative/);
-  assert.match(pageBridge, /function rejectTrackedChangesViaEditorUndo/);
-  assert.match(pageBridge, /rejectTrackedChangesViaEditorUndo\(expectedFiles,\s*postFiles,\s*applied\)[\s\S]*?if \(!trackedChanges\.length\)/);
-  assert.match(pageBridge, /function findEditorUndoControl/);
-  assert.match(pageBridge, /method:\s*'overleaf-editor-undo'/);
+  assert.match(writebackRouter, /function rejectTrackedChangesViaEditorUndo/);
+  assert.match(writebackRouter, /rejectTrackedChangesViaEditorUndo\(expectedFiles,\s*postFiles,\s*applied\)[\s\S]*?if \(!trackedChanges\.length\)/);
+  assert.match(writebackRouter, /function findEditorUndoControl/);
+  assert.match(writebackRouter, /method:\s*'overleaf-editor-undo'/);
 });
 
 test('change preview is grouped by file with edit evidence instead of raw operation counts', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -2569,7 +2624,7 @@ test('stale write copy explains user or collaborator edits without snapshot jarg
 
 test('confirmation prompts render as Codex plugin dialogs instead of browser page alerts', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const css = fs.readFileSync(
@@ -2600,7 +2655,7 @@ test('confirmation prompts render as Codex plugin dialogs instead of browser pag
 
 test('English locale is applied to dialogs, diff review, undo controls, and transcripts', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const diffReviewPanel = fs.readFileSync(
@@ -2631,7 +2686,7 @@ test('English locale is applied to dialogs, diff review, undo controls, and tran
 
 test('page bridge messages require same-origin responses in both directions', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const pageBridge = fs.readFileSync(
@@ -2645,7 +2700,7 @@ test('page bridge messages require same-origin responses in both directions', ()
 
 test('page bridge exposes a read-only realtime OT observer', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const pageBridge = fs.readFileSync(
@@ -2686,7 +2741,7 @@ test('page bridge exposes a read-only realtime OT observer', () => {
 
 test('header exposes project custom instructions settings and editor surface', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const i18n = fs.readFileSync(
@@ -2697,7 +2752,16 @@ test('header exposes project custom instructions settings and editor surface', (
     path.join(__dirname, '../extension/styles/panel.css'),
     'utf8'
   );
-  const headerActions = contentScript.match(/<div class="codex-vscode-head-actions"[\s\S]*?<div class="codex-vscode-main"/)?.[0] || '';
+  const panelRenderer = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/panelRenderer.js'),
+    'utf8'
+  );
+  const settingsPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/settingsPanel.js'),
+    'utf8'
+  );
+  const headerActions = panelRenderer.match(/<div class="codex-vscode-head-actions"[\s\S]*data-custom-instructions-settings[\s\S]*?<\/div>/)?.[0] || '';
+  const settingsSource = `${contentScript}\n${settingsPanel}`;
 
   assert.match(headerActions, /data-new-session/);
   assert.match(headerActions, /data-custom-instructions-settings/);
@@ -2705,10 +2769,10 @@ test('header exposes project custom instructions settings and editor surface', (
     headerActions.indexOf('data-new-session') < headerActions.indexOf('data-custom-instructions-settings'),
     'custom instructions settings must be the rightmost header action after New Session'
   );
-  assert.match(contentScript, /data-custom-instructions-panel/);
-  assert.match(contentScript, /data-custom-instructions-input/);
-  assert.match(contentScript, /data-custom-instructions-save/);
-  assert.match(contentScript, /<a class="codex-custom-instructions-learn-more" data-custom-instructions-learn-more data-i18n="customInstructionsLearnMore"/);
+  assert.match(settingsSource, /data-custom-instructions-panel/);
+  assert.match(settingsSource, /data-custom-instructions-input/);
+  assert.match(settingsSource, /data-custom-instructions-save/);
+  assert.match(settingsSource, /<a class="codex-custom-instructions-learn-more" data-custom-instructions-learn-more data-i18n="customInstructionsLearnMore"/);
   for (const key of [
     'customInstructionsTitle',
     'customInstructionsSubtitle',
@@ -2716,7 +2780,7 @@ test('header exposes project custom instructions settings and editor surface', (
     'personalizationConfig',
     'customInstructionsPlaceholder'
   ]) {
-    assert.match(contentScript, new RegExp(`data-i18n="${key}"|tr\\('${key}'\\)`), `content script should use ${key}`);
+    assert.match(settingsSource, new RegExp(`data-i18n="${key}"|tr\\('${key}'\\)`), `settings panel should use ${key}`);
     assert.match(i18n, new RegExp(`${key}:\\s*'`), `i18n should define ${key}`);
   }
   assert.match(css, /\.codex-custom-instructions-panel/);
@@ -2725,21 +2789,26 @@ test('header exposes project custom instructions settings and editor surface', (
 
 test('project custom instructions Learn more control is actionable', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
+  const settingsPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/settingsPanel.js'),
+    'utf8'
+  );
+  const contentSurface = `${contentScript}\n${settingsPanel}`;
 
-  assert.match(contentScript, /data-custom-instructions-learn-more/);
-  assert.match(contentScript, /href="https:\/\/developers\.openai\.com\/codex\/guides\/agents-md#create-global-guidance"/);
-  assert.match(contentScript, /target="_blank"/);
-  assert.match(contentScript, /rel="noopener noreferrer"/);
+  assert.match(contentSurface, /data-custom-instructions-learn-more/);
+  assert.match(contentSurface, /href="https:\/\/developers\.openai\.com\/codex\/guides\/agents-md#create-global-guidance"/);
+  assert.match(contentSurface, /target="_blank"/);
+  assert.match(contentSurface, /rel="noopener noreferrer"/);
   assert.doesNotMatch(contentScript, /showCustomInstructionsLearnMore/);
   assert.doesNotMatch(contentScript, /customInstructionsLearnMoreToast/);
 });
 
 test('project custom instructions editor saves and restores by project', async () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const harness = Function(`
@@ -2774,11 +2843,36 @@ test('project custom instructions editor saves and restores by project', async (
         return controls[selector] || null;
       }
     };
+    const settingsPanelInstance = {};
+    const SettingsPanel = {
+      show() {
+        customInstructionsPanel.hidden = false;
+        settingsButton.dataset.active = 'true';
+        settingsButton.setAttribute('aria-expanded', 'true');
+        customInstructionsInput.focus();
+      },
+      hide() {
+        customInstructionsPanel.hidden = true;
+        settingsButton.dataset.active = 'false';
+        settingsButton.setAttribute('aria-expanded', 'false');
+      },
+      setStatus() {},
+      clearStatus() {},
+      loadState() {},
+      readState() {
+        return {
+          governanceRules: {},
+          skillToggles: {}
+        };
+      }
+    };
     function getCurrentProjectId() { return currentProjectId; }
     function closeDiagnosticsMenu() {}
     function closeDiagnosticsResult() {}
     function closeModelConfigPopover() {}
     function closeContextTray() {}
+    function syncProjectSettingsEditorForProject() {}
+    function refreshLocalSkills() { return Promise.resolve(); }
     function tr(key) { return key; }
     function showPluginToast(message) { lastToast = message; }
     async function saveState() { savedCount++; }
@@ -2832,7 +2926,7 @@ test('project custom instructions editor saves and restores by project', async (
 
 test('project settings gear toggles the settings panel closed when already open', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const harness = Function(`
@@ -2865,11 +2959,33 @@ test('project settings gear toggles the settings panel closed when already open'
         return controls[selector] || null;
       }
     };
+    const settingsPanelInstance = {};
+    const SettingsPanel = {
+      show() {
+        customInstructionsPanel.hidden = false;
+        settingsButton.dataset.active = 'true';
+        settingsButton.setAttribute('aria-expanded', 'true');
+        customInstructionsInput.focus();
+      },
+      hide() {
+        customInstructionsPanel.hidden = true;
+        settingsButton.dataset.active = 'false';
+        settingsButton.setAttribute('aria-expanded', 'false');
+      },
+      isVisible() {
+        return customInstructionsPanel.hidden === false;
+      },
+      setStatus() {},
+      clearStatus() {},
+      loadState() {}
+    };
     function getCurrentProjectId() { return currentProjectId; }
     function closeDiagnosticsMenu() {}
     function closeDiagnosticsResult() {}
     function closeModelConfigPopover() {}
     function closeContextTray() {}
+    function syncProjectSettingsEditorForProject() {}
+    function refreshLocalSkills() { return Promise.resolve(); }
     function tr(key) { return key; }
     ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
     ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
@@ -2899,7 +3015,7 @@ test('project settings gear toggles the settings panel closed when already open'
 
 test('project settings transient status is cleared when reopening the panel', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const harness = Function(`
@@ -2936,6 +3052,29 @@ test('project settings transient status is cleared when reopening the panel', ()
       querySelector(selector) {
         return controls[selector] || null;
       }
+    };
+    const settingsPanelInstance = {};
+    const SettingsPanel = {
+      show() {
+        customInstructionsPanel.hidden = false;
+        settingsButton.dataset.active = 'true';
+        settingsButton.setAttribute('aria-expanded', 'true');
+        customInstructionsInput.focus();
+      },
+      hide() {
+        customInstructionsPanel.hidden = true;
+        settingsButton.dataset.active = 'false';
+        settingsButton.setAttribute('aria-expanded', 'false');
+      },
+      setStatus(_instance, text, status) {
+        projectSettingsStatus.textContent = text || '';
+        projectSettingsStatus.dataset.status = status;
+      },
+      clearStatus() {
+        projectSettingsStatus.textContent = '';
+        delete projectSettingsStatus.dataset.status;
+      },
+      loadState() {}
     };
     function getCurrentProjectId() { return currentProjectId; }
     function closeDiagnosticsMenu() {}
@@ -2977,7 +3116,7 @@ test('project settings transient status is cleared when reopening the panel', ()
 
 test('mirror prefetch state sync preserves unsaved custom instructions for same project', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const harness = Function(`
@@ -3042,7 +3181,7 @@ test('mirror prefetch state sync preserves unsaved custom instructions for same 
 
 test('stored project custom instructions are rehydrated before lightweight prefs are saved', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const loadBody = contentScript.match(/async function loadStoredState\(\) \{[\s\S]*?\n  async function saveState/)?.[0] || '';
@@ -3056,7 +3195,7 @@ test('stored project custom instructions are rehydrated before lightweight prefs
 
 test('saveState merges latest lightweight prefs before saving project-scoped settings', async () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const StorageDbModule = require('../extension/src/shared/storageDb');
@@ -3211,7 +3350,7 @@ test('saveState merges latest lightweight prefs before saving project-scoped set
 
 test('experimental OT sync ignores stale responses and reverts failed starts to default off', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const syncBody = contentScript.match(/async function syncOtWarmMirrorController\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -3241,7 +3380,7 @@ test('experimental OT sync ignores stale responses and reverts failed starts to 
 
 test('experimental OT input persistence does not leak checked state after project change', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const harness = Function(`
@@ -3304,7 +3443,7 @@ test('experimental OT input persistence does not leak checked state after projec
 
 test('experimental OT stop does not mark off when stop bridge fails', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const syncBody = contentScript.match(/async function syncOtWarmMirrorController\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -3323,7 +3462,7 @@ test('experimental OT stop does not mark off when stop bridge fails', () => {
 
 test('markdown links only allow http and https URLs', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const hrefBody = contentScript.match(/function formatMarkdownHref\(href\) \{[\s\S]*?\n  \}/)?.[0] || '';
@@ -3334,20 +3473,20 @@ test('markdown links only allow http and https URLs', () => {
 });
 
 test('session row controls do not interpolate translated strings through innerHTML', () => {
-  const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+  const sessionPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/sessionPanel.js'),
     'utf8'
   );
-  const renderBody = contentScript.match(/function renderSessionList\([^)]*\) \{[\s\S]*?\n  function getRunningSessionIds/)?.[0] || '';
+  const renderBody = sessionPanel.match(/function renderSessionRow\(instance, session\) \{[\s\S]*?\n  function beginRename/)?.[0] || '';
 
   assert.doesNotMatch(renderBody, /innerHTML\s*=/);
   assert.match(renderBody, /createElement\('button'\)/);
-  assert.match(renderBody, /setAttribute\('aria-label', tr\('renameSession'\)\)/);
+  assert.match(renderBody, /setAttribute\('aria-label', t\(instance, 'renameSession'\)\)/);
 });
 
 test('user-facing task failures do not render raw stack traces', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function persistRunResult/)?.[0] || '';

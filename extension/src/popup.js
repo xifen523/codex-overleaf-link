@@ -2,17 +2,25 @@
   'use strict';
 
   const CodexOverleafCompatibility = window.CodexOverleafCompatibility;
-  const INSTALL_COMMAND = CodexOverleafCompatibility?.buildInstallCommand?.() ||
+  const DEFAULT_INSTALL_COMMAND = CodexOverleafCompatibility?.buildInstallCommand?.() ||
     'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash';
   const button = document.getElementById('open-panel');
   const status = document.getElementById('status');
+  const compatStatusIcon = document.getElementById('compat-status-icon');
+  const versionPair = document.getElementById('version-pair');
   const nativeInstall = document.getElementById('native-install');
   const installCommand = document.getElementById('install-command');
   const copyInstallCommand = document.getElementById('copy-install-command');
   let activeOverleafTab = null;
+  let currentInstallCommand = DEFAULT_INSTALL_COMMAND;
 
-  installCommand.textContent = INSTALL_COMMAND;
+  installCommand.textContent = currentInstallCommand;
   button.textContent = 'Open panel in Overleaf';
+  setVersionStatus({
+    status: 'native_missing',
+    classification: 'incompatible',
+    extensionVersion: getExtensionCompatibilityMetadata().version
+  });
 
   button.addEventListener('click', async () => {
     const tab = activeOverleafTab || await getActiveOverleafProjectTab();
@@ -26,7 +34,7 @@
   });
 
   copyInstallCommand.addEventListener('click', async () => {
-    await navigator.clipboard.writeText(INSTALL_COMMAND);
+    await navigator.clipboard.writeText(currentInstallCommand);
     copyInstallCommand.textContent = 'Copied';
     setTimeout(() => {
       copyInstallCommand.textContent = 'Copy install command';
@@ -81,21 +89,31 @@
         }
       });
       const compatibility = evaluateNativeCompatibility(response);
-      if (compatibility.status === 'ok') {
+      setVersionStatus(compatibility);
+      if (getCompatibilityClassification(compatibility) === 'compatible') {
         nativeInstall.hidden = true;
         status.textContent = 'Native host connected. Open an Overleaf project tab to use Codex.';
         return;
       }
       showNativeInstallGuide(compatibility);
     } catch (_error) {
-      showNativeInstallGuide({ status: 'native_missing', installCommand: INSTALL_COMMAND });
+      const compatibility = {
+        status: 'native_missing',
+        classification: 'incompatible',
+        installCommand: DEFAULT_INSTALL_COMMAND,
+        updateCommand: DEFAULT_INSTALL_COMMAND,
+        extensionVersion: getExtensionCompatibilityMetadata().version
+      };
+      setVersionStatus(compatibility);
+      showNativeInstallGuide(compatibility);
     }
   }
 
   function showNativeInstallGuide(compatibility = {}) {
     nativeInstall.hidden = false;
-    installCommand.textContent = compatibility.installCommand || INSTALL_COMMAND;
-    status.textContent = getNativeStatusMessage(compatibility.status);
+    currentInstallCommand = getCompatibilityUpdateCommand(compatibility);
+    installCommand.textContent = currentInstallCommand;
+    status.textContent = getNativeStatusMessage(compatibility.status, getCompatibilityClassification(compatibility));
   }
 
   function evaluateNativeCompatibility(response) {
@@ -103,8 +121,38 @@
       return CodexOverleafCompatibility.evaluateNativeCompatibility(response, getExtensionCompatibilityMetadata());
     }
     return response?.ok
-      ? { status: 'ok', native: response.result, installCommand: INSTALL_COMMAND }
-      : { status: 'native_missing', native: response, installCommand: INSTALL_COMMAND };
+      ? {
+          status: 'ok',
+          classification: 'compatible',
+          native: response.result,
+          nativeVersion: response.result?.version,
+          currentNativeVersion: response.result?.version,
+          installCommand: DEFAULT_INSTALL_COMMAND,
+          updateCommand: DEFAULT_INSTALL_COMMAND,
+          extensionVersion: getExtensionCompatibilityMetadata().version
+        }
+      : {
+          status: 'native_missing',
+          classification: 'incompatible',
+          native: response,
+          installCommand: DEFAULT_INSTALL_COMMAND,
+          updateCommand: DEFAULT_INSTALL_COMMAND,
+          extensionVersion: getExtensionCompatibilityMetadata().version
+        };
+  }
+
+  function setVersionStatus(compatibility = {}) {
+    const classification = getCompatibilityClassification(compatibility);
+    const extensionVersion = compatibility.extensionVersion || getExtensionCompatibilityMetadata().version;
+    const nativeVersion = compatibility.currentNativeVersion || compatibility.nativeVersion || compatibility.native?.version;
+    versionPair.textContent = `Extension ${formatVersion(extensionVersion)} / Native ${formatVersion(nativeVersion)}`;
+    compatStatusIcon.textContent = getStatusIconText(classification);
+    compatStatusIcon.className = `status-icon ${classification}`;
+    compatStatusIcon.title = getCompatibilityStatusTitle(classification);
+    if (compatStatusIcon.dataset) {
+      compatStatusIcon.dataset.status = classification;
+    }
+    compatStatusIcon.setAttribute?.('aria-label', compatStatusIcon.title);
   }
 
   function getExtensionCompatibilityMetadata() {
@@ -115,7 +163,64 @@
     };
   }
 
-  function getNativeStatusMessage(statusValue) {
+  function getCompatibilityClassification(compatibility = {}) {
+    const classification = compatibility.classification || compatibility.status;
+    switch (classification) {
+      case 'compatible':
+      case 'update-available':
+      case 'incompatible':
+        return classification;
+      case 'ok':
+        return 'compatible';
+      default:
+        return 'incompatible';
+    }
+  }
+
+  function getCompatibilityUpdateCommand(compatibility = {}) {
+    if (compatibility.updateCommand || compatibility.installCommand) {
+      return compatibility.updateCommand || compatibility.installCommand;
+    }
+    return CodexOverleafCompatibility?.buildInstallCommand?.(
+      CodexOverleafCompatibility.BUILD_TARGET_VERSION,
+      compatibility.native?.platform || compatibility.platform
+    ) || DEFAULT_INSTALL_COMMAND;
+  }
+
+  function getStatusIconText(classification) {
+    switch (classification) {
+      case 'compatible':
+        return 'OK';
+      case 'update-available':
+        return '!';
+      default:
+        return 'X';
+    }
+  }
+
+  function getCompatibilityStatusTitle(classification) {
+    switch (classification) {
+      case 'compatible':
+        return 'Native host compatible';
+      case 'update-available':
+        return 'Native host update available';
+      default:
+        return 'Native host incompatible';
+    }
+  }
+
+  function formatVersion(version) {
+    const value = String(version || '').trim();
+    if (!value) {
+      return 'unknown';
+    }
+    return value.startsWith('v') ? value : `v${value}`;
+  }
+
+  function getNativeStatusMessage(statusValue, classification) {
+    if (classification === 'update-available') {
+      return 'Native host update available. Run the update command, then reload the extension.';
+    }
     switch (statusValue) {
       case 'native_too_old':
         return 'Native host update required. Run the install command, then reload the extension.';

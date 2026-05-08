@@ -10,7 +10,7 @@
   const EXTENSION_PROTOCOL_VERSION = 1;
   const SUPPORTED_NATIVE_PROTOCOL = Object.freeze({ min: 1, max: 1 });
   const MIN_NATIVE_VERSION = '0.9.5';
-  const BUILD_TARGET_VERSION = '0.9.5';
+  const BUILD_TARGET_VERSION = '1.0.0';
   const REQUIRED_CAPABILITIES = Object.freeze([
     'bridgePing',
     'mirrorSync',
@@ -23,22 +23,27 @@
     'localSkills',
     'mirrorSensitiveScan'
   ]);
-  const ALWAYS_ALLOWED_METHODS = new Set([
+  const UPDATE_AVAILABLE_CAPABILITIES = Object.freeze([
+    'bridgePing',
+    'mirrorStatus',
+    'codexModels',
+    'codexCancel',
+    'localSkills'
+  ]);
+  const COMPATIBILITY_CLASSIFICATIONS = Object.freeze({
+    compatible: 'compatible',
+    updateAvailable: 'update-available',
+    incompatible: 'incompatible'
+  });
+  const UPDATE_AVAILABLE_METHODS = new Set([
     'bridge.ping',
     'mirror.status',
-    'codex.cancel'
+    'codex.models',
+    'codex.cancel',
+    'skills.list'
   ]);
-  const OK_ONLY_METHODS = new Set([
-    'codex.history.clearPlugin',
-    'mirror.scanSensitive',
-    'mirror.sync',
-    'mirror.patchFiles',
-    'codex.run',
-    'task.run',
-    'task.confirm',
-    'skills.list',
-    'skills.install',
-    'skills.remove'
+  const INCOMPATIBLE_ALLOWED_METHODS = new Set([
+    'bridge.ping'
   ]);
 
   function buildBridgePingParams(metadata = {}) {
@@ -52,94 +57,186 @@
   }
 
   function evaluateNativeCompatibility(response, metadata = {}) {
-    if (!response || response.ok === false) {
-      return compatibilityResult('native_missing', response, metadata);
+    const native = unwrapNativeResponse(response);
+    if (!native) {
+      return compatibilityResult('native_missing', response, metadata, 'incompatible');
     }
 
-    const native = response.ok === true ? response.result : response;
-    if (!native || typeof native !== 'object') {
-      return compatibilityResult('native_missing', native, metadata);
+    const analysis = analyzeNativeCompatibility(native, metadata);
+    return compatibilityResult(analysis.status, native, metadata, analysis.classification);
+  }
+
+  function classifyNativeCompatibility(pingResult, extensionVersion) {
+    const metadata = extensionVersion === undefined
+      ? {}
+      : typeof extensionVersion === 'object'
+      ? extensionVersion
+      : { version: extensionVersion };
+    const native = unwrapNativeResponse(pingResult);
+    if (!native) {
+      return 'incompatible';
+    }
+    return analyzeNativeCompatibility(native, metadata).classification;
+  }
+
+  function buildInstallCommand(version = BUILD_TARGET_VERSION, platform) {
+    const normalized = normalizeReleaseVersion(version) || BUILD_TARGET_VERSION;
+    const ref = `v${normalized}`;
+    const installPlatform = normalizePlatform(platform) || detectCurrentPlatform();
+    const releaseBaseUrl = `https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${ref}`;
+
+    if (installPlatform === 'windows') {
+      return `iwr ${releaseBaseUrl}/install.ps1 -OutFile install.ps1; $env:CODEX_OVERLEAF_REF='${ref}'; powershell -ExecutionPolicy Bypass -File install.ps1`;
     }
 
-    const nativeVersion = parseSemver(native.version);
-    if (
-      !native.version ||
-      !Object.prototype.hasOwnProperty.call(native, 'protocolVersion') ||
-      !isProtocolRange(native.supportedProtocol) ||
-      !native.capabilities ||
-      typeof native.capabilities !== 'object' ||
-      !nativeVersion ||
-      compareSemver(nativeVersion, parseSemver(MIN_NATIVE_VERSION)) < 0 ||
-      !hasRequiredCapabilities(native.capabilities)
-    ) {
-      return compatibilityResult('native_too_old', native, metadata);
-    }
+    return `CODEX_OVERLEAF_REF=${ref} bash -c "$(curl -fsSL ${releaseBaseUrl}/install.sh)"`;
+  }
 
+  function buildReleaseUrl(version = BUILD_TARGET_VERSION) {
+    const normalized = normalizeReleaseVersion(version) || BUILD_TARGET_VERSION;
+    return `https://github.com/Ghqqqq/codex-overleaf-link/releases/tag/v${normalized}`;
+  }
+
+  function isMethodAllowed(method, classification) {
+    const normalizedClassification = normalizeClassification(classification);
+    if (method === 'bridge.ping') {
+      return true;
+    }
+    if (normalizedClassification === 'compatible') {
+      return true;
+    }
+    if (normalizedClassification === 'update-available') {
+      return UPDATE_AVAILABLE_METHODS.has(method);
+    }
+    if (normalizedClassification === 'incompatible') {
+      return INCOMPATIBLE_ALLOWED_METHODS.has(method);
+    }
+    return false;
+  }
+
+  function isNativeMethodAllowed(method, compatibilityStatus) {
+    return isMethodAllowed(method, getClassification(compatibilityStatus));
+  }
+
+  function compatibilityResult(status, native, metadata = {}, classification = 'incompatible') {
     const extensionVersion = resolveMetadataVersion(metadata);
+    const nativeVersion = native && typeof native === 'object' ? native.version : undefined;
+    const platform = native && typeof native === 'object' ? native.platform : undefined;
+    const updateCommand = buildInstallCommand(BUILD_TARGET_VERSION, platform);
+    return {
+      status,
+      classification,
+      native,
+      nativeVersion,
+      currentNativeVersion: nativeVersion,
+      extensionVersion: extensionVersion.normalized,
+      requiredVersion: BUILD_TARGET_VERSION,
+      installCommand: updateCommand,
+      updateCommand,
+      releaseUrl: buildReleaseUrl(BUILD_TARGET_VERSION),
+      platform: normalizePlatform(platform) || platform || undefined,
+      missingCapabilities: getMissingCapabilities(native?.capabilities, REQUIRED_CAPABILITIES),
+      missingUpdateCapabilities: getMissingCapabilities(native?.capabilities, UPDATE_AVAILABLE_CAPABILITIES)
+    };
+  }
+
+  function analyzeNativeCompatibility(native, metadata = {}) {
+    const extensionVersion = resolveMetadataVersion(metadata);
+    const nativeVersion = parseSemver(native.version);
+    const targetVersion = parseSemver(BUILD_TARGET_VERSION);
+
+    if (!native.version || !nativeVersion) {
+      return { status: 'native_too_old', classification: 'incompatible' };
+    }
+
+    if (!reportsProtocolOne(native)) {
+      return { status: 'protocol_unsupported', classification: 'incompatible' };
+    }
+
+    if (!native.capabilities || typeof native.capabilities !== 'object') {
+      return { status: 'native_too_old', classification: 'incompatible' };
+    }
+
     const minExtensionVersion = native.minExtensionVersion ? parseSemver(native.minExtensionVersion) : null;
     if (
       native.minExtensionVersion &&
       (!minExtensionVersion || !extensionVersion.valid || compareSemver(extensionVersion.parsed, minExtensionVersion) < 0)
     ) {
-      return compatibilityResult('extension_too_old', native, metadata);
-    }
-
-    if (!protocolRangesOverlap(SUPPORTED_NATIVE_PROTOCOL, native.supportedProtocol)) {
-      return compatibilityResult('protocol_unsupported', native, metadata);
+      return { status: 'extension_too_old', classification: 'incompatible' };
     }
 
     if (native.environment?.codex?.ok === false) {
-      return compatibilityResult('native_unhealthy', native, metadata);
+      return { status: 'native_unhealthy', classification: 'incompatible' };
     }
 
-    return compatibilityResult('ok', native, metadata);
+    if (compareSemver(nativeVersion, targetVersion) >= 0) {
+      return hasCapabilities(native.capabilities, REQUIRED_CAPABILITIES)
+        ? { status: 'ok', classification: 'compatible' }
+        : { status: 'native_too_old', classification: 'incompatible' };
+    }
+
+    return hasCapabilities(native.capabilities, UPDATE_AVAILABLE_CAPABILITIES)
+      ? { status: 'native_too_old', classification: 'update-available' }
+      : { status: 'native_too_old', classification: 'incompatible' };
   }
 
-  function buildInstallCommand(version = BUILD_TARGET_VERSION) {
-    const normalized = normalizeReleaseVersion(version) || BUILD_TARGET_VERSION;
-    const ref = `v${normalized}`;
-    return `CODEX_OVERLEAF_REF=${ref} bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${ref}/install.sh)"`;
+  function unwrapNativeResponse(response) {
+    if (!response || response.ok === false) {
+      return null;
+    }
+    const native = response.ok === true ? response.result : response;
+    return native && typeof native === 'object' ? native : null;
   }
 
-  function isNativeMethodAllowed(method, compatibilityStatus) {
-    if (ALWAYS_ALLOWED_METHODS.has(method)) {
+  function getClassification(compatibilityStatus) {
+    if (typeof compatibilityStatus === 'string') {
+      return normalizeClassification(compatibilityStatus) || mapLegacyStatusToClassification(compatibilityStatus);
+    }
+    if (!compatibilityStatus || typeof compatibilityStatus !== 'object') {
+      return 'incompatible';
+    }
+    return normalizeClassification(compatibilityStatus.classification) ||
+      normalizeClassification(compatibilityStatus.status) ||
+      mapLegacyStatusToClassification(compatibilityStatus.status);
+  }
+
+  function mapLegacyStatusToClassification(status) {
+    if (status === 'ok') {
+      return 'compatible';
+    }
+    return 'incompatible';
+  }
+
+  function normalizeClassification(classification) {
+    if (
+      classification === 'compatible' ||
+      classification === 'update-available' ||
+      classification === 'incompatible'
+    ) {
+      return classification;
+    }
+    return '';
+  }
+
+  function hasCapabilities(capabilities, requiredCapabilities) {
+    return requiredCapabilities.every(capability => capabilities[capability] === true);
+  }
+
+  function getMissingCapabilities(capabilities, requiredCapabilities) {
+    if (!capabilities || typeof capabilities !== 'object') {
+      return requiredCapabilities.slice();
+    }
+    return requiredCapabilities.filter(capability => capabilities[capability] !== true);
+  }
+
+  function reportsProtocolOne(native) {
+    if (native.protocolVersion !== EXTENSION_PROTOCOL_VERSION) {
+      return false;
+    }
+    if (native.supportedProtocol === undefined || native.supportedProtocol === null) {
       return true;
     }
-
-    const status = getStatus(compatibilityStatus);
-    if (method === 'codex.models') {
-      return status !== 'native_missing';
-    }
-
-    if (OK_ONLY_METHODS.has(method)) {
-      return status === 'ok';
-    }
-
-    return status === 'ok';
-  }
-
-  function compatibilityResult(status, native, metadata = {}) {
-    const extensionVersion = resolveMetadataVersion(metadata);
-    return {
-      status,
-      native,
-      extensionVersion: extensionVersion.normalized,
-      installCommand: buildInstallCommand()
-    };
-  }
-
-  function getStatus(compatibilityStatus) {
-    if (typeof compatibilityStatus === 'string') {
-      return compatibilityStatus;
-    }
-    if (compatibilityStatus && typeof compatibilityStatus.status === 'string') {
-      return compatibilityStatus.status;
-    }
-    return 'native_missing';
-  }
-
-  function hasRequiredCapabilities(capabilities) {
-    return REQUIRED_CAPABILITIES.every(capability => capabilities[capability] === true);
+    return protocolRangesOverlap(SUPPORTED_NATIVE_PROTOCOL, native.supportedProtocol);
   }
 
   function isProtocolRange(range) {
@@ -192,6 +289,30 @@
     return match ? match[1] : '';
   }
 
+  function normalizePlatform(platform) {
+    const normalized = String(platform || '').toLowerCase();
+    if (!normalized) {
+      return '';
+    }
+    if (normalized === 'win32' || normalized === 'windows' || normalized.startsWith('win')) {
+      return 'windows';
+    }
+    if (normalized === 'darwin' || normalized === 'mac' || normalized === 'macos' || normalized.includes('mac')) {
+      return 'darwin';
+    }
+    if (normalized === 'linux' || normalized.includes('linux')) {
+      return 'linux';
+    }
+    return '';
+  }
+
+  function detectCurrentPlatform() {
+    if (typeof navigator === 'undefined') {
+      return '';
+    }
+    return normalizePlatform(navigator.userAgentData?.platform || navigator.platform || '');
+  }
+
   function parseSemver(version) {
     const normalized = normalizeReleaseVersion(version);
     if (!normalized) {
@@ -219,10 +340,15 @@
     SUPPORTED_NATIVE_PROTOCOL,
     MIN_NATIVE_VERSION,
     REQUIRED_CAPABILITIES,
+    UPDATE_AVAILABLE_CAPABILITIES,
     BUILD_TARGET_VERSION,
+    COMPATIBILITY_CLASSIFICATIONS,
     buildBridgePingParams,
     evaluateNativeCompatibility,
+    classifyNativeCompatibility,
     buildInstallCommand,
+    buildReleaseUrl,
+    isMethodAllowed,
     isNativeMethodAllowed
   };
 });

@@ -6,43 +6,32 @@ import { fileURLToPath } from 'node:url';
 export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
   {
     path: 'extension/src/contentScript.js',
-    maxLines: 4500,
-    currentCeiling: 9498,
-    exception: 'v0.9.5 extracts attachments, diff review, and context tray; remaining UI/state controllers must be split before v1.0.'
+    maxLines: 4500
   },
   {
     path: 'extension/src/pageBridge.js',
-    maxLines: 2200,
-    currentCeiling: 4654,
-    exception: 'v0.9.5 extracts the capability guard; snapshot, tree, and writeback routing remain follow-up page modules.'
+    maxLines: 2200
   },
   {
     path: 'native-host/src/codexSessionRunner.js',
-    maxLines: 1500,
-    currentCeiling: 2198,
-    exception: 'v0.9.5 extracts response budgeting; session orchestration and skill prompt assembly remain follow-up modules.'
+    maxLines: 1500
   },
   {
     path: 'native-host/src/taskRunner.js',
-    maxLines: 1000,
-    currentCeiling: 1083,
-    exception: 'v0.9.5 extracts native quotas; command approval still needs a focused follow-up split.'
+    maxLines: 1000
   }
 ]);
 
 export function collectArchitectureBudgetResults(options = {}) {
   const rootDir = path.resolve(options.rootDir || getRepoRoot());
-  const enforceTarget = options.enforceTarget === true;
   return ARCHITECTURE_FILE_BUDGETS.map(budget => {
     const fullPath = path.join(rootDir, budget.path);
     const lineCount = fs.existsSync(fullPath) ? countLines(fs.readFileSync(fullPath, 'utf8')) : 0;
-    const ceiling = enforceTarget ? budget.maxLines : budget.currentCeiling;
+    const ceiling = budget.maxLines;
     return {
       path: budget.path,
       lineCount,
       maxLines: budget.maxLines,
-      currentCeiling: budget.currentCeiling,
-      exception: budget.exception || '',
       ceiling,
       ok: lineCount > 0 && lineCount <= ceiling,
       targetMet: lineCount > 0 && lineCount <= budget.maxLines
@@ -75,15 +64,12 @@ function getRepoRoot() {
 }
 
 function runCli() {
-  const enforceTarget = process.argv.includes('--enforce-target');
-  const results = collectArchitectureBudgetResults({ enforceTarget });
+  const results = collectArchitectureBudgetResults();
   for (const result of results) {
     const status = result.ok ? 'ok' : 'fail';
-    const target = result.targetMet ? 'target' : 'exception';
-    const exception = result.exception ? `\t${result.exception}` : '';
-    console.log(`${status}\t${target}\t${result.lineCount}/${result.ceiling}\t${result.path}${exception}`);
+    console.log(`${status}\ttarget\t${result.lineCount}/${result.ceiling}\t${result.path}`);
   }
-  const errors = collectArchitectureBudgetErrors({ enforceTarget });
+  const errors = collectArchitectureBudgetErrors();
   if (errors.length) {
     for (const error of errors) {
       console.error(error);

@@ -3,29 +3,23 @@ const test = require('node:test');
 
 const compatibility = require('../extension/src/shared/compatibility');
 
-const REQUIRED_CAPABILITIES = [
-  'bridgePing',
-  'mirrorSync',
-  'mirrorPatchFiles',
-  'mirrorStatus',
-  'codexRun',
-  'codexCancel',
-  'codexModels',
-  'historyClearPlugin',
-  'localSkills',
-  'mirrorSensitiveScan'
-];
+const REQUIRED_CAPABILITIES = compatibility.REQUIRED_CAPABILITIES;
+const UPDATE_AVAILABLE_CAPABILITIES = compatibility.UPDATE_AVAILABLE_CAPABILITIES;
 
-function compatibleNative(overrides = {}) {
+function capabilityMap(capabilities = REQUIRED_CAPABILITIES) {
+  return Object.fromEntries(capabilities.map(capability => [capability, true]));
+}
+
+function nativeResponse(overrides = {}) {
   return {
     ok: true,
     result: {
       host: 'com.codex.overleaf',
       platform: 'darwin',
-      version: '0.9.5',
+      version: compatibility.BUILD_TARGET_VERSION,
       protocolVersion: 1,
       supportedProtocol: { min: 1, max: 1 },
-      capabilities: Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true])),
+      capabilities: capabilityMap(),
       minExtensionVersion: '0.9.5',
       environment: {
         codex: { ok: true }
@@ -35,168 +29,167 @@ function compatibleNative(overrides = {}) {
   };
 }
 
-function statusFor(response, metadata = { version: '0.9.5' }) {
-  return compatibility.evaluateNativeCompatibility(response, metadata).status;
+function canonicalInstallCommand(platform) {
+  return compatibility.buildInstallCommand(compatibility.BUILD_TARGET_VERSION, platform);
 }
 
-function canonicalInstallCommand() {
-  return 'CODEX_OVERLEAF_REF=v0.9.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v0.9.5/install.sh)"';
-}
-
-test('buildBridgePingParams returns v0.9 extension protocol metadata', () => {
-  assert.equal(compatibility.MIN_NATIVE_VERSION, '0.9.5');
-  assert.equal(compatibility.BUILD_TARGET_VERSION, '0.9.5');
+test('buildBridgePingParams returns v1.0 extension protocol metadata', () => {
+  assert.equal(compatibility.BUILD_TARGET_VERSION, '1.0.0');
   assert.equal(compatibility.EXTENSION_PROTOCOL_VERSION, 1);
-  assert.deepEqual(compatibility.buildBridgePingParams({ version: '0.9.5' }), {
-    extensionVersion: '0.9.5',
+  assert.deepEqual(compatibility.buildBridgePingParams({ version: '1.0.0' }), {
+    extensionVersion: '1.0.0',
     extensionProtocolVersion: 1,
     supportedNativeProtocol: { min: 1, max: 1 },
     requiredCapabilities: REQUIRED_CAPABILITIES
   });
 });
 
-test('evaluateNativeCompatibility classifies missing native responses', () => {
-  assert.equal(statusFor(null), 'native_missing');
-  assert.equal(statusFor({ ok: false, error: { code: 'native_disconnected' } }), 'native_missing');
+test('classifyNativeCompatibility returns compatible only for target-or-newer protocol 1 hosts with all required capabilities', () => {
+  const result = compatibility.evaluateNativeCompatibility(nativeResponse(), { version: '1.0.0' });
+
+  assert.equal(compatibility.classifyNativeCompatibility(nativeResponse(), '1.0.0'), 'compatible');
+  assert.equal(result.status, 'ok');
+  assert.equal(result.classification, 'compatible');
+  assert.equal(result.requiredVersion, '1.0.0');
+  assert.equal(result.updateCommand, canonicalInstallCommand('darwin'));
+  assert.equal(result.releaseUrl, 'https://github.com/Ghqqqq/codex-overleaf-link/releases/tag/v1.0.0');
 });
 
-test('evaluateNativeCompatibility classifies v0.3-like ping responses as too old', () => {
-  assert.equal(statusFor({
-    ok: true,
-    result: {
-      host: 'com.codex.overleaf',
-      platform: 'darwin',
-      version: '0.3.0',
-      protocolVersion: 1,
-      environment: {}
-    }
-  }), 'native_too_old');
-});
-
-test('evaluateNativeCompatibility classifies malformed native versions as too old', () => {
-  assert.equal(statusFor(compatibleNative({ version: 'next' })), 'native_too_old');
-});
-
-test('evaluateNativeCompatibility classifies native versions below v0.9 as too old', () => {
-  assert.equal(statusFor(compatibleNative({ version: '0.8.0' })), 'native_too_old');
-});
-
-test('evaluateNativeCompatibility classifies missing required capabilities as too old', () => {
-  const missingCapability = compatibleNative({
-    capabilities: {
-      bridgePing: true,
-      mirrorSync: true,
-      mirrorStatus: true,
-      codexRun: true,
-      codexCancel: true,
-      codexModels: true,
-      historyClearPlugin: true
-    }
+test('classifyNativeCompatibility returns update-available for older protocol 1 hosts with the allowed-method capability subset', () => {
+  const response = nativeResponse({
+    version: '0.9.5',
+    capabilities: capabilityMap(UPDATE_AVAILABLE_CAPABILITIES)
   });
-  const falseCapability = compatibleNative({
+  const result = compatibility.evaluateNativeCompatibility(response, { version: '1.0.0' });
+
+  assert.equal(compatibility.classifyNativeCompatibility(response.result, '1.0.0'), 'update-available');
+  assert.equal(result.status, 'native_too_old');
+  assert.equal(result.classification, 'update-available');
+  assert.deepEqual(result.missingUpdateCapabilities, []);
+});
+
+test('classifyNativeCompatibility returns incompatible when an older native host lacks any update-available capability', () => {
+  const response = nativeResponse({
+    version: '0.9.5',
+    capabilities: capabilityMap(['bridgePing', 'mirrorStatus', 'codexModels', 'localSkills'])
+  });
+  const result = compatibility.evaluateNativeCompatibility(response, { version: '1.0.0' });
+
+  assert.equal(result.status, 'native_too_old');
+  assert.equal(result.classification, 'incompatible');
+  assert.deepEqual(result.missingUpdateCapabilities, ['codexCancel']);
+});
+
+test('classifyNativeCompatibility returns incompatible when a target-version native host lacks any required capability', () => {
+  const response = nativeResponse({
     capabilities: {
-      ...compatibleNative().result.capabilities,
+      ...capabilityMap(),
       mirrorPatchFiles: false
     }
   });
+  const result = compatibility.evaluateNativeCompatibility(response, { version: '1.0.0' });
 
-  assert.equal(statusFor(missingCapability), 'native_too_old');
-  assert.equal(statusFor(falseCapability), 'native_too_old');
+  assert.equal(result.status, 'native_too_old');
+  assert.equal(result.classification, 'incompatible');
+  assert.deepEqual(result.missingCapabilities, ['mirrorPatchFiles']);
 });
 
-test('evaluateNativeCompatibility classifies extension versions below native minimum as too old', () => {
+test('classifyNativeCompatibility returns incompatible for missing native, unsupported protocol, extension mismatch, or unhealthy local Codex', () => {
+  assert.equal(compatibility.classifyNativeCompatibility(null, '1.0.0'), 'incompatible');
   assert.equal(
-    statusFor(compatibleNative({ minExtensionVersion: '0.9.5' }), { version: '0.7.0' }),
+    compatibility.evaluateNativeCompatibility({ ok: false, error: { code: 'native_disconnected' } }).classification,
+    'incompatible'
+  );
+  assert.equal(
+    compatibility.evaluateNativeCompatibility(nativeResponse({ protocolVersion: 2, supportedProtocol: { min: 2, max: 2 } })).status,
+    'protocol_unsupported'
+  );
+  assert.equal(
+    compatibility.evaluateNativeCompatibility(nativeResponse({ minExtensionVersion: '1.0.1' }), { version: '1.0.0' }).status,
     'extension_too_old'
   );
-});
-
-test('evaluateNativeCompatibility returns a structured status for malformed extension versions', () => {
-  for (const version of ['next', null]) {
-    const result = compatibility.evaluateNativeCompatibility(compatibleNative(), { version });
-
-    assert.equal(result.status, 'extension_too_old');
-    assert.equal(result.installCommand, canonicalInstallCommand());
-  }
-});
-
-test('evaluateNativeCompatibility classifies protocol range mismatches', () => {
-  assert.equal(statusFor(compatibleNative({
-    supportedProtocol: { min: 2, max: 2 },
-    protocolVersion: 2
-  })), 'protocol_unsupported');
-});
-
-test('evaluateNativeCompatibility classifies explicit Codex environment failures as unhealthy', () => {
-  assert.equal(statusFor(compatibleNative({
-    environment: {
-      codex: { ok: false, reason: 'not found' }
-    }
-  })), 'native_unhealthy');
-});
-
-test('evaluateNativeCompatibility allows compatible metadata without Codex environment details', () => {
-  assert.equal(statusFor(compatibleNative({ environment: {} })), 'ok');
-});
-
-test('evaluateNativeCompatibility allows healthy v0.9 native metadata', () => {
-  assert.equal(statusFor(compatibleNative()), 'ok');
-});
-
-test('buildInstallCommand returns the canonical version-pinned installer', () => {
   assert.equal(
-    compatibility.buildInstallCommand('0.9.5'),
-    canonicalInstallCommand()
+    compatibility.evaluateNativeCompatibility(nativeResponse({ environment: { codex: { ok: false } } })).status,
+    'native_unhealthy'
   );
-  assert.equal(compatibility.buildInstallCommand('v0.9.5'), canonicalInstallCommand());
 });
 
-test('buildInstallCommand falls back to the canonical target for unsafe versions', () => {
+test('buildInstallCommand returns platform-specific release-pinned update commands', () => {
+  assert.equal(
+    compatibility.buildInstallCommand('1.0.0', 'darwin'),
+    'CODEX_OVERLEAF_REF=v1.0.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.0.0/install.sh)"'
+  );
+  assert.equal(
+    compatibility.buildInstallCommand('v1.0.0', 'linux'),
+    'CODEX_OVERLEAF_REF=v1.0.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.0.0/install.sh)"'
+  );
+  assert.equal(
+    compatibility.buildInstallCommand('1.0.0', 'win32'),
+    "iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.0.0/install.ps1 -OutFile install.ps1; $env:CODEX_OVERLEAF_REF='v1.0.0'; powershell -ExecutionPolicy Bypass -File install.ps1"
+  );
+});
+
+test('buildInstallCommand falls back to the build target for unsafe versions', () => {
   for (const version of [
-    '0.9.5; touch /tmp/pwned',
-    '0.9.5 && touch /tmp/pwned',
-    ' 0.9.5',
-    '0.9.5 ',
-    '0.9.5/bad',
-    'v0.9.5$(id)',
+    '1.0.0; touch /tmp/pwned',
+    '1.0.0 && touch /tmp/pwned',
+    ' 1.0.0',
+    '1.0.0 ',
+    '1.0.0/bad',
+    'v1.0.0$(id)',
     '',
     null
   ]) {
-    assert.equal(compatibility.buildInstallCommand(version), canonicalInstallCommand());
+    assert.equal(compatibility.buildInstallCommand(version, 'darwin'), canonicalInstallCommand('darwin'));
   }
 });
 
-test('compatibility recovery command uses the build target instead of caller metadata version', () => {
-  const result = compatibility.evaluateNativeCompatibility(compatibleNative(), { version: '0.3.0' });
-
-  assert.equal(result.status, 'extension_too_old');
-  assert.equal(result.installCommand, canonicalInstallCommand());
-});
-
-test('isNativeMethodAllowed applies the native compatibility policy', () => {
-  for (const method of ['bridge.ping', 'mirror.status', 'codex.cancel']) {
-    assert.equal(compatibility.isNativeMethodAllowed(method, 'native_missing'), true);
-    assert.equal(compatibility.isNativeMethodAllowed(method, 'native_too_old'), true);
-  }
-
-  assert.equal(compatibility.isNativeMethodAllowed('codex.models', 'native_missing'), false);
-  assert.equal(compatibility.isNativeMethodAllowed('codex.models', 'native_too_old'), true);
-  assert.equal(compatibility.isNativeMethodAllowed('codex.models', { status: 'native_unhealthy' }), true);
-
+test('isMethodAllowed applies the v1.0 native compatibility method matrix', () => {
   for (const method of [
-    'codex.history.clearPlugin',
+    'bridge.ping',
+    'mirror.status',
+    'codex.models',
+    'codex.cancel',
     'mirror.sync',
     'mirror.patchFiles',
+    'mirror.scanSensitive',
     'codex.run',
     'task.run',
     'task.confirm',
-    'mirror.scanSensitive',
+    'codex.history.clearPlugin',
     'skills.list',
     'skills.install',
     'skills.remove'
   ]) {
-    assert.equal(compatibility.isNativeMethodAllowed(method, 'native_too_old'), false);
-    assert.equal(compatibility.isNativeMethodAllowed(method, 'native_unhealthy'), false);
-    assert.equal(compatibility.isNativeMethodAllowed(method, 'ok'), true);
+    assert.equal(compatibility.isMethodAllowed(method, 'compatible'), true, method);
   }
+
+  for (const method of ['bridge.ping', 'mirror.status', 'codex.models', 'codex.cancel', 'skills.list']) {
+    assert.equal(compatibility.isMethodAllowed(method, 'update-available'), true, method);
+  }
+
+  for (const method of [
+    'mirror.sync',
+    'mirror.patchFiles',
+    'mirror.scanSensitive',
+    'codex.run',
+    'task.run',
+    'task.confirm',
+    'codex.history.clearPlugin',
+    'skills.install',
+    'skills.remove'
+  ]) {
+    assert.equal(compatibility.isMethodAllowed(method, 'update-available'), false, method);
+  }
+
+  assert.equal(compatibility.isMethodAllowed('bridge.ping', 'incompatible'), true);
+  for (const method of ['mirror.status', 'codex.models', 'codex.cancel', 'skills.list']) {
+    assert.equal(compatibility.isMethodAllowed(method, 'incompatible'), false, method);
+  }
+});
+
+test('isNativeMethodAllowed keeps the legacy ok status as compatible but treats old unclassified statuses as incompatible', () => {
+  assert.equal(compatibility.isNativeMethodAllowed('codex.run', { status: 'ok' }), true);
+  assert.equal(compatibility.isNativeMethodAllowed('skills.list', { classification: 'update-available' }), true);
+  assert.equal(compatibility.isNativeMethodAllowed('skills.list', { status: 'native_too_old' }), false);
 });

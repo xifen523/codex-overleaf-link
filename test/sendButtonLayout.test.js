@@ -28,7 +28,7 @@ function extractFunction(source, name) {
 
 test('composer discovers model options through the native codex.models endpoint', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const i18n = fs.readFileSync(
@@ -60,7 +60,7 @@ test('composer discovers model options through the native codex.models endpoint'
 
 test('composer preserves user model changes made while native discovery is pending', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const loadModelOptions = extractFunction(contentScript, 'loadModelOptions');
@@ -76,7 +76,7 @@ test('composer preserves user model changes made while native discovery is pendi
 
 test('composer preserves a custom selected model before async discovery finishes', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const applyStateToPanel = extractFunction(contentScript, 'applyStateToPanel');
@@ -94,26 +94,36 @@ test('composer preserves a custom selected model before async discovery finishes
 
 test('composer sends through a form submit path with a guarded run handler', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const composerPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerPanel.js'),
     'utf8'
   );
 
-  assert.match(contentScript, /<form class="codex-composer" data-composer-form>/);
-  assert.match(contentScript, /<button type="submit" data-run title="Send" aria-label="Send">↑<\/button>/);
-  assert.match(contentScript, /\[data-composer-form\]'\)\.addEventListener\('submit'/);
-  assert.match(contentScript, /event\.preventDefault\(\);\s*safeRunTask\(\);/);
-  assert.match(contentScript, /requestSubmit\(\)/);
+  assert.match(composerPanel, /<form class="codex-composer" data-composer-form>/);
+  assert.match(composerPanel, /<button type="submit" data-run title="Send" aria-label="Send">↑<\/button>/);
+  assert.match(composerPanel, /'submit'/);
+  assert.match(composerPanel, /event\.preventDefault\(\);\s*instance\.callbacks\.onSubmit\?\.\(\);/);
+  assert.match(composerPanel, /requestSubmit\?\.\(\)/);
+  assert.match(contentScript, /onSubmit:\s*\(\) => safeRunTask\(\)/);
   assert.match(contentScript, /function safeRunTask\(\)/);
   assert.match(contentScript, /runTask\(\)\.catch/);
 });
 
 test('composer textarea sends on Enter while preserving Shift Enter and IME composition', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const composerPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerPanel.js'),
     'utf8'
   );
 
-  assert.match(contentScript, /\[data-task\]'\)\.addEventListener\('keydown', handleTaskInputKeydown\)/);
+  assert.match(composerPanel, /'keydown'/);
+  assert.match(contentScript, /onTaskKeydown:\s*handleTaskInputKeydown/);
   assert.match(contentScript, /function handleTaskInputKeydown\(event\)/);
   assert.match(contentScript, /event\.key !== 'Enter'/);
   assert.match(contentScript, /event\.shiftKey/);
@@ -124,7 +134,7 @@ test('composer textarea sends on Enter while preserving Shift Enter and IME comp
 
 test('starting a run is not blocked by asynchronous state persistence', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function applySyncChangesToOverleaf/)?.[0] || '';
@@ -136,14 +146,18 @@ test('starting a run is not blocked by asynchronous state persistence', () => {
 
 test('clicking the running spinner requests cancellation instead of being disabled', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
-  const clickHandler = contentScript.match(/\[data-run\]'\)\.addEventListener\('click'[\s\S]*?\n      \}\);/)?.[0] || '';
+  const composerPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerPanel.js'),
+    'utf8'
+  );
+  const clickHandler = composerPanel.match(/querySelector\('\[data-run\]'\)[\s\S]*?form\?\.requestSubmit\?\.\(\);/)?.[0] || '';
   const setRunningBody = contentScript.match(/function setRunning\(running\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
-  assert.match(clickHandler, /if \(currentRunView\)/);
-  assert.match(clickHandler, /cancelActiveRun\(\)/);
+  assert.match(clickHandler, /if \(instance\.callbacks\.isRunning\?\.\(\)\)/);
+  assert.match(contentScript, /onCancel:\s*\(\) => cancelActiveRun\(\)/);
   assert.match(contentScript, /async function cancelActiveRun\(/);
   assert.match(contentScript, /method:\s*'codex\.cancel'/);
   assert.doesNotMatch(setRunningBody, /\[data-run\]'\)\.disabled = running/);
@@ -152,7 +166,7 @@ test('clicking the running spinner requests cancellation instead of being disabl
 
 test('task failures after a user cancellation request render as interrupted', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -162,7 +176,7 @@ test('task failures after a user cancellation request render as interrupted', ()
 
 test('panel persistence uses hybrid IndexedDB storage with legacy fallback', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
@@ -179,7 +193,7 @@ test('panel persistence uses hybrid IndexedDB storage with legacy fallback', () 
 
 test('storage notice is not appended repeatedly during autosave', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/contentScript.js'),
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const saveStateBody = contentScript.match(/async function saveState\(\) \{[\s\S]*?\n  function saveStateSoon/)?.[0] || '';

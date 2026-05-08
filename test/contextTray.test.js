@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const CONTENT_SCRIPT_PATH = path.join(__dirname, '../extension/src/contentScript.js');
+const CONTENT_SCRIPT_PATH = path.join(__dirname, '../extension/src/content/contentRuntime.js');
 const CONTEXT_TRAY_PATH = path.join(__dirname, '../extension/src/content/contextTray.js');
 
 function readFileIfExists(filePath) {
@@ -130,6 +130,8 @@ function createMinimalDocument() {
 test('add context button opens a visible Overleaf project file picker', () => {
   const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, 'utf8');
   const contextTray = readFileIfExists(CONTEXT_TRAY_PATH);
+  const composerPanel = readFileIfExists(path.join(__dirname, '../extension/src/content/composerPanel.js'));
+  const panelSource = `${contentScript}\n${composerPanel}`;
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../extension/manifest.json'), 'utf8'));
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
@@ -140,11 +142,11 @@ test('add context button opens a visible Overleaf project file picker', () => {
     'utf8'
   );
 
-  assert.match(contentScript, /data-add-context[^>]+aria-expanded="false"/);
-  assert.match(contentScript, /data-context-tray/);
-  assert.match(contentScript, /data-context-summary/);
-  assert.match(contentScript, /data-context-file-list/);
-  assert.match(contentScript, /data-context-refresh/);
+  assert.match(panelSource, /data-add-context[^>]+aria-expanded="false"/);
+  assert.match(panelSource, /data-context-tray/);
+  assert.match(panelSource, /data-context-summary/);
+  assert.match(panelSource, /data-context-file-list/);
+  assert.match(panelSource, /data-context-refresh/);
   assert.match(contentScript, /function toggleContextTray\(/);
   assert.match(contentScript, /CodexOverleafContextTray/);
   assert.match(extractFunction(contentScript, 'toggleContextTray'), /contextTrayController\.toggleContextTray\(\)/);
@@ -177,8 +179,8 @@ test('add context button opens a visible Overleaf project file picker', () => {
   assert.match(i18n, /clearFiles:\s*'清除全部 @file'/);
   assert.match(i18n, /removeContextFile:\s*'从 @context 移除 \{path\}'/);
   assert.match(i18n, /addContext:\s*'添加 @ 上下文'/);
-  assert.match(contentScript, /@compile-log/);
-  assert.match(contentScript, /@current-section/);
+  assert.match(panelSource, /@compile-log/);
+  assert.match(panelSource, /@current-section/);
   assert.match(contentScript, /focusFiles: getActiveFocusFiles\(\)/);
   assert.equal(contentScript.includes('Add context uses the active Overleaf project snapshot automatically.'), false);
   assert.match(css, /\.codex-context-tray/);

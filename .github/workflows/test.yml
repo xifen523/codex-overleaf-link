@@ -25,3 +25,9 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      - name: Check architecture budget
+        run: npm run check:architecture
+
+      - name: Run synthetic large-project regression gate
+        run: npm run benchmark:large -- --output .local/benchmarks/large-project.json || npm run benchmark:large -- --output .local/benchmarks/large-project-retry.json

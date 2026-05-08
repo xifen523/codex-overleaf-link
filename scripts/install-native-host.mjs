@@ -18,6 +18,7 @@ import {
 
 const args = parseArgs(process.argv.slice(2));
 const extensionId = args.extensionId || DEFAULT_CHROME_EXTENSION_ID;
+const extensionIds = [DEFAULT_CHROME_EXTENSION_ID, extensionId];
 
 if (!validateChromeExtensionId(extensionId)) {
   console.error('Usage: npm run install:native -- [--extension-id <32-letter-chrome-extension-id>]');
@@ -43,6 +44,7 @@ const registrationTarget = getNativeHostRegistrationTarget({
 const manifestPath = registrationTarget.manifestPath;
 const manifest = buildHostManifest({
   extensionId,
+  extensionIds,
   bridgePath,
   platform
 });
@@ -75,6 +77,7 @@ console.log(`Bridge executable: ${bridgePath}`);
 console.log(`Runtime root: ${installRoot}`);
 console.log(`Runtime package version: ${runtimePackageVersion}`);
 console.log(`Allowed Chrome extension id: ${extensionId}`);
+console.log(`Allowed Chrome extension ids: ${Array.from(new Set(extensionIds)).join(', ')}`);
 
 function resolveForPlatform(targetPath, platformPathModule) {
   if (platformPathModule.isAbsolute(targetPath)) {

@@ -17,6 +17,39 @@
         font-size: 15px;
       }
 
+      .version-status {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin: 0 0 10px;
+        color: #52616f;
+        font-size: 12px;
+      }
+
+      .status-icon {
+        display: inline-flex;
+        min-width: 24px;
+        min-height: 24px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 999px;
+        color: white;
+        font: 10px/1 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        letter-spacing: 0.02em;
+      }
+
+      .status-icon.compatible {
+        background: #1f7a63;
+      }
+
+      .status-icon.update-available {
+        background: #b66b00;
+      }
+
+      .status-icon.incompatible {
+        background: #b3261e;
+      }
+
       button {
         width: 100%;
         border: 1px solid #1c6b57;
@@ -66,6 +99,10 @@
   </head>
   <body>
     <h1>Codex Overleaf Link</h1>
+    <div class="version-status">
+      <span id="compat-status-icon" class="status-icon incompatible" title="Native host incompatible">X</span>
+      <span id="version-pair">Extension unknown / Native unknown</span>
+    </div>
     <button id="open-panel">Open panel in Overleaf</button>
     <p id="status">Use this on an Overleaf project tab.</p>
     <div id="native-install" class="install" hidden>

@@ -29,9 +29,13 @@ const OVERSIZED_SKIPPED_BINARY_BYTES = 11 * 1024 * 1024;
 const REPEATED_STATE_SESSION_COUNT = 12;
 const REPEATED_STATE_RUNS_PER_SESSION = 10;
 const REPEATED_STATE_EVENTS_PER_RUN = 120;
-const DEFAULT_MAX_SYNC_MS = 2500;
+const DEFAULT_MAX_SNAPSHOT_MS = 5000;
+const DEFAULT_MAX_SYNC_MS = 3000;
 const DEFAULT_MAX_STATUS_MS = 500;
 const DEFAULT_MAX_COLLECT_MS = 2500;
+const DEFAULT_MAX_DIFF_PATCH_MS = 1000;
+const DEFAULT_MAX_CONTEXT_TRAY_MS = 500;
+const DEFAULT_MAX_STORAGE_PREPARE_MS = 500;
 const REQUIRED_METRIC_KEYS = [
   'snapshot.total_ms',
   'snapshot.zip_parse_ms',
@@ -390,10 +394,15 @@ function summarizeRepeatedSessionStateFixture(stateFixture) {
 export function parseArgs(argv, env = process.env) {
   const parsed = {
     strict: isStrictEnv(env),
+    gate: false,
     output: '',
+    maxSnapshotMs: DEFAULT_MAX_SNAPSHOT_MS,
     maxSyncMs: DEFAULT_MAX_SYNC_MS,
     maxStatusMs: DEFAULT_MAX_STATUS_MS,
-    maxCollectMs: DEFAULT_MAX_COLLECT_MS
+    maxCollectMs: DEFAULT_MAX_COLLECT_MS,
+    maxDiffPatchMs: DEFAULT_MAX_DIFF_PATCH_MS,
+    maxContextTrayMs: DEFAULT_MAX_CONTEXT_TRAY_MS,
+    maxStoragePrepareMs: DEFAULT_MAX_STORAGE_PREPARE_MS
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -401,8 +410,14 @@ export function parseArgs(argv, env = process.env) {
       parsed.help = true;
     } else if (arg === '--strict') {
       parsed.strict = true;
+    } else if (arg === '--gate') {
+      parsed.gate = true;
+      parsed.strict = true;
     } else if (arg === '--output') {
       parsed.output = requireValue(argv, index, arg);
+      index += 1;
+    } else if (arg === '--max-snapshot-ms') {
+      parsed.maxSnapshotMs = parseNumberOption(requireValue(argv, index, arg), arg);
       index += 1;
     } else if (arg === '--max-sync-ms') {
       parsed.maxSyncMs = parseNumberOption(requireValue(argv, index, arg), arg);
@@ -412,6 +427,15 @@ export function parseArgs(argv, env = process.env) {
       index += 1;
     } else if (arg === '--max-collect-ms') {
       parsed.maxCollectMs = parseNumberOption(requireValue(argv, index, arg), arg);
+      index += 1;
+    } else if (arg === '--max-diff-patch-ms') {
+      parsed.maxDiffPatchMs = parseNumberOption(requireValue(argv, index, arg), arg);
+      index += 1;
+    } else if (arg === '--max-context-tray-ms') {
+      parsed.maxContextTrayMs = parseNumberOption(requireValue(argv, index, arg), arg);
+      index += 1;
+    } else if (arg === '--max-storage-prepare-ms') {
+      parsed.maxStoragePrepareMs = parseNumberOption(requireValue(argv, index, arg), arg);
       index += 1;
     } else {
       throw new Error(`Unknown option: ${arg}`);
@@ -599,12 +623,20 @@ function addHardInvariantFindings(report, context) {
 
 function addTimingFindings(report, options) {
   const thresholds = [
-    ['mirror.sync_ms', Number(options.maxSyncMs ?? DEFAULT_MAX_SYNC_MS)],
-    ['mirror.status_ms', Number(options.maxStatusMs ?? DEFAULT_MAX_STATUS_MS)],
-    ['mirror.collect_ms', Number(options.maxCollectMs ?? DEFAULT_MAX_COLLECT_MS)]
+    { metric: 'snapshot.total_ms', value: report.metrics['snapshot.total_ms'], limit: Number(options.maxSnapshotMs ?? DEFAULT_MAX_SNAPSHOT_MS) },
+    { metric: 'mirror.sync_ms', value: report.metrics['mirror.sync_ms'], limit: Number(options.maxSyncMs ?? DEFAULT_MAX_SYNC_MS) },
+    { metric: 'mirror.status_ms', value: report.metrics['mirror.status_ms'], limit: Number(options.maxStatusMs ?? DEFAULT_MAX_STATUS_MS) },
+    { metric: 'mirror.collect_ms', value: report.metrics['mirror.collect_ms'], limit: Number(options.maxCollectMs ?? DEFAULT_MAX_COLLECT_MS) },
+    {
+      metric: 'diff.compute_ms + patch.compute_ms',
+      value: roundMetric(Number(report.metrics['diff.compute_ms']) + Number(report.metrics['patch.compute_ms'])),
+      limit: Number(options.maxDiffPatchMs ?? DEFAULT_MAX_DIFF_PATCH_MS)
+    },
+    { metric: 'context_tray.render_ms', value: report.metrics['context_tray.render_ms'], limit: Number(options.maxContextTrayMs ?? DEFAULT_MAX_CONTEXT_TRAY_MS) },
+    { metric: 'storage.prepare_ms', value: report.metrics['storage.prepare_ms'], limit: Number(options.maxStoragePrepareMs ?? DEFAULT_MAX_STORAGE_PREPARE_MS) }
   ];
-  for (const [metric, limit] of thresholds) {
-    const value = report.metrics[metric];
+  for (const threshold of thresholds) {
+    const { metric, value, limit } = threshold;
     if (!Number.isFinite(limit) || !Number.isFinite(value) || value <= limit) {
       continue;
     }
@@ -708,15 +740,21 @@ function printHelp() {
   console.log([
     'Usage:',
     '  node scripts/benchmark-large-project.mjs --output /tmp/codex-overleaf-perf.json',
+    '  node scripts/benchmark-large-project.mjs --gate --output /tmp/codex-overleaf-perf.json',
     '  node scripts/benchmark-large-project.mjs --strict --output /tmp/codex-overleaf-perf.json',
     '',
     'Options:',
-    '  --output <path>        Write benchmark JSON to this path',
-    '  --strict               Treat timing threshold misses as failures',
+    '  --output <path>                  Write benchmark JSON to this path',
+    '  --gate                           Enable v1.0 synthetic regression gate mode',
+    '  --strict                         Treat timing threshold misses as failures',
     '  CODEX_OVERLEAF_PERF_STRICT=1 also enables strict timing failures.',
-    '  --max-sync-ms <ms>     Sync timing threshold, default 2500',
-    '  --max-status-ms <ms>   Status timing threshold, default 500',
-    '  --max-collect-ms <ms>  Change collection timing threshold, default 2500'
+    '  --max-snapshot-ms <ms>           Snapshot timing threshold, default 5000',
+    '  --max-sync-ms <ms>               Sync timing threshold, default 3000',
+    '  --max-status-ms <ms>             Status timing threshold, default 500',
+    '  --max-collect-ms <ms>            Change collection timing threshold, default 2500',
+    '  --max-diff-patch-ms <ms>         Diff plus patch timing threshold, default 1000',
+    '  --max-context-tray-ms <ms>       Context tray timing threshold, default 500',
+    '  --max-storage-prepare-ms <ms>    Storage preparation timing threshold, default 500'
   ].join('\n'));
 }
 

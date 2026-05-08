@@ -11,8 +11,9 @@ function validateChromeExtensionId(extensionId) {
   return /^[a-p]{32}$/.test(extensionId);
 }
 
-function buildHostManifest({ extensionId, bridgePath, platform = process.platform }) {
-  if (!validateChromeExtensionId(extensionId)) {
+function buildHostManifest({ extensionId, extensionIds, bridgePath, platform = process.platform }) {
+  const ids = normalizeExtensionIds(extensionIds || [extensionId]);
+  if (!ids.length) {
     throw new Error(`Invalid Chrome extension id: ${extensionId}`);
   }
   if (!bridgePath || !isAbsolutePathForPlatform(bridgePath, platform)) {
@@ -24,8 +25,25 @@ function buildHostManifest({ extensionId, bridgePath, platform = process.platfor
     description: HOST_DESCRIPTION,
     path: bridgePath,
     type: 'stdio',
-    allowed_origins: [`chrome-extension://${extensionId}/`]
+    allowed_origins: ids.map(id => `chrome-extension://${id}/`)
   };
+}
+
+function normalizeExtensionIds(extensionIds) {
+  const seen = new Set();
+  const ids = [];
+  for (const value of Array.isArray(extensionIds) ? extensionIds : [extensionIds]) {
+    const id = String(value || '').trim();
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    if (!validateChromeExtensionId(id)) {
+      throw new Error(`Invalid Chrome extension id: ${id}`);
+    }
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
 }
 
 function isAbsolutePathForPlatform(targetPath, platform = process.platform) {
@@ -52,5 +70,6 @@ module.exports = {
   HOST_NAME,
   buildHostManifest,
   getChromeNativeHostManifestPath,
+  normalizeExtensionIds,
   validateChromeExtensionId
 };

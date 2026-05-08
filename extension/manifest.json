@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Codex Overleaf Link",
-  "version": "0.9.5",
+  "version": "1.0.0",
   "description": "Connect the active Overleaf project to a local Codex bridge.",
   "icons": {
     "16": "assets/icons/icon16.png",
@@ -56,6 +56,12 @@
         "src/content/mirrorHealth.js",
         "src/content/otWarmMirrorController.js",
         "src/content/composerAttachments.js",
+        "src/content/panelRenderer.js",
+        "src/content/sessionPanel.js",
+        "src/content/settingsPanel.js",
+        "src/content/diagnosticsPanel.js",
+        "src/content/composerPanel.js",
+        "src/content/contentRuntime.js",
         "src/contentScript.js"
       ],
       "css": [
@@ -83,6 +89,9 @@
         "src/page/overleafProjectSnapshot.js",
         "src/page/overleafRealtimeObserver.js",
         "src/page/pageBridgeCapability.js",
+        "src/page/treeOperations.js",
+        "src/page/snapshotRouter.js",
+        "src/page/writebackRouter.js",
         "src/pageBridge.js"
       ],
       "matches": [

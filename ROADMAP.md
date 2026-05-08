@@ -1,14 +1,14 @@
 # Roadmap to v1.0
 
-This roadmap describes the planned path from the current `v0.9.5` release-candidate hardening line to a production-ready `v1.0.0`. The `v0.1` through `v0.8` sections are retained as historical milestones.
+This roadmap describes the production-stable `v1.0.0` release line and the historical path that led to it. The `v0.1` through `v0.9.5` sections are retained as historical milestones.
 
 The guiding principle is simple: make the existing bridge reliable first, then improve synchronization, then broaden distribution and platform support. Features that increase sync complexity or security surface area should stay behind explicit opt-in flags until they are proven stable.
 
 ## Release Discipline
 
 - `main` tracks release-candidate hardening, stable releases, and release hotfixes.
-- `next` tracks post-`v0.9.5` development toward `v1.0.0`.
-- `v0.9.x` is release-candidate hardening only: P0/P1 fixes, architecture hardening, release gate corrections, documentation corrections, manual smoke signoff, and compatibility signoff.
+- `next` tracks post-`v1.0.0` development toward the next planned release.
+- `v0.9.x` was the release-candidate hardening line: P0/P1 fixes, architecture hardening, release gate corrections, documentation corrections, manual smoke signoff, and compatibility signoff.
 - Historical `v0.1.x` releases were the original hotfix-only stable preview line and are no longer the current release line.
 - Experimental sync features must preserve the current full-snapshot fallback path.
 - User project content must stay local to the bridge and the user's configured Codex CLI account. The project should not add a hosted backend.
@@ -310,6 +310,8 @@ automated gates without adding major user-facing features.
 
 **Goal:** A stable release that can be recommended for regular academic writing workflows.
 
+**Status:** Release documentation and automated gates are prepared for v1.0.0. Tagging remains gated on the automated matrix, synthetic benchmark gate, architecture budget check, manual smoke signoff, P0/P1 signoff, release artifact verification, privacy-policy publication, and Chrome Web Store submission.
+
 ### Required Capabilities
 
 - Stable support for macOS, Windows, and Linux native hosts.
@@ -328,7 +330,11 @@ automated gates without adding major user-facing features.
 
 ### Release Criteria
 
-- Full automated test suite passes.
-- Manual smoke test passes on all supported platforms.
+- Full automated test suite passes on macOS, Windows, and Linux.
+- `npm run check:architecture` passes with zero current-ceiling exceptions.
+- Synthetic large-project regression gate passes on all CI platforms.
+- `npm run verify:release` and `npm run build:release` produce v1.0.0 artifacts.
+- Manual smoke test passes on all supported platforms, with cold/warm startup timing recorded as observations.
 - No known data-loss bugs.
 - No known privacy leaks in fixtures, logs, or release artifacts.
+- Privacy policy page is live and Chrome Web Store submission has been sent; approval is not required before the GitHub Release tag.

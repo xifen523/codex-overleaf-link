@@ -37,6 +37,18 @@ const overleafProjectSnapshotSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/page/overleafProjectSnapshot.js'),
   'utf8'
 );
+const treeOperationsSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/treeOperations.js'),
+  'utf8'
+);
+const snapshotRouterSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/snapshotRouter.js'),
+  'utf8'
+);
+const writebackRouterSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/writebackRouter.js'),
+  'utf8'
+);
 const overleafRealtimeObserverSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/page/overleafRealtimeObserver.js'),
   'utf8'
@@ -1924,6 +1936,9 @@ function createPageBridgeHarness({
   vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
   vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
   vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });
+  vm.runInContext(treeOperationsSource, context, { filename: 'treeOperations.js' });
+  vm.runInContext(snapshotRouterSource, context, { filename: 'snapshotRouter.js' });
+  vm.runInContext(writebackRouterSource, context, { filename: 'writebackRouter.js' });
   if (realtimeObserverFactory) {
     window.CodexOverleafRealtimeObserver = { create: realtimeObserverFactory };
   } else {

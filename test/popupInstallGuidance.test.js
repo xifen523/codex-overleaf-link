@@ -22,15 +22,55 @@ test('popup sends compatibility-aware bridge ping params', async () => {
   );
 });
 
-test('popup treats an old native response as update-required instead of connected', async () => {
+test('popup shows version pair and compatible status when native host is current', async () => {
   const harness = await loadPopupHarness({
-    nativeResponse: oldNativeResponse()
+    nativeResponse: compatibleNativeResponse()
+  });
+
+  assert.equal(harness.elements.nativeInstall.hidden, true);
+  assert.equal(harness.elements.compatStatusIcon.textContent, 'OK');
+  assert.equal(harness.elements.compatStatusIcon.dataset.status, 'compatible');
+  assert.equal(harness.elements.versionPair.textContent, 'Extension v1.0.0 / Native v1.0.0');
+  assert.match(harness.elements.status.textContent, /Native host connected/i);
+});
+
+test('popup treats an older capability-compatible native response as update-available', async () => {
+  const harness = await loadPopupHarness({
+    nativeResponse: oldUpdateAvailableNativeResponse()
   });
 
   assert.equal(harness.elements.nativeInstall.hidden, false);
-  assert.match(harness.elements.status.textContent, /Native host update required/i);
-  assert.doesNotMatch(harness.elements.status.textContent, /connected/i);
-  assert.equal(harness.elements.installCommand.textContent, compatibility.buildInstallCommand());
+  assert.equal(harness.elements.compatStatusIcon.textContent, '!');
+  assert.equal(harness.elements.compatStatusIcon.dataset.status, 'update-available');
+  assert.equal(harness.elements.versionPair.textContent, 'Extension v1.0.0 / Native v0.9.5');
+  assert.match(harness.elements.status.textContent, /Native host update available/i);
+  assert.equal(harness.elements.installCommand.textContent, compatibility.buildInstallCommand('1.0.0', 'darwin'));
+});
+
+test('popup shows platform-specific Windows update command for incompatible native responses', async () => {
+  const harness = await loadPopupHarness({
+    nativeResponse: incompatibleWindowsNativeResponse()
+  });
+
+  assert.equal(harness.elements.nativeInstall.hidden, false);
+  assert.equal(harness.elements.compatStatusIcon.textContent, 'X');
+  assert.equal(harness.elements.compatStatusIcon.dataset.status, 'incompatible');
+  assert.equal(harness.elements.installCommand.textContent, compatibility.buildInstallCommand('1.0.0', 'win32'));
+});
+
+test('popup copies the currently displayed update command', async () => {
+  let copied = '';
+  const harness = await loadPopupHarness({
+    nativeResponse: incompatibleWindowsNativeResponse(),
+    onClipboardWrite(text) {
+      copied = text;
+    }
+  });
+
+  await harness.elements.copyInstallCommand.click();
+
+  assert.equal(copied, harness.elements.installCommand.textContent);
+  assert.equal(harness.elements.copyInstallCommand.textContent, 'Copy install command');
 });
 
 test('popup reflects the active Overleaf panel state and toggles it', async () => {
@@ -90,13 +130,13 @@ function compatibleNativeResponse() {
     result: {
       host: 'com.codex.overleaf',
       platform: 'darwin',
-      version: '0.4.0',
+      version: compatibility.BUILD_TARGET_VERSION,
       protocolVersion: 1,
       supportedProtocol: { min: 1, max: 1 },
       capabilities: Object.fromEntries(
         compatibility.REQUIRED_CAPABILITIES.map(capability => [capability, true])
       ),
-      minExtensionVersion: '0.4.0',
+      minExtensionVersion: '0.9.5',
       environment: {
         codex: { ok: true }
       }
@@ -104,20 +144,48 @@ function compatibleNativeResponse() {
   };
 }
 
-function oldNativeResponse() {
+function oldUpdateAvailableNativeResponse() {
   return {
     ok: true,
     result: {
       host: 'com.codex.overleaf',
       platform: 'darwin',
-      version: '0.3.0',
+      version: '0.9.5',
       protocolVersion: 1,
-      environment: {}
+      supportedProtocol: { min: 1, max: 1 },
+      capabilities: Object.fromEntries(
+        compatibility.UPDATE_AVAILABLE_CAPABILITIES.map(capability => [capability, true])
+      ),
+      minExtensionVersion: '0.9.5',
+      environment: {
+        codex: { ok: true }
+      }
     }
   };
 }
 
-async function loadPopupHarness({ nativeResponse, activeTab = null, onSendMessage, onTabMessage } = {}) {
+function incompatibleWindowsNativeResponse() {
+  return {
+    ok: true,
+    result: {
+      host: 'com.codex.overleaf',
+      platform: 'win32',
+      version: '0.9.5',
+      protocolVersion: 1,
+      supportedProtocol: { min: 1, max: 1 },
+      capabilities: {
+        bridgePing: true,
+        mirrorStatus: true
+      },
+      minExtensionVersion: '0.9.5',
+      environment: {
+        codex: { ok: true }
+      }
+    }
+  };
+}
+
+async function loadPopupHarness({ nativeResponse, activeTab = null, onSendMessage, onTabMessage, onClipboardWrite } = {}) {
   const compatibilitySource = fs.readFileSync(
     path.join(__dirname, '../extension/src/shared/compatibility.js'),
     'utf8'
@@ -129,6 +197,8 @@ async function loadPopupHarness({ nativeResponse, activeTab = null, onSendMessag
   const elements = {
     button: createPopupElement('open-panel'),
     status: createPopupElement('status'),
+    compatStatusIcon: createPopupElement('compat-status-icon'),
+    versionPair: createPopupElement('version-pair'),
     nativeInstall: createPopupElement('native-install', { hidden: true }),
     installCommand: createPopupElement('install-command'),
     copyInstallCommand: createPopupElement('copy-install-command')
@@ -136,6 +206,8 @@ async function loadPopupHarness({ nativeResponse, activeTab = null, onSendMessag
   const elementById = {
     'open-panel': elements.button,
     status: elements.status,
+    'compat-status-icon': elements.compatStatusIcon,
+    'version-pair': elements.versionPair,
     'native-install': elements.nativeInstall,
     'install-command': elements.installCommand,
     'copy-install-command': elements.copyInstallCommand
@@ -179,12 +251,16 @@ async function loadPopupHarness({ nativeResponse, activeTab = null, onSendMessag
     },
     navigator: {
       clipboard: {
-        writeText() {
+        writeText(text) {
+          if (typeof onClipboardWrite === 'function') {
+            onClipboardWrite(text);
+          }
           return Promise.resolve();
         }
       }
     },
-    setTimeout() {
+    setTimeout(callback) {
+      callback();
       return 1;
     },
     clearTimeout() {},
@@ -211,8 +287,15 @@ function createPopupElement(id, options = {}) {
     id,
     hidden: options.hidden === true,
     textContent: '',
+    className: '',
+    title: '',
+    dataset: {},
+    attributes: {},
     addEventListener(type, listener) {
       listeners.set(type, listener);
+    },
+    setAttribute(name, value) {
+      this.attributes[name] = value;
     },
     click() {
       const listener = listeners.get('click');

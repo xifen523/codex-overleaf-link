@@ -43,6 +43,15 @@ importScripts('shared/compatibility.js');
     }
 
     if (message.payload?.method === 'codex.cancel') {
+      const compatibilityBlock = getNativeCompatibilityBlock(message.payload);
+      if (compatibilityBlock) {
+        sendResponse({
+          ok: false,
+          error: compatibilityBlock
+        });
+        return undefined;
+      }
+
       try {
         const id = sendNativeCancel(message.payload);
         sendResponse({
@@ -141,12 +150,10 @@ importScripts('shared/compatibility.js');
     const evidence = getNativeCompatibilityEvidence(request);
     if (!evidence) {
       if (COMPATIBILITY_REQUIRED_METHODS.has(request.method)) {
-        return {
-          code: 'native_incompatible',
-          message: formatNativeCompatibilityBlockMessage('unknown_native'),
+        return createNativeUpdateRequiredBlock(request.method, {
           status: 'unknown_native',
-          installCommand: undefined
-        };
+          classification: 'incompatible'
+        });
       }
       return null;
     }
@@ -156,12 +163,7 @@ importScripts('shared/compatibility.js');
     }
 
     const status = getNativeCompatibilityStatus(evidence);
-    return {
-      code: 'native_incompatible',
-      message: formatNativeCompatibilityBlockMessage(status),
-      status,
-      installCommand: evidence.installCommand
-    };
+    return createNativeUpdateRequiredBlock(request.method, evidence, status);
   }
 
   function isNativeMethodAllowedByCompatibility(method, evidence) {
@@ -188,7 +190,69 @@ importScripts('shared/compatibility.js');
     if (typeof evidence === 'string') {
       return evidence;
     }
-    return evidence?.status || 'native_missing';
+    return evidence?.status || evidence?.classification || 'native_missing';
+  }
+
+  function getNativeCompatibilityClassification(evidence) {
+    if (typeof evidence === 'string') {
+      return isNativeCompatibilityClassification(evidence)
+        ? evidence
+        : evidence === 'ok'
+          ? 'compatible'
+          : 'incompatible';
+    }
+    if (isNativeCompatibilityClassification(evidence?.classification)) {
+      return evidence.classification;
+    }
+    if (isNativeCompatibilityClassification(evidence?.status)) {
+      return evidence.status;
+    }
+    return evidence?.status === 'ok' ? 'compatible' : 'incompatible';
+  }
+
+  function isNativeCompatibilityClassification(status) {
+    return status === 'compatible' || status === 'update-available' || status === 'incompatible';
+  }
+
+  function createNativeUpdateRequiredBlock(method, evidence = {}, status = getNativeCompatibilityStatus(evidence)) {
+    const classification = getNativeCompatibilityClassification(evidence);
+    const requiredVersion = getNativeRequiredVersion(evidence);
+    const updateCommand = getNativeUpdateCommand(evidence);
+    const currentNativeVersion = getCurrentNativeVersion(evidence);
+    return {
+      code: 'native_update_required',
+      message: formatNativeCompatibilityBlockMessage(status, requiredVersion),
+      method,
+      status,
+      classification,
+      updateCommand,
+      installCommand: updateCommand,
+      currentNativeVersion,
+      requiredVersion,
+      releaseUrl: evidence?.releaseUrl || CodexOverleafCompatibility?.buildReleaseUrl?.(requiredVersion)
+    };
+  }
+
+  function getNativeRequiredVersion(evidence = {}) {
+    return evidence.requiredVersion ||
+      CodexOverleafCompatibility?.BUILD_TARGET_VERSION ||
+      '1.0.0';
+  }
+
+  function getCurrentNativeVersion(evidence = {}) {
+    return evidence.currentNativeVersion ||
+      evidence.nativeVersion ||
+      evidence.native?.version;
+  }
+
+  function getNativeUpdateCommand(evidence = {}) {
+    if (evidence.updateCommand || evidence.installCommand) {
+      return evidence.updateCommand || evidence.installCommand;
+    }
+    return CodexOverleafCompatibility?.buildInstallCommand?.(
+      getNativeRequiredVersion(evidence),
+      evidence.native?.platform || evidence.platform
+    );
   }
 
   function sanitizeNativeRequest(request) {
@@ -205,10 +269,8 @@ importScripts('shared/compatibility.js');
     };
   }
 
-  function formatNativeCompatibilityBlockMessage(status) {
+  function formatNativeCompatibilityBlockMessage(status, requiredVersion) {
     switch (status) {
-      case 'native_too_old':
-        return 'Native host update required before this request can run. Update the local native host, reload the extension, and try again.';
       case 'extension_too_old':
         return 'Extension update required before this request can run. Update the Chrome extension and try again.';
       case 'protocol_unsupported':
@@ -218,15 +280,16 @@ importScripts('shared/compatibility.js');
       case 'native_missing':
         return 'Native host is not connected. Install the local native host, reload the extension, and try again.';
       default:
-        return 'Native host is not compatible with this extension. Update the native host, reload the extension, and try again.';
+        return `This operation requires native host v${requiredVersion} or later. Run the update command to upgrade.`;
     }
   }
 
   function sendNativeCancel(payload) {
     const nativePort = ensurePort();
     const id = payload.id || crypto.randomUUID();
+    const request = sanitizeNativeRequest({ ...payload, id });
     try {
-      nativePort.postMessage({ ...payload, id });
+      nativePort.postMessage(request);
     } catch (error) {
       handleNativeConnectionFailure(
         nativePort,

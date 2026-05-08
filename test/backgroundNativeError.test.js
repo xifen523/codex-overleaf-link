@@ -27,6 +27,7 @@ test('background blocks side-effecting native requests with non-ok compatibility
       task: 'write',
       nativeCompatibility: {
         status: 'native_too_old',
+        classification: 'update-available',
         installCommand: compatibility.buildInstallCommand()
       }
     }
@@ -36,8 +37,12 @@ test('background blocks side-effecting native requests with non-ok compatibility
 
   const blockedRun = await settleWithin(runResponse);
   assert.equal(blockedRun.ok, false);
-  assert.equal(blockedRun.error.code, 'native_incompatible');
-  assert.match(blockedRun.error.message, /Native host/i);
+  assert.equal(blockedRun.error.code, 'native_update_required');
+  assert.equal(blockedRun.error.classification, 'update-available');
+  assert.equal(blockedRun.error.currentNativeVersion, undefined);
+  assert.equal(blockedRun.error.requiredVersion, compatibility.BUILD_TARGET_VERSION);
+  assert.equal(blockedRun.error.updateCommand, compatibility.buildInstallCommand());
+  assert.match(blockedRun.error.message, /requires native host v1\.0\.0/i);
 });
 
 test('background blocks side-effecting native requests without compatibility evidence before posting', async () => {
@@ -59,8 +64,84 @@ test('background blocks side-effecting native requests without compatibility evi
 
   const blockedRun = await settleWithin(runResponse);
   assert.equal(blockedRun.ok, false);
-  assert.equal(blockedRun.error.code, 'native_incompatible');
-  assert.match(blockedRun.error.message, /Native host/i);
+  assert.equal(blockedRun.error.code, 'native_update_required');
+  assert.equal(blockedRun.error.classification, 'incompatible');
+  assert.equal(blockedRun.error.requiredVersion, compatibility.BUILD_TARGET_VERSION);
+  assert.match(blockedRun.error.message, /requires native host v1\.0\.0/i);
+});
+
+test('background allows only update-available methods when native evidence is older but capability-compatible', async () => {
+  const harness = loadBackgroundHarness();
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const skillsResponse = harness.sendNative({
+    id: 'skills-update-available',
+    method: 'skills.list',
+    params: withUpdateAvailableNativeCompatibility({})
+  }, sender);
+  const syncResponse = harness.sendNative({
+    id: 'sync-update-available',
+    method: 'mirror.sync',
+    params: withUpdateAvailableNativeCompatibility({ projectId: 'abc123' })
+  }, sender);
+
+  assert.equal(harness.ports.length, 1);
+  assert.deepEqual(
+    harness.ports[0].messages.map(message => `${message.id}:${message.method}`),
+    ['skills-update-available:skills.list']
+  );
+
+  harness.ports[0].emitMessage({
+    id: 'skills-update-available',
+    ok: true,
+    result: {
+      skills: []
+    }
+  });
+
+  const skills = await skillsResponse;
+  const sync = await settleWithin(syncResponse);
+  assert.equal(skills.ok, true);
+  assert.equal(sync.ok, false);
+  assert.equal(sync.error.code, 'native_update_required');
+  assert.equal(sync.error.classification, 'update-available');
+  assert.equal(sync.error.currentNativeVersion, '0.9.5');
+  assert.equal(sync.error.requiredVersion, compatibility.BUILD_TARGET_VERSION);
+});
+
+test('background blocks codex.cancel when compatibility evidence is incompatible', async () => {
+  const harness = loadBackgroundHarness();
+  const sender = {
+    tab: {
+      id: 101,
+      url: 'https://www.overleaf.com/project/abc123'
+    }
+  };
+
+  const cancelResponse = await harness.sendNative({
+    id: 'cancel-incompatible',
+    method: 'codex.cancel',
+    params: {
+      requestId: 'run-id',
+      nativeCompatibility: {
+        status: 'native_too_old',
+        classification: 'incompatible',
+        nativeVersion: '0.9.4',
+        installCommand: compatibility.buildInstallCommand()
+      }
+    }
+  }, sender);
+
+  assert.equal(harness.ports.length, 0);
+  assert.equal(cancelResponse.ok, false);
+  assert.equal(cancelResponse.error.code, 'native_update_required');
+  assert.equal(cancelResponse.error.classification, 'incompatible');
+  assert.equal(cancelResponse.error.currentNativeVersion, '0.9.4');
 });
 
 test('background allows recoverable native requests without compatibility evidence', async () => {
@@ -738,6 +819,20 @@ function withOkNativeCompatibility(params = {}) {
     ...params,
     nativeCompatibility: {
       status: 'ok',
+      classification: 'compatible',
+      installCommand: compatibility.buildInstallCommand()
+    }
+  };
+}
+
+function withUpdateAvailableNativeCompatibility(params = {}) {
+  return {
+    ...params,
+    nativeCompatibility: {
+      status: 'native_too_old',
+      classification: 'update-available',
+      nativeVersion: '0.9.5',
+      requiredVersion: compatibility.BUILD_TARGET_VERSION,
       installCommand: compatibility.buildInstallCommand()
     }
   };
