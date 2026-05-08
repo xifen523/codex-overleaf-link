@@ -453,6 +453,7 @@ function pingNativeBridge(bridgePath, message, options = {}) {
       child = spawn(spawnInvocation.command, spawnInvocation.args, {
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
+        windowsVerbatimArguments: spawnInvocation.windowsVerbatimArguments === true,
         windowsHide: true
       });
     } catch (error) {
@@ -575,7 +576,8 @@ function buildDoctorBridgeSpawnInvocation(bridgePath, options = {}) {
 
   return {
     command: options.env?.ComSpec || options.env?.COMSPEC || 'cmd.exe',
-    args: ['/d', '/c', 'call', quoteWindowsCommandPath(bridgePath)]
+    args: ['/d', '/c', quoteWindowsCommandPath(bridgePath)],
+    windowsVerbatimArguments: true
   };
 }
 
