@@ -497,6 +497,16 @@ function pingNativeBridge(bridgePath, message, options = {}) {
         return;
       }
 
+      if ((exitCode !== 0 && exitCode !== null) || signal) {
+        settle({
+          ok: false,
+          exitCode,
+          signal: signal || undefined,
+          error: summarizeBridgeFailure(exitCode, signal, stderr)
+        });
+        return;
+      }
+
       let decoded;
       try {
         decoded = decodeFrames(stdout);

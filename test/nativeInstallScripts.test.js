@@ -144,6 +144,7 @@ function writeFakeDoctorBridge(tempDir, options = {}) {
   fs.writeFileSync(scriptPath, [
     'const response = JSON.parse(process.env.DOCTOR_BRIDGE_RESPONSE || "null");',
     'const mode = process.env.DOCTOR_BRIDGE_MODE || "response";',
+    'const exitCode = Number.parseInt(process.env.DOCTOR_BRIDGE_EXIT_CODE || "0", 10);',
     'process.stdin.resume();',
     'process.stdin.once("data", () => {',
     '  if (mode === "exit") process.exit(7);',
@@ -151,17 +152,17 @@ function writeFakeDoctorBridge(tempDir, options = {}) {
     '  const frame = Buffer.alloc(4 + payload.length);',
     '  frame.writeUInt32LE(payload.length, 0);',
     '  payload.copy(frame, 4);',
-    '  process.stdout.write(frame, () => process.exit(0));',
+    '  process.stdout.write(frame, () => process.exit(Number.isFinite(exitCode) ? exitCode : 0));',
     '});',
     ''
   ].join('\n'), 'utf8');
 
   if (process.platform === 'win32') {
-    fs.writeFileSync(launcherPath, `@echo off\r\nset DOCTOR_BRIDGE_RESPONSE=${JSON.stringify(JSON.stringify(response))}\r\nset DOCTOR_BRIDGE_MODE=${options.mode || 'response'}\r\n"${process.execPath}" "${scriptPath}"\r\n`, 'utf8');
+    fs.writeFileSync(launcherPath, `@echo off\r\nset DOCTOR_BRIDGE_RESPONSE=${JSON.stringify(JSON.stringify(response))}\r\nset DOCTOR_BRIDGE_MODE=${options.mode || 'response'}\r\nset DOCTOR_BRIDGE_EXIT_CODE=${options.exitCode ?? 0}\r\n"${process.execPath}" "${scriptPath}"\r\n`, 'utf8');
   } else {
     fs.writeFileSync(launcherPath, [
       '#!/bin/sh',
-      `DOCTOR_BRIDGE_RESPONSE=${shellSingleQuote(JSON.stringify(response))} DOCTOR_BRIDGE_MODE=${shellSingleQuote(options.mode || 'response')} exec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(scriptPath)}`,
+      `DOCTOR_BRIDGE_RESPONSE=${shellSingleQuote(JSON.stringify(response))} DOCTOR_BRIDGE_MODE=${shellSingleQuote(options.mode || 'response')} DOCTOR_BRIDGE_EXIT_CODE=${shellSingleQuote(options.exitCode ?? 0)} exec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(scriptPath)}`,
       ''
     ].join('\n'), 'utf8');
     fs.chmodSync(launcherPath, 0o755);
@@ -332,6 +333,31 @@ test('runDoctor reports compatible native ping as ok', async () => {
     assert.equal(result.body.status, 'ok');
     assert.equal(result.body.compatibility.classification, 'compatible');
     assert.equal(result.body.ping.ok, true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('runDoctor rejects a compatible native frame from a non-zero bridge exit', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-nonzero-frame-'));
+  try {
+    const bridgePath = writeFakeDoctorBridge(tempDir, { exitCode: 7 });
+    const { env } = writeDoctorManifest(tempDir, bridgePath);
+    const result = await runDoctor({
+      browser: 'chrome',
+      env,
+      homeDir: tempDir,
+      timeoutMs: 3000
+    });
+
+    assert.equal(result.exitCode, 3);
+    assert.equal(result.body.ok, false);
+    assert.equal(result.body.status, 'execution_failure');
+    assert.equal(result.body.ping.ok, false);
+    assert.equal(result.body.ping.exitCode, 7);
+    assert.equal(result.body.compatibility, null);
+    assert.equal(result.body.diagnostics.manifestPath, result.body.manifest.path);
+    assert.equal(result.body.diagnostics.bridgePath, result.body.bridge.path);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
