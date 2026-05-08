@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.1.0] - 2026-05-08
+## v1.1.0 - 2026-05-08
 
 Version alignment and npm distribution guidance for the v1.1 native-host package.
 
@@ -17,10 +17,6 @@ Version alignment and npm distribution guidance for the v1.1 native-host package
 - Clarified that dev and unpacked extension installs must pass `--extension-id` and that no default Chrome Web Store id is documented without a committed safe default.
 - Documented the safe runtime root copy used by the npm/native installer path.
 - Documented manual Chrome Web Store release ordering so native-host guidance follows the final extension id.
-
-## v1.1.0 - 2026-05-08
-
-Release tooling compatibility heading for the same v1.1.0 notes above.
 
 ## v1.0.0 - 2026-05-07
 

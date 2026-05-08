@@ -300,14 +300,18 @@ function writeChromeWebStoreDocs(rootDir, { version = '0.6.0', includeV09Coverag
   );
 }
 
-test('CHANGELOG documents the current v1.1.0 npm distribution release', () => {
+test('CHANGELOG documents the current v1.1.0 npm distribution release in release tooling format', async () => {
   const version = readJson(path.join(repoRoot, 'package.json')).version;
   const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
-  const heading = `## [${version}] - 2026-05-08`;
+  const heading = `## v${version} - 2026-05-08`;
   const start = changelog.indexOf(heading);
   assert.notEqual(start, -1, `CHANGELOG.md should contain ${heading}`);
-  const nextHeading = changelog.indexOf('\n## ', start + heading.length);
-  const section = nextHeading === -1 ? changelog.slice(start) : changelog.slice(start, nextHeading);
+  assert.equal(changelog.includes(`## [${version}] - 2026-05-08`), false);
+  assert.equal(changelog.indexOf(heading, start + heading.length), -1, 'CHANGELOG.md should not duplicate the current release heading');
+
+  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
+  const { extractReleaseNotes } = await import(moduleUrl);
+  const section = extractReleaseNotes(changelog, version);
 
   assert.match(section, /npm native installer CLI/i);
   assert.match(section, /native doctor command/i);
