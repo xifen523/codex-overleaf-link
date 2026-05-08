@@ -16,7 +16,7 @@
     "uninstall:native": "node scripts/uninstall-native-host.mjs",
     "bridge": "node native-host/src/index.js",
     "verify:npm-package": "node scripts/verify-npm-package.mjs",
-    "pack:npm": "npm pack --dry-run --json > .npm-pack-dry-run.json && npm run verify:npm-package -- --pack-json .npm-pack-dry-run.json && npm pack && npm run verify:npm-package -- --tarball \"$(node -p 'require(\"./package.json\").name + \"-\" + require(\"./package.json\").version + \".tgz\"')\" && rm .npm-pack-dry-run.json"
+    "pack:npm": "node scripts/verify-npm-package.mjs --pack"
   },
   "engines": {
     "node": ">=20"

@@ -6,10 +6,12 @@ import { fileURLToPath } from 'node:url';
 
 const FORBIDDEN_NPM_PACKAGE_PATH_PATTERNS = [
   /(^|\/)(docs|specs|superpowers|private|test|tests|fixtures|dist|\.github|node_modules)(\/|$)/,
-  /(\.env|\.pem|\.key|\.p12)$/
+  /(\.env(?:\.[^/]*)?|\.pem|\.key|\.p12)$/
 ];
 
-const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const scriptPath = fileURLToPath(import.meta.url);
+const scriptDir = path.dirname(scriptPath);
+const repoRoot = path.resolve(scriptDir, '..');
 const defaultManifestPath = path.join(scriptDir, 'npm-package-files-v1.1.0.txt');
 
 export function normalizePackagePathList(paths) {
@@ -93,32 +95,121 @@ export function verifyPackagePaths(actualPaths, expectedPaths = readExpectedMani
   };
 }
 
-function readPackJsonFile(filePath) {
-  const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+function readPackageMetadata() {
+  return JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+}
+
+function getCurrentPackageTarballName() {
+  const packageJson = readPackageMetadata();
+  return `${packageJson.name}-${packageJson.version}.tgz`;
+}
+
+function runNpm(args) {
+  const result = spawnSync('npm', args, {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    windowsHide: true
+  });
+
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || `npm ${args.join(' ')} exited with status ${result.status}`);
+  }
+
+  return result.stdout;
+}
+
+function parsePackJsonText(text) {
+  const parsed = JSON.parse(text);
   const packuments = Array.isArray(parsed) ? parsed : [parsed];
+  return packuments;
+}
+
+function getFilePathsFromPackuments(packuments) {
   return packuments.flatMap((packument) => (
     Array.isArray(packument?.files) ? packument.files.map((file) => file.path) : []
   ));
 }
 
-function readTarballFileList(filePath) {
-  const result = spawnSync('tar', ['-tzf', filePath], { encoding: 'utf8' });
-  if (result.error) {
-    throw result.error;
+function readPackJsonFile(filePath) {
+  return getFilePathsFromPackuments(parsePackJsonText(fs.readFileSync(filePath, 'utf8')));
+}
+
+function runNpmPackDryRun() {
+  return parsePackJsonText(runNpm(['pack', '--dry-run', '--json']));
+}
+
+function readCurrentPackageTarballAsDryRun(filePath) {
+  const actualName = path.basename(filePath);
+  const expectedName = getCurrentPackageTarballName();
+
+  if (actualName !== expectedName) {
+    throw new Error(
+      `Tarball listing is unsupported without a JavaScript tar reader. `
+      + `Use --pack or --pack-json for package verification. `
+      + `Expected current package tarball name ${expectedName}, received ${actualName}.`
+    );
   }
-  if (result.status !== 0) {
-    throw new Error(result.stderr || result.stdout || `tar exited with status ${result.status}`);
-  }
-  return result.stdout.split(/\r?\n/).filter(Boolean);
+
+  return getFilePathsFromPackuments(runNpmPackDryRun());
 }
 
 function readNewlineFileList(filePath) {
   return fs.readFileSync(filePath, 'utf8').split(/\r?\n/).filter(Boolean);
 }
 
+function assertVerified(result, label) {
+  if (!result.ok) {
+    throw new Error(`${label} failed:\n${result.errors.join('\n')}`);
+  }
+  return result;
+}
+
+function verifyActualPaths(actualPaths, label) {
+  return assertVerified(verifyPackagePaths(actualPaths), label);
+}
+
+function verifyPackuments(packuments, label) {
+  return verifyActualPaths(getFilePathsFromPackuments(packuments), label);
+}
+
+export function verifyNpmPackDryRun() {
+  return verifyPackuments(runNpmPackDryRun(), 'npm pack --dry-run --json verification');
+}
+
+export function packAndVerifyNpmPackage() {
+  const generatedTarballs = new Set();
+
+  try {
+    const dryRunResult = verifyNpmPackDryRun();
+    const packuments = parsePackJsonText(runNpm(['pack', '--json']));
+
+    for (const packument of packuments) {
+      if (typeof packument?.filename === 'string') {
+        generatedTarballs.add(path.resolve(repoRoot, packument.filename));
+      }
+    }
+
+    const packResult = verifyPackuments(packuments, 'npm pack --json verification');
+    return {
+      dryRun: dryRunResult,
+      packed: packResult,
+      tarballs: [...generatedTarballs]
+    };
+  } finally {
+    for (const tarballPath of generatedTarballs) {
+      fs.rmSync(tarballPath, { force: true });
+    }
+  }
+}
+
 function printUsage() {
   console.error([
     'Usage:',
+    '  node scripts/verify-npm-package.mjs',
+    '  node scripts/verify-npm-package.mjs --pack',
     '  node scripts/verify-npm-package.mjs --pack-json <path>',
     '  node scripts/verify-npm-package.mjs --tarball <path>',
     '  node scripts/verify-npm-package.mjs --file-list <path>'
@@ -127,7 +218,10 @@ function printUsage() {
 
 function getMode(args) {
   if (args.length === 0) {
-    return { mode: 'file-list', filePath: defaultManifestPath };
+    return { mode: '--dry-run' };
+  }
+  if (args.length === 1 && args[0] === '--pack') {
+    return { mode: '--pack' };
   }
   if (args.length !== 2) {
     return null;
@@ -140,13 +234,16 @@ function getMode(args) {
 }
 
 function readActualPathsForMode(mode, filePath) {
+  if (mode === '--dry-run') {
+    return getFilePathsFromPackuments(runNpmPackDryRun());
+  }
   if (mode === '--pack-json') {
     return readPackJsonFile(filePath);
   }
   if (mode === '--tarball') {
-    return readTarballFileList(filePath);
+    return readCurrentPackageTarballAsDryRun(filePath);
   }
-  if (mode === '--file-list' || mode === 'file-list') {
+  if (mode === '--file-list') {
     return readNewlineFileList(filePath);
   }
   throw new Error(`Unsupported mode: ${mode}`);
@@ -160,25 +257,23 @@ async function main() {
     return;
   }
 
-  let actualPaths;
   try {
-    actualPaths = readActualPathsForMode(mode.mode, mode.filePath);
+    if (mode.mode === '--pack') {
+      const result = packAndVerifyNpmPackage();
+      console.log(`Verified npm pack dry-run manifest with ${result.dryRun.actual.length} files.`);
+      console.log(`Verified npm packed manifest with ${result.packed.actual.length} files.`);
+      console.log('Removed generated npm tarball.');
+      return;
+    }
+
+    const result = verifyActualPaths(readActualPathsForMode(mode.mode, mode.filePath), 'npm package manifest verification');
+    console.log(`Verified npm package manifest with ${result.actual.length} files.`);
   } catch (error) {
-    console.error(`Failed to read npm package file list: ${error.message}`);
+    console.error(error.message);
     process.exitCode = 1;
-    return;
   }
-
-  const result = verifyPackagePaths(actualPaths);
-  if (!result.ok) {
-    console.error(result.errors.join('\n'));
-    process.exitCode = 1;
-    return;
-  }
-
-  console.log(`Verified npm package manifest with ${result.actual.length} files.`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && path.resolve(process.argv[1]) === scriptPath) {
   await main();
 }

@@ -85,6 +85,8 @@ test('npm package verifier rejects forbidden package paths and allows runtime pa
     'package/.github/workflows/release.yml',
     'package/node_modules/dependency/index.js',
     'package/config/.env',
+    'package/config/.env.local',
+    'package/config/.env.production',
     'package/certificates/dev.pem',
     'package/certificates/dev.key',
     'package/certificates/profile.p12'
@@ -122,6 +124,19 @@ test('npm package exact manifest checker reports missing and extra files', async
   assert.deepEqual(result.extra, ['package/bin/extra.mjs']);
 });
 
+test('npm package verifier CLI checks actual package contents by default', () => {
+  const result = spawnSync(process.execPath, [
+    path.join(repoRoot, 'scripts/verify-npm-package.mjs')
+  ], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Verified npm package manifest/);
+  assert.equal(result.stderr, '');
+});
+
 test('npm package verifier CLI checks newline file lists', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-npm-package-'));
   try {
@@ -143,4 +158,19 @@ test('npm package verifier CLI checks newline file lists', () => {
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+
+test('npm package verifier rejects unsupported non-current tarball listing without system tar', () => {
+  const result = spawnSync(process.execPath, [
+    path.join(repoRoot, 'scripts/verify-npm-package.mjs'),
+    '--tarball',
+    path.join(os.tmpdir(), 'not-current-package.tgz')
+  ], {
+    cwd: repoRoot,
+    encoding: 'utf8'
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Tarball listing is unsupported without a JavaScript tar reader/);
 });
