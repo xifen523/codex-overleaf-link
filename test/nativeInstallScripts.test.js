@@ -548,6 +548,49 @@ test('runDoctor redacts non-home POSIX paths with spaces from native error respo
   }
 });
 
+test('runDoctor redacts bracketed POSIX paths with spaces from native error response messages by default', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-error-bracketed-'));
+  try {
+    const leakedPath = '/Volumes/Work Drive/private/project.tex';
+    const errorResponse = {
+      id: 'doctor-ping',
+      ok: false,
+      error: {
+        code: 'native_error',
+        message: `Failed [${leakedPath}]`
+      }
+    };
+    const bridgePath = writeFakeDoctorBridge(tempDir, { response: errorResponse });
+    const { env } = writeDoctorManifest(tempDir, bridgePath);
+    const redacted = await runDoctor({
+      browser: 'chrome',
+      env,
+      homeDir: tempDir,
+      timeoutMs: 5000
+    });
+
+    assert.equal(redacted.exitCode, 3);
+    assert.equal(redacted.body.ok, false);
+    assert.doesNotMatch(redacted.body.ping.response.error.message, /\/Volumes/);
+    assert.doesNotMatch(redacted.body.ping.response.error.message, /Work Drive/);
+    assert.doesNotMatch(redacted.body.ping.response.error.message, /private\/project\.tex/);
+    assert.doesNotMatch(JSON.stringify(redacted.body), new RegExp(escapeRegExp(leakedPath)));
+
+    const revealed = await runDoctor({
+      browser: 'chrome',
+      env,
+      homeDir: tempDir,
+      revealPaths: true,
+      timeoutMs: 5000
+    });
+
+    assert.equal(revealed.exitCode, 3);
+    assert.equal(revealed.body.ping.response.error.message, `Failed [${leakedPath}]`);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('runDoctor reports bridge execution failure with static diagnostics', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-exec-failure-'));
   try {

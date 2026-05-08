@@ -723,13 +723,16 @@ function replaceCaseInsensitive(value, needle, replacement) {
 }
 
 function hasUnredactedAbsolutePath(message) {
-  if (/[A-Za-z]:\\/.test(message)) {
+  const candidate = String(message)
+    .replace(/~\/[^\s"'`<>|]+/g, '~')
+    .replace(/~\\[^\s"'`<>|]+/g, '~');
+  if (/[A-Za-z]:[\\/]/.test(candidate)) {
     return true;
   }
-  if (/\\\\[^\s\\/"'`<>|]+\\[^\s\\/"'`<>|]+/.test(message)) {
+  if (/\\\\/.test(candidate)) {
     return true;
   }
-  return /(^|[\s"'(:=])\/[^\s"'`<>|]+/.test(message);
+  return candidate.includes('/');
 }
 
 function normalizeTimeoutMs(timeoutMs) {
