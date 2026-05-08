@@ -240,39 +240,59 @@ function getBroadSystemDirs(platformPath, options = {}) {
 }
 
 function isUnderHostTempDir(targetRoot, platformPath) {
-  if (platformPath === path.win32) {
-    return false;
-  }
-
-  const tempDir = path.resolve(os.tmpdir());
-  const realTempDir = fs.realpathSync(os.tmpdir());
-  const parentPath = path.dirname(path.resolve(targetRoot));
-  if (parentPath !== tempDir && !parentPath.startsWith(`${tempDir}${path.sep}`)) {
-    return false;
-  }
-  if (!hasNoSymlinkAncestorsBelowTemp(parentPath, tempDir)) {
-    return false;
-  }
-
-  const existingParent = findExistingAncestor(parentPath);
+  const tempDir = platformPath.resolve(os.tmpdir());
+  const parentPath = platformPath.dirname(platformPath.resolve(targetRoot));
+  const existingParent = findExistingAncestor(parentPath, platformPath);
   if (!existingParent) {
     return false;
   }
 
-  const realParent = fs.realpathSync(existingParent);
-  if (realParent === realTempDir || realParent.startsWith(`${realTempDir}${path.sep}`)) {
+  const realTempDir = realpathSyncForPlatform(os.tmpdir(), platformPath);
+  const realParent = realpathSyncForPlatform(existingParent, platformPath);
+  const lexicalUnderTemp = isSameOrDescendantPath(parentPath, tempDir, platformPath);
+  const realUnderTemp = isSameOrDescendantPath(realParent, realTempDir, platformPath);
+
+  if (!lexicalUnderTemp && !realUnderTemp) {
+    return false;
+  }
+
+  if (lexicalUnderTemp) {
+    if (!hasNoSymlinkAncestorsBelowTemp(parentPath, tempDir, platformPath)) {
+      return false;
+    }
+    return realUnderTemp;
+  }
+
+  if (platformPath === path.win32 && realUnderTemp) {
     return true;
   }
+
   return false;
 }
 
-function findExistingAncestor(targetPath) {
-  let current = path.resolve(targetPath);
+function isSameOrDescendantPath(targetPath, parentPath, platformPath) {
+  const resolvedTarget = platformPath.resolve(targetPath);
+  const resolvedParent = platformPath.resolve(parentPath);
+  if (samePath(resolvedTarget, resolvedParent, platformPath)) {
+    return true;
+  }
+
+  const relative = platformPath.relative(resolvedParent, resolvedTarget);
+  return Boolean(relative) && !relative.startsWith('..') && !platformPath.isAbsolute(relative);
+}
+
+function realpathSyncForPlatform(targetPath, platformPath) {
+  const realpathSync = fs.realpathSync.native || fs.realpathSync;
+  return platformPath.resolve(realpathSync(targetPath));
+}
+
+function findExistingAncestor(targetPath, platformPath = path) {
+  let current = platformPath.resolve(targetPath);
   while (true) {
     if (fs.existsSync(current)) {
       return current;
     }
-    const parent = path.dirname(current);
+    const parent = platformPath.dirname(current);
     if (parent === current) {
       return null;
     }
@@ -280,10 +300,10 @@ function findExistingAncestor(targetPath) {
   }
 }
 
-function hasNoSymlinkAncestorsBelowTemp(parentPath, tempDir) {
-  let current = path.resolve(parentPath);
-  const resolvedTempDir = path.resolve(tempDir);
-  while (current !== resolvedTempDir) {
+function hasNoSymlinkAncestorsBelowTemp(parentPath, tempDir, platformPath) {
+  let current = platformPath.resolve(parentPath);
+  const resolvedTempDir = platformPath.resolve(tempDir);
+  while (!samePath(current, resolvedTempDir, platformPath)) {
     if (fs.existsSync(current)) {
       try {
         if (fs.lstatSync(current).isSymbolicLink()) {
@@ -293,7 +313,7 @@ function hasNoSymlinkAncestorsBelowTemp(parentPath, tempDir) {
         return false;
       }
     }
-    const parent = path.dirname(current);
+    const parent = platformPath.dirname(current);
     if (parent === current) {
       return false;
     }

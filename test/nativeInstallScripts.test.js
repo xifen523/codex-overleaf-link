@@ -144,8 +144,12 @@ function writeFakeDoctorBridge(tempDir, options = {}) {
   const response = options.response === undefined
     ? { id: 'doctor-ping', ok: true, result: buildDoctorNativePayload() }
     : options.response;
+  const responsePath = path.join(tempDir, 'doctor-bridge-response.json');
+  fs.writeFileSync(responsePath, JSON.stringify(response), 'utf8');
   fs.writeFileSync(scriptPath, [
-    'const response = JSON.parse(process.env.DOCTOR_BRIDGE_RESPONSE || "null");',
+    'const fs = require("node:fs");',
+    'const responseFile = process.env.DOCTOR_BRIDGE_RESPONSE_FILE;',
+    'const response = responseFile ? JSON.parse(fs.readFileSync(responseFile, "utf8")) : JSON.parse(process.env.DOCTOR_BRIDGE_RESPONSE || "null");',
     'const mode = process.env.DOCTOR_BRIDGE_MODE || "response";',
     'const exitCode = Number.parseInt(process.env.DOCTOR_BRIDGE_EXIT_CODE || "0", 10);',
     'process.stdin.resume();',
@@ -162,11 +166,19 @@ function writeFakeDoctorBridge(tempDir, options = {}) {
   ].join('\n'), 'utf8');
 
   if (process.platform === 'win32') {
-    fs.writeFileSync(launcherPath, `@echo off\r\nset DOCTOR_BRIDGE_RESPONSE=${JSON.stringify(JSON.stringify(response))}\r\nset DOCTOR_BRIDGE_MODE=${options.mode || 'response'}\r\nset DOCTOR_BRIDGE_EXIT_CODE=${options.exitCode ?? 0}\r\nset DOCTOR_BRIDGE_TRAILING_PARTIAL=${options.trailingPartial ? '1' : '0'}\r\n"${process.execPath}" "${scriptPath}"\r\n`, 'utf8');
+    fs.writeFileSync(launcherPath, [
+      '@echo off',
+      `set "DOCTOR_BRIDGE_RESPONSE_FILE=${responsePath}"`,
+      `set "DOCTOR_BRIDGE_MODE=${options.mode || 'response'}"`,
+      `set "DOCTOR_BRIDGE_EXIT_CODE=${options.exitCode ?? 0}"`,
+      `set "DOCTOR_BRIDGE_TRAILING_PARTIAL=${options.trailingPartial ? '1' : '0'}"`,
+      `"${process.execPath}" "${scriptPath}"`,
+      ''
+    ].join('\r\n'), 'utf8');
   } else {
     fs.writeFileSync(launcherPath, [
       '#!/bin/sh',
-      `DOCTOR_BRIDGE_RESPONSE=${shellSingleQuote(JSON.stringify(response))} DOCTOR_BRIDGE_MODE=${shellSingleQuote(options.mode || 'response')} DOCTOR_BRIDGE_EXIT_CODE=${shellSingleQuote(options.exitCode ?? 0)} DOCTOR_BRIDGE_TRAILING_PARTIAL=${shellSingleQuote(options.trailingPartial ? '1' : '0')} exec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(scriptPath)}`,
+      `DOCTOR_BRIDGE_RESPONSE_FILE=${shellSingleQuote(responsePath)} DOCTOR_BRIDGE_MODE=${shellSingleQuote(options.mode || 'response')} DOCTOR_BRIDGE_EXIT_CODE=${shellSingleQuote(options.exitCode ?? 0)} DOCTOR_BRIDGE_TRAILING_PARTIAL=${shellSingleQuote(options.trailingPartial ? '1' : '0')} exec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(scriptPath)}`,
       ''
     ].join('\n'), 'utf8');
     fs.chmodSync(launcherPath, 0o755);

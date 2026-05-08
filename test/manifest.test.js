@@ -95,7 +95,12 @@ test('builds a host manifest with an injectable Windows absolute bridge path', (
   );
 });
 
-test('returns the user-level macOS Chrome native host manifest path', () => {
+test('returns the user-level macOS Chrome native host manifest path', t => {
+  if (process.platform === 'win32') {
+    t.skip('default macOS helper requires a POSIX home path; injected macOS paths are covered separately');
+    return;
+  }
+
   assert.equal(
     getChromeNativeHostManifestPath(),
     path.posix.join(os.homedir(), 'Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.overleaf.json')

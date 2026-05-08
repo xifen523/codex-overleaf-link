@@ -105,9 +105,10 @@ function getCurrentPackageTarballName() {
 }
 
 function runNpm(args) {
-  const result = spawnSync('npm', args, {
+  const result = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
     cwd: repoRoot,
     encoding: 'utf8',
+    shell: process.platform === 'win32',
     windowsHide: true
   });
 

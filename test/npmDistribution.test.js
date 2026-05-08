@@ -65,9 +65,9 @@ function makeTarballSmokeEnv(tempDir, options = {}) {
 }
 
 function prependPath(env, dir) {
-  const currentPath = env.PATH || env.Path || '';
-  env.PATH = currentPath ? `${dir}${path.delimiter}${currentPath}` : dir;
-  delete env.Path;
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path') || 'PATH';
+  const currentPath = env[pathKey] || '';
+  env[pathKey] = currentPath ? `${dir}${path.delimiter}${currentPath}` : dir;
 }
 
 function createFakeWindowsRegistryCommand(tempDir) {
@@ -283,6 +283,15 @@ test('tarball smoke Windows registry isolation routes writes through fake reg co
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('test PATH prepending preserves existing environment variable casing', () => {
+  const env = { Path: 'C:\\Windows\\System32' };
+
+  prependPath(env, 'C:\\fake-bin');
+
+  assert.equal(env.Path, `C:\\fake-bin${path.delimiter}C:\\Windows\\System32`);
+  assert.equal(Object.hasOwn(env, 'PATH'), false);
 });
 
 test('packed npm tarball installs executable CLI and manages temp native host', () => {
