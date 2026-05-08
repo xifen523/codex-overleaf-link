@@ -448,7 +448,7 @@ test('native install script registers Windows Chrome host with reg.exe add', () 
   const regLog = path.join(tempDir, 'reg.log');
   const registryEnv = writeFakeRegistryCommand(tempDir);
   const localAppData = getTestWindowsLocalAppData(tempDir);
-  const expectedManifestPath = path.win32.join(localAppData, 'CodexOverleaf', 'native-host-runtime', 'com.codex.overleaf.json');
+  const expectedManifestPath = path.win32.join(localAppData, 'codex-overleaf', 'native-messaging-hosts', 'com.codex.overleaf.json');
 
   try {
     const result = spawnSync(process.execPath, [
@@ -486,7 +486,7 @@ test('native install script uses a .cmd Windows bridge path by default', () => {
   const registryEnv = writeFakeRegistryCommand(tempDir);
   const localAppData = getTestWindowsLocalAppData(tempDir);
   const expectedBridgePath = path.win32.join(localAppData, 'CodexOverleaf', 'codex-overleaf-bridge.cmd');
-  const expectedManifestPath = path.win32.join(localAppData, 'CodexOverleaf', 'native-host-runtime', 'com.codex.overleaf.json');
+  const expectedManifestPath = path.win32.join(localAppData, 'codex-overleaf', 'native-messaging-hosts', 'com.codex.overleaf.json');
 
   try {
     const result = spawnSync(process.execPath, [

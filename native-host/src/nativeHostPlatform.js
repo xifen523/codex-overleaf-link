@@ -2,21 +2,10 @@
 
 const os = require('node:os');
 const path = require('node:path');
-
-const HOST_NAME = 'com.codex.overleaf';
-
-const MACOS_MANIFEST_DIRS = {
-  chrome: 'Library/Application Support/Google/Chrome/NativeMessagingHosts'
-};
-
-const LINUX_MANIFEST_DIRS = {
-  chrome: '.config/google-chrome/NativeMessagingHosts',
-  chromium: '.config/chromium/NativeMessagingHosts'
-};
-
-const WINDOWS_REGISTRY_PATHS = {
-  chrome: 'Software\\Google\\Chrome\\NativeMessagingHosts'
-};
+const {
+  getNativeHostManifestPath,
+  getWindowsRegistryMetadata
+} = require('./manifest');
 
 function getNativeHostPlatform(options = {}) {
   return options.platform || process.platform;
@@ -49,7 +38,7 @@ function getDefaultBridgePath(options = {}) {
 function getNativeHostRegistrationTarget(options = {}) {
   const platform = getNativeHostPlatform(options);
   const browser = getNativeHostBrowser(options);
-  const manifestPath = getNativeManifestPath({ ...options, browser });
+  const manifestPath = getNativeHostManifestPath({ ...options, platform, browser });
 
   if (platform === 'darwin' || platform === 'linux') {
     return {
@@ -60,15 +49,13 @@ function getNativeHostRegistrationTarget(options = {}) {
   }
 
   if (platform === 'win32') {
-    const registryPath = WINDOWS_REGISTRY_PATHS[browser];
-    if (!registryPath) {
-      throwUnsupportedBrowser(platform, browser);
-    }
+    const metadata = getWindowsRegistryMetadata({ ...options, browser });
     return {
       kind: 'registry',
-      root: 'HKCU',
-      registryKey: `HKCU\\${registryPath}\\${HOST_NAME}`,
-      manifestPath
+      browser: metadata.browser,
+      root: metadata.root,
+      registryKey: metadata.registryKey,
+      manifestPath: metadata.manifestPath
     };
   }
 
@@ -78,35 +65,12 @@ function getNativeHostRegistrationTarget(options = {}) {
 function getNativeManifestPath(options = {}) {
   const platform = getNativeHostPlatform(options);
   const browser = getNativeHostBrowser(options);
-
-  if (platform === 'darwin') {
-    const manifestDir = MACOS_MANIFEST_DIRS[browser];
-    if (!manifestDir) {
-      throwUnsupportedBrowser(platform, browser);
-    }
-    return path.posix.join(getHomeDir(options), manifestDir, `${HOST_NAME}.json`);
-  }
-
-  if (platform === 'linux') {
-    const manifestDir = LINUX_MANIFEST_DIRS[browser];
-    if (!manifestDir) {
-      throwUnsupportedBrowser(platform, browser);
-    }
-    return path.posix.join(getHomeDir(options), manifestDir, `${HOST_NAME}.json`);
-  }
-
-  if (platform === 'win32') {
-    if (!WINDOWS_REGISTRY_PATHS[browser]) {
-      throwUnsupportedBrowser(platform, browser);
-    }
-    return path.win32.join(getDefaultRuntimeRoot(options), `${HOST_NAME}.json`);
-  }
-
-  throwUnsupportedPlatform(platform);
+  return getNativeHostManifestPath({ ...options, platform, browser });
 }
 
 function getNativeHostBrowser(options) {
-  return options.browser || 'chrome';
+  const browser = options.browser || 'chrome';
+  return browser === 'auto' ? 'chrome' : browser;
 }
 
 function getHomeDir(options) {

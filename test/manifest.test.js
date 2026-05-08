@@ -18,7 +18,8 @@ const {
 } = require('../native-host/src/manifest');
 const {
   getDefaultBridgePath,
-  getDefaultRuntimeRoot
+  getDefaultRuntimeRoot,
+  getNativeHostRegistrationTarget
 } = require('../native-host/src/nativeHostPlatform');
 const extensionManifest = require('../extension/manifest.json');
 
@@ -177,6 +178,59 @@ test('returns exact Windows Chrome native host manifest path and quoted registry
   assert.equal(
     metadata.deleteCommand,
     'reg.exe delete "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.codex.overleaf" /f'
+  );
+});
+
+test('actual native host registration target uses pinned Windows manifest path', () => {
+  const target = getNativeHostRegistrationTarget({
+    platform: 'win32',
+    browser: 'chrome',
+    env: {
+      LOCALAPPDATA: 'C:\\Users\\Alice\\AppData\\Local'
+    }
+  });
+
+  assert.equal(target.kind, 'registry');
+  assert.equal(target.browser, 'chrome');
+  assert.equal(
+    target.registryKey,
+    'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.codex.overleaf'
+  );
+  assert.equal(
+    target.manifestPath,
+    'C:\\Users\\Alice\\AppData\\Local\\codex-overleaf\\native-messaging-hosts\\com.codex.overleaf.json'
+  );
+});
+
+test('actual native host registration target normalizes auto browser to Chrome', () => {
+  assert.deepEqual(
+    getNativeHostRegistrationTarget({
+      platform: 'linux',
+      browser: 'auto',
+      homeDir: '/home/alice'
+    }),
+    {
+      kind: 'file',
+      browser: 'chrome',
+      manifestPath: '/home/alice/.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json'
+    }
+  );
+
+  const target = getNativeHostRegistrationTarget({
+    platform: 'win32',
+    browser: 'auto',
+    env: {
+      LOCALAPPDATA: 'C:\\Users\\Alice\\AppData\\Local'
+    }
+  });
+  assert.equal(target.browser, 'chrome');
+  assert.equal(
+    target.registryKey,
+    'HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.codex.overleaf'
+  );
+  assert.equal(
+    target.manifestPath,
+    'C:\\Users\\Alice\\AppData\\Local\\codex-overleaf\\native-messaging-hosts\\com.codex.overleaf.json'
   );
 });
 
