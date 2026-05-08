@@ -11,6 +11,10 @@ function readBackground() {
   return fs.readFileSync(backgroundPath, 'utf8');
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 test('background blocks side-effecting native requests with non-ok compatibility evidence before posting', async () => {
   const harness = loadBackgroundHarness();
   const sender = {
@@ -44,7 +48,7 @@ test('background blocks side-effecting native requests with non-ok compatibility
   assert.equal(blockedRun.error.recommendedVersion, compatibility.BUILD_TARGET_VERSION);
   assert.equal(blockedRun.error.updateCommand, compatibility.buildInstallCommand());
   assert.match(blockedRun.error.message, /requires native host v1\.0\.0/i);
-  assert.match(blockedRun.error.message, /recommended update target is v1\.1\.0/i);
+  assert.match(blockedRun.error.message, new RegExp(`recommended update target is v${escapeRegExp(compatibility.BUILD_TARGET_VERSION)}`, 'i'));
 });
 
 test('background blocks side-effecting native requests without compatibility evidence before posting', async () => {
@@ -72,7 +76,7 @@ test('background blocks side-effecting native requests without compatibility evi
   assert.equal(blockedRun.error.recommendedVersion, compatibility.BUILD_TARGET_VERSION);
   assert.equal(blockedRun.error.updateCommand, compatibility.buildInstallCommand());
   assert.match(blockedRun.error.message, /requires native host v1\.0\.0/i);
-  assert.match(blockedRun.error.message, /recommended update target is v1\.1\.0/i);
+  assert.match(blockedRun.error.message, new RegExp(`recommended update target is v${escapeRegExp(compatibility.BUILD_TARGET_VERSION)}`, 'i'));
 });
 
 test('background allows only update-available methods when native evidence is older but capability-compatible', async () => {
@@ -120,7 +124,7 @@ test('background allows only update-available methods when native evidence is ol
   assert.equal(sync.error.recommendedVersion, compatibility.BUILD_TARGET_VERSION);
   assert.equal(sync.error.updateCommand, compatibility.buildInstallCommand());
   assert.match(sync.error.message, /requires native host v1\.0\.0/i);
-  assert.match(sync.error.message, /recommended update target is v1\.1\.0/i);
+  assert.match(sync.error.message, new RegExp(`recommended update target is v${escapeRegExp(compatibility.BUILD_TARGET_VERSION)}`, 'i'));
 });
 
 test('background blocks codex.cancel when compatibility evidence is incompatible', async () => {
