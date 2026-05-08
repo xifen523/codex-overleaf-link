@@ -690,7 +690,11 @@ function sanitizeDiagnosticMessage(message, pathOptions = {}) {
       : redacted.split(normalizedHome).join('~');
   }
 
-  return redactAbsolutePathsInMessage(redacted, pathOptions);
+  if (hasUnredactedAbsolutePath(redacted)) {
+    return 'Native error message redacted (absolute path omitted)';
+  }
+
+  return redacted;
 }
 
 function firstDiagnosticLine(message) {
@@ -718,21 +722,14 @@ function replaceCaseInsensitive(value, needle, replacement) {
   return result + value.slice(offset);
 }
 
-function redactAbsolutePathsInMessage(message, pathOptions = {}) {
-  let redacted = String(message);
-  redacted = redacted.replace(/[A-Za-z]:\\[^\s"'`<>|]+/g, token => (
-    normalizeDiagnosticPath(token, { ...pathOptions, platform: 'win32', homeDir: '' })
-  ));
-  redacted = redacted.replace(/\\\\[^\s\\/"'`<>|]+\\[^\s\\/"'`<>|]+(?:\\[^\s"'`<>|]+)+/g, token => (
-    normalizeDiagnosticPath(token, { ...pathOptions, platform: 'win32', homeDir: '' })
-  ));
-  redacted = redacted.replace(/\/[^\s"'`<>|]+/g, (token, offset, fullMessage) => {
-    if (fullMessage[offset - 1] === '~') {
-      return token;
-    }
-    return normalizeDiagnosticPath(token, { ...pathOptions, platform: 'linux', homeDir: '' });
-  });
-  return redacted;
+function hasUnredactedAbsolutePath(message) {
+  if (/[A-Za-z]:\\/.test(message)) {
+    return true;
+  }
+  if (/\\\\[^\s\\/"'`<>|]+\\[^\s\\/"'`<>|]+/.test(message)) {
+    return true;
+  }
+  return /(^|[\s"'(:=])\/[^\s"'`<>|]+/.test(message);
 }
 
 function normalizeTimeoutMs(timeoutMs) {
