@@ -34,6 +34,7 @@ package/native-host/src/localSkills.js
 package/native-host/src/manifest.js
 package/native-host/src/mirrorSensitiveScan.js
 package/native-host/src/mirrorWorkspace.js
+package/native-host/src/nativeDoctor.js
 package/native-host/src/nativeEnvironment.js
 package/native-host/src/nativeHostPlatform.js
 package/native-host/src/nativeMessaging.js
