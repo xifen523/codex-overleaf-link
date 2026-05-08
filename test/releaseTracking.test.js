@@ -5,7 +5,20 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..');
+const packageJson = require('../package.json');
+const packageLock = require('../package-lock.json');
 const extensionManifest = require('../extension/manifest.json');
+const compatibility = require('../extension/src/shared/compatibility');
+
+test('current release version surfaces are aligned for v1.1.0 packaging', () => {
+  assert.equal(packageJson.version, '1.1.0');
+  assert.equal(packageLock.version, packageJson.version);
+  assert.equal(packageLock.packages[''].version, packageJson.version);
+  assert.equal(extensionManifest.version, packageJson.version);
+  assert.equal(compatibility.BUILD_TARGET_VERSION, packageJson.version);
+  assert.equal(compatibility.EXTENSION_PROTOCOL_VERSION, 1);
+  assert.deepEqual(compatibility.SUPPORTED_NATIVE_PROTOCOL, { min: 1, max: 1 });
+});
 
 function readGitTrackedFiles() {
   const result = spawnSync('git', ['ls-files'], {

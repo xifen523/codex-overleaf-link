@@ -34,6 +34,7 @@ const CANONICAL_RELEASE_INSTALL_COMMAND = `CODEX_OVERLEAF_REF=${CURRENT_RELEASE_
 const CANONICAL_WINDOWS_RELEASE_REF_COMMAND = `$env:CODEX_OVERLEAF_REF='${CURRENT_RELEASE_REF}'`;
 const CANONICAL_WINDOWS_RELEASE_INSTALL_URL = `https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${CURRENT_RELEASE_REF}/install.ps1`;
 const CANONICAL_WINDOWS_RELEASE_RUN_COMMAND = 'powershell -ExecutionPolicy Bypass -File install.ps1';
+const CANONICAL_NPM_EXEC_PREFIX = `npm exec --yes codex-overleaf-link@${CURRENT_PACKAGE_VERSION} --`;
 
 function writeFakeRegistryCommand(tempDir, options = {}) {
   const scriptPath = path.join(tempDir, 'fake-reg.js');
@@ -840,7 +841,7 @@ test('native install script defaults to the committed extension id', () => {
   );
 
   assert.match(source, /DEFAULT_CHROME_EXTENSION_ID/);
-  assert.match(source, /args\.extensionId \|\| DEFAULT_CHROME_EXTENSION_ID/);
+  assert.match(source, /options\.extensionId \|\| DEFAULT_CHROME_EXTENSION_ID/);
   assert.equal(DEFAULT_CHROME_EXTENSION_ID, 'illdpneeeopfffmiepaejglgmhpmdhdc');
 });
 
@@ -1361,6 +1362,13 @@ test('README documents current cross-platform install, uninstall, release artifa
   assert.match(readme, /native host update required/i);
   assert.match(readme, /CODEX_OVERLEAF_EXTENSION_ID/);
   assert.match(readme, /allowed_origins/);
+  assert.ok(readme.includes(`${CANONICAL_NPM_EXEC_PREFIX} install-native --extension-id <chrome-extension-id>`));
+  assert.ok(readme.includes(`${CANONICAL_NPM_EXEC_PREFIX} doctor`));
+  assert.ok(readme.includes(`${CANONICAL_NPM_EXEC_PREFIX} uninstall-native`));
+  assert.match(readme, /npm installs\/updates\/uninstalls\/diagnoses the native host only/i);
+  assert.match(readme, /npm does not install the Chrome extension/i);
+  assert.match(readme, /Use `--extension-id` for dev\/unpacked extension ids/i);
+  assert.match(readme, /Do not document a default Chrome Web Store id unless a safe default is committed/i);
   assert.doesNotMatch(readme, /version-0\.4\.0-blue/);
   assert.doesNotMatch(readme, /platform-macOS-lightgrey/);
 });

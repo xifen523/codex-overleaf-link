@@ -300,6 +300,22 @@ function writeChromeWebStoreDocs(rootDir, { version = '0.6.0', includeV09Coverag
   );
 }
 
+test('CHANGELOG documents the current v1.1.0 npm distribution release', () => {
+  const version = readJson(path.join(repoRoot, 'package.json')).version;
+  const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
+  const heading = `## [${version}] - 2026-05-08`;
+  const start = changelog.indexOf(heading);
+  assert.notEqual(start, -1, `CHANGELOG.md should contain ${heading}`);
+  const nextHeading = changelog.indexOf('\n## ', start + heading.length);
+  const section = nextHeading === -1 ? changelog.slice(start) : changelog.slice(start, nextHeading);
+
+  assert.match(section, /npm native installer CLI/i);
+  assert.match(section, /native doctor command/i);
+  assert.match(section, /safe runtime root copy/i);
+  assert.match(section, /npm package content gates/i);
+  assert.match(section, /manual Chrome Web Store release ordering/i);
+});
+
 test('package exposes release verification and artifact build commands', () => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
   const runTests = fs.readFileSync(path.join(repoRoot, 'scripts/run-tests.mjs'), 'utf8');
@@ -813,10 +829,7 @@ test('release verifier rejects stale Chrome Web Store release checklist instruct
   }
 });
 
-test('Chrome Web Store prep docs describe current permissions and privacy posture', () => {
-  const packageVersion = readJson(path.join(repoRoot, 'package.json')).version;
-  const releaseRef = `v${packageVersion}`;
-  const escapedReleaseRef = releaseRef.replace(/\./g, '\\.');
+test('Chrome Web Store prep docs describe manual release permissions and privacy posture', () => {
   const docsDir = path.join(repoRoot, 'docs/chrome-web-store');
   const permissions = readText(path.join(docsDir, 'permissions.md'));
   const privacy = readText(path.join(docsDir, 'privacy.md'));
@@ -855,7 +868,9 @@ test('Chrome Web Store prep docs describe current permissions and privacy postur
   assert.match(checklist, /npm test/);
   assert.match(checklist, /npm run verify:release/);
   assert.match(checklist, /npm run build:release/);
-  assert.match(checklist, new RegExp(`dist/releases/${escapedReleaseRef}/SHA256SUMS`));
+  const documentedReleaseRef = checklist.match(/dist\/releases\/(v\d+\.\d+\.\d+)\/SHA256SUMS/)?.[1];
+  assert.ok(documentedReleaseRef, 'release checklist should document a concrete GitHub release ref');
+  const escapedReleaseRef = documentedReleaseRef.replace(/\./g, '\\.');
   assert.match(checklist, new RegExp(`codex-overleaf-link-extension-${escapedReleaseRef}\\.zip`));
   assert.match(checklist, new RegExp(`codex-overleaf-native-host-${escapedReleaseRef}\\.tar\\.gz`));
   assert.match(checklist, /install\.ps1/);
