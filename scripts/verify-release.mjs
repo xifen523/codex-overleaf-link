@@ -4,10 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const CHROME_WEB_STORE_DOCS = [
-  'permissions.md',
-  'privacy.md',
-  'listing.md',
+const MANUAL_EXTENSION_RELEASE_DOCS = [
   'release-checklist.md'
 ];
 const EXPECTED_PACKAGE_NAME = 'codex-overleaf-link';
@@ -103,9 +100,9 @@ export function collectReleaseVerificationErrors(options = {}) {
   errors.push(...collectForbiddenTrackedPathErrors(rootDir, options.trackedFiles));
   errors.push(...collectInstallerArtifactErrors(rootDir));
   if (version) {
-    errors.push(...collectChromeWebStoreDocErrors(rootDir, version));
+    errors.push(...collectManualExtensionReleaseDocErrors(rootDir, version));
   } else {
-    errors.push(...collectChromeWebStoreDocErrors(rootDir));
+    errors.push(...collectManualExtensionReleaseDocErrors(rootDir));
   }
   return errors;
 }
@@ -175,13 +172,13 @@ export function collectInstallerArtifactErrors(rootDir) {
   return errors;
 }
 
-export function collectChromeWebStoreDocErrors(rootDir, version = '') {
-  const docsDir = path.join(rootDir, 'docs', 'chrome-web-store');
+export function collectManualExtensionReleaseDocErrors(rootDir, version = '') {
+  const docsDir = path.join(rootDir, 'docs', 'manual-extension');
   const errors = [];
-  for (const fileName of CHROME_WEB_STORE_DOCS) {
+  for (const fileName of MANUAL_EXTENSION_RELEASE_DOCS) {
     const docPath = path.join(docsDir, fileName);
     if (!fs.existsSync(docPath)) {
-      errors.push(`docs/chrome-web-store/${fileName} is required for release verification.`);
+      errors.push(`docs/manual-extension/${fileName} is required for release verification.`);
     }
   }
   if (errors.length === 0 && version) {
@@ -192,7 +189,7 @@ export function collectChromeWebStoreDocErrors(rootDir, version = '') {
 
 function collectReleaseChecklistErrors(docsDir, version) {
   const errors = [];
-  const relativePath = 'docs/chrome-web-store/release-checklist.md';
+  const relativePath = 'docs/manual-extension/release-checklist.md';
   const checklist = fs.readFileSync(path.join(docsDir, 'release-checklist.md'), 'utf8');
   const releaseRef = `v${version}`;
   const requiredFragments = [
@@ -202,7 +199,12 @@ function collectReleaseChecklistErrors(docsDir, version) {
     `codex-overleaf-link-${version}.tgz`,
     'npm run verify:npm-package',
     'npm package upload',
-    'install.ps1'
+    'install.ps1',
+    'GitHub Release',
+    'chrome://extensions',
+    'Load unpacked',
+    `npm exec --yes ${EXPECTED_PACKAGE_NAME}@${version} -- install-native --extension-id <chrome-extension-id>`,
+    `npm exec --yes ${EXPECTED_PACKAGE_NAME}@${version} -- doctor`
   ];
 
   for (const fragment of requiredFragments) {
@@ -220,6 +222,9 @@ function collectReleaseChecklistErrors(docsDir, version) {
   }
   if (/\bv0\.4(?:\.0)?\b/i.test(checklist)) {
     errors.push(`${relativePath} must not reference stale v0.4 release instructions.`);
+  }
+  if (/Chrome Web Store/i.test(checklist)) {
+    errors.push(`${relativePath} must not make Chrome Web Store part of the current v${version} release path.`);
   }
   return errors;
 }

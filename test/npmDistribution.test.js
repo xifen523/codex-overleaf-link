@@ -401,6 +401,25 @@ test('install-native rejects invalid extension id', () => {
   }
 });
 
+test('install-native rejects missing extension id', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-cli-install-missing-id-'));
+  try {
+    const result = runCli([
+      'install-native',
+      '--runtime-root',
+      path.join(tempDir, 'runtime'),
+      '--json'
+    ], {
+      env: makeIsolatedCliEnv(tempDir)
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Missing required --extension-id/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('uninstall-native --keep-runtime removes manifest and keeps runtime', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-cli-uninstall-keep-'));
   try {

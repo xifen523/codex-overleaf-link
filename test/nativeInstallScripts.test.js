@@ -32,10 +32,10 @@ const {
 
 const CURRENT_PACKAGE_VERSION = require('../package.json').version;
 const CURRENT_RELEASE_REF = `v${CURRENT_PACKAGE_VERSION}`;
-const CANONICAL_RELEASE_INSTALL_COMMAND = `CODEX_OVERLEAF_REF=${CURRENT_RELEASE_REF} bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${CURRENT_RELEASE_REF}/install.sh)"`;
+const CANONICAL_RELEASE_INSTALL_COMMAND = `CODEX_OVERLEAF_REF=${CURRENT_RELEASE_REF} bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${CURRENT_RELEASE_REF}/install.sh)" -- --extension-id <chrome-extension-id>`;
 const CANONICAL_WINDOWS_RELEASE_REF_COMMAND = `$env:CODEX_OVERLEAF_REF='${CURRENT_RELEASE_REF}'`;
 const CANONICAL_WINDOWS_RELEASE_INSTALL_URL = `https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${CURRENT_RELEASE_REF}/install.ps1`;
-const CANONICAL_WINDOWS_RELEASE_RUN_COMMAND = 'powershell -ExecutionPolicy Bypass -File install.ps1';
+const CANONICAL_WINDOWS_RELEASE_RUN_COMMAND = 'powershell -ExecutionPolicy Bypass -File install.ps1 --extension-id <chrome-extension-id>';
 const CANONICAL_NPM_EXEC_PREFIX = `npm exec --yes codex-overleaf-link@${CURRENT_PACKAGE_VERSION} --`;
 
 function writeFakeRegistryCommand(tempDir, options = {}) {
@@ -849,14 +849,15 @@ test('installRuntimeFromPackage reports rollback cleanup warnings without failin
   }
 });
 
-test('native install script defaults to the committed extension id', () => {
+test('native install script requires an explicit extension id', () => {
   const source = fs.readFileSync(
     path.join(__dirname, '../scripts/install-native-host.mjs'),
     'utf8'
   );
 
-  assert.match(source, /DEFAULT_CHROME_EXTENSION_ID/);
-  assert.match(source, /options\.extensionId \|\| DEFAULT_CHROME_EXTENSION_ID/);
+  assert.doesNotMatch(source, /DEFAULT_CHROME_EXTENSION_ID/);
+  assert.match(source, /Missing required --extension-id/);
+  assert.match(source, /const extensionIds = \[extensionId\]/);
   assert.equal(DEFAULT_CHROME_EXTENSION_ID, 'illdpneeeopfffmiepaejglgmhpmdhdc');
 });
 
@@ -944,6 +945,8 @@ test('native install runtime includes package metadata required by bridge ping',
   try {
     const result = spawnSync(process.execPath, [
       path.join(__dirname, '../scripts/install-native-host.mjs'),
+      '--extension-id',
+      DEFAULT_CHROME_EXTENSION_ID,
       '--runtime-root',
       runtimeRoot,
       '--bridge-path',
@@ -983,6 +986,8 @@ test('native install script writes Linux Chrome manifest under injected HOME', t
   try {
     const result = spawnSync(process.execPath, [
       path.join(__dirname, '../scripts/install-native-host.mjs'),
+      '--extension-id',
+      DEFAULT_CHROME_EXTENSION_ID,
       '--platform',
       'linux',
       '--browser',
@@ -1014,6 +1019,8 @@ test('native install script writes Linux Chromium manifest under injected HOME',
   try {
     const result = spawnSync(process.execPath, [
       path.join(__dirname, '../scripts/install-native-host.mjs'),
+      '--extension-id',
+      DEFAULT_CHROME_EXTENSION_ID,
       '--platform',
       'linux',
       '--browser',
@@ -1046,6 +1053,8 @@ test('native install script registers Windows Chrome host with reg.exe add', () 
   try {
     const result = spawnSync(process.execPath, [
       path.join(__dirname, '../scripts/install-native-host.mjs'),
+      '--extension-id',
+      DEFAULT_CHROME_EXTENSION_ID,
       '--platform',
       'win32',
       '--browser',
@@ -1084,6 +1093,8 @@ test('native install script uses a .cmd Windows bridge path by default', () => {
   try {
     const result = spawnSync(process.execPath, [
       path.join(__dirname, '../scripts/install-native-host.mjs'),
+      '--extension-id',
+      DEFAULT_CHROME_EXTENSION_ID,
       '--platform',
       'win32',
       '--browser',
@@ -1127,6 +1138,8 @@ test('native install script rejects unsafe runtime roots before deleting them', 
   try {
     const result = spawnSync(process.execPath, [
       path.join(__dirname, '../scripts/install-native-host.mjs'),
+      '--extension-id',
+      DEFAULT_CHROME_EXTENSION_ID,
       '--runtime-root',
       unsafeRoot
     ], {
@@ -1351,22 +1364,22 @@ test('repository ships a one-command macOS installer', () => {
   assert.match(installer, /pbcopy/);
   assert.match(installer, /open -a "Google Chrome" "chrome:\/\/extensions"/);
   assert.match(installer, /open -R/);
-  assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash/);
+  assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash -s -- --extension-id <chrome-extension-id>/);
   assert.match(readme, /~\/Codex Overleaf Link Extension/);
   assert.doesNotMatch(readme, /select `~\/\.codex-overleaf\/source\/extension`/);
 });
 
-test('README documents current cross-platform install, uninstall, release artifacts, and Web Store extension id flow', () => {
+test('README documents current cross-platform manual install, uninstall, release artifacts, and explicit extension id flow', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
 
-  assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash/);
+  assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash -s -- --extension-id <chrome-extension-id>/);
   assert.ok(readme.includes(CANONICAL_RELEASE_INSTALL_COMMAND));
   assert.match(readme, new RegExp(`iwr\\s+https://raw\\.githubusercontent\\.com/Ghqqqq/codex-overleaf-link/${escapeRegExp(CURRENT_RELEASE_REF)}/install\\.ps1`, 'i'));
   assert.match(readme, /powershell\s+-ExecutionPolicy\s+Bypass\s+-File\s+install\.ps1/i);
   assert.match(readme, /macOS\s+\/\s+Linux/i);
   assert.match(readme, /Windows/i);
   assert.match(readme, new RegExp(`codex-overleaf-link-extension-${escapeRegExp(CURRENT_RELEASE_REF)}\\.zip`));
-  assert.match(readme, /loadable Chrome extension/i);
+  assert.match(readme, /manual unpacked installation/i);
   assert.match(readme, new RegExp(`codex-overleaf-native-host-${escapeRegExp(CURRENT_RELEASE_REF)}\\.tar\\.gz`));
   assert.match(readme, /native host runtime/i);
   assert.match(readme, /install\.sh/);
@@ -1377,41 +1390,32 @@ test('README documents current cross-platform install, uninstall, release artifa
   assert.match(readme, /native host update required/i);
   assert.match(readme, /CODEX_OVERLEAF_EXTENSION_ID/);
   assert.match(readme, /allowed_origins/);
+  assert.match(readme, /GitHub Release extension zip/i);
+  assert.match(readme, /actual id shown by Chrome/i);
   assert.ok(readme.includes(`${CANONICAL_NPM_EXEC_PREFIX} install-native --extension-id <chrome-extension-id>`));
   assert.ok(readme.includes(`${CANONICAL_NPM_EXEC_PREFIX} doctor`));
   assert.ok(readme.includes(`${CANONICAL_NPM_EXEC_PREFIX} uninstall-native`));
-  assert.match(readme, /npm installs\/updates\/uninstalls\/diagnoses the native host only/i);
+  assert.match(readme, /npm installs, updates, uninstalls, and diagnoses the native host only/i);
   assert.match(readme, /npm does not install the Chrome extension/i);
-  assert.match(readme, /Use `--extension-id` for dev\/unpacked extension ids/i);
-  assert.match(readme, /Do not document a default Chrome Web Store id unless a safe default is committed/i);
+  assert.match(readme, /Use `--extension-id` for every manual\/unpacked extension install/i);
+  assert.doesNotMatch(readme, /Chrome Web Store once published/i);
   assert.doesNotMatch(readme, /version-0\.4\.0-blue/);
   assert.doesNotMatch(readme, /platform-macOS-lightgrey/);
 });
 
-test('README pins every Windows release installer command with CODEX_OVERLEAF_REF', () => {
+test('README documents Windows source installer with explicit extension id', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
   const installCommand = `iwr ${CANONICAL_WINDOWS_RELEASE_INSTALL_URL} -OutFile install.ps1`;
-  const installIndexes = [];
-  let searchFrom = 0;
-  while (true) {
-    const index = readme.indexOf(installCommand, searchFrom);
-    if (index === -1) {
-      break;
-    }
-    installIndexes.push(index);
-    searchFrom = index + installCommand.length;
-  }
+  const installIndex = readme.indexOf(installCommand);
 
-  assert.ok(installIndexes.length >= 4, 'expected install, update, recovery, and matrix Windows commands');
-  for (const index of installIndexes) {
-    const segment = readme.slice(index, index + 240);
-    assert.ok(segment.includes(CANONICAL_WINDOWS_RELEASE_REF_COMMAND), segment);
-    assert.ok(segment.includes(CANONICAL_WINDOWS_RELEASE_RUN_COMMAND), segment);
-    assert.ok(
-      segment.indexOf(CANONICAL_WINDOWS_RELEASE_REF_COMMAND) < segment.indexOf(CANONICAL_WINDOWS_RELEASE_RUN_COMMAND),
-      segment
-    );
-  }
+  assert.notEqual(installIndex, -1, 'expected Windows source installer download command');
+  const segment = readme.slice(installIndex, installIndex + 320);
+  assert.ok(segment.includes(CANONICAL_WINDOWS_RELEASE_REF_COMMAND), segment);
+  assert.ok(segment.includes(CANONICAL_WINDOWS_RELEASE_RUN_COMMAND), segment);
+  assert.ok(
+    segment.indexOf(CANONICAL_WINDOWS_RELEASE_REF_COMMAND) < segment.indexOf(CANONICAL_WINDOWS_RELEASE_RUN_COMMAND),
+    segment
+  );
 });
 
 test('README documents Windows cleanup roots and Codex skill loading boundaries', () => {
@@ -1434,7 +1438,7 @@ test('README documents Windows cleanup roots and Codex skill loading boundaries'
   assert.match(readme, /does not write to or reuse global `~\/\.codex\/sessions`/i);
 });
 
-test('one-command installer works on macOS Bash 3.2 when extension id is unset', t => {
+test('one-command installer works on macOS Bash 3.2 with explicit extension id', t => {
   if (process.platform === 'win32') {
     t.skip('macOS shell installer behavior is covered on POSIX runners');
     return;
@@ -1488,7 +1492,8 @@ test('one-command installer works on macOS Bash 3.2 when extension id is unset',
       HOME: tempDir,
       PATH: `${binDir}${path.delimiter}${process.env.PATH}`,
       CODEX_OVERLEAF_REPO_URL: 'https://example.invalid/repo.git',
-      CODEX_OVERLEAF_INSTALL_DIR: installDir
+      CODEX_OVERLEAF_INSTALL_DIR: installDir,
+      CODEX_OVERLEAF_EXTENSION_ID: DEFAULT_CHROME_EXTENSION_ID
     },
     encoding: 'utf8'
   });
@@ -1504,7 +1509,7 @@ test('one-command installer works on macOS Bash 3.2 when extension id is unset',
   assert.match(result.stdout, /Refresh the Overleaf page/);
   const nodeArgs = fs.readFileSync(nodeLog, 'utf8');
   assert.match(nodeArgs, /scripts\/install-native-host\.mjs/);
-  assert.doesNotMatch(nodeArgs, /--extension-id/);
+  assert.match(nodeArgs, /--extension-id\nilldpneeeopfffmiepaejglgmhpmdhdc/);
   assert.equal(fs.readlinkSync(visibleExtensionLink), path.join(installDir, 'extension'));
   assert.equal(fs.readFileSync(pbcopyLog, 'utf8'), visibleExtensionLink);
   const openArgs = fs.readFileSync(openLog, 'utf8');

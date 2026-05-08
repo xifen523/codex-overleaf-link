@@ -2,21 +2,22 @@
 
 ## v1.1.0 - 2026-05-08
 
-Version alignment and npm distribution guidance for the v1.1 native-host package.
+Version alignment and manual GitHub Release distribution guidance for the v1.1 native-host package.
 
 ### Added
 
 - npm native installer CLI guidance with release-pinned `npm exec` install, doctor, and uninstall commands.
 - Native doctor command documentation for diagnosing the installed native host without installing the Chrome extension.
 - npm package content gates that verify the package includes only the intended native-host runtime files.
+- Manual extension release checklist for the current GitHub Release/unpacked-extension distribution path.
 
 ### Changed
 
 - Bumped package, extension manifest, compatibility target, and native ping metadata to `1.1.0` while keeping native protocol `1`.
 - Documented that npm installs, updates, uninstalls, and diagnoses the native host only, and that the Chrome extension must be installed separately.
-- Clarified that dev and unpacked extension installs must pass `--extension-id` and that no default Chrome Web Store id is documented without a committed safe default.
+- Required native-host installs to pass the actual Chrome extension id with `--extension-id`; the installer no longer falls back to a default extension id.
 - Documented the safe runtime root copy used by the npm/native installer path.
-- Documented manual Chrome Web Store release ordering so native-host guidance follows the final extension id.
+- Shifted v1.1.0 release guidance to GitHub Release artifacts plus manual unpacked extension loading, with native-host binding to the id shown in `chrome://extensions`.
 
 ## v1.0.0 - 2026-05-07
 

@@ -5,7 +5,6 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
-  DEFAULT_CHROME_EXTENSION_ID,
   buildAllowedOrigin,
   buildHostManifest,
   validateChromeExtensionId
@@ -24,13 +23,16 @@ const scriptDir = path.dirname(scriptPath);
 const defaultPackageRoot = path.resolve(scriptDir, '..');
 
 export function installNativeHost(options = {}) {
-  const extensionId = options.extensionId || DEFAULT_CHROME_EXTENSION_ID;
+  const extensionId = options.extensionId;
+  if (!extensionId) {
+    throw new Error('Missing required --extension-id <chrome-extension-id>. Load the extension in chrome://extensions and pass the id shown by Chrome.');
+  }
   if (!validateChromeExtensionId(extensionId)) {
     throw new Error(`Invalid Chrome extension id: ${extensionId}`);
   }
 
   const packageRoot = path.resolve(options.packageRoot || defaultPackageRoot);
-  const extensionIds = Array.from(new Set([DEFAULT_CHROME_EXTENSION_ID, extensionId]));
+  const extensionIds = [extensionId];
   const platform = options.platform || process.platform;
   const browser = options.browser || 'chrome';
   assertSupportedBrowser(browser);
@@ -227,7 +229,7 @@ function readOptionValue(argv, index, optionName) {
 }
 
 function printUsage() {
-  console.log('Usage: install-native-host.mjs [--extension-id <id>] [--browser chrome|chromium|auto] [--runtime-root <path>] [--json]');
+  console.log('Usage: install-native-host.mjs --extension-id <id> [--browser chrome|chromium|auto] [--runtime-root <path>] [--json]');
 }
 
 async function main() {
