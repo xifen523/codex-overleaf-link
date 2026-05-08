@@ -112,6 +112,52 @@ function assertContainsInOrder(text, expectedFragments) {
   }
 }
 
+function getReleaseWorkflowUploadFilesBlock(workflow) {
+  const filesBlock = workflow.match(/^\s+files:\s+\|\s*$([\s\S]*?)^\s+fail_on_unmatched_files:/m)?.[1] || '';
+  assert.notEqual(filesBlock, '', 'Release workflow must define an explicit files: block.');
+  return filesBlock;
+}
+
+function getReleaseWorkflowUploadFiles(workflow) {
+  return getReleaseWorkflowUploadFilesBlock(workflow)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function getExpectedReleaseWorkflowUploadFiles() {
+  const releaseDir = 'dist/releases/${{ github.ref_name }}';
+  const checksumCoveredUploads = [
+    `${releaseDir}/codex-overleaf-link-extension-` + '${{ github.ref_name }}.zip',
+    `${releaseDir}/codex-overleaf-native-host-` + '${{ github.ref_name }}.tar.gz',
+    `${releaseDir}/codex-overleaf-link-` + '${{ env.PACKAGE_VERSION }}.tgz',
+    `${releaseDir}/install.sh`,
+    `${releaseDir}/install.ps1`,
+    `${releaseDir}/uninstall-native-host.mjs`,
+    `${releaseDir}/native-host/src/nativeHostPlatform.js`,
+    `${releaseDir}/native-host/src/manifest.js`,
+    `${releaseDir}/native-host/src/runtimeInstaller.js`,
+    `${releaseDir}/release-manifest.json`,
+    `${releaseDir}/release-notes.md`
+  ];
+
+  return [
+    ...checksumCoveredUploads,
+    // SHA256SUMS is the checksum index for every other uploaded asset; it cannot include its own hash.
+    `${releaseDir}/SHA256SUMS`
+  ];
+}
+
+function assertReleaseWorkflowUploadsExactArtifactSet(workflow) {
+  const filesBlock = getReleaseWorkflowUploadFilesBlock(workflow);
+  assert.doesNotMatch(filesBlock, /\*/);
+  assert.doesNotMatch(filesBlock, /codex-overleaf-release-output/);
+  assert.deepEqual(
+    getReleaseWorkflowUploadFiles(workflow).sort(),
+    getExpectedReleaseWorkflowUploadFiles().sort()
+  );
+}
+
 function sha256(filePath) {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
@@ -505,23 +551,22 @@ test('release workflow publishes generated notes and built artifacts', () => {
     workflow,
     /^\s+body_path:\s+dist\/releases\/\$\{\{ github\.ref_name \}\}\/release-notes\.md\s*$/m
   );
-  const filesSection = workflow.match(/^\s+files:\s+\|\s*$([\s\S]*?)^\s+fail_on_unmatched_files:/m)?.[1] || '';
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/codex-overleaf-link-extension-\$\{\{ github\.ref_name \}\}\.zip/);
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/codex-overleaf-native-host-\$\{\{ github\.ref_name \}\}\.tar\.gz/);
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/codex-overleaf-link-\$\{\{ env\.PACKAGE_VERSION \}\}\.tgz/);
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/install\.sh/);
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/install\.ps1/);
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/uninstall-native-host\.mjs/);
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/native-host\/src\/nativeHostPlatform\.js/);
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/native-host\/src\/manifest\.js/);
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/native-host\/src\/runtimeInstaller\.js/);
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/release-manifest\.json/);
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/release-notes\.md/);
-  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/SHA256SUMS/);
-  assert.doesNotMatch(filesSection, /\*/);
-  assert.doesNotMatch(filesSection, /codex-overleaf-release-output/);
+  assertReleaseWorkflowUploadsExactArtifactSet(workflow);
   assert.match(workflow, /^\s+fail_on_unmatched_files:\s+true\s*$/m);
   assert.match(workflow, /^\s+overwrite_files:\s+true\s*$/m);
+});
+
+test('release workflow upload artifact gate rejects extra explicit files', () => {
+  const workflow = readReleaseWorkflow();
+  const workflowWithExtraUpload = workflow.replace(
+    /^(\s+fail_on_unmatched_files:)/m,
+    '            dist/releases/${{ github.ref_name }}/unchecked-extra.txt\n$1'
+  );
+
+  assert.throws(
+    () => assertReleaseWorkflowUploadsExactArtifactSet(workflowWithExtraUpload),
+    /unchecked-extra\.txt|deepStrictEqual|Expected values to be strictly deep-equal/
+  );
 });
 
 test('release verifier catches package and extension manifest version mismatch', async () => {
