@@ -24,8 +24,52 @@ function makeIsolatedCliEnv(tempDir) {
     ...process.env,
     HOME: tempDir,
     USERPROFILE: tempDir,
-    LOCALAPPDATA: path.join(tempDir, 'LocalAppData')
+    LOCALAPPDATA: path.join(tempDir, 'LocalAppData'),
+    APPDATA: path.join(tempDir, 'AppData', 'Roaming'),
+    XDG_CONFIG_HOME: path.join(tempDir, '.config')
   };
+}
+
+function makeIsolatedNpmEnv(tempDir) {
+  const cacheDir = path.join(tempDir, 'npm-cache');
+  const userConfigPath = path.join(tempDir, 'npm-userconfig');
+
+  return {
+    ...makeIsolatedCliEnv(tempDir),
+    npm_config_cache: cacheDir,
+    npm_config_userconfig: userConfigPath,
+    NPM_CONFIG_CACHE: cacheDir,
+    NPM_CONFIG_USERCONFIG: userConfigPath
+  };
+}
+
+function runNpm(args, options = {}) {
+  return spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
+    cwd: options.cwd || repoRoot,
+    encoding: 'utf8',
+    env: options.env || process.env,
+    shell: process.platform === 'win32',
+    windowsHide: true
+  });
+}
+
+function installedPackageBinPath(prefix) {
+  return path.join(
+    prefix,
+    'node_modules',
+    '.bin',
+    process.platform === 'win32' ? 'codex-overleaf-link.cmd' : 'codex-overleaf-link'
+  );
+}
+
+function runInstalledCli(prefix, args, options = {}) {
+  return spawnSync(installedPackageBinPath(prefix), args, {
+    cwd: options.cwd || prefix,
+    encoding: 'utf8',
+    env: options.env || process.env,
+    shell: process.platform === 'win32',
+    windowsHide: true
+  });
 }
 
 function manifestPathForHome(tempDir, browser = 'chrome') {
@@ -135,6 +179,94 @@ test('unknown command exits with an error', () => {
 
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Unknown command/);
+});
+
+test('packed npm tarball installs executable CLI and manages temp native host', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-npm-tarball-smoke-'));
+  const installPrefix = path.join(tempDir, 'prefix');
+  const runtimeRoot = path.join(tempDir, 'runtime');
+  const tarballName = `${packageJson.name}-${packageJson.version}.tgz`;
+  const tarballPath = path.join(repoRoot, tarballName);
+  const env = makeIsolatedNpmEnv(tempDir);
+
+  try {
+    fs.rmSync(tarballPath, { force: true });
+
+    const pack = runNpm(['pack'], { env });
+    assert.equal(pack.status, 0, pack.stderr || pack.stdout);
+    assert.equal(fs.existsSync(tarballPath), true);
+
+    const install = runNpm([
+      'install',
+      '--prefix',
+      installPrefix,
+      `./${tarballName}`,
+      '--no-audit',
+      '--fund=false'
+    ], { env });
+    assert.equal(install.status, 0, install.stderr || install.stdout);
+    assert.equal(fs.existsSync(installedPackageBinPath(installPrefix)), true);
+
+    const version = runInstalledCli(installPrefix, ['version'], { env });
+    assert.equal(version.status, 0, version.stderr || version.stdout);
+    assert.equal(version.stdout.trim(), packageJson.version);
+
+    const help = runInstalledCli(installPrefix, ['help'], { env });
+    assert.equal(help.status, 0, help.stderr || help.stdout);
+    assert.match(help.stdout, /Commands:/);
+
+    const unknown = runInstalledCli(installPrefix, ['missing-command'], { env });
+    assert.equal(unknown.status, 1);
+    assert.match(unknown.stderr, /Unknown command/);
+
+    const doctorBeforeInstall = runInstalledCli(installPrefix, ['doctor', '--json'], { env });
+    assert.equal(doctorBeforeInstall.status, 2, doctorBeforeInstall.stderr || doctorBeforeInstall.stdout);
+    assert.equal(doctorBeforeInstall.stderr, '');
+    const beforeInstallBody = JSON.parse(doctorBeforeInstall.stdout);
+    assert.equal(beforeInstallBody.ok, false);
+    assert.equal(beforeInstallBody.status, 'missing_install');
+
+    const installNative = runInstalledCli(installPrefix, [
+      'install-native',
+      '--extension-id',
+      validExtensionId,
+      '--runtime-root',
+      runtimeRoot,
+      '--json'
+    ], { env });
+    assert.equal(installNative.status, 0, installNative.stderr || installNative.stdout);
+
+    const doctorAfterInstall = runInstalledCli(installPrefix, [
+      'doctor',
+      '--json',
+      '--runtime-root',
+      runtimeRoot
+    ], { env });
+    assert.equal(doctorAfterInstall.status, 0, doctorAfterInstall.stderr || doctorAfterInstall.stdout);
+
+    const uninstallNative = runInstalledCli(installPrefix, [
+      'uninstall-native',
+      '--runtime-root',
+      runtimeRoot,
+      '--json'
+    ], { env });
+    assert.equal(uninstallNative.status, 0, uninstallNative.stderr || uninstallNative.stdout);
+
+    const doctorAfterUninstall = runInstalledCli(installPrefix, [
+      'doctor',
+      '--json',
+      '--runtime-root',
+      runtimeRoot
+    ], { env });
+    assert.equal(doctorAfterUninstall.status, 2, doctorAfterUninstall.stderr || doctorAfterUninstall.stdout);
+    assert.equal(doctorAfterUninstall.stderr, '');
+    const afterUninstallBody = JSON.parse(doctorAfterUninstall.stdout);
+    assert.equal(afterUninstallBody.ok, false);
+    assert.equal(afterUninstallBody.status, 'missing_install');
+  } finally {
+    fs.rmSync(tarballPath, { force: true });
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('install-native with valid extension id writes manifest and reports json', () => {
