@@ -10,11 +10,21 @@ const repoRoot = path.resolve(__dirname, '..');
 const packageJson = require('../package.json');
 const cliPath = path.join(repoRoot, 'bin/codex-overleaf-link.mjs');
 
-function runCli(args) {
+function runCli(args, options = {}) {
   return spawnSync(process.execPath, [cliPath, ...args], {
     cwd: repoRoot,
-    encoding: 'utf8'
+    encoding: 'utf8',
+    env: options.env || process.env
   });
+}
+
+function makeIsolatedCliEnv(tempDir) {
+  return {
+    ...process.env,
+    HOME: tempDir,
+    USERPROFILE: tempDir,
+    LOCALAPPDATA: path.join(tempDir, 'LocalAppData')
+  };
 }
 
 test('package metadata is configured for npm distribution', () => {
@@ -52,6 +62,49 @@ test('help command lists available commands', () => {
   assert.match(result.stdout, /doctor/);
   assert.match(result.stdout, /version/);
   assert.match(result.stdout, /help/);
+});
+
+test('doctor command supports json output', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-cli-doctor-json-'));
+  try {
+    const result = runCli([
+      'doctor',
+      '--json',
+      '--browser',
+      'chrome',
+      '--runtime-root',
+      path.join(tempDir, 'runtime')
+    ], {
+      env: makeIsolatedCliEnv(tempDir)
+    });
+
+    assert.equal(result.status, 2);
+    assert.equal(result.stderr, '');
+    const body = JSON.parse(result.stdout);
+    assert.equal(body.ok, false);
+    assert.equal(body.status, 'missing_install');
+    assert.equal(body.browser, 'chrome');
+    assert.match(body.manifest.path, /^~/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('doctor command supports human output', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-cli-doctor-human-'));
+  try {
+    const result = runCli(['doctor', '--browser', 'chrome'], {
+      env: makeIsolatedCliEnv(tempDir)
+    });
+
+    assert.equal(result.status, 2);
+    assert.equal(result.stderr, '');
+    assert.match(result.stdout, /Native host doctor/);
+    assert.match(result.stdout, /missing_install/);
+    assert.doesNotMatch(result.stdout, /not implemented yet/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('unknown command exits with an error', () => {

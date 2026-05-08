@@ -7,16 +7,26 @@ const test = require('node:test');
 
 const {
   DEFAULT_CHROME_EXTENSION_ID,
+  buildHostManifest,
   getNativeHostManifestPath,
   getWindowsRegistryMetadata
 } = require('../native-host/src/manifest');
 const { getDefaultBridgePath } = require('../native-host/src/nativeHostPlatform');
+const {
+  classifyDoctorResult,
+  normalizeDiagnosticPath,
+  runDoctor
+} = require('../native-host/src/nativeDoctor');
 const {
   assertSafeManagedRuntimeRoot,
   installRuntimeFromPackage,
   readRuntimeMarker,
   uninstallManagedRuntime
 } = require('../native-host/src/runtimeInstaller');
+const {
+  REQUIRED_CAPABILITIES,
+  UPDATE_AVAILABLE_CAPABILITIES
+} = require('../extension/src/shared/compatibility');
 
 const CURRENT_PACKAGE_VERSION = require('../package.json').version;
 const CURRENT_RELEASE_REF = `v${CURRENT_PACKAGE_VERSION}`;
@@ -80,6 +90,276 @@ function writeRuntimePackageFixture(tempDir, version = '9.8.7') {
 
   return packageRoot;
 }
+
+function makeDoctorEnv(tempDir) {
+  return {
+    ...process.env,
+    HOME: tempDir,
+    USERPROFILE: tempDir,
+    LOCALAPPDATA: path.join(tempDir, 'LocalAppData')
+  };
+}
+
+function writeDoctorManifest(tempDir, bridgePath, overrides = {}) {
+  const env = makeDoctorEnv(tempDir);
+  const manifestPath = getNativeHostManifestPath({
+    browser: 'chrome',
+    platform: process.platform,
+    homeDir: tempDir,
+    env
+  });
+  const manifest = {
+    ...buildHostManifest({
+      extensionId: DEFAULT_CHROME_EXTENSION_ID,
+      bridgePath,
+      platform: process.platform
+    }),
+    ...overrides
+  };
+  fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+  return { env, manifest, manifestPath };
+}
+
+function buildDoctorNativePayload(overrides = {}) {
+  return {
+    host: 'com.codex.overleaf',
+    platform: process.platform,
+    protocolVersion: 1,
+    supportedProtocol: { min: 1, max: 1 },
+    capabilities: Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true])),
+    minExtensionVersion: '1.0.0',
+    version: CURRENT_PACKAGE_VERSION,
+    environment: { codex: { ok: true } },
+    ...overrides
+  };
+}
+
+function writeFakeDoctorBridge(tempDir, options = {}) {
+  const scriptPath = path.join(tempDir, 'doctor-bridge.js');
+  const launcherPath = path.join(tempDir, process.platform === 'win32' ? 'doctor-bridge.cmd' : 'doctor-bridge');
+  const response = options.response === undefined
+    ? { id: 'doctor-ping', ok: true, result: buildDoctorNativePayload() }
+    : options.response;
+  fs.writeFileSync(scriptPath, [
+    'const response = JSON.parse(process.env.DOCTOR_BRIDGE_RESPONSE || "null");',
+    'const mode = process.env.DOCTOR_BRIDGE_MODE || "response";',
+    'process.stdin.resume();',
+    'process.stdin.once("data", () => {',
+    '  if (mode === "exit") process.exit(7);',
+    '  const payload = Buffer.from(JSON.stringify(response), "utf8");',
+    '  const frame = Buffer.alloc(4 + payload.length);',
+    '  frame.writeUInt32LE(payload.length, 0);',
+    '  payload.copy(frame, 4);',
+    '  process.stdout.write(frame, () => process.exit(0));',
+    '});',
+    ''
+  ].join('\n'), 'utf8');
+
+  if (process.platform === 'win32') {
+    fs.writeFileSync(launcherPath, `@echo off\r\nset DOCTOR_BRIDGE_RESPONSE=${JSON.stringify(JSON.stringify(response))}\r\nset DOCTOR_BRIDGE_MODE=${options.mode || 'response'}\r\n"${process.execPath}" "${scriptPath}"\r\n`, 'utf8');
+  } else {
+    fs.writeFileSync(launcherPath, [
+      '#!/bin/sh',
+      `DOCTOR_BRIDGE_RESPONSE=${shellSingleQuote(JSON.stringify(response))} DOCTOR_BRIDGE_MODE=${shellSingleQuote(options.mode || 'response')} exec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(scriptPath)}`,
+      ''
+    ].join('\n'), 'utf8');
+    fs.chmodSync(launcherPath, 0o755);
+  }
+
+  return launcherPath;
+}
+
+function shellSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+test('classifyDoctorResult maps native doctor states to deterministic exit codes', () => {
+  const base = {
+    manifest: { exists: true, valid: true },
+    bridge: { exists: true, valid: true },
+    ping: { ok: true }
+  };
+
+  assert.deepEqual(classifyDoctorResult({ manifest: { exists: false } }), {
+    exitCode: 2,
+    ok: false,
+    status: 'missing_install'
+  });
+  assert.deepEqual(classifyDoctorResult({
+    ...base,
+    bridge: { exists: false, valid: true }
+  }), {
+    exitCode: 2,
+    ok: false,
+    status: 'missing_bridge'
+  });
+  assert.deepEqual(classifyDoctorResult({
+    ...base,
+    compatibility: { classification: 'update-available', status: 'native_too_old' }
+  }), {
+    exitCode: 3,
+    ok: false,
+    status: 'native_stale'
+  });
+  assert.deepEqual(classifyDoctorResult({
+    ...base,
+    compatibility: { classification: 'compatible', status: 'ok' }
+  }), {
+    exitCode: 0,
+    ok: true,
+    status: 'ok'
+  });
+  assert.deepEqual(classifyDoctorResult({
+    ...base,
+    ping: { ok: false, error: 'spawn failed' }
+  }), {
+    exitCode: 3,
+    ok: false,
+    status: 'execution_failure'
+  });
+});
+
+test('normalizeDiagnosticPath redacts home paths unless revealPaths is set', () => {
+  const homeDir = path.join(os.tmpdir(), 'codex-overleaf-doctor-home');
+  const targetPath = path.join(homeDir, 'NativeMessagingHosts', 'com.codex.overleaf.json');
+
+  assert.equal(
+    normalizeDiagnosticPath(targetPath, { homeDir }),
+    `~${path.sep}NativeMessagingHosts${path.sep}com.codex.overleaf.json`
+  );
+  assert.equal(
+    normalizeDiagnosticPath(targetPath, { homeDir, revealPaths: true }),
+    targetPath
+  );
+});
+
+test('runDoctor reports missing manifest as missing install with redacted paths', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-missing-manifest-'));
+  try {
+    const result = await runDoctor({
+      browser: 'chrome',
+      env: makeDoctorEnv(tempDir),
+      homeDir: tempDir,
+      timeoutMs: 50
+    });
+
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.body.ok, false);
+    assert.equal(result.body.status, 'missing_install');
+    assert.match(result.body.manifest.path, /^~/);
+    assert.doesNotMatch(JSON.stringify(result.body), new RegExp(escapeRegExp(tempDir)));
+
+    const revealed = await runDoctor({
+      browser: 'chrome',
+      env: makeDoctorEnv(tempDir),
+      homeDir: tempDir,
+      revealPaths: true,
+      timeoutMs: 50
+    });
+    assert.match(revealed.body.manifest.path, new RegExp(escapeRegExp(tempDir)));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('runDoctor reports missing bridge from installed manifest', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-missing-bridge-'));
+  try {
+    const bridgePath = path.join(tempDir, 'missing-bridge');
+    const { env } = writeDoctorManifest(tempDir, bridgePath);
+    const result = await runDoctor({
+      browser: 'chrome',
+      env,
+      homeDir: tempDir,
+      timeoutMs: 50
+    });
+
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.body.ok, false);
+    assert.equal(result.body.status, 'missing_bridge');
+    assert.equal(result.body.bridge.exists, false);
+    assert.match(result.body.bridge.path, /^~/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('runDoctor reports stale native ping as native_stale', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-stale-'));
+  try {
+    const staleResponse = {
+      id: 'doctor-ping',
+      ok: true,
+      result: buildDoctorNativePayload({
+        version: '0.9.5',
+        capabilities: Object.fromEntries(UPDATE_AVAILABLE_CAPABILITIES.map(capability => [capability, true]))
+      })
+    };
+    const bridgePath = writeFakeDoctorBridge(tempDir, { response: staleResponse });
+    const { env } = writeDoctorManifest(tempDir, bridgePath);
+    const result = await runDoctor({
+      browser: 'chrome',
+      env,
+      homeDir: tempDir,
+      timeoutMs: 3000
+    });
+
+    assert.equal(result.exitCode, 3);
+    assert.equal(result.body.ok, false);
+    assert.equal(result.body.status, 'native_stale');
+    assert.equal(result.body.compatibility.classification, 'update-available');
+    assert.equal(result.body.compatibility.nativeVersion, '0.9.5');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('runDoctor reports compatible native ping as ok', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-compatible-'));
+  try {
+    const bridgePath = writeFakeDoctorBridge(tempDir);
+    const { env } = writeDoctorManifest(tempDir, bridgePath);
+    const result = await runDoctor({
+      browser: 'chrome',
+      env,
+      homeDir: tempDir,
+      timeoutMs: 3000
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.body.ok, true);
+    assert.equal(result.body.status, 'ok');
+    assert.equal(result.body.compatibility.classification, 'compatible');
+    assert.equal(result.body.ping.ok, true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('runDoctor reports bridge execution failure with static diagnostics', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-doctor-exec-failure-'));
+  try {
+    const bridgePath = writeFakeDoctorBridge(tempDir, { mode: 'exit' });
+    const { env } = writeDoctorManifest(tempDir, bridgePath);
+    const result = await runDoctor({
+      browser: 'chrome',
+      env,
+      homeDir: tempDir,
+      timeoutMs: 3000
+    });
+
+    assert.equal(result.exitCode, 3);
+    assert.equal(result.body.ok, false);
+    assert.equal(result.body.status, 'execution_failure');
+    assert.equal(result.body.diagnostics.manifestPath, result.body.manifest.path);
+    assert.equal(result.body.diagnostics.bridgePath, result.body.bridge.path);
+    assert.equal(result.body.ping.ok, false);
+    assert.doesNotMatch(JSON.stringify(result.body), /at .*nativeDoctor/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
 test('installRuntimeFromPackage creates stable managed runtime layout and marker', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-runtime-installer-'));
