@@ -28,7 +28,7 @@ const registrationTarget = getNativeHostRegistrationTarget({
 });
 const manifestPath = registrationTarget.manifestPath;
 
-removePath(manifestPath, 'Native Messaging host manifest');
+removeManifestPath(manifestPath);
 if (registrationTarget.kind === 'registry') {
   if (deleteWindowsRegistryValue(registrationTarget.registryKey)) {
     console.log(`Removed Native Messaging host registry key: ${registrationTarget.registryKey}`);
@@ -67,6 +67,26 @@ function removePath(target, label) {
   }
   fs.rmSync(target, { recursive: true, force: true });
   console.log(`Removed ${label}: ${target}`);
+}
+
+function removeManifestPath(target) {
+  let stat;
+  try {
+    stat = fs.lstatSync(target);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      console.log(`Native Messaging host manifest not found: ${target}`);
+      return;
+    }
+    throw error;
+  }
+
+  if (stat.isDirectory()) {
+    throw new Error(`Refusing to remove Native Messaging host manifest directory: ${target}`);
+  }
+
+  fs.rmSync(target, { force: true });
+  console.log(`Removed Native Messaging host manifest: ${target}`);
 }
 
 function removeBridgePath(target) {

@@ -99,15 +99,21 @@ function installRuntimeFromPackage(options = {}) {
       throw error;
     }
 
+    let warning;
     if (rollbackCreated) {
-      safeRemove(rollbackRoot);
+      try {
+        cleanupRollback(rollbackRoot, options.cleanupRollback);
+      } catch (error) {
+        warning = `Installed runtime, but failed to remove rollback directory ${rollbackRoot}: ${error.message}`;
+      }
     }
 
     return {
       ok: true,
       action: existingMarker ? 'replaced' : 'installed',
       runtimeRoot,
-      marker: readRuntimeMarker(runtimeRoot)
+      marker: readRuntimeMarker(runtimeRoot),
+      warning
     };
   } catch (error) {
     safeRemove(stagingRoot);
@@ -235,17 +241,63 @@ function isUnderHostTempDir(targetRoot, platformPath) {
   if (platformPath === path.win32) {
     return false;
   }
-  const resolvedTarget = path.resolve(targetRoot);
-  const tempCandidates = new Set([
-    path.resolve(os.tmpdir()),
-    fs.realpathSync(os.tmpdir())
-  ]);
-  for (const tempDir of tempCandidates) {
-    if (resolvedTarget !== tempDir && resolvedTarget.startsWith(`${tempDir}${path.sep}`)) {
-      return true;
-    }
+
+  const tempDir = path.resolve(os.tmpdir());
+  const realTempDir = fs.realpathSync(os.tmpdir());
+  const parentPath = path.dirname(path.resolve(targetRoot));
+  if (parentPath !== tempDir && !parentPath.startsWith(`${tempDir}${path.sep}`)) {
+    return false;
+  }
+  if (!hasNoSymlinkAncestorsBelowTemp(parentPath, tempDir)) {
+    return false;
+  }
+
+  const existingParent = findExistingAncestor(parentPath);
+  if (!existingParent) {
+    return false;
+  }
+
+  const realParent = fs.realpathSync(existingParent);
+  if (realParent === realTempDir || realParent.startsWith(`${realTempDir}${path.sep}`)) {
+    return true;
   }
   return false;
+}
+
+function findExistingAncestor(targetPath) {
+  let current = path.resolve(targetPath);
+  while (true) {
+    if (fs.existsSync(current)) {
+      return current;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return null;
+    }
+    current = parent;
+  }
+}
+
+function hasNoSymlinkAncestorsBelowTemp(parentPath, tempDir) {
+  let current = path.resolve(parentPath);
+  const resolvedTempDir = path.resolve(tempDir);
+  while (current !== resolvedTempDir) {
+    if (fs.existsSync(current)) {
+      try {
+        if (fs.lstatSync(current).isSymbolicLink()) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return false;
+    }
+    current = parent;
+  }
+  return true;
 }
 
 function samePath(left, right, platformPath) {
@@ -263,6 +315,14 @@ function throwUnsafe(runtimeRoot) {
 
 function safeRemove(target) {
   fs.rmSync(target, { recursive: true, force: true });
+}
+
+function cleanupRollback(rollbackRoot, injectedCleanupRollback) {
+  if (typeof injectedCleanupRollback === 'function') {
+    injectedCleanupRollback(rollbackRoot);
+    return;
+  }
+  safeRemove(rollbackRoot);
 }
 
 module.exports = {

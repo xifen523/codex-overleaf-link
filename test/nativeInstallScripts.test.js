@@ -123,6 +123,38 @@ test('assertSafeManagedRuntimeRoot rejects dangerous roots and accepts a temp ru
   }
 });
 
+test('managed runtime safety refuses temp roots through symlinked ancestors', t => {
+  if (process.platform === 'win32') {
+    t.skip('symlinked POSIX temp ancestor behavior is covered on POSIX runners');
+    return;
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-runtime-symlink-'));
+  const outsideDir = fs.mkdtempSync(path.join(process.cwd(), '.runtime-installer-outside-'));
+  const packageRoot = writeRuntimePackageFixture(tempDir);
+  const linkPath = path.join(tempDir, 'link');
+  const runtimeRoot = path.join(linkPath, 'runtime');
+  try {
+    fs.symlinkSync(outsideDir, linkPath, 'dir');
+
+    assert.throws(
+      () => assertSafeManagedRuntimeRoot(runtimeRoot, { packageRoot }),
+      /Refusing to recursively remove unsafe runtime root/
+    );
+    assert.throws(
+      () => installRuntimeFromPackage({ packageRoot, runtimeRoot }),
+      /Refusing to recursively remove unsafe runtime root/
+    );
+    assert.throws(
+      () => uninstallManagedRuntime({ runtimeRoot }),
+      /Refusing to recursively remove unsafe runtime root/
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
 test('installRuntimeFromPackage refuses to replace an unmarked existing runtime root', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-runtime-unmarked-'));
   const packageRoot = writeRuntimePackageFixture(tempDir);
@@ -188,6 +220,31 @@ test('installRuntimeFromPackage leaves previous runtime in place when staged ver
 
     assert.equal(readRuntimeMarker(runtimeRoot).version, '1.0.0');
     assert.equal(JSON.parse(fs.readFileSync(path.join(runtimeRoot, 'package.json'), 'utf8')).version, '1.0.0');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('installRuntimeFromPackage reports rollback cleanup warnings without failing activation', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-runtime-cleanup-warning-'));
+  const packageRoot = writeRuntimePackageFixture(tempDir, '1.0.0');
+  const runtimeRoot = path.join(tempDir, 'runtime');
+  try {
+    installRuntimeFromPackage({ packageRoot, runtimeRoot });
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: 'codex-overleaf-link', version: '2.0.0' }), 'utf8');
+
+    const result = installRuntimeFromPackage({
+      packageRoot,
+      runtimeRoot,
+      cleanupRollback() {
+        throw new Error('simulated cleanup failure');
+      }
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.action, 'replaced');
+    assert.match(result.warning, /simulated cleanup failure/);
+    assert.equal(readRuntimeMarker(runtimeRoot).version, '2.0.0');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -550,6 +607,44 @@ test('native uninstall script refuses to recursively delete a bridge directory',
 
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /Refusing to remove bridge directory/);
+    assert.equal(fs.readFileSync(markerPath, 'utf8'), 'keep');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('native uninstall script refuses to recursively delete a manifest directory', t => {
+  if (process.platform === 'win32') {
+    t.skip('Linux manifest path behavior is covered on POSIX runners');
+    return;
+  }
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-manifest-dir-guard-test-'));
+  const manifestPath = path.join(tempDir, '.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json');
+  const markerPath = path.join(manifestPath, 'marker.txt');
+  const bridgePath = path.join(tempDir, 'codex-overleaf-bridge');
+  fs.mkdirSync(manifestPath, { recursive: true });
+  fs.writeFileSync(markerPath, 'keep');
+
+  try {
+    const result = spawnSync(process.execPath, [
+      path.join(__dirname, '../scripts/uninstall-native-host.mjs'),
+      '--platform',
+      'linux',
+      '--browser',
+      'chrome',
+      '--bridge-path',
+      bridgePath,
+      '--keep-runtime'
+    ], {
+      env: {
+        ...process.env,
+        HOME: tempDir
+      },
+      encoding: 'utf8'
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Refusing to remove Native Messaging host manifest directory/);
     assert.equal(fs.readFileSync(markerPath, 'utf8'), 'keep');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
