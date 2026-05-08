@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_CHROME_EXTENSION_ID,
@@ -15,6 +16,9 @@ import {
   getDefaultRuntimeRoot,
   getNativeHostRegistrationTarget
 } from '../native-host/src/nativeHostPlatform.js';
+
+const require = createRequire(import.meta.url);
+const { installRuntimeFromPackage } = require('../native-host/src/runtimeInstaller.js');
 
 const args = parseArgs(process.argv.slice(2));
 const extensionId = args.extensionId || DEFAULT_CHROME_EXTENSION_ID;
@@ -30,6 +34,7 @@ const __dirname = path.dirname(__filename);
 const platform = args.platform || process.platform;
 const browser = args.browser || 'chrome';
 const platformPath = platform === 'win32' ? path.win32 : path.posix;
+const runtimePlatformPath = args.runtimeRoot && path.isAbsolute(args.runtimeRoot) ? path : platformPath;
 const defaultInstallRoot = getDefaultRuntimeRoot({ platform, browser, env: process.env });
 const installRoot = resolveForPlatform(args.runtimeRoot || defaultInstallRoot, platformPath);
 const bridgeEntryPath = platformPath.join(installRoot, 'native-host', 'src', 'index.js');
@@ -49,7 +54,12 @@ const manifest = buildHostManifest({
   platform
 });
 
-installRuntime(installRoot);
+installRuntimeFromPackage({
+  packageRoot: path.resolve(__dirname, '..'),
+  runtimeRoot: installRoot,
+  defaultRuntimeRoot: defaultInstallRoot,
+  platformPath: runtimePlatformPath
+});
 const runtimePackageVersion = readRuntimePackageVersion(path.join(installRoot, 'package.json'));
 fs.mkdirSync(platformPath.dirname(bridgePath), { recursive: true });
 fs.writeFileSync(bridgePath, buildLauncher({
@@ -84,69 +94,6 @@ function resolveForPlatform(targetPath, platformPathModule) {
     return targetPath;
   }
   return platformPathModule.resolve(targetPath);
-}
-
-function installRuntime(targetRoot) {
-  assertSafeRuntimeRoot(targetRoot, defaultInstallRoot, platformPath);
-  fs.rmSync(targetRoot, { recursive: true, force: true });
-  copyFile(path.resolve(__dirname, '../package.json'), path.join(targetRoot, 'package.json'));
-  copyDirectory(path.resolve(__dirname, '../native-host/src'), path.join(targetRoot, 'native-host/src'));
-  copyDirectory(path.resolve(__dirname, '../extension/src/shared'), path.join(targetRoot, 'extension/src/shared'));
-  copyFile(path.resolve(__dirname, './codex-json-agent.mjs'), path.join(targetRoot, 'scripts/codex-json-agent.mjs'));
-}
-
-function assertSafeRuntimeRoot(targetRoot, expectedDefaultRoot, platformPathModule) {
-  if (samePathForPlatform(targetRoot, expectedDefaultRoot, platformPathModule)) {
-    return;
-  }
-
-  const baseName = path.basename(targetRoot);
-  const allowedTempRuntimeNames = new Set(['runtime', 'native-host-runtime']);
-  if (allowedTempRuntimeNames.has(baseName) && isUnderHostTempDir(targetRoot)) {
-    return;
-  }
-
-  throw new Error(`Refusing to recursively remove unsafe runtime root: ${targetRoot}`);
-}
-
-function samePathForPlatform(left, right, platformPathModule) {
-  const resolvedLeft = platformPathModule.resolve(left);
-  const resolvedRight = platformPathModule.resolve(right);
-  if (platformPathModule === path.win32) {
-    return resolvedLeft.toLowerCase() === resolvedRight.toLowerCase();
-  }
-  return resolvedLeft === resolvedRight;
-}
-
-function isUnderHostTempDir(targetRoot) {
-  const resolvedTarget = path.resolve(targetRoot);
-  const tempCandidates = new Set([
-    path.resolve(os.tmpdir()),
-    fs.realpathSync(os.tmpdir())
-  ]);
-  for (const tempDir of tempCandidates) {
-    if (resolvedTarget === tempDir || resolvedTarget.startsWith(`${tempDir}${path.sep}`)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function copyDirectory(source, target) {
-  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
-    const sourcePath = path.join(source, entry.name);
-    const targetPath = path.join(target, entry.name);
-    if (entry.isDirectory()) {
-      copyDirectory(sourcePath, targetPath);
-    } else if (entry.isFile()) {
-      copyFile(sourcePath, targetPath);
-    }
-  }
-}
-
-function copyFile(source, target) {
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.copyFileSync(source, target);
 }
 
 function readRuntimePackageVersion(packagePath) {

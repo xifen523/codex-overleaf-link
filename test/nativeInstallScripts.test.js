@@ -7,6 +7,12 @@ const test = require('node:test');
 
 const { DEFAULT_CHROME_EXTENSION_ID } = require('../native-host/src/manifest');
 const { getDefaultBridgePath } = require('../native-host/src/nativeHostPlatform');
+const {
+  assertSafeManagedRuntimeRoot,
+  installRuntimeFromPackage,
+  readRuntimeMarker,
+  uninstallManagedRuntime
+} = require('../native-host/src/runtimeInstaller');
 
 const CURRENT_PACKAGE_VERSION = require('../package.json').version;
 const CURRENT_RELEASE_REF = `v${CURRENT_PACKAGE_VERSION}`;
@@ -50,6 +56,142 @@ function getWindowsSimulationFilePath(tempDir, targetPath) {
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+function writeRuntimePackageFixture(tempDir, version = '9.8.7') {
+  const packageRoot = path.join(tempDir, 'package-root');
+  const files = {
+    'package.json': JSON.stringify({ name: 'codex-overleaf-link', version }, null, 2),
+    'native-host/src/index.js': 'module.exports = {};\n',
+    'extension/src/shared/compatibility.js': 'module.exports = {};\n',
+    'scripts/install-native-host.mjs': '#!/usr/bin/env node\n',
+    'scripts/uninstall-native-host.mjs': '#!/usr/bin/env node\n'
+  };
+
+  for (const [relativePath, content] of Object.entries(files)) {
+    const filePath = path.join(packageRoot, relativePath);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, content, 'utf8');
+  }
+
+  return packageRoot;
+}
+
+test('installRuntimeFromPackage creates stable managed runtime layout and marker', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-runtime-installer-'));
+  const packageRoot = writeRuntimePackageFixture(tempDir, '2.3.4');
+  const runtimeRoot = path.join(tempDir, 'runtime');
+  try {
+    const result = installRuntimeFromPackage({ packageRoot, runtimeRoot });
+
+    assert.equal(result.ok, true);
+    assert.equal(fs.existsSync(path.join(runtimeRoot, '.codex-overleaf-runtime.json')), true);
+    assert.equal(fs.existsSync(path.join(runtimeRoot, 'package.json')), true);
+    assert.equal(fs.existsSync(path.join(runtimeRoot, 'native-host/src/index.js')), true);
+    assert.equal(fs.existsSync(path.join(runtimeRoot, 'extension/src/shared/compatibility.js')), true);
+    assert.equal(fs.existsSync(path.join(runtimeRoot, 'scripts/install-native-host.mjs')), true);
+    assert.equal(fs.existsSync(path.join(runtimeRoot, 'scripts/uninstall-native-host.mjs')), true);
+
+    const marker = readRuntimeMarker(runtimeRoot);
+    assert.equal(marker.managedBy, 'codex-overleaf-link');
+    assert.equal(marker.version, '2.3.4');
+    assert.equal(marker.installedFrom, 'npm');
+    assert.equal(typeof marker.installedAt, 'string');
+    assert.ok(Number.isFinite(Date.parse(marker.installedAt)));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('assertSafeManagedRuntimeRoot rejects dangerous roots and accepts a temp runtime child', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-runtime-safe-'));
+  const packageRoot = writeRuntimePackageFixture(tempDir);
+  try {
+    const dangerousRoots = ['/', os.homedir(), packageRoot, '/usr', '/tmp'];
+    for (const dangerousRoot of dangerousRoots) {
+      assert.throws(
+        () => assertSafeManagedRuntimeRoot(dangerousRoot, { packageRoot }),
+        /Refusing to recursively remove unsafe runtime root/
+      );
+    }
+
+    assert.equal(
+      assertSafeManagedRuntimeRoot(path.join(tempDir, 'runtime'), { packageRoot }),
+      path.join(tempDir, 'runtime')
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('installRuntimeFromPackage refuses to replace an unmarked existing runtime root', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-runtime-unmarked-'));
+  const packageRoot = writeRuntimePackageFixture(tempDir);
+  const runtimeRoot = path.join(tempDir, 'runtime');
+  try {
+    fs.mkdirSync(runtimeRoot, { recursive: true });
+    fs.writeFileSync(path.join(runtimeRoot, 'keep.txt'), 'keep', 'utf8');
+
+    assert.throws(
+      () => installRuntimeFromPackage({ packageRoot, runtimeRoot }),
+      /Refusing to replace unmarked runtime root/
+    );
+    assert.equal(fs.readFileSync(path.join(runtimeRoot, 'keep.txt'), 'utf8'), 'keep');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('uninstallManagedRuntime removes marked runtime, refuses unmarked runtime, and honors keepRuntime', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-runtime-uninstall-'));
+  const packageRoot = writeRuntimePackageFixture(tempDir);
+  const runtimeRoot = path.join(tempDir, 'runtime');
+  try {
+    installRuntimeFromPackage({ packageRoot, runtimeRoot });
+    const kept = uninstallManagedRuntime({ runtimeRoot, keepRuntime: true });
+    assert.equal(kept.action, 'kept');
+    assert.equal(fs.existsSync(runtimeRoot), true);
+
+    const removed = uninstallManagedRuntime({ runtimeRoot });
+    assert.equal(removed.action, 'removed');
+    assert.equal(fs.existsSync(runtimeRoot), false);
+
+    fs.mkdirSync(runtimeRoot, { recursive: true });
+    fs.writeFileSync(path.join(runtimeRoot, 'keep.txt'), 'keep', 'utf8');
+    assert.throws(
+      () => uninstallManagedRuntime({ runtimeRoot }),
+      /Refusing to remove unmarked runtime root/
+    );
+    assert.equal(fs.readFileSync(path.join(runtimeRoot, 'keep.txt'), 'utf8'), 'keep');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('installRuntimeFromPackage leaves previous runtime in place when staged verification fails', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-runtime-rollback-'));
+  const packageRoot = writeRuntimePackageFixture(tempDir, '1.0.0');
+  const runtimeRoot = path.join(tempDir, 'runtime');
+  try {
+    installRuntimeFromPackage({ packageRoot, runtimeRoot });
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), JSON.stringify({ name: 'codex-overleaf-link', version: '2.0.0' }), 'utf8');
+
+    assert.throws(
+      () => installRuntimeFromPackage({
+        packageRoot,
+        runtimeRoot,
+        verifyRuntime() {
+          throw new Error('simulated staged verification failure');
+        }
+      }),
+      /simulated staged verification failure/
+    );
+
+    assert.equal(readRuntimeMarker(runtimeRoot).version, '1.0.0');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(runtimeRoot, 'package.json'), 'utf8')).version, '1.0.0');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
 test('native install script defaults to the committed extension id', () => {
   const source = fs.readFileSync(
@@ -420,7 +562,12 @@ test('native uninstall script continues when Windows registry key is already mis
   const runtimeRoot = path.join(tempDir, 'runtime');
   const bridgePath = path.join(tempDir, 'codex-overleaf-bridge.cmd');
   fs.mkdirSync(runtimeRoot, { recursive: true });
-  fs.writeFileSync(path.join(runtimeRoot, 'marker.txt'), 'remove');
+  fs.writeFileSync(path.join(runtimeRoot, '.codex-overleaf-runtime.json'), JSON.stringify({
+    managedBy: 'codex-overleaf-link',
+    version: CURRENT_PACKAGE_VERSION,
+    installedFrom: 'npm',
+    installedAt: new Date().toISOString()
+  }));
   fs.writeFileSync(bridgePath, '@echo off\r\n');
   const registryEnv = writeFakeRegistryCommand(tempDir, {
     exitCode: 1,

@@ -1,18 +1,22 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import {
   getDefaultBridgePath,
   getDefaultRuntimeRoot,
   getNativeHostRegistrationTarget
 } from '../native-host/src/nativeHostPlatform.js';
 
+const require = createRequire(import.meta.url);
+const { uninstallManagedRuntime } = require('../native-host/src/runtimeInstaller.js');
+
 const args = parseArgs(process.argv.slice(2));
 const platform = args.platform || process.platform;
 const browser = args.browser || 'chrome';
 const platformPath = platform === 'win32' ? path.win32 : path.posix;
+const runtimePlatformPath = args.runtimeRoot && path.isAbsolute(args.runtimeRoot) ? path : platformPath;
 const defaultInstallRoot = getDefaultRuntimeRoot({ platform, browser, env: process.env });
 const installRoot = resolveForPlatform(args.runtimeRoot || defaultInstallRoot, platformPath);
 const defaultBridgePath = getDefaultBridgePath({ platform, browser, env: process.env });
@@ -34,8 +38,16 @@ if (registrationTarget.kind === 'registry') {
 }
 removeBridgePath(bridgePath);
 if (!args.keepRuntime) {
-  assertSafeRuntimeRoot(installRoot, defaultInstallRoot, platformPath);
-  removePath(installRoot, 'Runtime root');
+  const result = uninstallManagedRuntime({
+    runtimeRoot: installRoot,
+    defaultRuntimeRoot: defaultInstallRoot,
+    platformPath: runtimePlatformPath
+  });
+  if (result.action === 'not-found') {
+    console.log(`Runtime root not found: ${installRoot}`);
+  } else if (result.removed) {
+    console.log(`Removed Runtime root: ${installRoot}`);
+  }
 }
 
 console.log('Codex Overleaf native host uninstall finished.');
@@ -75,43 +87,6 @@ function removeBridgePath(target) {
 
   fs.rmSync(target, { force: true });
   console.log(`Removed Bridge executable: ${target}`);
-}
-
-function assertSafeRuntimeRoot(targetRoot, expectedDefaultRoot, platformPathModule) {
-  if (samePathForPlatform(targetRoot, expectedDefaultRoot, platformPathModule)) {
-    return;
-  }
-
-  const baseName = path.basename(targetRoot);
-  const allowedTempRuntimeNames = new Set(['runtime', 'native-host-runtime']);
-  if (allowedTempRuntimeNames.has(baseName) && isUnderHostTempDir(targetRoot)) {
-    return;
-  }
-
-  throw new Error(`Refusing to recursively remove unsafe runtime root: ${targetRoot}`);
-}
-
-function samePathForPlatform(left, right, platformPathModule) {
-  const resolvedLeft = platformPathModule.resolve(left);
-  const resolvedRight = platformPathModule.resolve(right);
-  if (platformPathModule === path.win32) {
-    return resolvedLeft.toLowerCase() === resolvedRight.toLowerCase();
-  }
-  return resolvedLeft === resolvedRight;
-}
-
-function isUnderHostTempDir(targetRoot) {
-  const resolvedTarget = path.resolve(targetRoot);
-  const tempCandidates = new Set([
-    path.resolve(os.tmpdir()),
-    fs.realpathSync(os.tmpdir())
-  ]);
-  for (const tempDir of tempCandidates) {
-    if (resolvedTarget === tempDir || resolvedTarget.startsWith(`${tempDir}${path.sep}`)) {
-      return true;
-    }
-  }
-  return false;
 }
 
 function deleteWindowsRegistryValue(registryKey) {
