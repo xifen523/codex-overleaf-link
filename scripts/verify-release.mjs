@@ -10,6 +10,7 @@ const CHROME_WEB_STORE_DOCS = [
   'listing.md',
   'release-checklist.md'
 ];
+const EXPECTED_PACKAGE_NAME = 'codex-overleaf-link';
 export const FORBIDDEN_TRACKED_PATH_PATTERNS = [
   /^\.local\//,
   /^docs\/superpowers\//,
@@ -55,6 +56,7 @@ export function collectReleaseVerificationErrors(options = {}) {
   const releaseDate = options.releaseDate;
   const errors = [];
   const pkg = readJsonFile(rootDir, 'package.json', errors);
+  const packageLock = readJsonFile(rootDir, 'package-lock.json', errors);
   const manifest = readJsonFile(rootDir, 'extension/manifest.json', errors);
   const readme = readTextFile(rootDir, 'README.md', errors);
   const changelog = readTextFile(rootDir, 'CHANGELOG.md', errors);
@@ -64,6 +66,7 @@ export function collectReleaseVerificationErrors(options = {}) {
   }
 
   const version = pkg.version;
+  errors.push(...collectPackageMetadataErrors({ rootDir, pkg, packageLock }));
   if (!version) {
     errors.push('package.json must define a release version.');
   }
@@ -78,6 +81,11 @@ export function collectReleaseVerificationErrors(options = {}) {
     const expectedBadge = `version-${version}-blue`;
     if (!readme.includes(expectedBadge)) {
       errors.push(`README.md must contain the release badge fragment "${expectedBadge}".`);
+    }
+
+    const pinnedNpmInstallCommand = `npm exec --yes ${EXPECTED_PACKAGE_NAME}@${version} -- install-native --extension-id <chrome-extension-id>`;
+    if (!readme.includes(pinnedNpmInstallCommand)) {
+      errors.push(`README.md must contain the pinned npm install command "${pinnedNpmInstallCommand}".`);
     }
 
     const changelogHeadingPattern = releaseDate
@@ -98,6 +106,45 @@ export function collectReleaseVerificationErrors(options = {}) {
   } else {
     errors.push(...collectChromeWebStoreDocErrors(rootDir));
   }
+  return errors;
+}
+
+function collectPackageMetadataErrors({ rootDir, pkg, packageLock }) {
+  const errors = [];
+  const version = pkg.version;
+
+  if (pkg.name !== EXPECTED_PACKAGE_NAME) {
+    errors.push(`package.json name ${formatValue(pkg.name)} must be ${EXPECTED_PACKAGE_NAME}.`);
+  }
+  if (typeof pkg.packageManager !== 'string' || pkg.packageManager.trim() === '') {
+    errors.push('package.json must define packageManager for reproducible npm release tooling.');
+  }
+
+  if (version) {
+    if (packageLock.name !== EXPECTED_PACKAGE_NAME) {
+      errors.push(`package-lock.json name ${formatValue(packageLock.name)} must be ${EXPECTED_PACKAGE_NAME}.`);
+    }
+    if (packageLock.version !== version) {
+      errors.push(`package-lock.json version ${formatValue(packageLock.version)} must match package.json version ${version}.`);
+    }
+    const rootPackage = packageLock.packages && packageLock.packages[''];
+    if (!rootPackage || typeof rootPackage !== 'object') {
+      errors.push('package-lock.json must include a root packages[""] entry.');
+    } else {
+      if (rootPackage.name !== EXPECTED_PACKAGE_NAME) {
+        errors.push(`package-lock.json root package name ${formatValue(rootPackage.name)} must be ${EXPECTED_PACKAGE_NAME}.`);
+      }
+      if (rootPackage.version !== version) {
+        errors.push(`package-lock.json root package version ${formatValue(rootPackage.version)} must match package.json version ${version}.`);
+      }
+    }
+
+    const npmManifestPath = path.join(rootDir, 'scripts', `npm-package-files-v${version}.txt`);
+    if (!fs.existsSync(npmManifestPath)) {
+      errors.push(`scripts/npm-package-files-v${version}.txt is required for exact npm package manifest verification.`);
+    }
+  }
+
   return errors;
 }
 
@@ -146,6 +193,9 @@ function collectReleaseChecklistErrors(docsDir, version) {
     `dist/releases/${releaseRef}/SHA256SUMS`,
     `codex-overleaf-link-extension-${releaseRef}.zip`,
     `codex-overleaf-native-host-${releaseRef}.tar.gz`,
+    `codex-overleaf-link-${version}.tgz`,
+    'npm run verify:npm-package',
+    'npm package upload',
     'install.ps1'
   ];
 

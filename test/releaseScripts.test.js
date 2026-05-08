@@ -190,7 +190,11 @@ function releaseBuildEnv(overrides = {}) {
 
 function writeMinimalReleaseBuildFixture(rootDir, { untracked = [] } = {}) {
   const files = {
-    'package.json': `${JSON.stringify({ version: '0.6.0' }, null, 2)}\n`,
+    'package.json': `${JSON.stringify({
+      name: 'codex-overleaf-link',
+      version: '0.6.0',
+      packageManager: 'npm@11.11.0'
+    }, null, 2)}\n`,
     'CHANGELOG.md': '# Changelog\n\n## v0.6.0 - 2026-05-06\n\nFixture release notes.\n',
     'install.sh': '#!/usr/bin/env bash\nREF="${CODEX_OVERLEAF_REF:-main}"\n',
     'install.ps1': "$DefaultRef = 'main'\n",
@@ -232,6 +236,8 @@ function writeMinimalReleaseBuildFixture(rootDir, { untracked = [] } = {}) {
 
 function writeReleaseFixture(rootDir, overrides = {}) {
   const packageVersion = Object.hasOwn(overrides, 'packageVersion') ? overrides.packageVersion : '0.6.0';
+  const packageName = Object.hasOwn(overrides, 'packageName') ? overrides.packageName : 'codex-overleaf-link';
+  const packageManager = Object.hasOwn(overrides, 'packageManager') ? overrides.packageManager : 'npm@11.11.0';
   const manifestVersion = Object.hasOwn(overrides, 'manifestVersion') ? overrides.manifestVersion : packageVersion;
   const readmeVersion = Object.hasOwn(overrides, 'readmeVersion') ? overrides.readmeVersion : packageVersion;
   const changelogVersion = Object.hasOwn(overrides, 'changelogVersion') ? overrides.changelogVersion : packageVersion;
@@ -241,9 +247,32 @@ function writeReleaseFixture(rootDir, overrides = {}) {
     : 'Fixture release notes.\n';
 
   fs.mkdirSync(path.join(rootDir, 'extension'), { recursive: true });
+  const packageJson = {
+    name: packageName,
+    version: packageVersion,
+    packageManager
+  };
+  if (packageManager === undefined) {
+    delete packageJson.packageManager;
+  }
   fs.writeFileSync(
     path.join(rootDir, 'package.json'),
-    `${JSON.stringify({ version: packageVersion }, null, 2)}\n`
+    `${JSON.stringify(packageJson, null, 2)}\n`
+  );
+  fs.writeFileSync(
+    path.join(rootDir, 'package-lock.json'),
+    `${JSON.stringify({
+      name: packageName,
+      version: packageVersion,
+      lockfileVersion: 3,
+      requires: true,
+      packages: {
+        '': {
+          name: packageName,
+          version: packageVersion
+        }
+      }
+    }, null, 2)}\n`
   );
   fs.writeFileSync(
     path.join(rootDir, 'extension/manifest.json'),
@@ -251,7 +280,10 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   );
   fs.writeFileSync(
     path.join(rootDir, 'README.md'),
-    `<img src="https://img.shields.io/badge/version-${readmeVersion}-blue" alt="version">\n`
+    overrides.readmeText || [
+      `<img src="https://img.shields.io/badge/version-${readmeVersion}-blue" alt="version">`,
+      `npm exec --yes codex-overleaf-link@${packageVersion} -- install-native --extension-id <chrome-extension-id>`
+    ].join('\n')
   );
   fs.writeFileSync(
     path.join(rootDir, 'CHANGELOG.md'),
@@ -261,6 +293,7 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   fs.writeFileSync(path.join(rootDir, 'install.ps1'), '$ErrorActionPreference = "Stop"\n');
   fs.mkdirSync(path.join(rootDir, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(rootDir, 'scripts/install-native-host.mjs'), '#!/usr/bin/env node\n');
+  fs.writeFileSync(path.join(rootDir, 'scripts', `npm-package-files-v${packageVersion}.txt`), 'package/package.json\n');
 }
 
 function writeChromeWebStoreDocs(rootDir, { version = '0.6.0', includeV09Coverage = false } = {}) {
@@ -288,10 +321,13 @@ function writeChromeWebStoreDocs(rootDir, { version = '0.6.0', includeV09Coverag
     [
       'npm test',
       'npm run verify:release',
+      'npm run verify:npm-package',
       'npm run build:release',
       `dist/releases/${releaseRef}/SHA256SUMS`,
       `codex-overleaf-link-extension-${releaseRef}.zip`,
       `codex-overleaf-native-host-${releaseRef}.tar.gz`,
+      `codex-overleaf-link-${version}.tgz`,
+      `Confirm npm package upload includes codex-overleaf-link-${version}.tgz with the release artifacts.`,
       'install.ps1',
       'Web Store extension id',
       'current release scope',
@@ -540,6 +576,56 @@ test('release verifier catches README badge mismatch', async () => {
       errors.some((error) => /README\.md.*version-1\.2\.3-blue/i.test(error)),
       errors.join('\n')
     );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('release verifier requires npm package metadata, lockfile, exact manifest, README, and upload docs', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-npm-metadata-'));
+  try {
+    writeReleaseFixture(tempDir, {
+      packageManager: undefined,
+      readmeText: '<img src="https://img.shields.io/badge/version-1.2.3-blue" alt="version">\n',
+      packageVersion: '1.2.3'
+    });
+    writeChromeWebStoreDocs(tempDir, { version: '1.2.3', includeV09Coverage: true });
+    fs.writeFileSync(
+      path.join(tempDir, 'package-lock.json'),
+      `${JSON.stringify({
+        name: 'codex-overleaf-link',
+        version: '1.2.2',
+        packages: {
+          '': {
+            name: 'codex-overleaf-link',
+            version: '1.2.2'
+          }
+        }
+      }, null, 2)}\n`
+    );
+    fs.rmSync(path.join(tempDir, 'scripts/npm-package-files-v1.2.3.txt'));
+    fs.writeFileSync(
+      path.join(tempDir, 'docs/chrome-web-store/release-checklist.md'),
+      readText(path.join(tempDir, 'docs/chrome-web-store/release-checklist.md'))
+        .replace('npm run verify:npm-package\n', '')
+        .replace(/codex-overleaf-link-1\.2\.3\.tgz\n/g, '')
+        .replace(/Confirm npm package upload includes codex-overleaf-link-1\.2\.3\.tgz with the release artifacts\.\n/g, '')
+    );
+    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
+    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+
+    const errors = collectReleaseVerificationErrors({
+      rootDir: tempDir,
+      releaseDate: '2026-05-06'
+    });
+
+    assert.ok(errors.some((error) => /package\.json must define packageManager/i.test(error)), errors.join('\n'));
+    assert.ok(errors.some((error) => /package-lock\.json version 1\.2\.2 must match package\.json version 1\.2\.3/i.test(error)), errors.join('\n'));
+    assert.ok(errors.some((error) => /scripts\/npm-package-files-v1\.2\.3\.txt/i.test(error)), errors.join('\n'));
+    assert.ok(errors.some((error) => /README\.md.*npm exec --yes codex-overleaf-link@1\.2\.3 -- install-native/i.test(error)), errors.join('\n'));
+    assert.ok(errors.some((error) => /release-checklist\.md.*npm run verify:npm-package/i.test(error)), errors.join('\n'));
+    assert.ok(errors.some((error) => /release-checklist\.md.*codex-overleaf-link-1\.2\.3\.tgz/i.test(error)), errors.join('\n'));
+    assert.ok(errors.some((error) => /release-checklist\.md.*npm package upload/i.test(error)), errors.join('\n'));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -874,10 +960,14 @@ test('Chrome Web Store prep docs describe manual release permissions and privacy
 
   assert.match(checklist, /npm test/);
   assert.match(checklist, /npm run verify:release/);
+  assert.match(checklist, /npm run verify:npm-package/);
   assert.match(checklist, /npm run build:release/);
   assert.match(checklist, new RegExp(`dist/releases/${escapedReleaseRef}/SHA256SUMS`));
   assert.match(checklist, new RegExp(`codex-overleaf-link-extension-${escapedReleaseRef}\\.zip`));
   assert.match(checklist, new RegExp(`codex-overleaf-native-host-${escapedReleaseRef}\\.tar\\.gz`));
+  assert.match(checklist, new RegExp(`codex-overleaf-link-${packageVersion.replace(/\./g, '\\.')}\\.tgz`));
+  assert.match(checklist, /npm package tarball/i);
+  assert.match(checklist, /upload/i);
   assert.match(checklist, /install\.ps1/);
   assert.match(checklist, new RegExp(escapedReleaseRef));
   assert.match(
@@ -1246,6 +1336,7 @@ test('build-release creates expected artifacts and metadata', (t) => {
   const outputDir = path.join(tempDir, 'out');
   const extensionZip = `codex-overleaf-link-extension-v${version}.zip`;
   const nativeTarball = `codex-overleaf-native-host-v${version}.tar.gz`;
+  const npmTarball = `codex-overleaf-link-${version}.tgz`;
 
   try {
     const result = spawnSync(process.execPath, [
@@ -1267,6 +1358,7 @@ test('build-release creates expected artifacts and metadata', (t) => {
     const expectedFiles = [
       extensionZip,
       nativeTarball,
+      npmTarball,
       'install.sh',
       'install.ps1',
       'uninstall-native-host.mjs',
@@ -1284,7 +1376,7 @@ test('build-release creates expected artifacts and metadata', (t) => {
     assert.doesNotThrow(() => new Date(manifest.createdAt).toISOString());
     assert.deepEqual(
       manifest.artifacts.map((artifact) => artifact.name).sort(),
-      [extensionZip, nativeTarball, 'install.sh', 'install.ps1', 'uninstall-native-host.mjs'].sort()
+      [extensionZip, nativeTarball, npmTarball, 'install.sh', 'install.ps1', 'uninstall-native-host.mjs'].sort()
     );
     for (const artifact of manifest.artifacts) {
       const artifactPath = path.join(outputDir, artifact.name);
@@ -1295,13 +1387,16 @@ test('build-release creates expected artifacts and metadata', (t) => {
 
     const releaseNotes = fs.readFileSync(path.join(outputDir, 'release-notes.md'), 'utf8');
     assert.match(releaseNotes, new RegExp(`^## v${version.replace(/\./g, '\\.')} - `));
+    assert.match(releaseNotes, new RegExp(`npm exec --yes codex-overleaf-link@${version.replace(/\./g, '\\.')} -- install-native --extension-id <chrome-extension-id>`));
+    assert.match(releaseNotes, new RegExp(`npm exec --yes codex-overleaf-link@${version.replace(/\./g, '\\.')} -- doctor`));
+    assert.match(releaseNotes, new RegExp(`npm exec --yes codex-overleaf-link@${version.replace(/\./g, '\\.')} -- uninstall-native`));
     assert.doesNotMatch(releaseNotes, /\n## v0\.2\.0 - /);
 
     const sums = fs.readFileSync(path.join(outputDir, 'SHA256SUMS'), 'utf8').trim().split('\n');
     const checksumNames = sums.map((line) => line.replace(/^[0-9a-f]{64}\s+\*?/, ''));
     assert.deepEqual(
       checksumNames.sort(),
-      [extensionZip, nativeTarball, 'install.sh', 'install.ps1', 'uninstall-native-host.mjs', 'release-manifest.json', 'release-notes.md'].sort()
+      [extensionZip, nativeTarball, npmTarball, 'install.sh', 'install.ps1', 'uninstall-native-host.mjs', 'release-manifest.json', 'release-notes.md'].sort()
     );
     assert.equal(checksumNames.includes('SHA256SUMS'), false);
     for (const line of sums) {
@@ -1309,6 +1404,7 @@ test('build-release creates expected artifacts and metadata', (t) => {
       const fileName = line.replace(/^[0-9a-f]{64}\s+/, '');
       assert.equal(line.slice(0, 64), sha256(path.join(outputDir, fileName)));
     }
+    assert.equal(fs.existsSync(path.join(repoRoot, npmTarball)), false, `${npmTarball} should not be left in the package root`);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

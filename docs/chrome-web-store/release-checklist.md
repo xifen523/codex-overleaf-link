@@ -9,6 +9,7 @@ artifact names aligned with `package.json` before running `npm run verify:releas
 - Run `npm run check:architecture`.
 - Run `npm run benchmark:large -- --output .local/benchmarks/v1.1-large-project.json`.
 - Run `npm run verify:release`.
+- Run `npm run verify:npm-package`.
 - Run `npm run build:release`.
 - Confirm the GitHub release workflow has passing macOS, Linux, and Windows jobs for tests, architecture budget enforcement, and the synthetic large-project regression gate.
 
@@ -17,6 +18,8 @@ artifact names aligned with `package.json` before running `npm run verify:releas
 - Verify checksums from `dist/releases/v1.1.0/SHA256SUMS`.
 - Inspect extension zip `codex-overleaf-link-extension-v1.1.0.zip` before upload.
 - Inspect native host tarball `codex-overleaf-native-host-v1.1.0.tar.gz` before upload.
+- Inspect npm package tarball `codex-overleaf-link-1.1.0.tgz` before upload.
+- Confirm npm package upload includes `codex-overleaf-link-1.1.0.tgz` with the release artifacts.
 - Confirm release artifacts exclude `docs/`, `docs/superpowers/`, `.local/`, `.git/`, `test/`, `dist/`, `build/`, README, changelog, roadmap, specs, plans, keys, certificates, logs, sqlite files, and `.crx` files.
 - Confirm the release `install.sh` defaults `CODEX_OVERLEAF_REF` to `v1.1.0`.
 - Confirm the release `install.ps1` defaults `$DefaultRef` to `v1.1.0`.
