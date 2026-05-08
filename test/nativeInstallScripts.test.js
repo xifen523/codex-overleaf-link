@@ -129,7 +129,7 @@ function buildDoctorNativePayload(overrides = {}) {
     protocolVersion: 1,
     supportedProtocol: { min: 1, max: 1 },
     capabilities: Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true])),
-    minExtensionVersion: '1.0.0',
+    minExtensionVersion: CURRENT_PACKAGE_VERSION,
     version: CURRENT_PACKAGE_VERSION,
     environment: { codex: { ok: true } },
     ...overrides

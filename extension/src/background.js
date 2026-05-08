@@ -236,7 +236,7 @@ importScripts('shared/compatibility.js');
   function getNativeRequiredVersion(evidence = {}) {
     return evidence.requiredVersion ||
       CodexOverleafCompatibility?.BUILD_TARGET_VERSION ||
-      '1.0.0';
+      '1.1.0';
   }
 
   function getCurrentNativeVersion(evidence = {}) {
