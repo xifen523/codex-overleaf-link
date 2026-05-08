@@ -78,6 +78,9 @@ jobs:
             dist/releases/${{ github.ref_name }}/install.sh
             dist/releases/${{ github.ref_name }}/install.ps1
             dist/releases/${{ github.ref_name }}/uninstall-native-host.mjs
+            dist/releases/${{ github.ref_name }}/native-host/src/nativeHostPlatform.js
+            dist/releases/${{ github.ref_name }}/native-host/src/manifest.js
+            dist/releases/${{ github.ref_name }}/native-host/src/runtimeInstaller.js
             dist/releases/${{ github.ref_name }}/release-manifest.json
             dist/releases/${{ github.ref_name }}/release-notes.md
             dist/releases/${{ github.ref_name }}/SHA256SUMS

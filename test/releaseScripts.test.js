@@ -512,6 +512,9 @@ test('release workflow publishes generated notes and built artifacts', () => {
   assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/install\.sh/);
   assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/install\.ps1/);
   assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/uninstall-native-host\.mjs/);
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/native-host\/src\/nativeHostPlatform\.js/);
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/native-host\/src\/manifest\.js/);
+  assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/native-host\/src\/runtimeInstaller\.js/);
   assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/release-manifest\.json/);
   assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/release-notes\.md/);
   assert.match(filesSection, /dist\/releases\/\$\{\{ github\.ref_name \}\}\/SHA256SUMS/);
