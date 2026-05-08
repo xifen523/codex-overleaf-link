@@ -13,6 +13,7 @@ const {
 } = require('../native-host/src/manifest');
 const { getDefaultBridgePath } = require('../native-host/src/nativeHostPlatform');
 const {
+  buildDoctorBridgeSpawnInvocation,
   classifyDoctorResult,
   normalizeDiagnosticPath,
   runDoctor
@@ -244,6 +245,19 @@ test('normalizeDiagnosticPath redacts home paths unless revealPaths is set', () 
     normalizeDiagnosticPath(targetPath, { homeDir, revealPaths: true }),
     targetPath
   );
+});
+
+test('doctor launches Windows command bridge through cmd.exe', () => {
+  const bridgePath = 'C:\\Users\\Alice Smith\\AppData\\Local\\codex-overleaf\\codex-overleaf-bridge.cmd';
+  const invocation = buildDoctorBridgeSpawnInvocation(bridgePath, { platform: 'win32' });
+
+  assert.match(path.win32.basename(invocation.command).toLowerCase(), /^cmd(?:\.exe)?$/);
+  assert.deepEqual(invocation.args.slice(0, 3), ['/d', '/s', '/c']);
+  assert.equal(invocation.args[3], `"${bridgePath}"`);
+
+  const exeInvocation = buildDoctorBridgeSpawnInvocation('C:\\Tools\\codex-overleaf-bridge.exe', { platform: 'win32' });
+  assert.equal(exeInvocation.command, 'C:\\Tools\\codex-overleaf-bridge.exe');
+  assert.deepEqual(exeInvocation.args, []);
 });
 
 test('runDoctor reports missing manifest as missing install with redacted paths', async () => {

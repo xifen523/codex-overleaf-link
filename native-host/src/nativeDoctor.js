@@ -98,6 +98,7 @@ async function runDoctor(options = {}) {
   }, {
     env,
     pathOptions,
+    platform,
     timeoutMs
   });
   const rawPingResponse = pingResult.rawResponse;
@@ -393,6 +394,10 @@ function validateBridgePath(bridgePath, options) {
 function pingNativeBridge(bridgePath, message, options = {}) {
   const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
   const env = options.env || process.env;
+  const spawnInvocation = buildDoctorBridgeSpawnInvocation(bridgePath, {
+    env,
+    platform: options.platform
+  });
 
   return new Promise(resolve => {
     let child;
@@ -445,7 +450,7 @@ function pingNativeBridge(bridgePath, message, options = {}) {
     }
 
     try {
-      child = spawn(bridgePath, [], {
+      child = spawn(spawnInvocation.command, spawnInvocation.args, {
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true
@@ -557,6 +562,25 @@ function pingNativeBridge(bridgePath, message, options = {}) {
       });
     }
   });
+}
+
+function buildDoctorBridgeSpawnInvocation(bridgePath, options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform !== 'win32' || !/\.(?:cmd|bat)$/i.test(String(bridgePath))) {
+    return {
+      command: bridgePath,
+      args: []
+    };
+  }
+
+  return {
+    command: options.env?.ComSpec || options.env?.COMSPEC || 'cmd.exe',
+    args: ['/d', '/s', '/c', quoteWindowsCommandPath(bridgePath)]
+  };
+}
+
+function quoteWindowsCommandPath(targetPath) {
+  return `"${String(targetPath).replace(/"/g, '""')}"`;
 }
 
 function sanitizePingResponse(response, pathOptions) {
@@ -784,6 +808,7 @@ function getPlatformPath(platform) {
 }
 
 module.exports = {
+  buildDoctorBridgeSpawnInvocation,
   classifyDoctorResult,
   formatDoctorHuman,
   normalizeDiagnosticPath,
