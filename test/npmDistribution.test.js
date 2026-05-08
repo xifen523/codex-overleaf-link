@@ -9,6 +9,7 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..');
 const packageJson = require('../package.json');
 const cliPath = path.join(repoRoot, 'bin/codex-overleaf-link.mjs');
+const validExtensionId = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 function runCli(args, options = {}) {
   return spawnSync(process.execPath, [cliPath, ...args], {
@@ -25,6 +26,21 @@ function makeIsolatedCliEnv(tempDir) {
     USERPROFILE: tempDir,
     LOCALAPPDATA: path.join(tempDir, 'LocalAppData')
   };
+}
+
+function manifestPathForHome(tempDir, browser = 'chrome') {
+  if (process.platform === 'darwin') {
+    const browserDir = browser === 'chromium' ? 'Chromium' : 'Google/Chrome';
+    return path.join(tempDir, 'Library/Application Support', browserDir, 'NativeMessagingHosts', 'com.codex.overleaf.json');
+  }
+  if (process.platform === 'linux') {
+    const browserDir = browser === 'chromium' ? '.config/chromium' : '.config/google-chrome';
+    return path.join(tempDir, browserDir, 'NativeMessagingHosts', 'com.codex.overleaf.json');
+  }
+  if (process.platform === 'win32') {
+    return path.join(tempDir, 'LocalAppData', 'codex-overleaf', 'native-messaging-hosts', 'com.codex.overleaf.json');
+  }
+  throw new Error(`Unsupported test platform: ${process.platform}`);
 }
 
 test('package metadata is configured for npm distribution', () => {
@@ -114,11 +130,139 @@ test('unknown command exits with an error', () => {
   assert.match(result.stderr, /Unknown command/);
 });
 
-test('install-native command is not implemented yet', () => {
-  const result = runCli(['install-native']);
+test('install-native with valid extension id writes manifest and reports json', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-cli-install-json-'));
+  try {
+    const runtimeRoot = path.join(tempDir, 'runtime');
+    const result = runCli([
+      'install-native',
+      '--extension-id',
+      validExtensionId,
+      '--browser',
+      'chrome',
+      '--runtime-root',
+      runtimeRoot,
+      '--json'
+    ], {
+      env: makeIsolatedCliEnv(tempDir)
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(result.stderr, '');
+    const body = JSON.parse(result.stdout);
+    assert.equal(body.ok, true);
+    assert.equal(body.manifest.allowedOrigin, `chrome-extension://${validExtensionId}/`);
+    assert.ok(body.manifest.allowedOrigins.includes(`chrome-extension://${validExtensionId}/`));
+    assert.equal(JSON.parse(fs.readFileSync(manifestPathForHome(tempDir), 'utf8')).allowed_origins.includes(`chrome-extension://${validExtensionId}/`), true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('install-native rejects invalid extension id', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-cli-install-invalid-'));
+  try {
+    const result = runCli([
+      'install-native',
+      '--extension-id',
+      'invalid-extension-id',
+      '--runtime-root',
+      path.join(tempDir, 'runtime'),
+      '--json'
+    ], {
+      env: makeIsolatedCliEnv(tempDir)
+    });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Invalid Chrome extension id/);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('uninstall-native --keep-runtime removes manifest and keeps runtime', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-cli-uninstall-keep-'));
+  try {
+    const runtimeRoot = path.join(tempDir, 'runtime');
+    const env = makeIsolatedCliEnv(tempDir);
+    const install = runCli([
+      'install-native',
+      '--extension-id',
+      validExtensionId,
+      '--runtime-root',
+      runtimeRoot,
+      '--json'
+    ], { env });
+    assert.equal(install.status, 0, install.stderr || install.stdout);
+
+    const uninstall = runCli([
+      'uninstall-native',
+      '--runtime-root',
+      runtimeRoot,
+      '--keep-runtime',
+      '--json'
+    ], { env });
+
+    assert.equal(uninstall.status, 0, uninstall.stderr || uninstall.stdout);
+    assert.equal(uninstall.stderr, '');
+    const body = JSON.parse(uninstall.stdout);
+    assert.equal(body.ok, true);
+    assert.equal(body.keepRuntime, true);
+    assert.equal(body.manifest.removed, true);
+    assert.equal(fs.existsSync(manifestPathForHome(tempDir)), false);
+    assert.equal(fs.existsSync(runtimeRoot), true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('uninstall-native removes marked runtime when safe', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-cli-uninstall-full-'));
+  try {
+    const runtimeRoot = path.join(tempDir, 'runtime');
+    const env = makeIsolatedCliEnv(tempDir);
+    const install = runCli([
+      'install-native',
+      '--extension-id',
+      validExtensionId,
+      '--runtime-root',
+      runtimeRoot,
+      '--json'
+    ], { env });
+    assert.equal(install.status, 0, install.stderr || install.stdout);
+
+    const uninstall = runCli([
+      'uninstall-native',
+      '--runtime-root',
+      runtimeRoot,
+      '--json'
+    ], { env });
+
+    assert.equal(uninstall.status, 0, uninstall.stderr || uninstall.stdout);
+    assert.equal(uninstall.stderr, '');
+    const body = JSON.parse(uninstall.stdout);
+    assert.equal(body.ok, true);
+    assert.equal(body.keepRuntime, false);
+    assert.equal(body.runtime.removed, true);
+    assert.equal(fs.existsSync(manifestPathForHome(tempDir)), false);
+    assert.equal(fs.existsSync(runtimeRoot), false);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('install-native rejects unknown option', () => {
+  const result = runCli(['install-native', '--unknown-option']);
 
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /install-native is not implemented yet\./);
+  assert.match(result.stderr, /Unknown option/);
+});
+
+test('install-native rejects missing option value', () => {
+  const result = runCli(['install-native', '--extension-id']);
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Missing value/);
 });
 
 

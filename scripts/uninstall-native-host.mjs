@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import {
   getDefaultBridgePath,
   getDefaultRuntimeRoot,
@@ -11,47 +12,86 @@ import {
 
 const require = createRequire(import.meta.url);
 const { uninstallManagedRuntime } = require('../native-host/src/runtimeInstaller.js');
+const scriptPath = fileURLToPath(import.meta.url);
 
-const args = parseArgs(process.argv.slice(2));
-const platform = args.platform || process.platform;
-const browser = args.browser || 'chrome';
-const platformPath = platform === 'win32' ? path.win32 : path.posix;
-const runtimePlatformPath = args.runtimeRoot && path.isAbsolute(args.runtimeRoot) ? path : platformPath;
-const defaultInstallRoot = getDefaultRuntimeRoot({ platform, browser, env: process.env });
-const installRoot = resolveForPlatform(args.runtimeRoot || defaultInstallRoot, platformPath);
-const defaultBridgePath = getDefaultBridgePath({ platform, browser, env: process.env });
-const bridgePath = resolveForPlatform(args.bridgePath || defaultBridgePath, platformPath);
-const registrationTarget = getNativeHostRegistrationTarget({
-  platform,
-  browser,
-  env: process.env
-});
-const manifestPath = registrationTarget.manifestPath;
+export function uninstallNativeHost(options = {}) {
+  const platform = options.platform || process.platform;
+  const browser = options.browser || 'chrome';
+  assertSupportedBrowser(browser);
 
-removeManifestPath(manifestPath);
-if (registrationTarget.kind === 'registry') {
-  if (deleteWindowsRegistryValue(registrationTarget.registryKey)) {
-    console.log(`Removed Native Messaging host registry key: ${registrationTarget.registryKey}`);
-  } else {
-    console.log(`Native Messaging host registry key not found: ${registrationTarget.registryKey}`);
-  }
-}
-removeBridgePath(bridgePath);
-if (!args.keepRuntime) {
-  const result = uninstallManagedRuntime({
+  const env = options.env || process.env;
+  const platformPath = platform === 'win32' ? path.win32 : path.posix;
+  const runtimePlatformPath = options.runtimeRoot && path.isAbsolute(options.runtimeRoot) ? path : platformPath;
+  const defaultInstallRoot = getDefaultRuntimeRoot({ platform, browser, env });
+  const installRoot = resolveForPlatform(options.runtimeRoot || defaultInstallRoot, platformPath);
+  const defaultBridgePath = getDefaultBridgePath({ platform, browser, env });
+  const bridgePath = resolveForPlatform(options.bridgePath || defaultBridgePath, platformPath);
+  const registrationTarget = getNativeHostRegistrationTarget({
+    platform,
+    browser,
+    env
+  });
+  const manifestPath = registrationTarget.manifestPath;
+
+  const manifest = removeManifestPath(manifestPath);
+  const registry = registrationTarget.kind === 'registry'
+    ? removeRegistryValue(registrationTarget.registryKey)
+    : undefined;
+  const bridge = options.keepRuntime
+    ? { path: bridgePath, action: 'kept', removed: false, kept: true }
+    : removeBridgePath(bridgePath);
+  const runtimeResult = uninstallManagedRuntime({
     runtimeRoot: installRoot,
     defaultRuntimeRoot: defaultInstallRoot,
-    platformPath: runtimePlatformPath
+    platformPath: runtimePlatformPath,
+    keepRuntime: Boolean(options.keepRuntime)
   });
-  if (result.action === 'not-found') {
-    console.log(`Runtime root not found: ${installRoot}`);
-  } else if (result.removed) {
-    console.log(`Removed Runtime root: ${installRoot}`);
-  }
+  const runtime = summarizeRuntimeResult(runtimeResult);
+
+  return {
+    ok: true,
+    status: deriveStatus({ manifest, runtime, keepRuntime: Boolean(options.keepRuntime) }),
+    keepRuntime: Boolean(options.keepRuntime),
+    browser: registrationTarget.browser,
+    manifest,
+    registry,
+    bridge,
+    runtime
+  };
 }
 
-console.log('Codex Overleaf native host uninstall finished.');
-console.log('Project mirrors and plugin Codex history under ~/.codex-overleaf are left intact.');
+export function formatUninstallNativeHostHuman(result) {
+  const lines = [];
+  if (result.manifest.removed) {
+    lines.push(`Removed Native Messaging host manifest: ${result.manifest.path}`);
+  } else {
+    lines.push(`Native Messaging host manifest not found: ${result.manifest.path}`);
+  }
+  if (result.registry) {
+    if (result.registry.removed) {
+      lines.push(`Removed Native Messaging host registry key: ${result.registry.key}`);
+    } else {
+      lines.push(`Native Messaging host registry key not found: ${result.registry.key}`);
+    }
+  }
+  if (result.bridge.action === 'kept') {
+    lines.push(`Kept Bridge executable: ${result.bridge.path}`);
+  } else if (result.bridge.removed) {
+    lines.push(`Removed Bridge executable: ${result.bridge.path}`);
+  } else {
+    lines.push(`Bridge executable not found: ${result.bridge.path}`);
+  }
+  if (result.runtime.action === 'not-found') {
+    lines.push(`Runtime root not found: ${result.runtime.root}`);
+  } else if (result.runtime.kept) {
+    lines.push(`Kept Runtime root: ${result.runtime.root}`);
+  } else if (result.runtime.removed) {
+    lines.push(`Removed Runtime root: ${result.runtime.root}`);
+  }
+  lines.push('Codex Overleaf native host uninstall finished.');
+  lines.push('Project mirrors and plugin Codex history under ~/.codex-overleaf are left intact.');
+  return `${lines.join('\n')}\n`;
+}
 
 function resolveForPlatform(targetPath, platformPathModule) {
   if (platformPathModule.isAbsolute(targetPath)) {
@@ -60,23 +100,13 @@ function resolveForPlatform(targetPath, platformPathModule) {
   return platformPathModule.resolve(targetPath);
 }
 
-function removePath(target, label) {
-  if (!fs.existsSync(target)) {
-    console.log(`${label} not found: ${target}`);
-    return;
-  }
-  fs.rmSync(target, { recursive: true, force: true });
-  console.log(`Removed ${label}: ${target}`);
-}
-
 function removeManifestPath(target) {
   let stat;
   try {
     stat = fs.lstatSync(target);
   } catch (error) {
     if (error && error.code === 'ENOENT') {
-      console.log(`Native Messaging host manifest not found: ${target}`);
-      return;
+      return { path: target, action: 'not-found', removed: false };
     }
     throw error;
   }
@@ -86,7 +116,7 @@ function removeManifestPath(target) {
   }
 
   fs.rmSync(target, { force: true });
-  console.log(`Removed Native Messaging host manifest: ${target}`);
+  return { path: target, action: 'removed', removed: true };
 }
 
 function removeBridgePath(target) {
@@ -95,8 +125,7 @@ function removeBridgePath(target) {
     stat = fs.lstatSync(target);
   } catch (error) {
     if (error && error.code === 'ENOENT') {
-      console.log(`Bridge executable not found: ${target}`);
-      return;
+      return { path: target, action: 'not-found', removed: false };
     }
     throw error;
   }
@@ -106,7 +135,14 @@ function removeBridgePath(target) {
   }
 
   fs.rmSync(target, { force: true });
-  console.log(`Removed Bridge executable: ${target}`);
+  return { path: target, action: 'removed', removed: true };
+}
+
+function removeRegistryValue(registryKey) {
+  if (deleteWindowsRegistryValue(registryKey)) {
+    return { key: registryKey, action: 'removed', removed: true };
+  }
+  return { key: registryKey, action: 'not-found', removed: false };
 }
 
 function deleteWindowsRegistryValue(registryKey) {
@@ -150,25 +186,96 @@ function parseStringArrayEnv(value) {
   return parsed;
 }
 
+function summarizeRuntimeResult(result) {
+  return {
+    root: result.runtimeRoot,
+    action: result.action,
+    removed: Boolean(result.removed),
+    kept: Boolean(result.kept),
+    markerManagedBy: result.marker && result.marker.managedBy,
+    markerVersion: result.marker && result.marker.version
+  };
+}
+
+function deriveStatus({ manifest, runtime, keepRuntime }) {
+  if (keepRuntime) {
+    return manifest.removed ? 'manifest-removed-runtime-kept' : 'manifest-not-found-runtime-kept';
+  }
+  if (manifest.action === 'not-found' && runtime.action === 'not-found') {
+    return 'not-found';
+  }
+  return 'uninstalled';
+}
+
+function assertSupportedBrowser(browser) {
+  if (!['auto', 'chrome', 'chromium'].includes(browser)) {
+    throw new Error('Usage: --browser must be one of chrome, chromium, or auto');
+  }
+}
+
 function parseArgs(argv) {
   const parsed = {};
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--bridge-path') {
-      parsed.bridgePath = argv[index + 1];
+      parsed.bridgePath = readOptionValue(argv, index, arg);
       index += 1;
     } else if (arg === '--runtime-root') {
-      parsed.runtimeRoot = argv[index + 1];
+      parsed.runtimeRoot = readOptionValue(argv, index, arg);
       index += 1;
     } else if (arg === '--keep-runtime') {
       parsed.keepRuntime = true;
     } else if (arg === '--browser') {
-      parsed.browser = argv[index + 1];
+      parsed.browser = readOptionValue(argv, index, arg);
       index += 1;
     } else if (arg === '--platform') {
-      parsed.platform = argv[index + 1];
+      parsed.platform = readOptionValue(argv, index, arg);
       index += 1;
+    } else if (arg === '--force') {
+      parsed.force = true;
+    } else if (arg === '--json') {
+      parsed.json = true;
+    } else if (arg === '--help') {
+      parsed.help = true;
+    } else {
+      throw new Error(`Unknown option: ${arg}`);
     }
   }
   return parsed;
+}
+
+function readOptionValue(argv, index, optionName) {
+  const value = argv[index + 1];
+  if (!value || value.startsWith('--')) {
+    throw new Error(`Missing value for ${optionName}`);
+  }
+  return value;
+}
+
+function printUsage() {
+  console.log('Usage: uninstall-native-host.mjs [--browser chrome|chromium|auto] [--runtime-root <path>] [--keep-runtime] [--json]');
+}
+
+async function main() {
+  let args;
+  try {
+    args = parseArgs(process.argv.slice(2));
+    if (args.help) {
+      printUsage();
+      return;
+    }
+    const result = uninstallNativeHost(args);
+    if (args.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      process.stdout.write(formatUninstallNativeHostHuman(result));
+    }
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
+if (path.resolve(process.argv[1] || '') === scriptPath) {
+  await main();
 }

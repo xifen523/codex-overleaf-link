@@ -1,26 +1,81 @@
 #!/usr/bin/env node
+import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json');
+const packageRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
-const command = process.argv[2] ?? 'help';
+let command = process.argv[2] ?? 'help';
 const args = process.argv.slice(3);
+
+if (command === '--help') {
+  command = 'help';
+}
 
 function printHelp() {
   console.log(`codex-overleaf-link ${packageJson.version}
 
 Commands:
-  install-native    Install the native host (not implemented yet)
-  uninstall-native  Uninstall the native host (not implemented yet)
+  install-native    Install the native host
+  uninstall-native  Uninstall the native host
   doctor            Check local native host setup
   version           Print the package version
   help              Show this help message`);
 }
 
-function notImplemented(name) {
-  console.error(`${name} is not implemented yet.`);
-  process.exit(1);
+const OPTION_DEFINITIONS = {
+  '--extension-id': { key: 'extensionId', takesValue: true },
+  '--browser': { key: 'browser', takesValue: true },
+  '--runtime-root': { key: 'runtimeRoot', takesValue: true },
+  '--force': { key: 'force', takesValue: false },
+  '--keep-runtime': { key: 'keepRuntime', takesValue: false },
+  '--reveal-paths': { key: 'revealPaths', takesValue: false },
+  '--json': { key: 'json', takesValue: false },
+  '--help': { key: 'help', takesValue: false }
+};
+
+const INSTALL_NATIVE_OPTIONS = new Set([
+  '--extension-id',
+  '--browser',
+  '--runtime-root',
+  '--force',
+  '--reveal-paths',
+  '--json',
+  '--help'
+]);
+
+const UNINSTALL_NATIVE_OPTIONS = new Set([
+  '--browser',
+  '--runtime-root',
+  '--force',
+  '--keep-runtime',
+  '--reveal-paths',
+  '--json',
+  '--help'
+]);
+
+function parseNativeArgs(argv, allowedOptions) {
+  const parsed = {};
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const definition = OPTION_DEFINITIONS[arg];
+    if (!definition || !allowedOptions.has(arg)) {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+
+    if (definition.takesValue) {
+      parsed[definition.key] = readOptionValue(argv, index, arg);
+      index += 1;
+    } else {
+      parsed[definition.key] = true;
+    }
+  }
+
+  validateBrowserOption(parsed.browser);
+  return parsed;
 }
 
 function parseDoctorArgs(argv) {
@@ -62,6 +117,17 @@ function readOptionValue(argv, index, optionName) {
   return value;
 }
 
+function validateBrowserOption(browser) {
+  if (browser && !['auto', 'chrome', 'chromium'].includes(browser)) {
+    throw new Error('Usage: --browser must be one of chrome, chromium, or auto');
+  }
+}
+
+function exitWithError(error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+
 switch (command) {
   case 'help':
     printHelp();
@@ -73,10 +139,59 @@ switch (command) {
       console.log(packageJson.version);
     }
     break;
-  case 'install-native':
-  case 'uninstall-native':
-    notImplemented(command);
+  case 'install-native': {
+    let installArgs;
+    try {
+      installArgs = parseNativeArgs(args, INSTALL_NATIVE_OPTIONS);
+    } catch (error) {
+      exitWithError(error);
+    }
+    if (installArgs.help) {
+      printHelp();
+      break;
+    }
+
+    try {
+      const { formatInstallNativeHostHuman, installNativeHost } = await import('../scripts/install-native-host.mjs');
+      const result = installNativeHost({
+        ...installArgs,
+        packageRoot
+      });
+      if (installArgs.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        process.stdout.write(formatInstallNativeHostHuman(result));
+      }
+    } catch (error) {
+      exitWithError(error);
+    }
     break;
+  }
+  case 'uninstall-native': {
+    let uninstallArgs;
+    try {
+      uninstallArgs = parseNativeArgs(args, UNINSTALL_NATIVE_OPTIONS);
+    } catch (error) {
+      exitWithError(error);
+    }
+    if (uninstallArgs.help) {
+      printHelp();
+      break;
+    }
+
+    try {
+      const { formatUninstallNativeHostHuman, uninstallNativeHost } = await import('../scripts/uninstall-native-host.mjs');
+      const result = uninstallNativeHost(uninstallArgs);
+      if (uninstallArgs.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        process.stdout.write(formatUninstallNativeHostHuman(result));
+      }
+    } catch (error) {
+      exitWithError(error);
+    }
+    break;
+  }
   case 'doctor': {
     const { formatDoctorHuman, runDoctor } = require('../native-host/src/nativeDoctor.js');
     let doctorArgs;
