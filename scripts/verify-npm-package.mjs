@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const FORBIDDEN_NPM_PACKAGE_PATH_PATTERNS = [
   /(^|\/)(docs|specs|superpowers|private|test|tests|fixtures|dist|\.github|node_modules)(\/|$)/,
+  /(^|\/)scripts\/npm-package-files-v[^/]+\.txt$/,
   /(\.env(?:\.[^/]*)?|\.pem|\.key|\.p12)$/
 ];
 
@@ -57,18 +58,61 @@ export function compareExactManifest(actualPaths, expectedPaths) {
   };
 }
 
-function getDefaultManifestPath() {
-  const packageJson = readPackageMetadata();
-  return path.join(scriptDir, `npm-package-files-v${packageJson.version}.txt`);
-}
-
-export function readExpectedManifest(manifestPath = getDefaultManifestPath()) {
+export function readExpectedManifest(manifestPath) {
+  if (!manifestPath) {
+    return buildExpectedManifestFromPackageFiles();
+  }
   return normalizePackagePathList(
     fs.readFileSync(manifestPath, 'utf8')
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith('#'))
   );
+}
+
+function buildExpectedManifestFromPackageFiles() {
+  const packageJson = readPackageMetadata();
+  const expected = new Set(['package/package.json']);
+
+  for (const implicitPath of ['README.md', 'LICENSE']) {
+    if (fs.existsSync(path.join(repoRoot, implicitPath))) {
+      expected.add(`package/${implicitPath}`);
+    }
+  }
+
+  for (const rawEntry of packageJson.files || []) {
+    const entry = String(rawEntry).replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
+    if (!entry || entry.includes('\0') || entry.split('/').includes('..')) {
+      continue;
+    }
+    collectPackageFileEntry(entry, expected);
+  }
+
+  return normalizePackagePathList([...expected]);
+}
+
+function collectPackageFileEntry(entry, expected) {
+  const fullPath = path.join(repoRoot, entry);
+  if (!fs.existsSync(fullPath)) {
+    return;
+  }
+
+  const stat = fs.statSync(fullPath);
+  if (stat.isFile()) {
+    expected.add(`package/${entry}`);
+    return;
+  }
+
+  if (!stat.isDirectory()) {
+    return;
+  }
+
+  for (const child of fs.readdirSync(fullPath, { withFileTypes: true })) {
+    if (child.name === 'node_modules' || child.name.startsWith('.')) {
+      continue;
+    }
+    collectPackageFileEntry(`${entry}/${child.name}`, expected);
+  }
 }
 
 export function verifyPackagePaths(actualPaths, expectedPaths = readExpectedManifest()) {

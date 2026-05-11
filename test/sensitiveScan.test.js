@@ -4,9 +4,11 @@ const test = require('node:test');
 const sensitiveScan = require('../extension/src/shared/sensitiveScan');
 
 test('scanSensitiveText detects tokens and redacts previews', () => {
+  const sampleGithubToken = ['ghp', 'abcdefghijklmnopqrstuvwxyz123456'].join('_');
+  const sampleApiToken = ['sk', 'abcdefghijklmnopqrstuvwxyz1234567890'].join('-');
   const findings = sensitiveScan.scanSensitiveText(
     'prompt',
-    'Use Bearer ghp_abcdefghijklmnopqrstuvwxyz123456 and sk-abcdefghijklmnopqrstuvwxyz1234567890 and password = "hunter2"'
+    `Use Bearer ${sampleGithubToken} and ${sampleApiToken} and password = "hunter2"`
   );
 
   assert.ok(findings.some(finding => finding.detectorId === 'bearer-token'));
@@ -15,15 +17,15 @@ test('scanSensitiveText detects tokens and redacts previews', () => {
   for (const finding of findings) {
     assert.equal(finding.source, 'prompt');
     assert.equal(finding.preview.includes('hunter2'), false);
-    assert.equal(finding.preview.includes('ghp_abcdefghijklmnopqrstuvwxyz123456'), false);
-    assert.equal(finding.preview.includes('sk-abcdefghijklmnopqrstuvwxyz1234567890'), false);
+    assert.equal(finding.preview.includes(sampleGithubToken), false);
+    assert.equal(finding.preview.includes(sampleApiToken), false);
   }
 });
 
 test('scanSensitiveProjectFiles reports secret paths and never full secret content', () => {
   const findings = sensitiveScan.scanSensitiveProjectFiles([
     { path: 'main.tex', content: 'This confidential review must preserve anonymity.' },
-    { path: 'keys.txt', content: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----' }
+    { path: 'keys.txt', content: ['-----BEGIN ', 'PRIVATE KEY-----\nabc\n-----END ', 'PRIVATE KEY-----'].join('') }
   ]);
 
   assert.deepEqual(findings.map(finding => finding.path).sort(), ['keys.txt']);

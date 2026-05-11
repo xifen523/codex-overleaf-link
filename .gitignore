@@ -12,3 +12,5 @@ build/
 *.key
 *.p12
 *.sqlite
+ROADMAP.md
+scripts/npm-package-files-v*.txt

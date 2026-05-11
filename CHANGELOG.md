@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.1.2 - 2026-05-11
+
+Release hygiene patch for public source and package surfaces.
+
+### Changed
+
+- Removed internal roadmap and release-planning docs from the public tracked source tree and release source archives.
+- Updated release verification to reject tracked `ROADMAP.md`, `docs/`, and generated npm package manifest artifacts.
+- Kept npm/native release artifacts document-free while preserving npm-first install, doctor, and uninstall commands.
+- Bumped package, extension manifest, compatibility target, and native ping metadata to `1.1.2` while keeping native protocol `1`.
+
+### Fixed
+
+- Avoided fake secret literals in tests that can trigger external secret scanners despite not being real credentials.
+
 ## v1.1.1 - 2026-05-08
 
 Small native-host update guidance patch for npm-first local installs.

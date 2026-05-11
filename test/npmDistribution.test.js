@@ -188,7 +188,7 @@ function bridgePathForHome(tempDir) {
 
 test('package metadata is configured for npm distribution', () => {
   assert.equal(packageJson.name, 'codex-overleaf-link');
-  assert.equal(packageJson.version, '1.1.1');
+  assert.equal(packageJson.version, '1.1.2');
   assert.equal(packageJson.bin['codex-overleaf-link'], 'bin/codex-overleaf-link.mjs');
   assert.match(packageJson.packageManager, /^npm@/);
   assert.ok(packageJson.files.includes('bin/'));
@@ -653,11 +653,13 @@ test('npm package verifier CLI checks actual package contents by default', () =>
   assert.equal(result.stderr, '');
 });
 
-test('npm package verifier CLI checks newline file lists', () => {
+test('npm package verifier CLI checks newline file lists', async () => {
+  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-npm-package.mjs')).href;
+  const { readExpectedManifest } = await import(moduleUrl);
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-npm-package-'));
   try {
     const fileListPath = path.join(tempDir, 'files.txt');
-    fs.writeFileSync(fileListPath, fs.readFileSync(path.join(repoRoot, 'scripts/npm-package-files-v1.1.1.txt'), 'utf8'));
+    fs.writeFileSync(fileListPath, `${readExpectedManifest().join('\n')}\n`);
 
     const result = spawnSync(process.execPath, [
       path.join(repoRoot, 'scripts/verify-npm-package.mjs'),

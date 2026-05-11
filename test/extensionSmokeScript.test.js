@@ -168,7 +168,7 @@ test('redactSmokeResult keeps only allowlisted fields and strips sensitive conte
           durationMs: 12,
           fileCount: 2,
           textBytes: 42,
-          secret: 'ghp_abcdefghijklmnopqrstuvwxyz123456'
+          secret: ['ghp', 'abcdefghijklmnopqrstuvwxyz123456'].join('_')
         }
       },
       errors: [{
@@ -224,7 +224,7 @@ test('redactSmokeResult drops unknown native capability names before writing JSO
           tokenStatus: 'sk-test-1234567890abcdef',
           nestedPreview: {
             secretTheoremPreview: 'Private nested theorem text',
-            token: 'ghp_abcdefghijklmnopqrstuvwxyz123456'
+            token: ['ghp', 'abcdefghijklmnopqrstuvwxyz123456'].join('_')
           }
         }
       }

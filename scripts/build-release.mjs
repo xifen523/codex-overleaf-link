@@ -237,8 +237,7 @@ function getRequiredReleaseTrackedFiles(version) {
     'README.md',
     'LICENSE',
     'scripts/install-native-host.mjs',
-    'scripts/verify-npm-package.mjs',
-    `scripts/npm-package-files-v${version}.txt`
+    'scripts/verify-npm-package.mjs'
   ];
 }
 
@@ -467,8 +466,7 @@ function getNpmPackageReleaseInputFiles(trackedFiles) {
     ...[...trackedFiles].filter((relativePath) => (
       relativePath.startsWith('bin/') ||
       relativePath.startsWith('native-host/src/') ||
-      relativePath.startsWith('extension/src/shared/') ||
-      /^scripts\/npm-package-files-v[^/]+\.txt$/.test(relativePath)
+      relativePath.startsWith('extension/src/shared/')
     ))
   ];
   return [...new Set(files.map(validateTrackedRelativePath).filter((relativePath) => trackedFiles.has(relativePath)))].sort();

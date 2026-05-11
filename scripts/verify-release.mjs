@@ -4,17 +4,16 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const MANUAL_EXTENSION_RELEASE_DOCS = [
-  'release-checklist.md'
-];
 const EXPECTED_PACKAGE_NAME = 'codex-overleaf-link';
 const EXPECTED_PACKAGE_LOCK_VERSION = 3;
 export const FORBIDDEN_TRACKED_PATH_PATTERNS = [
   /^\.local\//,
-  /^docs\/superpowers\//,
+  /^ROADMAP\.md$/,
+  /^docs\//,
   /^dist\//,
   /^build\//,
   /^native-host\/bin\//,
+  /^scripts\/npm-package-files-v[^/]+\.txt$/,
   /^\.worktrees\//,
   /^worktrees\//,
   /\.(pem|key|p12|crx|sqlite|log)$/i
@@ -38,17 +37,6 @@ const FORBIDDEN_PACKAGED_SOURCE_PATH_TOKENS = new Set([
   'secrets',
   'spec'
 ]);
-const RELEASE_CHECKLIST_REQUIRED_SECTIONS = [
-  'Automated Verification',
-  'Release Artifact Hygiene',
-  'Real Overleaf Smoke',
-  'Large-Project Performance Baseline',
-  'Security And Privacy Review',
-  'Documentation Pass',
-  'Compatibility Matrix',
-  'P0/P1 Signoff'
-];
-
 export function collectReleaseVerificationErrors(options = {}) {
   const rootDir = path.resolve(options.rootDir || getRepoRoot());
   const releaseDate = options.releaseDate;
@@ -99,11 +87,6 @@ export function collectReleaseVerificationErrors(options = {}) {
 
   errors.push(...collectForbiddenTrackedPathErrors(rootDir, options.trackedFiles));
   errors.push(...collectInstallerArtifactErrors(rootDir));
-  if (version) {
-    errors.push(...collectManualExtensionReleaseDocErrors(rootDir, version));
-  } else {
-    errors.push(...collectManualExtensionReleaseDocErrors(rootDir));
-  }
   return errors;
 }
 
@@ -142,10 +125,6 @@ function collectPackageMetadataErrors({ rootDir, pkg, packageLock }) {
       }
     }
 
-    const npmManifestPath = path.join(rootDir, 'scripts', `npm-package-files-v${version}.txt`);
-    if (!fs.existsSync(npmManifestPath)) {
-      errors.push(`scripts/npm-package-files-v${version}.txt is required for exact npm package manifest verification.`);
-    }
   }
 
   return errors;
@@ -172,63 +151,6 @@ export function collectInstallerArtifactErrors(rootDir) {
   return errors;
 }
 
-export function collectManualExtensionReleaseDocErrors(rootDir, version = '') {
-  const docsDir = path.join(rootDir, 'docs', 'manual-extension');
-  const errors = [];
-  for (const fileName of MANUAL_EXTENSION_RELEASE_DOCS) {
-    const docPath = path.join(docsDir, fileName);
-    if (!fs.existsSync(docPath)) {
-      errors.push(`docs/manual-extension/${fileName} is required for release verification.`);
-    }
-  }
-  if (errors.length === 0 && version) {
-    errors.push(...collectReleaseChecklistErrors(docsDir, version));
-  }
-  return errors;
-}
-
-function collectReleaseChecklistErrors(docsDir, version) {
-  const errors = [];
-  const relativePath = 'docs/manual-extension/release-checklist.md';
-  const checklist = fs.readFileSync(path.join(docsDir, 'release-checklist.md'), 'utf8');
-  const releaseRef = `v${version}`;
-  const requiredFragments = [
-    `dist/releases/${releaseRef}/SHA256SUMS`,
-    `codex-overleaf-link-extension-${releaseRef}.zip`,
-    `codex-overleaf-native-host-${releaseRef}.tar.gz`,
-    `codex-overleaf-link-${version}.tgz`,
-    'npm run verify:npm-package',
-    'npm package upload',
-    'install.ps1',
-    'GitHub Release',
-    'chrome://extensions',
-    'Load unpacked',
-    `npm exec --yes ${EXPECTED_PACKAGE_NAME}@${version} -- install-native`,
-    `npm exec --yes ${EXPECTED_PACKAGE_NAME}@${version} -- doctor`
-  ];
-
-  for (const fragment of requiredFragments) {
-    if (!checklist.includes(fragment)) {
-      errors.push(`${relativePath} must reference current ${releaseRef} release instruction "${fragment}".`);
-    }
-  }
-  for (const section of RELEASE_CHECKLIST_REQUIRED_SECTIONS) {
-    if (!hasMarkdownSection(checklist, section)) {
-      errors.push(`${relativePath} must include a "${section}" section for v0.9 release readiness.`);
-    }
-  }
-  if (!hasP0P1IssueSignoff(checklist)) {
-    errors.push(`${relativePath} must include a P0/P1 issue signoff command using "gh issue list --search 'is:issue is:open (label:P0 OR label:P1)'" or separate P0 and P1 label checks.`);
-  }
-  if (/\bv0\.4(?:\.0)?\b/i.test(checklist)) {
-    errors.push(`${relativePath} must not reference stale v0.4 release instructions.`);
-  }
-  if (/Chrome Web Store/i.test(checklist)) {
-    errors.push(`${relativePath} must not make Chrome Web Store part of the current v${version} release path.`);
-  }
-  return errors;
-}
-
 function readJsonFile(rootDir, relativePath, errors) {
   const fullPath = path.join(rootDir, relativePath);
   try {
@@ -251,17 +173,6 @@ function readTextFile(rootDir, relativePath, errors) {
 
 function formatValue(value) {
   return value === undefined ? '<missing>' : String(value);
-}
-
-function hasMarkdownSection(markdown, section) {
-  return new RegExp(`^#{2,6}\\s+${escapeRegExp(section)}\\s*$`, 'im').test(markdown);
-}
-
-function hasP0P1IssueSignoff(checklist) {
-  const hasCombinedSearch = /gh issue list --search ["']is:issue is:open \(label:P0 OR label:P1\)["']/.test(checklist);
-  const hasSeparateChecks = /gh issue list --state open --label P0\b/.test(checklist)
-    && /gh issue list --state open --label P1\b/.test(checklist);
-  return hasCombinedSearch || hasSeparateChecks;
 }
 
 function normalizeTrackedPath(relativePath) {

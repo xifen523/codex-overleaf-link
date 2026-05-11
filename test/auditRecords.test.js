@@ -3,7 +3,7 @@ const test = require('node:test');
 
 const audit = require('../extension/src/shared/auditRecords');
 
-const SECRET = 'sk-v0test_DO_NOT_LEAK_1234567890abcdef';
+const SECRET = ['sk', 'v0test_DO_NOT_LEAK_1234567890abcdef'].join('-');
 const PROJECT_TEXT = `PROJECT_TEXT_SHOULD_NOT_APPEAR ${SECRET}`;
 const TASK_PROMPT = `TASK_PROMPT_SHOULD_NOT_APPEAR ${SECRET}`;
 const COMPILE_LOG = `COMPILE_LOG_SHOULD_NOT_APPEAR ${SECRET}`;
@@ -18,16 +18,16 @@ const NO_SECRET_RAW_DIFF = 'RAW_DIFF_SHOULD_NOT_PERSIST';
 const NO_SECRET_PROJECT_TEXT = 'PROJECT_TEXT_SHOULD_NOT_PERSIST';
 const NO_SECRET_MESSAGE = 'MESSAGE_BODY_SHOULD_NOT_PERSIST';
 const SECRET_PATH = `sections/${SECRET}/main.tex`;
-const GITHUB_PAT = `ghp_${'A'.repeat(36)}`;
-const GITHUB_FINE_GRAINED_PAT = `github_pat_${'B'.repeat(36)}`;
+const GITHUB_PAT = ['ghp', 'A'.repeat(36)].join('_');
+const GITHUB_FINE_GRAINED_PAT = ['github', 'pat', 'B'.repeat(36)].join('_');
 const SLACK_TOKEN = `xoxb-${'C'.repeat(24)}`;
 const AWS_ACCESS_KEY = `AKIA${'D'.repeat(16)}`;
 const BEARER_TOKEN_VALUE = `${'e'.repeat(32)}.${'f'.repeat(16)}`;
 const BEARER_TOKEN = `Bearer ${BEARER_TOKEN_VALUE}`;
 const PRIVATE_KEY_BLOCK = [
-  '-----BEGIN PRIVATE KEY-----',
+  '-----BEGIN ' + 'PRIVATE KEY-----',
   'MIIEvCOMMONSECRETKEYDATA',
-  '-----END PRIVATE KEY-----'
+  '-----END ' + 'PRIVATE KEY-----'
 ].join('\n');
 const API_KEY_VALUE = 'api_key_common_secret_12345';
 const TOKEN_VALUE = 'token_common_secret_12345';

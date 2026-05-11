@@ -340,68 +340,27 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   fs.writeFileSync(path.join(rootDir, 'install.ps1'), '$ErrorActionPreference = "Stop"\n');
   fs.mkdirSync(path.join(rootDir, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(rootDir, 'scripts/install-native-host.mjs'), '#!/usr/bin/env node\n');
-  fs.writeFileSync(path.join(rootDir, 'scripts', `npm-package-files-v${packageVersion}.txt`), 'package/package.json\n');
 }
 
-function writeManualExtensionDocs(rootDir, { version = '0.6.0', includeV09Coverage = false } = {}) {
-  const docsDir = path.join(rootDir, 'docs/manual-extension');
-  const releaseRef = `v${version}`;
-  fs.mkdirSync(docsDir, { recursive: true });
-  const coverageSections = includeV09Coverage
-    ? [
-      '## Automated Verification',
-      '## Release Artifact Hygiene',
-      '## Real Overleaf Smoke',
-      '## Large-Project Performance Baseline',
-      '## Security And Privacy Review',
-      '## Documentation Pass',
-      '## Compatibility Matrix',
-      '## P0/P1 Signoff',
-      "gh issue list --search 'is:issue is:open (label:P0 OR label:P1)'"
-    ]
-    : [];
-  fs.writeFileSync(
-    path.join(docsDir, 'release-checklist.md'),
-    [
-      'npm test',
-      'npm run verify:release',
-      'npm run verify:npm-package',
-      'npm run build:release',
-      `dist/releases/${releaseRef}/SHA256SUMS`,
-      `codex-overleaf-link-extension-${releaseRef}.zip`,
-      `codex-overleaf-native-host-${releaseRef}.tar.gz`,
-      `codex-overleaf-link-${version}.tgz`,
-      `Confirm npm package upload includes codex-overleaf-link-${version}.tgz with the release artifacts.`,
-      'install.ps1',
-      'GitHub Release',
-      'chrome://extensions',
-      'Load unpacked',
-      `npm exec --yes codex-overleaf-link@${version} -- install-native`,
-      `npm exec --yes codex-overleaf-link@${version} -- doctor`,
-      'current release scope',
-      ...coverageSections
-    ].join('\n')
-  );
-}
-
-test('CHANGELOG documents the current v1.1.1 npm-first update guidance patch in release tooling format', async () => {
+test('CHANGELOG documents the current v1.1.2 release hygiene patch in release tooling format', async () => {
   const version = readJson(path.join(repoRoot, 'package.json')).version;
   const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
-  const heading = `## v${version} - 2026-05-08`;
+  const heading = `## v${version} - 2026-05-11`;
   const start = changelog.indexOf(heading);
   assert.notEqual(start, -1, `CHANGELOG.md should contain ${heading}`);
-  assert.equal(changelog.includes(`## [${version}] - 2026-05-08`), false);
+  assert.equal(changelog.includes(`## [${version}] - 2026-05-11`), false);
   assert.equal(changelog.indexOf(heading, start + heading.length), -1, 'CHANGELOG.md should not duplicate the current release heading');
 
   const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
   const { extractReleaseNotes } = await import(moduleUrl);
   const section = extractReleaseNotes(changelog, version);
+  const escapedVersion = version.replace(/\./g, '\\.');
 
-  assert.match(section, /npm-first local installs/i);
-  assert.match(section, /npm exec --yes codex-overleaf-link@1\.1\.1 -- install-native/i);
-  assert.match(section, /bundled stable extension id/i);
-  assert.match(section, /custom\/dev unpacked extension ids/i);
-  assert.match(section, /fallback installers/i);
+  assert.match(section, /Release hygiene patch for public source/i);
+  assert.match(section, new RegExp(`codex-overleaf-link@${escapedVersion}|npm-first install`, 'i'));
+  assert.match(section, /internal roadmap/i);
+  assert.match(section, /fake secret literals/i);
+  assert.match(section, /npm-first install/i);
   assert.match(section, /native protocol `1`/i);
 });
 
@@ -649,7 +608,6 @@ test('release verifier requires npm package metadata, lockfile, exact manifest, 
       readmeText: '<img src="https://img.shields.io/badge/version-1.2.3-blue" alt="version">\n',
       packageVersion: '1.2.3'
     });
-    writeManualExtensionDocs(tempDir, { version: '1.2.3', includeV09Coverage: true });
     fs.writeFileSync(
       path.join(tempDir, 'package-lock.json'),
       `${JSON.stringify({
@@ -663,14 +621,6 @@ test('release verifier requires npm package metadata, lockfile, exact manifest, 
         }
       }, null, 2)}\n`
     );
-    fs.rmSync(path.join(tempDir, 'scripts/npm-package-files-v1.2.3.txt'));
-    fs.writeFileSync(
-      path.join(tempDir, 'docs/manual-extension/release-checklist.md'),
-      readText(path.join(tempDir, 'docs/manual-extension/release-checklist.md'))
-        .replace('npm run verify:npm-package\n', '')
-        .replace(/codex-overleaf-link-1\.2\.3\.tgz\n/g, '')
-        .replace(/Confirm npm package upload includes codex-overleaf-link-1\.2\.3\.tgz with the release artifacts\.\n/g, '')
-    );
     const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
     const { collectReleaseVerificationErrors } = await import(moduleUrl);
 
@@ -682,11 +632,7 @@ test('release verifier requires npm package metadata, lockfile, exact manifest, 
     assert.ok(errors.some((error) => /package\.json must define packageManager/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /package-lock\.json lockfileVersion <missing> must be 3/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /package-lock\.json version 1\.2\.2 must match package\.json version 1\.2\.3/i.test(error)), errors.join('\n'));
-    assert.ok(errors.some((error) => /scripts\/npm-package-files-v1\.2\.3\.txt/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /README\.md.*npm exec --yes codex-overleaf-link@1\.2\.3 -- install-native/i.test(error)), errors.join('\n'));
-    assert.ok(errors.some((error) => /release-checklist\.md.*npm run verify:npm-package/i.test(error)), errors.join('\n'));
-    assert.ok(errors.some((error) => /release-checklist\.md.*codex-overleaf-link-1\.2\.3\.tgz/i.test(error)), errors.join('\n'));
-    assert.ok(errors.some((error) => /release-checklist\.md.*npm package upload/i.test(error)), errors.join('\n'));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -699,7 +645,6 @@ test('release verifier rejects invalid package-lock lockfileVersion', async () =
       packageVersion: '1.2.3',
       lockfileVersion: 2
     });
-    writeManualExtensionDocs(tempDir, { version: '1.2.3', includeV09Coverage: true });
     const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
     const { collectReleaseVerificationErrors } = await import(moduleUrl);
 
@@ -748,7 +693,6 @@ test('release verifier accepts changelog date from package release heading by de
       packageVersion: '0.9.0',
       changelogDate: '2026-05-07'
     });
-    writeManualExtensionDocs(tempDir, { version: '0.9.0', includeV09Coverage: true });
     const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
     const { collectReleaseVerificationErrors } = await import(moduleUrl);
 
@@ -769,13 +713,16 @@ test('release verifier rejects forbidden tracked internal and private files', as
       packageVersion: '0.9.0',
       changelogDate: '2026-05-07'
     });
-    writeManualExtensionDocs(tempDir, { version: '0.9.0', includeV09Coverage: true });
     const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
     const { collectReleaseVerificationErrors } = await import(moduleUrl);
 
     const forbiddenPaths = [
       '.local/release-process.md',
+      'ROADMAP.md',
+      'docs/manual-extension/release-checklist.md',
+      'docs/chrome-web-store/privacy.md',
       'docs/superpowers/specs/internal.md',
+      'scripts/npm-package-files-v1.2.3.txt',
       'dist/releases/private.zip',
       'build/tmp.txt',
       'native-host/bin/local-bridge',
@@ -792,7 +739,7 @@ test('release verifier rejects forbidden tracked internal and private files', as
       rootDir: tempDir,
       releaseDate: '2026-05-07',
       trackedFiles: [
-        'docs/manual-extension/release-checklist.md',
+        'README.md',
         ...forbiddenPaths
       ]
     });
@@ -804,7 +751,7 @@ test('release verifier rejects forbidden tracked internal and private files', as
       );
     }
     assert.equal(
-      errors.some((error) => error.includes('docs/manual-extension/release-checklist.md')),
+      errors.some((error) => error.includes('README.md')),
       false,
       errors.join('\n')
     );
@@ -820,7 +767,6 @@ test('release verifier rejects private files from packaged source trees without 
       packageVersion: '0.9.0',
       changelogDate: '2026-05-07'
     });
-    writeManualExtensionDocs(tempDir, { version: '0.9.0', includeV09Coverage: true });
     const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
     const { collectReleaseVerificationErrors } = await import(moduleUrl);
 
@@ -829,8 +775,7 @@ test('release verifier rejects private files from packaged source trees without 
       'extension/src/contentScript.js',
       'extension/src/shared/sessionState.js',
       'native-host/src/taskRunner.js',
-      'native-host/src/nativeHostPlatform.js',
-      'docs/manual-extension/release-checklist.md'
+      'native-host/src/nativeHostPlatform.js'
     ];
     const forbiddenPackagedPaths = [
       'extension/src/private-notes.md',
@@ -867,163 +812,20 @@ test('release verifier rejects private files from packaged source trees without 
   }
 });
 
-test('release verifier requires v0.9 release checklist coverage sections', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-checklist-coverage-'));
+test('release verifier does not require manual extension docs in public source', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-no-public-docs-'));
   try {
     writeReleaseFixture(tempDir, {
       packageVersion: '0.9.0',
       changelogDate: '2026-05-07'
     });
-    writeManualExtensionDocs(tempDir, { version: '0.9.0' });
     const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
     const { collectReleaseVerificationErrors } = await import(moduleUrl);
 
-    const errors = collectReleaseVerificationErrors({
-      rootDir: tempDir,
-      releaseDate: '2026-05-07'
-    });
-
-    for (const section of [
-      'Automated Verification',
-      'Release Artifact Hygiene',
-      'Real Overleaf Smoke',
-      'Large-Project Performance Baseline',
-      'Security And Privacy Review',
-      'Documentation Pass',
-      'Compatibility Matrix',
-      'P0/P1 Signoff'
-    ]) {
-      assert.ok(
-        errors.some((error) => error.includes(section)),
-        `Expected checklist error for ${section}.\n${errors.join('\n')}`
-      );
-    }
+    assert.deepEqual(collectReleaseVerificationErrors({ rootDir: tempDir, releaseDate: '2026-05-07' }), []);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
-});
-
-test('release verifier requires a correct P0/P1 issue signoff check', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-p0-p1-signoff-'));
-  try {
-    writeReleaseFixture(tempDir, {
-      packageVersion: '0.9.0',
-      changelogDate: '2026-05-07'
-    });
-    writeManualExtensionDocs(tempDir, { version: '0.9.0', includeV09Coverage: true });
-    const checklistPath = path.join(tempDir, 'docs/manual-extension/release-checklist.md');
-    fs.writeFileSync(
-      checklistPath,
-      readText(checklistPath).replace(
-        "gh issue list --search 'is:issue is:open (label:P0 OR label:P1)'",
-        "gh issue list --search 'is:issue is:open label:P0 label:P1'"
-      )
-    );
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
-
-    const errors = collectReleaseVerificationErrors({
-      rootDir: tempDir,
-      releaseDate: '2026-05-07'
-    });
-
-    assert.ok(
-      errors.some((error) => /P0\/P1.*issue/i.test(error)),
-      errors.join('\n')
-    );
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('release verifier requires manual extension release docs for current releases', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-docs-'));
-  try {
-    writeReleaseFixture(tempDir, {
-      packageVersion: '0.6.0'
-    });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
-
-    const missingDocErrors = collectReleaseVerificationErrors({
-      rootDir: tempDir,
-      releaseDate: '2026-05-06'
-    });
-    assert.ok(
-      missingDocErrors.some((error) => /docs\/manual-extension\/release-checklist\.md/.test(error)),
-      missingDocErrors.join('\n')
-    );
-
-    writeManualExtensionDocs(tempDir, { version: '0.6.0', includeV09Coverage: true });
-    assert.deepEqual(collectReleaseVerificationErrors({ rootDir: tempDir, releaseDate: '2026-05-06' }), []);
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('release verifier rejects stale manual extension release checklist instructions', async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-stale-checklist-'));
-  try {
-    writeReleaseFixture(tempDir, {
-      packageVersion: '0.6.0'
-    });
-    writeManualExtensionDocs(tempDir);
-    fs.writeFileSync(
-      path.join(tempDir, 'docs/manual-extension/release-checklist.md'),
-      'npm test\nnpm run verify:release\nnpm run build:release\nverify checksums\ninspect extension zip\noutside v0.4\n'
-    );
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
-
-    const errors = collectReleaseVerificationErrors({
-      rootDir: tempDir,
-      releaseDate: '2026-05-06'
-    });
-
-    assert.ok(
-      errors.some((error) => /release-checklist\.md.*v0\.6\.0/i.test(error)),
-      errors.join('\n')
-    );
-    assert.ok(
-      errors.some((error) => /release-checklist\.md.*must not reference stale v0\.4/i.test(error)),
-      errors.join('\n')
-    );
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('manual extension release docs describe GitHub Release unpacked-extension install and privacy posture', () => {
-  const packageVersion = readJson(path.join(repoRoot, 'package.json')).version;
-  const releaseRef = `v${packageVersion}`;
-  const escapedReleaseRef = releaseRef.replace(/\./g, '\\.');
-  const docsDir = path.join(repoRoot, 'docs/manual-extension');
-  const checklist = readText(path.join(docsDir, 'release-checklist.md'));
-
-  assert.match(checklist, /npm test/);
-  assert.match(checklist, /npm run verify:release/);
-  assert.match(checklist, /npm run verify:npm-package/);
-  assert.match(checklist, /npm run build:release/);
-  assert.match(checklist, new RegExp(`dist/releases/${escapedReleaseRef}/SHA256SUMS`));
-  assert.match(checklist, new RegExp(`codex-overleaf-link-extension-${escapedReleaseRef}\\.zip`));
-  assert.match(checklist, new RegExp(`codex-overleaf-native-host-${escapedReleaseRef}\\.tar\\.gz`));
-  assert.match(checklist, new RegExp(`codex-overleaf-link-${packageVersion.replace(/\./g, '\\.')}\\.tgz`));
-  assert.match(checklist, /npm package/i);
-  assert.match(checklist, /upload/i);
-  assert.match(checklist, /install\.ps1/);
-  assert.match(checklist, new RegExp(escapedReleaseRef));
-  assert.match(checklist, /GitHub Release/i);
-  assert.match(checklist, /chrome:\/\/extensions/i);
-  assert.match(checklist, /Load unpacked/i);
-  assert.match(checklist, /allowed_origins/i);
-  assert.match(checklist, new RegExp(`npm exec --yes codex-overleaf-link@${packageVersion.replace(/\./g, '\\.')} -- install-native`));
-  assert.match(checklist, new RegExp(`npm exec --yes codex-overleaf-link@${packageVersion.replace(/\./g, '\\.')} -- doctor`));
-  assert.match(checklist, /page-bridge threat model/i);
-  assert.doesNotMatch(checklist, /Chrome Web Store/i);
-  assert.doesNotMatch(checklist, /v0\.6\.0/);
-  assert.doesNotMatch(checklist, /v0\.5\.0/);
-  assert.doesNotMatch(checklist, /v0\.4\.0/);
-  assert.doesNotMatch(checklist, /outside v0\.4/i);
 });
 
 test('release verifier CLI exits 1 on metadata mismatch', () => {

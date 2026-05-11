@@ -825,7 +825,7 @@ test('mirror.scanSensitive reports redacted findings from the local mirror works
       project: {
         capabilities: { fullProjectSnapshot: true },
         files: [
-          { path: 'main.tex', content: 'token = sk-abcdefghijklmnopqrstuvwxyz1234567890' },
+          { path: 'main.tex', content: `token = ${['sk', 'abcdefghijklmnopqrstuvwxyz1234567890'].join('-')}` },
           { path: 'figure.png', contentBase64: Buffer.from([1, 2, 3]).toString('base64'), size: 3 }
         ]
       }
