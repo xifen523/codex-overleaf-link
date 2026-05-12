@@ -26,6 +26,12 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Verify release metadata and source hygiene
+        run: npm run verify:release
+
+      - name: Verify npm package manifest
+        run: npm run verify:npm-package
+
       - name: Check architecture budget
         run: npm run check:architecture
 

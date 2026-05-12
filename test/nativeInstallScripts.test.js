@@ -1376,15 +1376,15 @@ test('repository ships a one-command macOS installer', () => {
   assert.match(installer, /pbcopy/);
   assert.match(installer, /open -a "Google Chrome" "chrome:\/\/extensions"/);
   assert.match(installer, /open -R/);
-  assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash/);
-  assert.match(readme, /~\/Codex Overleaf Link Extension/);
+  assert.match(readme, new RegExp(`CODEX_OVERLEAF_REF=${escapeRegExp(CURRENT_RELEASE_REF)}\\s+bash -c "\\$\\(curl -fsSL https://raw\\.githubusercontent\\.com/Ghqqqq/codex-overleaf-link/${escapeRegExp(CURRENT_RELEASE_REF)}/install\\.sh\\)"`));
+  assert.match(readme, new RegExp(`codex-overleaf-link-extension-${escapeRegExp(CURRENT_RELEASE_REF)}\\.zip`));
   assert.doesNotMatch(readme, /select `~\/\.codex-overleaf\/source\/extension`/);
 });
 
 test('README documents current cross-platform manual install, uninstall, release artifacts, and bundled extension id flow', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
 
-  assert.match(readme, /curl -fsSL "https:\/\/raw\.githubusercontent\.com\/Ghqqqq\/codex-overleaf-link\/main\/install\.sh\?\$\(date \+%s\)" \| bash/);
+  assert.match(readme, new RegExp(`CODEX_OVERLEAF_REF=${escapeRegExp(CURRENT_RELEASE_REF)}\\s+bash -c "\\$\\(curl -fsSL https://raw\\.githubusercontent\\.com/Ghqqqq/codex-overleaf-link/${escapeRegExp(CURRENT_RELEASE_REF)}/install\\.sh\\)"`));
   assert.ok(readme.includes(CANONICAL_RELEASE_INSTALL_COMMAND));
   assert.match(readme, new RegExp(`iwr\\s+https://raw\\.githubusercontent\\.com/Ghqqqq/codex-overleaf-link/${escapeRegExp(CURRENT_RELEASE_REF)}/install\\.ps1`, 'i'));
   assert.match(readme, /powershell\s+-ExecutionPolicy\s+Bypass\s+-File\s+install\.ps1/i);

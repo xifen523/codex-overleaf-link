@@ -10,10 +10,10 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const RELEASE_OUTPUT_MARKER = '.codex-overleaf-release-output';
 const BUILD_RELEASE_USAGE = 'Usage: node scripts/build-release.mjs [--output <path>]';
 const DEFAULT_RELEASE_DATE = '2026-05-06';
-const REQUIRED_NATIVE_UNINSTALL_HELPER_FILES = [
-  'native-host/src/nativeHostPlatform.js',
-  'native-host/src/manifest.js',
-  'native-host/src/runtimeInstaller.js'
+const NATIVE_UNINSTALL_HELPER_ARTIFACTS = [
+  { source: 'native-host/src/nativeHostPlatform.js', name: 'nativeHostPlatform.js' },
+  { source: 'native-host/src/manifest.js', name: 'manifest.js' },
+  { source: 'native-host/src/runtimeInstaller.js', name: 'runtimeInstaller.js' }
 ];
 
 function main() {
@@ -81,6 +81,7 @@ export function buildRelease(options = {}) {
     sourcePath: path.join(rootDir, 'scripts/uninstall-native-host.mjs'),
     targetPath: copiedUninstallPath
   });
+  writeTopLevelNativeHelperAssets({ rootDir, outputDir, trackedFiles });
 
   const releaseNotes = getReleaseNotesForBuild({ rootDir, version });
   fs.writeFileSync(path.join(outputDir, 'release-notes.md'), releaseNotes, 'utf8');
@@ -92,7 +93,7 @@ export function buildRelease(options = {}) {
     'install.sh',
     'install.ps1',
     'uninstall-native-host.mjs',
-    ...REQUIRED_NATIVE_UNINSTALL_HELPER_FILES
+    ...NATIVE_UNINSTALL_HELPER_ARTIFACTS.map((artifact) => artifact.name)
   ];
   const manifest = {
     version,
@@ -232,7 +233,7 @@ function getRequiredReleaseTrackedFiles(version) {
     'install.ps1',
     'scripts/codex-json-agent.mjs',
     'scripts/uninstall-native-host.mjs',
-    ...REQUIRED_NATIVE_UNINSTALL_HELPER_FILES,
+    ...NATIVE_UNINSTALL_HELPER_ARTIFACTS.map((artifact) => artifact.source),
     'package-lock.json',
     'README.md',
     'LICENSE',
@@ -472,12 +473,13 @@ function getNpmPackageReleaseInputFiles(trackedFiles) {
   return [...new Set(files.map(validateTrackedRelativePath).filter((relativePath) => trackedFiles.has(relativePath)))].sort();
 }
 
-function copyTrackedFile({ rootDir, stagingRoot, relativePath, trackedFiles }) {
+function copyTrackedFile({ rootDir, stagingRoot, relativePath, trackedFiles, targetRelativePath }) {
   const validatedRelativePath = validateTrackedRelativePath(relativePath);
+  const validatedTargetRelativePath = validateTrackedRelativePath(targetRelativePath || relativePath);
   if (!trackedFiles.has(validatedRelativePath)) {
-    throw new Error(`Required release file is not git-tracked: ${validatedRelativePath}`);
+    throw new Error(`Required release file is not git-tracked: `);
   }
-  copyFile(path.join(rootDir, validatedRelativePath), path.join(stagingRoot, validatedRelativePath));
+  copyFile(path.join(rootDir, validatedRelativePath), path.join(stagingRoot, validatedTargetRelativePath));
 }
 
 function validateTrackedRelativePath(relativePath) {
@@ -564,11 +566,11 @@ function writeTopLevelUninstallScript({ rootDir, sourcePath, targetPath }) {
   const patched = source
     .replace(
     "from '../native-host/src/nativeHostPlatform.js';",
-    "from './native-host/src/nativeHostPlatform.js';"
+    "from './nativeHostPlatform.js';"
     )
     .replace(
       "require('../native-host/src/runtimeInstaller.js')",
-      "require('./native-host/src/runtimeInstaller.js')"
+      "require('./runtimeInstaller.js')"
     )
     .replace(
       "if (path.resolve(process.argv[1] || '') === scriptPath) {\n  await main();\n}",
@@ -599,11 +601,17 @@ function writeTopLevelUninstallScript({ rootDir, sourcePath, targetPath }) {
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.writeFileSync(targetPath, patched, 'utf8');
   fs.chmodSync(targetPath, fs.statSync(sourcePath).mode & 0o777);
-  for (const relativePath of REQUIRED_NATIVE_UNINSTALL_HELPER_FILES) {
-    copyFile(
-      path.join(rootDir, relativePath),
-      path.join(path.dirname(targetPath), relativePath)
-    );
+}
+
+function writeTopLevelNativeHelperAssets({ rootDir, outputDir, trackedFiles }) {
+  for (const artifact of NATIVE_UNINSTALL_HELPER_ARTIFACTS) {
+    copyTrackedFile({
+      rootDir,
+      stagingRoot: outputDir,
+      relativePath: artifact.source,
+      targetRelativePath: artifact.name,
+      trackedFiles
+    });
   }
 }
 

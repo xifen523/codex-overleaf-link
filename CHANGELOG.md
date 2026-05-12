@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.1.3 - 2026-05-12
+
+Release pipeline hardening patch for checksum-verifiable GitHub assets and npm-first release consistency.
+
+### Changed
+
+- Release builds now publish top-level native helper assets whose names match `SHA256SUMS` and `release-manifest.json`.
+- CI now runs release metadata/source hygiene and npm package manifest checks on normal main and PR workflows.
+- The tag release workflow now publishes or verifies the npm package before publishing the GitHub Release.
+- README installation guidance is npm-first for native-host setup and uses the GitHub Release extension zip as the primary unpacked extension source.
+- Bumped package, extension manifest, compatibility target, and native ping metadata to `1.1.3` while keeping native protocol `1`.
+
 ## v1.1.2 - 2026-05-11
 
 Release hygiene patch for public source and package surfaces.

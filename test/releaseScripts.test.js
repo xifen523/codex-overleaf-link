@@ -134,9 +134,9 @@ function getExpectedReleaseWorkflowUploadFiles() {
     `${releaseDir}/install.sh`,
     `${releaseDir}/install.ps1`,
     `${releaseDir}/uninstall-native-host.mjs`,
-    `${releaseDir}/native-host/src/nativeHostPlatform.js`,
-    `${releaseDir}/native-host/src/manifest.js`,
-    `${releaseDir}/native-host/src/runtimeInstaller.js`,
+    `${releaseDir}/nativeHostPlatform.js`,
+    `${releaseDir}/manifest.js`,
+    `${releaseDir}/runtimeInstaller.js`,
     `${releaseDir}/release-manifest.json`,
     `${releaseDir}/release-notes.md`
   ];
@@ -297,6 +297,12 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   const packageJson = {
     name: packageName,
     version: packageVersion,
+    repository: Object.hasOwn(overrides, 'repository')
+      ? overrides.repository
+      : {
+          type: 'git',
+          url: 'git+https://github.com/Ghqqqq/codex-overleaf-link.git'
+        },
     packageManager
   };
   if (packageManager === undefined) {
@@ -342,13 +348,13 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   fs.writeFileSync(path.join(rootDir, 'scripts/install-native-host.mjs'), '#!/usr/bin/env node\n');
 }
 
-test('CHANGELOG documents the current v1.1.2 release hygiene patch in release tooling format', async () => {
+test('CHANGELOG documents the current v1.1.3 release pipeline hardening patch in release tooling format', async () => {
   const version = readJson(path.join(repoRoot, 'package.json')).version;
   const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
-  const heading = `## v${version} - 2026-05-11`;
+  const heading = `## v${version} - 2026-05-12`;
   const start = changelog.indexOf(heading);
   assert.notEqual(start, -1, `CHANGELOG.md should contain ${heading}`);
-  assert.equal(changelog.includes(`## [${version}] - 2026-05-11`), false);
+  assert.equal(changelog.includes(`## [${version}] - 2026-05-12`), false);
   assert.equal(changelog.indexOf(heading, start + heading.length), -1, 'CHANGELOG.md should not duplicate the current release heading');
 
   const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
@@ -356,11 +362,11 @@ test('CHANGELOG documents the current v1.1.2 release hygiene patch in release to
   const section = extractReleaseNotes(changelog, version);
   const escapedVersion = version.replace(/\./g, '\\.');
 
-  assert.match(section, /Release hygiene patch for public source/i);
-  assert.match(section, new RegExp(`codex-overleaf-link@${escapedVersion}|npm-first install`, 'i'));
-  assert.match(section, /internal roadmap/i);
-  assert.match(section, /fake secret literals/i);
-  assert.match(section, /npm-first install/i);
+  assert.match(section, /Release pipeline hardening patch/i);
+  assert.match(section, new RegExp(`v${escapedVersion}|npm-first`, 'i'));
+  assert.match(section, /SHA256SUMS/i);
+  assert.match(section, /npm package/i);
+  assert.match(section, /GitHub Release extension zip/i);
   assert.match(section, /native protocol `1`/i);
 });
 
@@ -398,11 +404,19 @@ test('release workflow grants publish permission and runs release checks before 
   const workflow = readReleaseWorkflow();
   const permissionsSection = getTopLevelYamlSection(workflow, 'permissions');
 
-  assert.match(permissionsSection, /^\s+contents:\s+write\s*$/m);
+  assert.match(permissionsSection, /^\s+contents:\s+read\s*$/m);
+  assert.match(workflow, /release:[\s\S]*?permissions:\s*\n\s+contents:\s+write\s*\n\s+id-token:\s+write/m);
+  assert.match(workflow, /node-version:\s+22\.14\.0/);
+  assert.match(workflow, /npm install -g npm@11\.11\.0/);
+  assert.match(workflow, /registry-url:\s+https:\/\/registry\.npmjs\.org/);
+  assert.match(workflow, /NODE_AUTH_TOKEN:\s+\$\{\{\s*secrets\.NPM_TOKEN\s*\}\}/);
+  assert.match(workflow, /npm publish --access public --provenance/);
   assertContainsInOrder(workflow, [
     'run: npm test',
     'run: npm run verify:release',
     'name: Verify release tag matches package version',
+    'name: Publish npm package',
+    'name: Verify npm package is published',
     'run: npm run build:release',
     'uses: softprops/action-gh-release@v2'
   ]);
@@ -419,6 +433,8 @@ test('release workflow fails early when tag and package version differ', () => {
   assertContainsInOrder(workflow, [
     'run: npm run verify:release',
     'name: Verify release tag matches package version',
+    'name: Publish npm package',
+    'name: Verify npm package is published',
     'run: npm run build:release'
   ]);
 });
@@ -430,7 +446,12 @@ test('test workflow runs the test suite on macOS, Linux, and Windows', () => {
   assert.match(workflow, /^\s+matrix:\s*$/m);
   assert.match(workflow, /^\s+os:\s+\[macos-latest,\s+ubuntu-latest,\s+windows-latest\]\s*$/m);
   assert.match(workflow, /^\s+runs-on:\s+\$\{\{ matrix\.os \}\}\s*$/m);
-  assert.match(workflow, /run: npm test/);
+  assertContainsInOrder(workflow, [
+    'run: npm test',
+    'run: npm run verify:release',
+    'run: npm run verify:npm-package',
+    'run: npm run check:architecture'
+  ]);
 });
 
 test('issue templates require task mode and release triage fields', () => {
@@ -605,6 +626,7 @@ test('release verifier requires npm package metadata, lockfile, exact manifest, 
   try {
     writeReleaseFixture(tempDir, {
       packageManager: undefined,
+      repository: undefined,
       readmeText: '<img src="https://img.shields.io/badge/version-1.2.3-blue" alt="version">\n',
       packageVersion: '1.2.3'
     });
@@ -630,6 +652,7 @@ test('release verifier requires npm package metadata, lockfile, exact manifest, 
     });
 
     assert.ok(errors.some((error) => /package\.json must define packageManager/i.test(error)), errors.join('\n'));
+    assert.ok(errors.some((error) => /package\.json must define repository\.url/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /package-lock\.json lockfileVersion <missing> must be 3/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /package-lock\.json version 1\.2\.2 must match package\.json version 1\.2\.3/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /README\.md.*npm exec --yes codex-overleaf-link@1\.2\.3 -- install-native/i.test(error)), errors.join('\n'));
@@ -1181,9 +1204,9 @@ test('build-release creates expected artifacts and metadata', (t) => {
   const nativeTarball = `codex-overleaf-native-host-v${version}.tar.gz`;
   const npmTarball = `codex-overleaf-link-${version}.tgz`;
   const helperArtifacts = [
-    'native-host/src/nativeHostPlatform.js',
-    'native-host/src/manifest.js',
-    'native-host/src/runtimeInstaller.js'
+    'nativeHostPlatform.js',
+    'manifest.js',
+    'runtimeInstaller.js'
   ];
 
   try {

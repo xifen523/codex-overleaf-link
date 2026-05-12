@@ -6,10 +6,13 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test-matrix:
+    permissions:
+      contents: read
+
     strategy:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
@@ -24,6 +27,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          registry-url: https://registry.npmjs.org
 
       - name: Run tests
         run: npm test
@@ -37,6 +41,9 @@ jobs:
   release:
     needs: test-matrix
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
 
     steps:
       - name: Check out repository
@@ -45,7 +52,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22.14.0
+          registry-url: https://registry.npmjs.org
+
+      - name: Set up npm CLI
+        run: npm install -g npm@11.11.0
 
       - name: Verify release metadata
         run: npm run verify:release
@@ -60,6 +71,22 @@ jobs:
             exit 1
           fi
           echo "PACKAGE_VERSION=${package_version}" >> "${GITHUB_ENV}"
+
+      - name: Publish npm package
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if npm view "codex-overleaf-link@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+            echo "codex-overleaf-link@${PACKAGE_VERSION} is already published."
+          else
+            npm publish --access public --provenance
+          fi
+
+      - name: Verify npm package is published
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm view codex-overleaf-link@${{ env.PACKAGE_VERSION }} version
 
       - name: Build release artifacts
         run: npm run build:release
@@ -78,9 +105,9 @@ jobs:
             dist/releases/${{ github.ref_name }}/install.sh
             dist/releases/${{ github.ref_name }}/install.ps1
             dist/releases/${{ github.ref_name }}/uninstall-native-host.mjs
-            dist/releases/${{ github.ref_name }}/native-host/src/nativeHostPlatform.js
-            dist/releases/${{ github.ref_name }}/native-host/src/manifest.js
-            dist/releases/${{ github.ref_name }}/native-host/src/runtimeInstaller.js
+            dist/releases/${{ github.ref_name }}/nativeHostPlatform.js
+            dist/releases/${{ github.ref_name }}/manifest.js
+            dist/releases/${{ github.ref_name }}/runtimeInstaller.js
             dist/releases/${{ github.ref_name }}/release-manifest.json
             dist/releases/${{ github.ref_name }}/release-notes.md
             dist/releases/${{ github.ref_name }}/SHA256SUMS

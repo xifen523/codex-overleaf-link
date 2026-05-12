@@ -95,7 +95,7 @@ body:
     id: install_update_method
     attributes:
       label: Install or update command used
-      description: Include whether you used the pinned command, latest source installer, Linux Chromium `--browser chromium`, or manual install. Redact private paths if needed.
+      description: Include whether you used the pinned command, GitHub Release source installer fallback, Linux Chromium `--browser chromium`, or manual install. Redact private paths if needed.
       placeholder: CODEX_OVERLEAF_REF=v0.8.0 ... / install.ps1 / npm run install:native
     validations:
       required: true

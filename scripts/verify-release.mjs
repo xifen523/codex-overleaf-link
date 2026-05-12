@@ -100,6 +100,9 @@ function collectPackageMetadataErrors({ rootDir, pkg, packageLock }) {
   if (typeof pkg.packageManager !== 'string' || pkg.packageManager.trim() === '') {
     errors.push('package.json must define packageManager for reproducible npm release tooling.');
   }
+  if (!pkg.repository || pkg.repository.type !== 'git' || pkg.repository.url !== 'git+https://github.com/Ghqqqq/codex-overleaf-link.git') {
+    errors.push('package.json must define repository.url as git+https://github.com/Ghqqqq/codex-overleaf-link.git for npm provenance.');
+  }
   if (packageLock.lockfileVersion !== EXPECTED_PACKAGE_LOCK_VERSION) {
     errors.push(
       `package-lock.json lockfileVersion ${formatValue(packageLock.lockfileVersion)} must be ${EXPECTED_PACKAGE_LOCK_VERSION}.`
