@@ -81,6 +81,7 @@
     /\b(?:sk|pk)-[A-Za-z0-9][A-Za-z0-9_-]{7,}\b/g,
     /\b(?:api[_-]?key|token|password|passwd|secret)\b\s*[:=]\s*["']?[^"'\s,;]+["']?/gi
   ];
+  const LineReferences = loadLineReferences();
 
   function normalizePanelState(input = {}, options = {}) {
     const state = {
@@ -143,7 +144,7 @@
   }
 
   function normalizeSession(session, fallbackState = DEFAULT_PANEL_STATE, options = {}) {
-    const history = Array.isArray(session.history) ? session.history.slice(-10) : [];
+    const history = normalizeHistoryEntries(session.history);
     const normalizedRuns = normalizeRuns(session.runs, options);
     const runs = normalizedRuns.length ? normalizedRuns : recoverRunsFromHistory(session, history);
     const rawTitle = typeof session.title === 'string' ? session.title.trim() : '';
@@ -159,7 +160,7 @@
       updatedAt: typeof session.updatedAt === 'string' ? session.updatedAt : new Date().toISOString(),
       history,
       runs,
-      task: typeof session.task === 'string' ? session.task : '',
+      task: sanitizeAssistantVisibleText(session.task),
       mode: VALID_MODES.has(session.mode) ? session.mode : fallbackState.mode,
       model: typeof session.model === 'string' && session.model ? session.model : fallbackState.model,
       reasoningEffort: VALID_REASONING.has(session.reasoningEffort)
@@ -267,9 +268,9 @@
       titleSource,
       createdAt: overrides.createdAt || new Date().toISOString(),
       updatedAt: overrides.updatedAt || new Date().toISOString(),
-      history: Array.isArray(overrides.history) ? overrides.history.slice(-10) : [],
+      history: normalizeHistoryEntries(overrides.history),
       runs,
-      task: typeof overrides.task === 'string' ? overrides.task : '',
+      task: sanitizeAssistantVisibleText(overrides.task),
       mode: VALID_MODES.has(overrides.mode) ? overrides.mode : DEFAULT_PANEL_STATE.mode,
       model: typeof overrides.model === 'string' && overrides.model ? overrides.model : DEFAULT_PANEL_STATE.model,
       reasoningEffort: VALID_REASONING.has(overrides.reasoningEffort)
@@ -286,6 +287,8 @@
 
   function recordSessionResult(session, entry) {
     const base = session?.id ? session : createSession();
+    const task = sanitizeAssistantVisibleText(entry?.task) || 'untitled task';
+    const result = sanitizeAssistantVisibleText(entry?.result || entry?.status) || 'completed';
     return {
       ...base,
       id: base.id,
@@ -293,12 +296,12 @@
       history: [
         ...(Array.isArray(base.history) ? base.history : []),
         {
-          task: entry.task || 'untitled task',
-          result: entry.result || entry.status || 'completed',
-          at: entry.at || new Date().toISOString()
+          task,
+          result,
+          at: entry?.at || new Date().toISOString()
         }
       ].slice(-10),
-      updatedAt: entry.at || new Date().toISOString()
+      updatedAt: entry?.at || new Date().toISOString()
     };
   }
 
@@ -419,7 +422,7 @@
   }
 
   function sanitizeAutoTitle(value) {
-    const title = String(value || '')
+    const title = sanitizeAssistantVisibleText(value)
       .replace(/@file:[^\s]+/g, ' ')
       .replace(/@(context|compile-log)\b/g, ' ')
       .replace(/\s+/g, ' ')
@@ -506,13 +509,13 @@
 
     return {
       id: run.id,
-      task: typeof run.task === 'string' && run.task ? run.task : 'untitled task',
+      task: sanitizeAssistantVisibleText(run.task) || 'untitled task',
       mode: typeof run.mode === 'string' ? run.mode : '',
       model: typeof run.model === 'string' ? run.model : '',
       reasoningEffort: typeof run.reasoningEffort === 'string' ? run.reasoningEffort : '',
       speedTier: typeof run.speedTier === 'string' ? run.speedTier : '',
       status: shouldStopRestoredRun ? 'failed' : normalizeRunStatus(run.status),
-      statusText: shouldStopRestoredRun ? '页面刷新后已停止跟踪' : typeof run.statusText === 'string' ? run.statusText : '',
+      statusText: shouldStopRestoredRun ? '页面刷新后已停止跟踪' : sanitizeAssistantVisibleText(run.statusText),
       startedAt: typeof run.startedAt === 'string' ? run.startedAt : '',
       finishedAt: shouldStopRestoredRun ? new Date().toISOString() : typeof run.finishedAt === 'string' ? run.finishedAt : '',
       events: events.slice(-MAX_RUN_EVENTS),
@@ -522,7 +525,7 @@
       undoBaseFiles: normalizeRunFiles(run.undoBaseFiles),
       undoTrackedChanges: normalizeRunTrackedChanges(run.undoTrackedChanges),
       undoExpectedFiles: normalizeRunFiles(run.undoExpectedFiles),
-      undoStatus: typeof run.undoStatus === 'string' ? redactSecretLikeText(run.undoStatus) : ''
+      undoStatus: sanitizeAssistantVisibleText(run.undoStatus)
     };
   }
 
@@ -538,14 +541,14 @@
     return (Array.isArray(events) ? events : [])
       .filter(event => event && typeof event.title === 'string')
       .map(event => ({
-        title: event.title,
+        title: sanitizeAssistantVisibleText(event.title) || 'Event',
         status: typeof event.status === 'string' ? event.status : 'info',
-        detail: event.detail,
+        detail: sanitizeAssistantVisibleValue(event.detail),
         timestamp: typeof event.timestamp === 'string' ? event.timestamp : '',
         kind: typeof event.kind === 'string' ? event.kind : 'activity',
-        technicalDetail: event.technicalDetail,
-        streamKey: typeof event.streamKey === 'string' ? event.streamKey : '',
-        streamRole: typeof event.streamRole === 'string' ? event.streamRole : ''
+        technicalDetail: sanitizeAssistantVisibleValue(event.technicalDetail),
+        streamKey: sanitizeAssistantVisibleText(event.streamKey),
+        streamRole: sanitizeAssistantVisibleText(event.streamRole)
       }))
       .slice(-MAX_RUN_EVENTS);
   }
@@ -624,8 +627,8 @@
       normalized.push({
         key,
         id: typeof change.id === 'string' ? change.id : '',
-        path: typeof change.path === 'string' ? change.path : '',
-        label: typeof change.label === 'string' ? change.label : ''
+        path: sanitizeAssistantVisibleText(change.path),
+        label: sanitizeAssistantVisibleText(change.label)
       });
     }
     return normalized;
@@ -638,7 +641,7 @@
       if (typeof item !== 'string') {
         continue;
       }
-      const path = redactSecretLikeText(item.trim());
+      const path = sanitizeAssistantVisibleText(item.trim());
       if (!path || seen.has(path)) {
         continue;
       }
@@ -914,7 +917,7 @@
     if (typeof value !== 'string' || !value.trim()) {
       return '';
     }
-    const text = redactSecretLikeText(value);
+    const text = sanitizeAssistantVisibleText(value);
     if (isOmittedStorageSummary(text)) {
       return text;
     }
@@ -938,7 +941,7 @@
     for (const key of Object.keys(value)) {
       const item = value[key];
       if (/(^|[A-Z_])path$/i.test(key) && typeof item === 'string') {
-        const path = redactSecretLikeText(item).replace(/\\/g, '/').replace(/^\/+/, '').trim();
+        const path = sanitizeAssistantVisibleText(item).replace(/\\/g, '/').replace(/^\/+/, '').trim();
         if (path) {
           state.count += 1;
           if (!state.seen.has(path) && state.items.length < 5) {
@@ -991,11 +994,105 @@
   }
 
   function normalizeTextField(value, maxChars) {
-    const text = typeof value === 'string' ? redactSecretLikeText(value) : '';
+    const text = sanitizeAssistantVisibleText(value);
     if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) {
       return text;
     }
     return `${text.slice(0, Math.max(0, maxChars - 1))}…`;
+  }
+
+  function normalizeHistoryEntries(history) {
+    return (Array.isArray(history) ? history : [])
+      .slice(-10)
+      .map(entry => ({
+        task: sanitizeAssistantVisibleText(entry?.task) || 'untitled task',
+        result: sanitizeAssistantVisibleText(entry?.result || entry?.status) || 'completed',
+        at: typeof entry?.at === 'string' ? entry.at : ''
+      }));
+  }
+
+  function sanitizeAssistantVisibleValue(value, depth = 0) {
+    if (typeof value === 'string') {
+      return sanitizeAssistantVisibleText(value);
+    }
+    if (value === undefined || value === null || typeof value === 'number' || typeof value === 'boolean') {
+      return value;
+    }
+    if (depth > 12) {
+      return '[redacted nested value]';
+    }
+    if (Array.isArray(value)) {
+      return value.map(item => sanitizeAssistantVisibleValue(item, depth + 1));
+    }
+    if (typeof value === 'object') {
+      const result = {};
+      for (const key of Object.keys(value)) {
+        const safeKey = sanitizeAssistantVisibleText(key) || key;
+        result[safeKey] = sanitizeAssistantVisibleValue(value[key], depth + 1);
+      }
+      return result;
+    }
+    return value;
+  }
+
+  function sanitizeAssistantVisibleText(value) {
+    if (typeof value !== 'string' || !value) {
+      return '';
+    }
+    const secretRedacted = redactSecretLikeText(value);
+    if (!mightContainLocalReferenceText(secretRedacted)) {
+      return secretRedacted;
+    }
+    if (LineReferences?.sanitizeLocalReferences) {
+      try {
+        return LineReferences.sanitizeLocalReferences(secretRedacted, {
+          projectFiles: [],
+          context: 'persist'
+        });
+      } catch (_error) {
+        return fallbackSanitizeLocalReferences(secretRedacted);
+      }
+    }
+    return fallbackSanitizeLocalReferences(secretRedacted);
+  }
+
+  function mightContainLocalReferenceText(value) {
+    return /(?:file:\/\/\/?|[A-Za-z]:[\\/]|\/(?:Users|home|private|var|tmp)\/|[\\/]\.codex-overleaf[\\/]projects[\\/]|\.codex-overleaf[\\/]projects[\\/])/i.test(String(value || ''));
+  }
+
+  function loadLineReferences() {
+    if (typeof globalThis !== 'undefined' && globalThis.CodexOverleafLineReferences) {
+      return globalThis.CodexOverleafLineReferences;
+    }
+    if (typeof require === 'function') {
+      try {
+        return require('./lineReferences');
+      } catch (_error) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function fallbackSanitizeLocalReferences(value) {
+    return String(value || '')
+      .replace(/\[([^\]]*)\]\(([^)]*)\)/g, (_raw, label, target) => {
+        const safeLabel = fallbackSanitizeBareLocalPaths(label);
+        return /^https?:\/\//i.test(String(target || '').trim())
+          ? `[${safeLabel}](${target})`
+          : `[${safeLabel}]`;
+      })
+      .replace(/(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|private|var|tmp)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/][^\s)\]]+)/gi, rawPath => {
+        const line = String(rawPath || '').match(/:(\d+)(?::\d+)?(?:[.,;!?])?$/)?.[1];
+        return line ? `[local path:${line}]` : '[local path]';
+      });
+  }
+
+  function fallbackSanitizeBareLocalPaths(value) {
+    return String(value || '').replace(/(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|private|var|tmp)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/][^\s)\]]+)/gi, rawPath => {
+      const line = String(rawPath || '').match(/:(\d+)(?::\d+)?(?:[.,;!?])?$/)?.[1];
+      return line ? `[local path:${line}]` : '[local path]';
+    });
   }
 
   function redactSecretLikeText(value) {

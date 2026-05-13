@@ -120,6 +120,13 @@ function createMinimalDocument() {
   }
 
   return {
+    createTextNode(text) {
+      return {
+        nodeType: 3,
+        textContent: String(text || ''),
+        children: []
+      };
+    },
     createElement(tagName) {
       return new Element(tagName);
     }
@@ -131,6 +138,76 @@ function collectElementText(node) {
     node?.textContent || '',
     ...(node?.children || []).map(child => collectElementText(child))
   ].join('');
+}
+
+function collectElements(node, predicate, result = []) {
+  if (!node) {
+    return result;
+  }
+  if (predicate(node)) {
+    result.push(node);
+  }
+  for (const child of node.children || []) {
+    collectElements(child, predicate, result);
+  }
+  return result;
+}
+
+function loadMarkdownRendererHarness(projectFiles = [], options = {}) {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const LineReferences = require('../extension/src/shared/lineReferences');
+  const document = createMinimalDocument();
+  const pageBridgeCalls = [];
+  const toasts = [];
+  const start = contentScript.indexOf('function getCurrentProjectReferenceFiles');
+  assert.notEqual(start, -1, 'line-reference renderer helpers should exist');
+  const endFunction = extractFunction(contentScript, 'normalizeInlineOrderedLists');
+  const end = contentScript.indexOf(endFunction) + endFunction.length;
+  const markdownRegion = [
+    contentScript.slice(start, end),
+    extractFunction(contentScript, 'isMarkdownHeadingLine'),
+    extractFunction(contentScript, 'isMarkdownListLine'),
+    extractFunction(contentScript, 'isMarkdownOrderedListLine'),
+    extractFunction(contentScript, 'isSameMarkdownListKind'),
+    extractFunction(contentScript, 'stripMarkdownListMarker')
+  ].join('\n');
+
+  return Function('document', 'LineReferences', 'projectFiles', 'pageBridgeCalls', 'toasts', 'options', `
+    let state = {
+      focusFiles: [],
+      session: { focusFiles: [] },
+      sessions: []
+    };
+    let currentRunView = { projectFiles };
+    function callPageBridge(method, params) {
+      pageBridgeCalls.push({ method, params });
+      return options.callPageBridge
+        ? options.callPageBridge(method, params)
+        : Promise.resolve(options.pageBridgeResult || { ok: true });
+    }
+    function showPluginToast(text, options) {
+      toasts.push({ text, options });
+    }
+    function tr(key) { return key; }
+    function tx(english) { return english; }
+    ${markdownRegion}
+    return {
+      buildMarkdownInlineNodes,
+      renderMarkdownInlineText,
+      renderMarkdownBlockText,
+      formatMarkdownLinkLabel,
+      formatMarkdownHref,
+      pageBridgeCalls,
+      toasts
+    };
+  `)(document, LineReferences, projectFiles, pageBridgeCalls, toasts, options);
+}
+
+function findLineReferenceButtons(node) {
+  return collectElements(node, item => item.className === 'codex-line-reference');
 }
 
 function loadCreateDiffReviewElementForTest(options = {}) {
@@ -2548,6 +2625,19 @@ test('no-trace undo restores original file snapshots in one operation per file',
   assert.doesNotMatch(recordUndoBody, /record\.undoExpectedFiles = \[\]/);
 });
 
+test('no-trace undo marks button applied when verified restore succeeds despite stale leftover skips', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const undoRunBody = contentScript.match(/async function undoRun\(runId\) \{[\s\S]*?\n  async function undoRunTrackedChanges/)?.[0] || '';
+
+  assert.match(contentScript, /function isUndoResultEffectivelyApplied\(run, result\)/);
+  assert.match(undoRunBody, /const undoApplied = isUndoResultEffectivelyApplied\(run, result\)/);
+  assert.match(undoRunBody, /status:\s*undoApplied \? 'completed' : result\.skipped\?\.length \? 'failed' : 'completed'/);
+  assert.match(undoRunBody, /setRunUndoStatus\(runId,\s*undoApplied \? 'applied' : 'partial'\)/);
+});
+
 test('reviewing write undo rejects Overleaf tracked changes instead of text patching', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
@@ -3470,6 +3560,232 @@ test('markdown links only allow http and https URLs', () => {
   assert.match(hrefBody, /protocol === 'http:' \|\| parsed\.protocol === 'https:'/);
   assert.doesNotMatch(hrefBody, /file:\/\//);
   assert.doesNotMatch(hrefBody, /return target/);
+});
+
+test('markdown renderer turns resolvable plain line references into safe jump buttons', async () => {
+  const harness = loadMarkdownRendererHarness([
+    { path: 'main.tex', kind: 'text' },
+    { path: 'sections/main.tex', kind: 'text' },
+    { path: 'sections/intro.tex', kind: 'text' },
+    { path: 'appendix/intro.tex', kind: 'text' },
+    { path: 'assets/data.tex', kind: 'binary' }
+  ]);
+  const target = createMinimalDocument().createElement('div');
+
+  target.replaceChildren(...harness.buildMarkdownInlineNodes(
+    'See main.tex:117 and sections/intro.tex:42. Ambiguous intro.tex:8 and binary assets/data.tex:9 stay text.'
+  ));
+
+  const buttons = findLineReferenceButtons(target);
+  assert.deepEqual(buttons.map(button => button.textContent), ['main.tex:117', 'sections/intro.tex:42']);
+  assert.equal(buttons[0].type, 'button');
+  assert.equal(buttons[0].dataset.path, 'main.tex');
+  assert.equal(buttons[0].dataset.line, '117');
+  assert.equal(buttons[0].getAttribute('aria-label'), 'Open main.tex line 117');
+  assert.match(collectElementText(target), /Ambiguous intro\.tex:8/);
+  assert.match(collectElementText(target), /binary assets\/data\.tex:9/);
+
+  await buttons[0].click();
+
+  assert.deepEqual(harness.pageBridgeCalls[0], {
+    method: 'jumpToPosition',
+    params: { path: 'main.tex', line: 117, selectLine: true }
+  });
+});
+
+test('markdown renderer leaves inline and fenced code refs non-clickable', () => {
+  const harness = loadMarkdownRendererHarness([{ path: 'main.tex', kind: 'text' }]);
+  const inlineTarget = createMinimalDocument().createElement('div');
+  const blockTarget = createMinimalDocument().createElement('div');
+
+  harness.renderMarkdownInlineText(inlineTarget, '`see main.tex:42` and main.tex:43');
+  harness.renderMarkdownBlockText(blockTarget, [
+    '```tex',
+    'main.tex:99',
+    '```',
+    '',
+    'Outside main.tex:100'
+  ].join('\n'));
+
+  assert.deepEqual(findLineReferenceButtons(inlineTarget).map(button => button.textContent), ['main.tex:43']);
+  assert.deepEqual(findLineReferenceButtons(blockTarget).map(button => button.textContent), ['main.tex:100']);
+  assert.match(collectElementText(inlineTarget), /main\.tex:42/);
+  assert.match(collectElementText(blockTarget), /main\.tex:99/);
+});
+
+test('markdown renderer turns standalone inline code location refs into jump buttons', async () => {
+  const harness = loadMarkdownRendererHarness([{ path: 'main.tex', kind: 'text' }]);
+  const target = createMinimalDocument().createElement('div');
+
+  harness.renderMarkdownInlineText(target, '位置在 `main.tex:28`。');
+
+  const buttons = findLineReferenceButtons(target);
+  assert.deepEqual(buttons.map(button => button.textContent), ['main.tex:28']);
+  assert.equal(collectElements(target, node => node.tagName === 'CODE').length, 0);
+
+  await buttons[0].click();
+
+  assert.deepEqual(harness.pageBridgeCalls[0], {
+    method: 'jumpToPosition',
+    params: { path: 'main.tex', line: 28, selectLine: true }
+  });
+});
+
+test('line-reference buttons render with link-like visual affordance', () => {
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+
+  assert.match(css, /#codex-overleaf-panel \.codex-line-reference\s*\{/);
+  assert.match(css, /\.codex-line-reference[\s\S]*color:\s*#4ea1ff/);
+  assert.match(css, /\.codex-line-reference[\s\S]*text-decoration:\s*underline/);
+  assert.match(css, /\.codex-line-reference[\s\S]*cursor:\s*pointer/);
+  assert.match(css, /\.codex-line-reference[\s\S]*background:\s*transparent/);
+});
+
+test('markdown renderer sanitizes local absolute paths inside inline and fenced code', () => {
+  const rawLocalPath = '/Users/alice/.codex-overleaf/projects/p/workspace/main.tex:42';
+  const harness = loadMarkdownRendererHarness([{ path: 'main.tex', kind: 'text' }]);
+  const inlineTarget = createMinimalDocument().createElement('div');
+  const blockTarget = createMinimalDocument().createElement('div');
+
+  harness.renderMarkdownInlineText(inlineTarget, `Inline \`${rawLocalPath}\``);
+  harness.renderMarkdownBlockText(blockTarget, ['```', rawLocalPath, '```'].join('\n'));
+
+  assert.equal(collectElementText(inlineTarget).includes('/Users/alice'), false);
+  assert.equal(collectElementText(blockTarget).includes('/Users/alice'), false);
+  assert.equal(findLineReferenceButtons(inlineTarget).length, 0);
+  assert.equal(findLineReferenceButtons(blockTarget).length, 0);
+});
+
+test('line-reference button clicks distinguish line and line-column jumps', async () => {
+  const harness = loadMarkdownRendererHarness([{ path: 'main.tex', kind: 'text' }]);
+  const target = createMinimalDocument().createElement('div');
+  target.replaceChildren(...harness.buildMarkdownInlineNodes('main.tex:42 and main.tex:42:7'));
+
+  const buttons = findLineReferenceButtons(target);
+  await buttons[0].click();
+  await buttons[1].click();
+
+  assert.deepEqual(harness.pageBridgeCalls, [
+    {
+      method: 'jumpToPosition',
+      params: { path: 'main.tex', line: 42, selectLine: true }
+    },
+    {
+      method: 'jumpToPosition',
+      params: { path: 'main.tex', line: 42, column: 7, selectLine: false }
+    }
+  ]);
+});
+
+test('markdown renderer sanitizes local path labels while preserving HTTPS links', () => {
+  const rawLocalPath = '/Users/alice/.codex-overleaf/projects/p/workspace/main.tex:42';
+  const harness = loadMarkdownRendererHarness([{ path: 'main.tex', kind: 'text' }]);
+  const target = createMinimalDocument().createElement('div');
+
+  harness.renderMarkdownInlineText(target, `[${rawLocalPath}](https://example.test/review)`);
+
+  const anchors = collectElements(target, node => node.tagName === 'A');
+  assert.equal(anchors.length, 1);
+  assert.equal(anchors[0].href, 'https://example.test/review');
+  assert.equal(anchors[0].textContent.includes('/Users/alice'), false);
+  assert.equal(collectElementText(target).includes('/Users/alice'), false);
+  assert.equal(findLineReferenceButtons(target).length, 0);
+});
+
+test('markdown renderer turns target-only local markdown line refs into safe jump buttons', async () => {
+  const rawLocalTarget = '/Users/alice/.codex-overleaf/projects/p/workspace/main.tex:117';
+  const harness = loadMarkdownRendererHarness([{ path: 'main.tex', kind: 'text' }]);
+  const target = createMinimalDocument().createElement('div');
+
+  harness.renderMarkdownInlineText(target, `[main.tex](${rawLocalTarget})`);
+
+  const buttons = findLineReferenceButtons(target);
+  const anchors = collectElements(target, node => node.tagName === 'A');
+  assert.equal(anchors.length, 0);
+  assert.deepEqual(buttons.map(button => button.textContent), ['main.tex:117']);
+  assert.equal(collectElementText(target).includes('/Users/alice'), false);
+  assert.equal(buttons[0].title.includes('/Users/alice'), false);
+
+  await buttons[0].click();
+
+  assert.deepEqual(harness.pageBridgeCalls[0], {
+    method: 'jumpToPosition',
+    params: { path: 'main.tex', line: 117, selectLine: true }
+  });
+});
+
+test('unresolved local markdown targets render sanitized label-only text', () => {
+  const rawLocalTarget = '/Users/alice/.codex-overleaf/projects/p/workspace/missing.tex:117';
+  const harness = loadMarkdownRendererHarness([{ path: 'main.tex', kind: 'text' }]);
+  const target = createMinimalDocument().createElement('div');
+
+  harness.renderMarkdownInlineText(target, `[main.tex](${rawLocalTarget})`);
+
+  assert.equal(findLineReferenceButtons(target).length, 0);
+  assert.equal(collectElements(target, node => node.tagName === 'A').length, 0);
+  assert.equal(collectElementText(target), 'main.tex');
+  assert.equal(collectElementText(target).includes('/Users/alice'), false);
+  assert.equal(collectElementText(target).includes('workspace'), false);
+  assert.equal(collectElementText(target).includes('missing.tex:117'), false);
+});
+
+test('http markdown links never expose unsafe local target text as their label', () => {
+  const rawLocalTarget = '/Users/alice/.codex-overleaf/projects/p/workspace/main.tex:117';
+  const harness = loadMarkdownRendererHarness([{ path: 'main.tex', kind: 'text' }]);
+  const target = createMinimalDocument().createElement('div');
+
+  harness.renderMarkdownInlineText(target, `[review](https://example.test/review?file=${encodeURIComponent(rawLocalTarget)})`);
+
+  const anchors = collectElements(target, node => node.tagName === 'A');
+  assert.equal(anchors.length, 1);
+  assert.equal(anchors[0].textContent, 'review');
+  assert.equal(anchors[0].textContent.includes('/Users/alice'), false);
+  assert.equal(anchors[0].textContent.includes('workspace'), false);
+  assert.equal(anchors[0].href.includes('/Users/alice'), false);
+  assert.equal(anchors[0].href, 'https://example.test/review');
+});
+
+test('line-reference buttons show pending state and failure feedback without leaking local paths', async () => {
+  const rawLocalFailure = '/Users/alice/.codex-overleaf/projects/p/workspace/main.tex:117';
+  let resolveJump;
+  const pending = new Promise(resolve => {
+    resolveJump = resolve;
+  });
+  const harness = loadMarkdownRendererHarness([{ path: 'main.tex', kind: 'text' }], {
+    callPageBridge() {
+      return pending;
+    }
+  });
+  const target = createMinimalDocument().createElement('div');
+
+  harness.renderMarkdownInlineText(target, 'main.tex:117');
+  const button = findLineReferenceButtons(target)[0];
+  const clickPromise = button.click();
+
+  assert.equal(button.disabled, true);
+  assert.equal(button.dataset.status, 'pending');
+
+  resolveJump({ ok: false, error: `Could not open ${rawLocalFailure}` });
+  await clickPromise;
+
+  assert.equal(button.disabled, false);
+  assert.equal(button.dataset.status, 'failed');
+  assert.equal(button.title.includes('/Users/alice'), false);
+  assert.equal(JSON.stringify(harness.toasts).includes('/Users/alice'), false);
+});
+
+test('run view captures safe project file inventory for final report line references beyond focus files', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /function captureProjectReferenceFiles\(/);
+  assert.match(contentScript, /currentRunView\.projectFiles = captureProjectReferenceFiles\(project\)/);
+  assert.match(contentScript, /projectFiles:\s*captureProjectReferenceFiles\(arguments\[0\]\?\.project\)/);
 });
 
 test('session row controls do not interpolate translated strings through innerHTML', () => {

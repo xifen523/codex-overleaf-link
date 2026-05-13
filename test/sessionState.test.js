@@ -64,6 +64,22 @@ const COMMON_SECRET_FORBIDDEN_VALUES = [
   TOKEN_VALUE,
   PASSWORD_VALUE
 ];
+const RAW_LOCAL_PATH = '/Users/alice/.codex-overleaf/projects/project-a/workspace/main.tex:117';
+const RAW_LOCAL_PATH_COLUMN = '/Users/alice/.codex-overleaf/projects/project-a/workspace/main.tex:117:9';
+const RAW_LOCAL_DIR = '/Users/alice/.codex-overleaf/projects/project-a/workspace/sections';
+
+function assertNoRawLocalPaths(value, label = 'value') {
+  const serialized = JSON.stringify(value);
+  for (const forbidden of [
+    '/Users/alice',
+    '.codex-overleaf/projects/project-a',
+    RAW_LOCAL_PATH,
+    RAW_LOCAL_PATH_COLUMN,
+    RAW_LOCAL_DIR
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, `${label} leaked ${forbidden}`);
+  }
+}
 
 test('normalizes missing panel state with defaults and a session id', () => {
   const state = normalizePanelState({});
@@ -337,6 +353,29 @@ test('recordSessionResult preserves existing session runs and settings', () => {
   assert.equal(updated.codexThreadId, 'thread_123');
   assert.equal(updated.runs[0].id, 'run_1');
   assert.equal(updated.history.at(-1).result, '已检查并总结');
+});
+
+test('recordSessionResult redacts local absolute paths from stored history text', () => {
+  const session = createSession({
+    title: 'Local path redaction',
+    task: `Inspect ${RAW_LOCAL_PATH}`
+  });
+
+  const updated = recordSessionResult(session, {
+    task: `Please inspect ${RAW_LOCAL_PATH}`,
+    result: [
+      'Final answer:',
+      RAW_LOCAL_PATH,
+      `Inline code \`${RAW_LOCAL_PATH_COLUMN}\``,
+      '```',
+      RAW_LOCAL_DIR,
+      '```'
+    ].join('\n'),
+    status: `failed while opening ${RAW_LOCAL_PATH}`
+  });
+
+  assertNoRawLocalPaths(updated.history, 'recordSessionResult history');
+  assert.match(updated.history.at(-1).result, /local path|main\.tex/);
 });
 
 test('normalizes run attachment previews in memory and omits raw previews from compact storage', () => {
@@ -638,6 +677,66 @@ test('normalizes previously corrupted history-only sessions into clickable runs'
   assert.deepEqual(state.runs[0].events[0].detail, {
     '结论': '结论：发现 3 处语法问题。'
   });
+});
+
+test('normalizes assistant-visible run and history text without local absolute paths', () => {
+  const state = normalizePanelState({
+    sessions: [{
+      id: 'session_local_paths',
+      title: `Manual title ${RAW_LOCAL_PATH}`,
+      task: `Task mentions ${RAW_LOCAL_PATH}`,
+      history: [{
+        task: `History task ${RAW_LOCAL_PATH}`,
+        result: `History result ${RAW_LOCAL_PATH_COLUMN}`,
+        at: '2026-05-06T00:00:00.000Z'
+      }],
+      runs: [{
+        id: 'run_local_paths',
+        task: `Run task ${RAW_LOCAL_PATH}`,
+        status: 'completed',
+        statusText: `Done after reading ${RAW_LOCAL_PATH}`,
+        events: [{
+          title: `Stream delta ${RAW_LOCAL_PATH}`,
+          status: 'completed',
+          kind: 'stream',
+          streamKey: 'assistant',
+          streamRole: 'assistant',
+          detail: {
+            userReport: { text: `User report ${RAW_LOCAL_PATH}` },
+            assistantMessage: `Assistant message ${RAW_LOCAL_PATH_COLUMN}`,
+            finalAnswer: `Final answer ${RAW_LOCAL_PATH}`,
+            delta: `Delta ${RAW_LOCAL_PATH}`,
+            inlineCode: `\`${RAW_LOCAL_PATH}\``,
+            fencedCode: ['```', RAW_LOCAL_PATH_COLUMN, '```'].join('\n')
+          }
+        }]
+      }]
+    }],
+    activeSessionId: 'session_local_paths'
+  });
+
+  assertNoRawLocalPaths(state, 'normalized state');
+  assert.match(state.runs[0].events[0].title, /local path|main\.tex/);
+});
+
+test('normalizes reloaded history-only run cards without local absolute paths', () => {
+  const state = normalizePanelState({
+    sessions: [{
+      id: 'session_recovered_local_paths',
+      title: 'Recovered local path card',
+      task: '',
+      history: [{
+        task: `Reloaded task ${RAW_LOCAL_PATH}`,
+        result: `Reloaded final answer ${RAW_LOCAL_PATH_COLUMN}`,
+        at: '2026-05-06T00:00:00.000Z'
+      }]
+    }],
+    activeSessionId: 'session_recovered_local_paths'
+  });
+
+  assertNoRawLocalPaths(state, 'recovered history run');
+  assert.equal(state.runs[0].id, 'recovered_session_recovered_local_paths_0');
+  assert.match(state.runs[0].events[0].detail['结论'], /local path|main\.tex/);
 });
 
 test('migrates legacy single-session state into a switchable session list', () => {
@@ -975,6 +1074,58 @@ test('aggressive storage preparation preserves the active session essentials und
   assert.equal(compact.runs.length, 0);
   assert.ok(activeStoredSession.runs.length <= 3);
   assert.ok(activeStoredSession.runs.every(run => run.events.length <= 20));
+});
+
+test('prepareStateForStorage redacts local absolute paths on compact and aggressive paths', () => {
+  const rawState = {
+    activeSessionId: 'session_storage_local_paths',
+    focusFiles: [RAW_LOCAL_PATH],
+    sessions: [{
+      id: 'session_storage_local_paths',
+      title: `Storage local path ${RAW_LOCAL_PATH}`,
+      titleSource: 'manual',
+      task: `Storage task ${RAW_LOCAL_PATH}`,
+      focusFiles: [RAW_LOCAL_PATH],
+      history: [{
+        task: `Storage history task ${RAW_LOCAL_PATH}`,
+        result: `Storage history result ${RAW_LOCAL_PATH_COLUMN}`,
+        at: '2026-05-06T00:00:00.000Z'
+      }],
+      runs: [{
+        id: 'run_storage_local_paths',
+        task: `Run task ${RAW_LOCAL_PATH}`,
+        status: 'completed',
+        statusText: `Status ${RAW_LOCAL_PATH}`,
+        events: [{
+          title: `Event title ${RAW_LOCAL_PATH}`,
+          status: 'completed',
+          kind: 'report',
+          detail: {
+            userReport: `Structured userReport ${RAW_LOCAL_PATH}`,
+            assistantMessage: `Assistant message ${RAW_LOCAL_PATH_COLUMN}`,
+            finalAnswer: `Final answer ${RAW_LOCAL_PATH}`,
+            path: RAW_LOCAL_PATH
+          }
+        }, {
+          title: 'Code report',
+          status: 'completed',
+          kind: 'activity',
+          detail: [
+            `Inline \`${RAW_LOCAL_PATH}\``,
+            '```',
+            RAW_LOCAL_PATH_COLUMN,
+            '```'
+          ].join('\n')
+        }]
+      }]
+    }]
+  };
+
+  const compact = prepareStateForStorage(rawState);
+  const aggressive = prepareStateForStorage(rawState, { aggressive: true });
+
+  assertNoRawLocalPaths(compact, 'compact storage state');
+  assertNoRawLocalPaths(aggressive, 'aggressive storage state');
 });
 
 test('normalizeSession preserves codexThreadId', () => {

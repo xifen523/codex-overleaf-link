@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2.0 - 2026-05-13
+
+Release metadata alignment patch for v1.2 packaging, compatibility, and release tracking surfaces.
+
+### Changed
+
+- Bumped package, extension manifest, compatibility target, README release commands, and native ping metadata to `1.2.0` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.2.0.zip`, `codex-overleaf-native-host-v1.2.0.tar.gz`, and `codex-overleaf-link-1.2.0.tgz`.
+- Release tracking tests now assert v1.2.0 package, lockfile, extension, and compatibility metadata alignment.
+
 ## v1.1.3 - 2026-05-12
 
 Release pipeline hardening patch for checksum-verifiable GitHub assets and npm-first release consistency.

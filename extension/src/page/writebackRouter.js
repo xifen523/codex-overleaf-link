@@ -356,6 +356,19 @@
         skipped
       };
     }
+    const snapshotUndo = await restoreExpectedFilesWithNoTraceUndo(expectedFiles, postFiles);
+    if (snapshotUndo.attempted) {
+      applied.push(...snapshotUndo.applied);
+      skipped.push(...snapshotUndo.skipped);
+      if (applied.length > 0) {
+        compileBridge.markSourceEdited();
+      }
+      return {
+        ok: skipped.length === 0,
+        applied,
+        skipped
+      };
+    }
     if (editorUndo.attempted) {
       skipped.push({
         trackedChange: null,
@@ -530,9 +543,9 @@
         }
       }
 
-      const current = readActiveEditorText();
       const postContent = postByPath.get(path);
-      if (current !== postContent) {
+      const postReady = await waitForActiveEditorExpectedText(path, postContent, 2500);
+      if (!postReady.ok) {
         return {
           ok: false,
           attempted: false,
@@ -561,6 +574,103 @@
     }
 
     return { ok: true, attempted: true };
+  }
+
+  async function restoreExpectedFilesWithNoTraceUndo(expectedFiles, postFiles) {
+    const expectedByPath = new Map((expectedFiles || [])
+      .filter(file => file?.path && typeof file.content === 'string')
+      .map(file => [normalizeSafeProjectPath(file.path), file.content])
+      .filter(([path]) => path));
+    const postByPath = new Map((postFiles || [])
+      .filter(file => file?.path && typeof file.content === 'string')
+      .map(file => [normalizeSafeProjectPath(file.path), file.content])
+      .filter(([path]) => path));
+    const paths = Array.from(expectedByPath.keys()).filter(path => postByPath.has(path));
+    if (!paths.length) {
+      return {
+        ok: false,
+        attempted: false,
+        applied: [],
+        skipped: []
+      };
+    }
+
+    for (const path of paths) {
+      if (path && getActiveFilePath() !== path) {
+        const opened = await openFileByPath(path);
+        if (!opened.ok) {
+          return {
+            ok: false,
+            attempted: false,
+            applied: [],
+            skipped: [],
+            code: 'snapshot_undo_open_failed',
+            reason: `无法打开 ${path} 来执行快照撤销。`
+          };
+        }
+      }
+      const ready = await waitForActiveEditorExpectedText(path, postByPath.get(path), 1500);
+      if (!ready.ok) {
+        return {
+          ok: false,
+          attempted: false,
+          applied: [],
+          skipped: [],
+          code: 'snapshot_undo_current_mismatch',
+          reason: `${path} 当前内容已经不是本轮写入后的内容；为避免覆盖你的后续修改，Codex 不执行快照撤销。`
+        };
+      }
+    }
+
+    const operations = paths.map(path => ({
+      type: 'edit',
+      path,
+      replaceAll: expectedByPath.get(path),
+      reason: 'Undo tracked edit'
+    }));
+    const result = await applyOperationsWithNoTraceUndo(operations, {
+      baseFiles: paths.map(path => ({
+        path,
+        content: postByPath.get(path)
+      }))
+    });
+    const toTrackedResult = item => ({
+      trackedChange: {
+        key: `snapshot-undo:${item.operation?.path || ''}`,
+        id: '',
+        path: item.operation?.path || '',
+        label: 'No-trace snapshot undo'
+      },
+      result: item.result
+    });
+    return {
+      ok: !(result.skipped || []).length,
+      attempted: true,
+      applied: (result.applied || []).map(toTrackedResult),
+      skipped: (result.skipped || []).map(toTrackedResult)
+    };
+  }
+
+  async function waitForActiveEditorExpectedText(filePath, expectedContent, timeoutMs) {
+    const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0);
+    let actual = readActiveEditorText();
+    while (Date.now() < deadline) {
+      const activeFileMatches = !filePath || getActiveFilePath() === filePath;
+      actual = readActiveEditorText();
+      if (activeFileMatches && actual === expectedContent) {
+        return {
+          ok: true,
+          text: actual
+        };
+      }
+      await delay(60);
+    }
+    actual = readActiveEditorText();
+    return {
+      ok: false,
+      text: actual,
+      activePath: getActiveFilePath()
+    };
   }
 
   async function undoEditorHistoryUntilContent(expectedContent, path) {
@@ -867,14 +977,19 @@
     const trackedBefore = trackReviewingChanges
       ? collectTrackedChangeRefsForPaths(collectOperationPaths([operation]))
       : [];
-    const current = openedEditorText ?? readActiveEditorText();
-    const freshness = window.CodexOverleafStaleGuard?.checkOperationFreshness(
+    let current = openedEditorText ?? readActiveEditorText();
+    let freshness = window.CodexOverleafStaleGuard?.checkOperationFreshness(
       operation,
       current,
       options.baseFileLookup
     ) || { ok: true };
     if (!freshness.ok) {
-      return freshness;
+      const ready = await waitForFreshEditorTextForOperation(operation, options.baseFileLookup, 1500);
+      if (!ready.ok) {
+        return freshness;
+      }
+      current = ready.text;
+      freshness = { ok: true };
     }
 
     let nextContent = null;
@@ -949,6 +1064,32 @@
       reason: `${filePath || '当前文件'} 写入后读回内容和 Codex 预期不一致，已停止把这次操作标记为成功。请刷新 Overleaf 后重试。`,
       expectedLength: String(expected || '').length,
       actualLength: String(actual || '').length
+    };
+  }
+
+  async function waitForFreshEditorTextForOperation(operation, baseFileLookup, waitMs = 1500) {
+    const deadline = Date.now() + Math.max(0, Number(waitMs) || 0);
+    while (Date.now() < deadline) {
+      if (operation?.path && getActiveFilePath() !== operation.path) {
+        await delay(60);
+        continue;
+      }
+      const text = readActiveEditorText();
+      const freshness = window.CodexOverleafStaleGuard?.checkOperationFreshness(
+        operation,
+        text,
+        baseFileLookup
+      ) || { ok: true };
+      if (freshness.ok) {
+        return {
+          ok: true,
+          text
+        };
+      }
+      await delay(60);
+    }
+    return {
+      ok: false
     };
   }
 

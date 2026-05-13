@@ -23,21 +23,38 @@ const {
 } = require('../native-host/src/nativeHostPlatform');
 const extensionManifest = require('../extension/manifest.json');
 
-test('release metadata is prepared for v1.1.3', () => {
-  assert.equal(packageJson.version, '1.1.3');
+test('release metadata is prepared for v1.2.0', () => {
+  assert.equal(packageJson.version, '1.2.0');
   assert.equal(extensionManifest.version, packageJson.version);
 });
 
-test('release docs carry exact v1.1.3 badge and changelog heading', () => {
+test('release docs carry exact v1.2.0 badge and changelog heading', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
   const changelog = fs.readFileSync(path.join(__dirname, '../CHANGELOG.md'), 'utf8');
   const escapedVersion = packageJson.version.replace(/\./g, '\\.');
 
   assert.match(readme, new RegExp(`version-${escapedVersion}-blue`));
   assert.doesNotMatch(readme, /version-1\.0\.0-blue/);
-  assert.match(changelog, new RegExp(`^## v${escapedVersion} - 2026-05-12$`, 'm'));
-  assert.doesNotMatch(changelog, new RegExp(`^## \\[${escapedVersion}\\] - 2026-05-12$`, 'm'));
+  assert.match(changelog, new RegExp(`^## v${escapedVersion} - 2026-05-13$`, 'm'));
+  assert.doesNotMatch(changelog, new RegExp(`^## \\[${escapedVersion}\\] - 2026-05-13$`, 'm'));
   assert.doesNotMatch(changelog, /^## v1\.0\.0 - 2026-05-07[\s\S]*version-1\.1\.0-blue/m);
+});
+
+test('loads line reference shared module immediately after project files', () => {
+  const contentScript = extensionManifest.content_scripts[0];
+  const js = contentScript.js;
+  const projectFilesIndex = js.indexOf('src/shared/projectFiles.js');
+  const lineReferencesIndex = js.indexOf('src/shared/lineReferences.js');
+  const sessionStateIndex = js.indexOf('src/shared/sessionState.js');
+  const contentRuntimeIndex = js.indexOf('src/content/contentRuntime.js');
+
+  assert.notEqual(projectFilesIndex, -1);
+  assert.notEqual(lineReferencesIndex, -1);
+  assert.notEqual(sessionStateIndex, -1);
+  assert.notEqual(contentRuntimeIndex, -1);
+  assert.equal(lineReferencesIndex, projectFilesIndex + 1);
+  assert.equal(lineReferencesIndex < sessionStateIndex, true);
+  assert.equal(lineReferencesIndex < contentRuntimeIndex, true);
 });
 
 test('pins the Native Messaging host name', () => {

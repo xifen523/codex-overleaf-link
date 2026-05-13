@@ -185,7 +185,8 @@
           selection: {
             anchor: range.from,
             head: range.to
-          }
+          },
+          scrollIntoView: true
         });
         return {
           ok: true,

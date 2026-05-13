@@ -812,11 +812,69 @@
   }
 
   function normalizeTextField(value, maxChars) {
-    var text = typeof value === 'string' ? redactSecretLikeText(value) : '';
+    var text = sanitizeAssistantVisibleText(value);
     if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) {
       return text;
     }
     return text.slice(0, Math.max(0, maxChars - 1)) + '…';
+  }
+
+  function sanitizeAssistantVisibleText(value) {
+    if (typeof value !== 'string' || !value) {
+      return '';
+    }
+    var text = redactSecretLikeText(value);
+    if (!mightContainLocalReferenceText(text)) {
+      return text;
+    }
+    return sanitizeLocalReferencesForStorage(text);
+  }
+
+  function mightContainLocalReferenceText(value) {
+    return /(?:file:\/\/\/?|[A-Za-z]:[\\/]|\/(?:Users|home|private|var|tmp)\/|[\\/]\.codex-overleaf[\\/]projects[\\/]|\.codex-overleaf[\\/]projects[\\/])/i.test(String(value || ''));
+  }
+
+  function sanitizeLocalReferencesForStorage(value) {
+    return String(value || '')
+      .replace(/\[([^\]]*)\]\(([^)]*)\)/g, function (_raw, label, target) {
+        var safeLabel = sanitizeBareLocalPaths(label, false);
+        var trimmedTarget = String(target || '').trim();
+        if (/^https?:\/\//i.test(trimmedTarget)) {
+          return '[' + safeLabel + '](' + sanitizeHttpTarget(trimmedTarget) + ')';
+        }
+        if (mightContainLocalReferenceText(trimmedTarget)) {
+          return '[' + safeLabel + ']';
+        }
+        return '[' + safeLabel + '](' + sanitizeBareLocalPaths(trimmedTarget, false) + ')';
+      })
+      .replace(/(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|private|var|tmp)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi, function (rawPath) {
+        return formatLocalPathPlaceholder(rawPath, true);
+      });
+  }
+
+  function sanitizeBareLocalPaths(value, includeBrackets) {
+    return String(value || '').replace(/(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|private|var|tmp)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi, function (rawPath) {
+      return formatLocalPathPlaceholder(rawPath, includeBrackets);
+    });
+  }
+
+  function sanitizeHttpTarget(value) {
+    try {
+      var parsed = new URL(value);
+      if (mightContainLocalReferenceText(parsed.href)) {
+        parsed.search = '';
+        parsed.hash = '';
+      }
+      return parsed.href;
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  function formatLocalPathPlaceholder(rawPath, includeBrackets) {
+    var lineMatch = String(rawPath || '').match(/:(\d+)(?::\d+)?(?:[.,;!?])?$/);
+    var value = lineMatch ? 'local path:' + lineMatch[1] : 'local path';
+    return includeBrackets ? '[' + value + ']' : value;
   }
 
   function nonNegativeInteger(value) {

@@ -4,6 +4,7 @@ function buildCodexPrompt(request) {
   const project = request.project || {};
   const files = Array.isArray(project.files) ? project.files : [];
   const focusFiles = normalizeFocusFiles(request.focusFiles || request.session?.focusFiles);
+  const activePath = normalizeProjectPath(project.activePath);
   const orderedFiles = orderFilesByFocus(files, focusFiles);
   const inventory = orderedFiles.map(file => `- ${file.path} (${String(file.content || '').length} chars)`).join('\n') || '- no files supplied';
 
@@ -15,13 +16,19 @@ function buildCodexPrompt(request) {
     `Reasoning effort: ${request.reasoningEffort || 'default'}`,
     `Session: ${request.session?.id || 'none'}`,
     `Task: ${request.task}`,
-    `Active file: ${project.activePath || 'unknown'}`,
+    `Active file: ${activePath || 'unknown'}`,
     '',
     'Recent session history:',
     formatSessionHistory(request.session?.history),
     '',
     'Focus files:',
     formatFocusFiles(focusFiles, files),
+    '',
+    'Project location citation rules:',
+    formatProjectLocationCitationRules(),
+    '',
+    'Focused project file inventory:',
+    formatFocusedProjectFileInventory([activePath, ...focusFiles]),
     '',
     'Files:',
     inventory,
@@ -62,10 +69,7 @@ function normalizeFocusFiles(value) {
   const seen = new Set();
   const files = [];
   for (const item of Array.isArray(value) ? value : []) {
-    if (typeof item !== 'string') {
-      continue;
-    }
-    const path = item.trim();
+    const path = normalizeProjectPath(item);
     if (!path || seen.has(path)) {
       continue;
     }
@@ -73,6 +77,42 @@ function normalizeFocusFiles(value) {
     files.push(path);
   }
   return files.slice(0, 5);
+}
+
+function normalizeProjectPath(value) {
+  const path = String(value || '')
+    .replace(/^@file:/i, '')
+    .replace(/\\/g, '/')
+    .trim();
+  if (!path || /^file:\/\//i.test(path) || /^[A-Za-z]:\//.test(path)) {
+    return '';
+  }
+  const projectPath = path.replace(/^\/+/, '');
+  const wasAbsolutePath = path.startsWith('/');
+  if (wasAbsolutePath && /^(Users|home|tmp|var|private|Volumes)\//i.test(projectPath)) {
+    return '';
+  }
+  if (/(^|\/)\.codex-overleaf\/projects(\/|$)/.test(projectPath)) {
+    return '';
+  }
+  return projectPath;
+}
+
+function formatProjectLocationCitationRules() {
+  return [
+    '- In any user-visible output, cite project locations using only Overleaf project-relative paths from the project file inventory below.',
+    '- Use path:LINE[:COLUMN] (for example, path/to/file.tex:12:3).',
+    '- Do not cite local absolute paths, temporary workspace paths, file:// URLs, or markdown links to local files.',
+    '- If a line number is uncertain, cite only the project-relative file path.'
+  ].join('\n');
+}
+
+function formatFocusedProjectFileInventory(files) {
+  const focusFiles = normalizeFocusFiles(files);
+  if (!focusFiles.length) {
+    return '- none selected.';
+  }
+  return focusFiles.map(filePath => `- ${filePath}`).join('\n');
 }
 
 function formatFocusFiles(focusFiles, files) {

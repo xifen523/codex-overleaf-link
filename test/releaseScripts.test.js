@@ -348,13 +348,13 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   fs.writeFileSync(path.join(rootDir, 'scripts/install-native-host.mjs'), '#!/usr/bin/env node\n');
 }
 
-test('CHANGELOG documents the current v1.1.3 release pipeline hardening patch in release tooling format', async () => {
+test('CHANGELOG documents the current v1.2.0 release metadata alignment in release tooling format', async () => {
   const version = readJson(path.join(repoRoot, 'package.json')).version;
   const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
-  const heading = `## v${version} - 2026-05-12`;
+  const heading = `## v${version} - 2026-05-13`;
   const start = changelog.indexOf(heading);
   assert.notEqual(start, -1, `CHANGELOG.md should contain ${heading}`);
-  assert.equal(changelog.includes(`## [${version}] - 2026-05-12`), false);
+  assert.equal(changelog.includes(`## [${version}] - 2026-05-13`), false);
   assert.equal(changelog.indexOf(heading, start + heading.length), -1, 'CHANGELOG.md should not duplicate the current release heading');
 
   const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
@@ -362,11 +362,11 @@ test('CHANGELOG documents the current v1.1.3 release pipeline hardening patch in
   const section = extractReleaseNotes(changelog, version);
   const escapedVersion = version.replace(/\./g, '\\.');
 
-  assert.match(section, /Release pipeline hardening patch/i);
-  assert.match(section, new RegExp(`v${escapedVersion}|npm-first`, 'i'));
-  assert.match(section, /SHA256SUMS/i);
-  assert.match(section, /npm package/i);
-  assert.match(section, /GitHub Release extension zip/i);
+  assert.match(section, /Release metadata alignment patch/i);
+  assert.match(section, /package, extension manifest, compatibility target/i);
+  assert.match(section, new RegExp(`codex-overleaf-link-extension-v${escapedVersion}\\.zip`));
+  assert.match(section, new RegExp(`codex-overleaf-native-host-v${escapedVersion}\\.tar\\.gz`));
+  assert.match(section, new RegExp(`codex-overleaf-link-${escapedVersion}\\.tgz`));
   assert.match(section, /native protocol `1`/i);
 });
 

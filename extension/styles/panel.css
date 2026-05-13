@@ -1097,6 +1097,39 @@
   color: #bdbdbd;
 }
 
+#codex-overleaf-panel .codex-line-reference {
+  border: 0;
+  background: transparent;
+  color: #4ea1ff;
+  padding: 0;
+  font: inherit;
+  line-height: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+#codex-overleaf-panel .codex-line-reference:hover,
+#codex-overleaf-panel .codex-line-reference:focus-visible {
+  background: transparent;
+  color: #8cc8ff;
+}
+
+#codex-overleaf-panel .codex-line-reference:focus-visible {
+  outline: 1px solid #4ea1ff;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+#codex-overleaf-panel .codex-line-reference:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+#codex-overleaf-panel .codex-line-reference[data-status="failed"] {
+  color: #ff8a8a;
+}
+
 #codex-overleaf-panel .run-process {
   margin-top: 4px;
 }

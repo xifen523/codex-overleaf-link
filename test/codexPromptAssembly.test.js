@@ -36,6 +36,36 @@ test('buildCodexTurnPrompt separates system context from the user request', () =
   assert.equal(prompt.userPrompt, 'Current user request:\nPolish the introduction.');
 });
 
+test('buildCodexTurnPrompt instructs Codex to cite Overleaf project-relative locations', () => {
+  const workspacePath = '/Users/alice/.codex-overleaf/projects/p/workspace';
+  const prompt = buildCodexTurnPrompt({
+    task: 'Review labels.',
+    activePath: 'main.tex',
+    contextFiles: ['main.tex', 'sections/intro.tex'],
+    mode: 'ask',
+    projectKey: 'project-1',
+    workspacePath
+  });
+
+  assert.match(prompt.systemPrompt, /Overleaf project-relative paths/);
+  assert.match(prompt.systemPrompt, /path:LINE\[:COLUMN\]/);
+  assert.match(prompt.systemPrompt, /Do not cite local absolute paths/);
+  assert.match(prompt.systemPrompt, /Do not wrap project location citations in backticks/);
+  assert.match(prompt.systemPrompt, /file:\/\//);
+  assert.match(prompt.systemPrompt, /main\.tex/);
+  assert.match(prompt.systemPrompt, /sections\/intro\.tex/);
+  assert.doesNotMatch(prompt.systemPrompt, /\/Users\//);
+  assert.doesNotMatch(prompt.systemPrompt, /C:\\Users\\/);
+  assert.doesNotMatch(prompt.systemPrompt, /\.codex-overleaf\/projects/);
+  assert.doesNotMatch(prompt.systemPrompt, new RegExp(workspacePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
+  const inventory = prompt.systemPrompt.match(/Focused project file inventory:\n([\s\S]*?)\n\n/)?.[1] || '';
+  assert.match(inventory, /- main\.tex/);
+  assert.match(inventory, /- sections\/intro\.tex/);
+  assert.doesNotMatch(inventory, /\/tmp\/project-1/);
+  assert.equal((inventory.match(/main\.tex/g) || []).length, 1);
+});
+
 test('validatePromptSize reports total prompt characters and native-message overflow', () => {
   const small = validatePromptSize('system', 'user');
   assert.deepEqual(small, {

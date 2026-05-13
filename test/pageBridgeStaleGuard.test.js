@@ -482,6 +482,237 @@ test('page bridge jumpToPosition opens target file and records CodeMirror select
   assert.equal(bridge.getLastDispatchChanges(), null);
 });
 
+test('page bridge jumpToPosition selects requested one-based line content', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'first line\nsecond line\nthird line'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'main.tex',
+    line: 2,
+    selectLine: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'codemirror-view-selection');
+  assert.equal(result.path, 'main.tex');
+  assert.deepEqual(bridge.getLastSelection(), { anchor: 11, head: 22 });
+  assert.equal(bridge.getLastScrollIntoView(), true);
+});
+
+test('page bridge jumpToPosition selectLine wins over requested column', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'first line\nsecond line\nthird line'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'main.tex',
+    line: 2,
+    column: 1,
+    selectLine: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'codemirror-view-selection');
+  assert.equal(result.path, 'main.tex');
+  assert.equal(result.from, 11);
+  assert.equal(result.to, 22);
+  assert.deepEqual(bridge.getLastSelection(), { anchor: 11, head: 22 });
+});
+
+test('page bridge jumpToPosition line_out_of_range includes requested line and lineCount', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'first line\nsecond line'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'main.tex',
+    line: 3
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'line_out_of_range');
+  assert.equal(result.path, 'main.tex');
+  assert.equal(result.line, 3);
+  assert.equal(result.lineCount, 2);
+});
+
+test('page bridge jumpToPosition column_out_of_range includes requested line, column, and lineLength', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'abc\ndef'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'main.tex',
+    line: 2,
+    column: 5
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'column_out_of_range');
+  assert.equal(result.path, 'main.tex');
+  assert.equal(result.line, 2);
+  assert.equal(result.column, 5);
+  assert.equal(result.lineLength, 3);
+});
+
+test('page bridge jumpToPosition places cursor at requested one-based column', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'abc\ndef'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'main.tex',
+    line: 2,
+    column: 2,
+    selectLine: false
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'codemirror-view-selection');
+  assert.equal(result.path, 'main.tex');
+  assert.deepEqual(bridge.getLastSelection(), { anchor: 5, head: 5 });
+});
+
+test('page bridge jumpToPosition rejects out-of-range line requests', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'abc\ndef'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'main.tex',
+    line: 3,
+    selectLine: true
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'line_out_of_range');
+  assert.equal(result.path, 'main.tex');
+  assert.deepEqual(bridge.getLastSelection(), null);
+});
+
+test('page bridge jumpToPosition rejects out-of-range column requests', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'abc\ndef'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'main.tex',
+    line: 2,
+    column: 5,
+    selectLine: false
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'column_out_of_range');
+  assert.equal(result.path, 'main.tex');
+  assert.deepEqual(bridge.getLastSelection(), null);
+});
+
+test('page bridge jumpToPosition accounts for CRLF line endings when selecting a line', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'aa\r\nbbb\r\nc'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'main.tex',
+    line: 2,
+    selectLine: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'codemirror-view-selection');
+  assert.equal(result.path, 'main.tex');
+  assert.deepEqual(bridge.getLastSelection(), { anchor: 4, head: 7 });
+});
+
+test('page bridge jumpToPosition selects the last line without a trailing newline', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'one\ntwo'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'main.tex',
+    line: 2,
+    selectLine: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'codemirror-view-selection');
+  assert.equal(result.path, 'main.tex');
+  assert.deepEqual(bridge.getLastSelection(), { anchor: 4, head: 7 });
+});
+
+test('page bridge jumpToPosition keeps offset ranges unchanged when line mode is absent', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'abcdef'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'main.tex',
+    from: 2,
+    to: 4
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'codemirror-view-selection');
+  assert.equal(result.path, 'main.tex');
+  assert.equal(result.from, 2);
+  assert.equal(result.to, 4);
+  assert.deepEqual(bridge.getLastSelection(), { anchor: 2, head: 4 });
+});
+
+test('page bridge jumpToPosition opens target file before resolving line positions', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: {
+      'main.tex': 'main file content',
+      'refs.bib': 'top\nmiddle\nbottom'
+    }
+  });
+
+  const result = await bridge.call('jumpToPosition', {
+    path: 'refs.bib',
+    line: 2,
+    selectLine: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.method, 'codemirror-view-selection');
+  assert.equal(result.path, 'refs.bib');
+  assert.deepEqual(bridge.getLastSelection(), { anchor: 4, head: 10 });
+});
+
 test('page bridge jumpToPosition rejects out-of-range offsets without modifying content', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -937,6 +1168,40 @@ test('page bridge applies all no-trace undo patches for one file in a single cal
   assert.equal(bridge.getDispatchCount(), 2);
 });
 
+test('page bridge no-trace undo waits when active path switches before editor content catches up', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    initialEditorPath: 'refs.bib',
+    initialEditorCatchUpDelayMs: 180,
+    reviewingClickBehavior: 'toggle',
+    reviewingOk: true,
+    files: {
+      'main.tex': 'alpha delta gamma',
+      'refs.bib': '@book{stale}'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha delta gamma' }
+    ],
+    reviewingPolicy: 'no-trace-undo',
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        replaceAll: 'alpha beta gamma'
+      }
+    ]
+  });
+
+  assert.equal(result.ok, true, result.error || JSON.stringify(result));
+  assert.equal(result.applied.length, 1);
+  assert.equal(result.skipped.length, 0);
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getDispatchCount(), 1);
+});
+
 test('page bridge records and rejects Overleaf tracked changes for Reviewing writes', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -1190,6 +1455,39 @@ test('page bridge uses Overleaf editor undo to revert a tracked-change batch in 
   assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
   assert.equal(bridge.getEditorUndoClickCount(), 1);
   assert.equal(bridge.getRejectClickCount(), 0);
+});
+
+test('page bridge native undo waits when active path switches before editor content catches up', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    initialEditorPath: 'refs.bib',
+    initialEditorCatchUpDelayMs: 180,
+    reviewingOk: true,
+    editorUndoTargets: {
+      'main.tex': 'alpha beta gamma'
+    },
+    files: {
+      'main.tex': 'alpha delta gamma',
+      'refs.bib': '@book{stale}'
+    }
+  });
+
+  const undo = await bridge.call('rejectTrackedChanges', {
+    trackedChanges: [],
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    postFiles: [
+      { path: 'main.tex', content: 'alpha delta gamma' }
+    ]
+  });
+
+  assert.equal(undo.ok, true, undo.error || JSON.stringify(undo));
+  assert.equal(undo.applied.length, 1);
+  assert.equal(undo.skipped.length, 0);
+  assert.equal(undo.applied[0].result.method, 'overleaf-editor-undo');
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getEditorUndoClickCount(), 1);
 });
 
 test('page bridge does not use editor undo after user edits change the post-run content', async () => {
@@ -1809,16 +2107,19 @@ function createPageBridgeHarness({
   realtimeObserverFactory = null,
   rerenderTrackedChangeIdsOnReject = false,
   editorUndoTargets = {},
+  initialEditorPath = activePath,
+  initialEditorCatchUpDelayMs = null,
   editorSwitchDelayMs = 0
 }) {
   const fileMap = new Map(Object.entries(files));
   const trackedChanges = [];
   let selectedPath = activePath;
-  let editorPath = activePath;
+  let editorPath = initialEditorPath;
   let listener = null;
   let pendingResult = null;
   let lastDispatchChanges = null;
   let lastSelection = null;
+  let lastScrollIntoView = null;
   let dispatchCount = 0;
   let reviewingActive = reviewingOk;
   let reviewingClickCount = 0;
@@ -1830,6 +2131,12 @@ function createPageBridgeHarness({
   let modeMenuOpen = false;
   let modeOptionClickCount = 0;
   const documentEventListeners = [];
+
+  if (initialEditorPath !== activePath && Number.isFinite(Number(initialEditorCatchUpDelayMs))) {
+    setTimeout(() => {
+      editorPath = selectedPath;
+    }, Math.max(0, Number(initialEditorCatchUpDelayMs)));
+  }
 
   const document = {
     addEventListener(type, handler, optionsArg) {
@@ -1991,6 +2298,9 @@ function createPageBridgeHarness({
     getLastSelection() {
       return lastSelection == null ? null : JSON.parse(JSON.stringify(lastSelection));
     },
+    getLastScrollIntoView() {
+      return lastScrollIntoView;
+    },
     getDispatchCount() {
       return dispatchCount;
     },
@@ -2066,6 +2376,9 @@ function createPageBridgeHarness({
       dispatch(transaction) {
         dispatchCount += 1;
         lastDispatchChanges = transaction.changes;
+        lastScrollIntoView = Object.prototype.hasOwnProperty.call(transaction, 'scrollIntoView')
+          ? transaction.scrollIntoView
+          : null;
         if (transaction.selection) {
           lastSelection = transaction.selection;
         }

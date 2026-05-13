@@ -30,9 +30,14 @@ function buildCodexTurnPrompt(options = {}) {
     '',
     'Current Overleaf workspace:',
     `- Project: ${context.projectKey || context.projectId || 'unknown'}`,
-    `- Local workspace: ${context.workspacePath || 'current cwd'}`,
     '- The local workspace was synced from Overleaf immediately before this turn.',
     '- If the recent session history conflicts with the files in the workspace, trust the files.',
+    '',
+    'Project location citation rules:',
+    formatProjectLocationCitationRules(),
+    '',
+    'Focused project file inventory:',
+    formatFocusedProjectFileInventory(context.focusFiles),
     '',
     'Focus files:',
     formatFocusFiles(context.focusFiles),
@@ -222,11 +227,40 @@ function normalizeFocusFiles(value) {
 }
 
 function normalizeProjectPath(value) {
-  return String(value || '')
+  const path = String(value || '')
     .replace(/^@file:/i, '')
     .replace(/\\/g, '/')
-    .trim()
-    .replace(/^\/+/, '');
+    .trim();
+  if (!path || /^file:\/\//i.test(path) || /^[A-Za-z]:\//.test(path)) {
+    return '';
+  }
+  const projectPath = path.replace(/^\/+/, '');
+  const wasAbsolutePath = path.startsWith('/');
+  if (wasAbsolutePath && /^(Users|home|tmp|var|private|Volumes)\//i.test(projectPath)) {
+    return '';
+  }
+  if (/(^|\/)\.codex-overleaf\/projects(\/|$)/.test(projectPath)) {
+    return '';
+  }
+  return projectPath;
+}
+
+function formatProjectLocationCitationRules() {
+  return [
+    '- In any user-visible output, cite project locations using only Overleaf project-relative paths from the project file inventory below.',
+    '- Use path:LINE[:COLUMN] (for example, path/to/file.tex:12:3).',
+    '- Do not wrap project location citations in backticks or inline code; write main.tex:28 as normal text so the browser can turn it into a jump button.',
+    '- Do not cite local absolute paths, temporary workspace paths, file:// URLs, or markdown links to local files.',
+    '- If a line number is uncertain, cite only the project-relative file path.'
+  ].join('\n');
+}
+
+function formatFocusedProjectFileInventory(files) {
+  const focusFiles = normalizeFocusFiles(files);
+  if (!focusFiles.length) {
+    return '- none selected.';
+  }
+  return focusFiles.map(filePath => `- ${filePath}`).join('\n');
 }
 
 function formatFocusFiles(files) {

@@ -56,6 +56,7 @@
     setActiveSession,
     updateActiveSession
   } = window.CodexOverleafSessionState;
+  const LineReferences = window.CodexOverleafLineReferences;
   const { getProjectStorageKey } = window.CodexOverleafStorageKeys;
   const { HIGH_RISK_TYPES, buildChangeSummaryLine, hasSkippedApplyOperations } = window.CodexOverleafSummary;
   const {
@@ -1897,6 +1898,7 @@
       if (!useExistingMirror) {
         appendLog(formatProjectSnapshotUserLog(project));
       }
+      currentRunView.projectFiles = captureProjectReferenceFiles(project);
       const snapshotWarnings = useExistingMirror
         ? { blocking: [], nonBlocking: [] }
         : getProjectSnapshotWarnings(project);
@@ -2042,6 +2044,7 @@
           return;
         }
         project = staleRetry.project;
+        currentRunView.projectFiles = captureProjectReferenceFiles(project);
         useExistingMirror = false;
         fileOverlays = null;
         otWarmStart = false;
@@ -2168,15 +2171,23 @@
       );
       try {
         const runSessionForHistory = findSessionById(runSessionId) || getActiveSession(state);
-        const updatedSession = recordSessionResult(runSessionForHistory, {
-          task,
-          result: buildSessionHistoryResult({
-            assistantMessage,
-            syncOutcome,
-            syncChanges
-          })
-        });
-        replaceSessionInState(updatedSession);
+        const rawAssistantMessage = assistantMessage;
+        const rawSyncOutcome = syncOutcome;
+        const rawSyncChanges = syncChanges;
+        {
+          const assistantMessage = sanitizeAssistantVisibleText(rawAssistantMessage);
+          const syncOutcome = sanitizeAssistantVisibleValue(rawSyncOutcome);
+          const syncChanges = sanitizeAssistantVisibleValue(rawSyncChanges);
+          const updatedSession = recordSessionResult(runSessionForHistory, {
+            task: sanitizeAssistantVisibleText(task),
+            result: buildSessionHistoryResult({
+              assistantMessage,
+              syncOutcome,
+              syncChanges
+            })
+          });
+          replaceSessionInState(updatedSession);
+        }
 
         const returnedThreadId = response.result?.threadId || '';
         if (returnedThreadId && returnedThreadId !== codexThreadId) {
@@ -2337,15 +2348,23 @@
     finishRunView(tx('Skill installer completed', 'Skill installer 已完成'), 'completed');
 
     const runSessionForHistory = findSessionById(runSessionId) || getActiveSession(state);
-    const updatedSession = recordSessionResult(runSessionForHistory, {
-      task,
-      result: buildSessionHistoryResult({
-        assistantMessage,
-        syncOutcome: { summaryLine: 'skill installer completed' },
-        syncChanges: []
-      })
-    });
-    replaceSessionInState(updatedSession);
+    const rawAssistantMessage = assistantMessage;
+    const rawSyncOutcome = { summaryLine: 'skill installer completed' };
+    const rawSyncChanges = [];
+    {
+      const assistantMessage = sanitizeAssistantVisibleText(rawAssistantMessage);
+      const syncOutcome = sanitizeAssistantVisibleValue(rawSyncOutcome);
+      const syncChanges = sanitizeAssistantVisibleValue(rawSyncChanges);
+      const updatedSession = recordSessionResult(runSessionForHistory, {
+        task: sanitizeAssistantVisibleText(task),
+        result: buildSessionHistoryResult({
+          assistantMessage,
+          syncOutcome,
+          syncChanges
+        })
+      });
+      replaceSessionInState(updatedSession);
+    }
 
     const returnedThreadId = response.result?.threadId || '';
     if (returnedThreadId && returnedThreadId !== codexThreadId) {
@@ -7112,6 +7131,7 @@
       events: root.querySelector('[data-run-events]'),
       report: root.querySelector('[data-run-report]'),
       status: root.querySelector('[data-run-status]'),
+      projectFiles: captureProjectReferenceFiles(arguments[0]?.project),
       startedAt: Date.now()
     };
   }
@@ -7120,6 +7140,7 @@
     if (!currentRunView) {
       return;
     }
+    const safeText = sanitizeAssistantVisibleText(text);
     const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
     flushPendingStreamRenders();
     const statusText = formatProcessedSummary(status, Date.now() - currentRunView.startedAt);
@@ -7134,7 +7155,7 @@
     if (visibleView) {
       visibleView.root.dataset.status = status;
       visibleView.root.title = [
-        text,
+        safeText,
         record?.mode ? `${tr('mode')}: ${formatModeLabel(record.mode)}` : '',
         record?.model,
         record?.reasoningEffort,
@@ -7205,21 +7226,22 @@
 
   function appendRunEvent(input = {}) {
     const { title, status = 'info', detail, timestamp } = input;
+    const safeTitle = sanitizeAssistantVisibleText(title) || 'Event';
     if (!currentRunView?.events) {
-      appendPlainLog(title || '');
+      appendPlainLog(safeTitle);
       return;
     }
 
     const event = {
-      title: title || 'Event',
-      status,
-      detail,
+      title: safeTitle,
+      status: sanitizeAssistantVisibleText(status) || 'info',
+      detail: sanitizeAssistantVisibleValue(detail),
       timestamp: timestamp || new Date().toISOString(),
       kind: input.kind || 'activity',
-      technicalDetail: input.technicalDetail,
-      streamKey: input.streamKey,
-      streamRole: input.streamRole,
-      appendText: input.appendText,
+      technicalDetail: sanitizeAssistantVisibleValue(input.technicalDetail),
+      streamKey: sanitizeAssistantVisibleText(input.streamKey),
+      streamRole: sanitizeAssistantVisibleText(input.streamRole),
+      appendText: typeof input.appendText === 'string' ? sanitizeAssistantVisibleText(input.appendText) : input.appendText,
       replaceText: input.replaceText
     };
     const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
@@ -7317,19 +7339,20 @@
     const events = Array.isArray(record.events) ? record.events : [];
     const existing = [...events].reverse().find(item => item.kind === 'stream' && item.streamKey === streamKey);
     if (existing) {
+      const nextTitle = sanitizeAssistantVisibleText(event.title);
       existing.title = event.replaceText
-        ? event.title
-        : appendStreamText(existing.title, event.title);
-      existing.status = event.status || existing.status || 'running';
+        ? nextTitle
+        : sanitizeAssistantVisibleText(appendStreamText(existing.title, nextTitle));
+      existing.status = sanitizeAssistantVisibleText(event.status) || existing.status || 'running';
       existing.timestamp = event.timestamp || existing.timestamp;
-      existing.streamRole = event.streamRole || existing.streamRole;
+      existing.streamRole = sanitizeAssistantVisibleText(event.streamRole) || existing.streamRole;
       return existing;
     }
 
     const next = {
       ...event,
       streamKey,
-      title: event.title || ''
+      title: sanitizeAssistantVisibleText(event.title)
     };
     delete next.appendText;
     delete next.replaceText;
@@ -7523,7 +7546,7 @@
   }
 
   function renderRunEvent(event) {
-    return renderActivityLine(event);
+    return renderActivityLine(sanitizeRunEventForRender(event));
   }
 
   function upsertStreamEvent(view, event) {
@@ -7545,7 +7568,8 @@
     view.events.append(renderStreamEvent({ ...event, streamKey }));
   }
 
-  function renderStreamEvent(event) {
+  function renderStreamEvent(input) {
+    const event = sanitizeRunEventForRender(input);
     const row = document.createElement('div');
     row.className = 'run-stream';
     row.dataset.status = event.status || 'running';
@@ -7561,8 +7585,155 @@
     return row;
   }
 
+  function sanitizeRunEventForRender(event = {}) {
+    return {
+      ...event,
+      title: sanitizeAssistantVisibleText(event.title),
+      status: sanitizeAssistantVisibleText(event.status),
+      detail: sanitizeAssistantVisibleValue(event.detail),
+      technicalDetail: sanitizeAssistantVisibleValue(event.technicalDetail),
+      streamKey: sanitizeAssistantVisibleText(event.streamKey),
+      streamRole: sanitizeAssistantVisibleText(event.streamRole)
+    };
+  }
+
+  function getCurrentProjectReferenceFiles() {
+    const files = [];
+    const seen = new Set();
+    const addFile = (item, textPathOnly = false) => {
+      if (typeof item === 'string') {
+        addReferenceFile({ path: item, kind: 'text' });
+        return;
+      }
+      if (!item || typeof item !== 'object') {
+        return;
+      }
+      const path = typeof item.path === 'string'
+        ? item.path
+        : (typeof item.filePath === 'string' ? item.filePath : '');
+      if (!path) {
+        return;
+      }
+      const isBinary = item.kind === 'binary'
+        || item.type === 'binary'
+        || item.binary === true
+        || item.isBinary === true;
+      const kind = isBinary
+        ? 'binary'
+        : (item.kind === 'text' || textPathOnly || typeof item.content === 'string' || !Object.prototype.hasOwnProperty.call(item, 'content')
+          ? 'text'
+          : 'binary');
+      addReferenceFile({ path, kind });
+    };
+    const addReferenceFile = file => {
+      const normalizedPath = normalizeReferencePathForRuntime(file.path);
+      if (!normalizedPath || seen.has(normalizedPath) || hasUnsafeRuntimePathSegments(normalizedPath)) {
+        return;
+      }
+      seen.add(normalizedPath);
+      files.push({
+        path: normalizedPath,
+        kind: file.kind === 'binary' ? 'binary' : 'text'
+      });
+    };
+    const addFiles = value => {
+      if (Array.isArray(value)) {
+        value.forEach(item => addFile(item));
+      }
+    };
+    const addTextPaths = value => {
+      if (Array.isArray(value)) {
+        value.forEach(item => addFile(item, true));
+      }
+    };
+
+    addFiles(currentRunView?.projectFiles);
+    addFiles(currentRunView?.files);
+    addFiles(currentRunView?.project?.files);
+    addFiles(currentRunView?.snapshot?.files);
+    addFiles(currentRunView?.projectSnapshot?.files);
+    addFiles(currentRunView?.contextFiles);
+    addFiles(state?.projectFiles);
+    addFiles(state?.files);
+    addFiles(state?.project?.files);
+    addFiles(state?.snapshot?.files);
+    addFiles(state?.projectSnapshot?.files);
+    addFiles(state?.contextFiles);
+    addTextPaths(state?.focusFiles);
+    addTextPaths(state?.session?.focusFiles);
+    const activeSession = typeof getActiveSession === 'function' ? getActiveSession(state) : null;
+    addTextPaths(activeSession?.focusFiles);
+    for (const session of Array.isArray(state?.sessions) ? state.sessions : []) {
+      addTextPaths(session?.focusFiles);
+    }
+    return files;
+  }
+
+  function captureProjectReferenceFiles(project) {
+    const result = [];
+    const seen = new Set();
+    const files = Array.isArray(project?.files) ? project.files : [];
+    for (const file of files) {
+      const path = normalizeReferencePathForRuntime(file?.path);
+      if (!path || seen.has(path) || hasUnsafeRuntimePathSegments(path)) {
+        continue;
+      }
+      seen.add(path);
+      const isBinary = file?.kind === 'binary'
+        || file?.type === 'binary'
+        || file?.binary === true
+        || file?.isBinary === true;
+      result.push({
+        path,
+        kind: isBinary ? 'binary' : 'text'
+      });
+    }
+    return result;
+  }
+
   function renderMarkdownInlineText(target, value) {
     target.replaceChildren(...buildMarkdownInlineNodes(value));
+  }
+
+  function sanitizeAssistantVisibleText(value) {
+    if (typeof value !== 'string' || !value) {
+      return '';
+    }
+    if (LineReferences?.sanitizeLocalReferences) {
+      try {
+        return LineReferences.sanitizeLocalReferences(value, {
+          projectFiles: getCurrentProjectReferenceFiles(),
+          context: 'render'
+        });
+      } catch (_error) {
+        return fallbackSanitizeLocalReferences(value);
+      }
+    }
+    return fallbackSanitizeLocalReferences(value);
+  }
+
+  function sanitizeAssistantVisibleValue(value, depth = 0) {
+    if (typeof value === 'string') {
+      return sanitizeAssistantVisibleText(value);
+    }
+    if (value === undefined || value === null || typeof value === 'number' || typeof value === 'boolean') {
+      return value;
+    }
+    if (depth > 12) {
+      return '[redacted nested value]';
+    }
+    if (Array.isArray(value)) {
+      return value.map(item => sanitizeAssistantVisibleValue(item, depth + 1));
+    }
+    if (typeof value === 'object') {
+      const result = {};
+      for (const key of Object.keys(value)) {
+        const safeKey = sanitizeAssistantVisibleText(key) || key;
+        result[safeKey] = sanitizeAssistantVisibleValue(value[key], depth + 1);
+      }
+      return result;
+    }
+    return value;
   }
 
   function buildMarkdownInlineNodes(value) {
@@ -7573,12 +7744,12 @@
     while (index < source.length) {
       const next = findNextInlineMarkdown(source, index);
       if (!next) {
-        nodes.push(document.createTextNode(source.slice(index)));
+        nodes.push(...buildLineReferenceInlineNodes(source.slice(index)));
         break;
       }
 
       if (next.start > index) {
-        nodes.push(document.createTextNode(source.slice(index, next.start)));
+        nodes.push(...buildLineReferenceInlineNodes(source.slice(index, next.start)));
       }
 
       if (next.type === 'strong') {
@@ -7586,23 +7757,274 @@
         strong.append(...buildMarkdownInlineNodes(next.text));
         nodes.push(strong);
       } else if (next.type === 'code') {
-        const code = document.createElement('code');
-        code.textContent = next.text;
-        nodes.push(code);
+        nodes.push(...buildInlineCodeNodes(next.text));
       } else if (next.type === 'link') {
-        const link = document.createElement('a');
-        link.href = formatMarkdownHref(next.href);
-        link.textContent = formatMarkdownLinkLabel(next.text, next.href);
-        link.title = next.href;
-        link.target = '_blank';
-        link.rel = 'noreferrer';
-        nodes.push(link);
+        nodes.push(...buildMarkdownLinkNodes(next.text, next.href));
       }
 
       index = next.end;
     }
 
     return nodes;
+  }
+
+  function buildInlineCodeNodes(value) {
+    const source = String(value || '');
+    const trimmed = source.trim();
+    const refs = trimmed ? parseRuntimeLineReferences(trimmed, 'plain-text-token') : [];
+    const ref = refs.length === 1 && refs[0]?.rawText === trimmed ? refs[0] : null;
+    if (ref && !isRuntimeLocalPathLike(ref.rawPath)) {
+      const resolved = resolveRuntimeLineReference(ref);
+      if (resolved) {
+        return [createLineReferenceButton(resolved)];
+      }
+    }
+    const code = document.createElement('code');
+    code.textContent = sanitizeAssistantVisibleText(source);
+    return [code];
+  }
+
+  function buildLineReferenceInlineNodes(value) {
+    const source = String(value || '');
+    if (!source) {
+      return [];
+    }
+    const refs = parseRuntimeLineReferences(source, 'plain-text-token');
+    if (!refs.length) {
+      return [document.createTextNode(sanitizeAssistantVisibleText(source))];
+    }
+    const nodes = [];
+    let cursor = 0;
+    for (const ref of refs) {
+      const rawText = String(ref.rawText || '');
+      if (!rawText) {
+        continue;
+      }
+      const start = source.indexOf(rawText, cursor);
+      if (start < cursor) {
+        continue;
+      }
+      appendSanitizedTextNode(nodes, source.slice(cursor, start));
+      const resolved = resolveRuntimeLineReference(ref);
+      if (resolved) {
+        nodes.push(createLineReferenceButton(resolved));
+      } else {
+        appendSanitizedTextNode(nodes, rawText);
+      }
+      cursor = start + rawText.length;
+    }
+    appendSanitizedTextNode(nodes, source.slice(cursor));
+    return nodes;
+  }
+
+  function buildMarkdownLinkNodes(text, href) {
+    const target = String(href || '').trim();
+    if (isHttpMarkdownHref(target)) {
+      const link = document.createElement('a');
+      link.href = formatMarkdownHref(target);
+      link.textContent = formatHttpMarkdownLinkLabel(text);
+      link.title = link.href;
+      link.target = '_blank';
+      link.rel = 'noreferrer';
+      return [link];
+    }
+
+    const resolved = resolveMarkdownLineReference(text, target);
+    if (resolved) {
+      return [createLineReferenceButton(resolved)];
+    }
+
+    return [document.createTextNode(sanitizeAssistantVisibleText(text))];
+  }
+
+  function formatHttpMarkdownLinkLabel(text) {
+    const label = sanitizeAssistantVisibleText(text).trim();
+    return label || 'link';
+  }
+
+  function appendSanitizedTextNode(nodes, value) {
+    const text = sanitizeAssistantVisibleText(value);
+    if (text) {
+      nodes.push(document.createTextNode(text));
+    }
+  }
+
+  function resolveMarkdownLineReference(text, href) {
+    const candidates = [
+      { value: href, mode: 'markdown-link-target' },
+      { value: text, mode: 'markdown-link-label' }
+    ];
+    for (const candidate of candidates) {
+      for (const ref of parseRuntimeLineReferences(candidate.value, candidate.mode)) {
+        const resolved = resolveRuntimeLineReference(ref);
+        if (resolved) {
+          return resolved;
+        }
+      }
+    }
+    return null;
+  }
+
+  function isRuntimeLocalPathLike(value) {
+    if (LineReferences?.isLocalPathLike) {
+      try {
+        return LineReferences.isLocalPathLike(value);
+      } catch (_error) {
+        return true;
+      }
+    }
+    return fallbackLooksLikeLocalPath(value);
+  }
+
+  function parseRuntimeLineReferences(text, mode) {
+    if (!LineReferences?.parseLineReferencesFromText) {
+      return [];
+    }
+    try {
+      return LineReferences.parseLineReferencesFromText({ text: String(text || ''), mode }) || [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  function resolveRuntimeLineReference(ref) {
+    if (!LineReferences?.resolveProjectReference) {
+      return null;
+    }
+    const line = Number(ref?.line);
+    const column = ref?.column === null || ref?.column === undefined || ref?.column === ''
+      ? null
+      : Number(ref.column);
+    if (!Number.isSafeInteger(line) || line < 1 || (column !== null && (!Number.isSafeInteger(column) || column < 1))) {
+      return null;
+    }
+    let resolved;
+    try {
+      resolved = LineReferences.resolveProjectReference({
+        rawPath: ref.rawPath,
+        projectFiles: getCurrentProjectReferenceFiles()
+      });
+    } catch (_error) {
+      return null;
+    }
+    if (!resolved?.path || resolved.file?.kind === 'binary') {
+      return null;
+    }
+    return {
+      path: resolved.path,
+      line,
+      column
+    };
+  }
+
+  function createLineReferenceButton(reference) {
+    const button = document.createElement('button');
+    button.className = 'codex-line-reference';
+    button.type = 'button';
+    button.textContent = formatLineReferenceText(reference);
+    button.dataset.path = reference.path;
+    button.dataset.line = String(reference.line);
+    if (reference.column) {
+      button.dataset.column = String(reference.column);
+    }
+    const ariaLabel = reference.column
+      ? `Open ${reference.path} line ${reference.line} column ${reference.column}`
+      : `Open ${reference.path} line ${reference.line}`;
+    button.setAttribute('aria-label', ariaLabel);
+    button.title = ariaLabel;
+    button.addEventListener('click', async event => {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      const params = {
+        path: reference.path,
+        line: reference.line,
+        selectLine: !reference.column
+      };
+      if (reference.column) {
+        params.column = reference.column;
+        params.selectLine = false;
+      }
+      button.disabled = true;
+      button.dataset.status = 'pending';
+      try {
+        const result = await callPageBridge('jumpToPosition', params);
+        if (result?.ok === false) {
+          button.dataset.status = 'failed';
+          button.title = tx('Could not open that referenced line.', '无法打开引用的行。');
+          showPluginToast?.(tx('Could not open that referenced line.', '无法打开引用的行。'), {
+            status: 'warning'
+          });
+          return;
+        }
+        delete button.dataset.status;
+        button.title = ariaLabel;
+      } catch (_error) {
+        button.dataset.status = 'failed';
+        button.title = tx('Could not open that referenced line.', '无法打开引用的行。');
+        showPluginToast?.(tx('Could not open that referenced line.', '无法打开引用的行。'), {
+          status: 'warning'
+        });
+      } finally {
+        button.disabled = false;
+      }
+    });
+    return button;
+  }
+
+  function formatLineReferenceText(reference) {
+    return `${reference.path}:${reference.line}${reference.column ? `:${reference.column}` : ''}`;
+  }
+
+  function normalizeReferencePathForRuntime(value) {
+    if (LineReferences?.normalizeReferencePath) {
+      return LineReferences.normalizeReferencePath(value);
+    }
+    return String(value || '')
+      .replace(/\\/g, '/')
+      .replace(/\/+/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/^\.\//, '')
+      .trim();
+  }
+
+  function hasUnsafeRuntimePathSegments(path) {
+    return normalizeReferencePathForRuntime(path)
+      .split('/')
+      .some(segment => segment === '.' || segment === '..');
+  }
+
+  function isHttpMarkdownHref(href) {
+    try {
+      const parsed = new URL(String(href || '').trim());
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function containsLocalPathText(value) {
+    return /(?:file:\/\/\/?|[A-Za-z]:[\\/]|\/(?:Users|home|private|var|tmp)\/|[\\/]\.codex-overleaf[\\/]projects[\\/])/i.test(String(value || ''));
+  }
+
+  function fallbackSanitizeLocalReferences(value) {
+    return String(value || '')
+      .replace(/\[([^\]]*)\]\(([^)]*)\)/g, (_raw, label, target) => {
+        const safeLabel = fallbackSanitizeBareLocalPaths(label);
+        return /^https?:\/\//i.test(String(target || '').trim())
+          ? `[${safeLabel}](${target})`
+          : `[${safeLabel}]`;
+      })
+      .replace(/(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|private|var|tmp)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi, rawPath => {
+        const line = String(rawPath || '').match(/:(\d+)(?::\d+)?(?:[.,;!?])?$/)?.[1];
+        return line ? `[local path:${line}]` : '[local path]';
+      });
+  }
+
+  function fallbackSanitizeBareLocalPaths(value) {
+    return String(value || '').replace(/(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|private|var|tmp)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi, rawPath => {
+      const line = String(rawPath || '').match(/:(\d+)(?::\d+)?(?:[.,;!?])?$/)?.[1];
+      return line ? `[local path:${line}]` : '[local path]';
+    });
   }
 
   function findNextInlineMarkdown(source, index) {
@@ -7668,13 +8090,17 @@
   function formatMarkdownLinkLabel(text, href) {
     const source = String(text || '');
     const target = String(href || '');
+    const resolved = resolveMarkdownLineReference(source, target);
+    if (resolved) {
+      return formatLineReferenceText(resolved);
+    }
     const workspaceMatch = target.match(/\/workspace\/([^:)]+)(?::(\d+))?/);
     if (workspaceMatch) {
-      const fileLabel = workspaceMatch[1];
+      const fileLabel = sanitizeAssistantVisibleText(workspaceMatch[1]);
       const line = workspaceMatch[2];
       return line ? `workspace/${fileLabel}:${line}` : `workspace/${fileLabel}`;
     }
-    return source || target;
+    return sanitizeAssistantVisibleText(source || target);
   }
 
   function formatMarkdownHref(href) {
@@ -7685,6 +8111,10 @@
     try {
       const parsed = new URL(target);
       if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        if (containsLocalPathText(parsed.href)) {
+          parsed.search = '';
+          parsed.hash = '';
+        }
         return parsed.href;
       }
     } catch (_error) {
@@ -7707,6 +8137,25 @@
       const line = lines[index];
       if (!line.trim()) {
         index++;
+        continue;
+      }
+
+      if (isMarkdownFenceLine(line)) {
+        const codeLines = [];
+        index++;
+        while (index < lines.length && !isMarkdownFenceLine(lines[index])) {
+          codeLines.push(lines[index]);
+          index++;
+        }
+        if (index < lines.length && isMarkdownFenceLine(lines[index])) {
+          index++;
+        }
+        const pre = document.createElement('pre');
+        pre.className = 'run-code-block';
+        const code = document.createElement('code');
+        code.textContent = sanitizeAssistantVisibleText(codeLines.join('\n'));
+        pre.append(code);
+        target.append(pre);
         continue;
       }
 
@@ -7737,7 +8186,8 @@
         index < lines.length &&
         lines[index].trim() &&
         !isMarkdownListLine(lines[index]) &&
-        !isMarkdownHeadingLine(lines[index])
+        !isMarkdownHeadingLine(lines[index]) &&
+        !isMarkdownFenceLine(lines[index])
       ) {
         paragraphLines.push(lines[index].trim());
         index++;
@@ -7747,6 +8197,10 @@
       paragraph.append(...buildMarkdownInlineNodes(paragraphLines.join(' ')));
       target.append(paragraph);
     }
+  }
+
+  function isMarkdownFenceLine(line) {
+    return /^\s*```/.test(String(line || ''));
   }
 
   function isMarkdownListLine(line) {
@@ -7811,12 +8265,13 @@
     return /^\s*(#{1,6}\s+\S|\*\*[^*]+\*\*:?\s*)$/.test(line);
   }
 
-  function renderActivityLine(event) {
+  function renderActivityLine(input) {
+    const event = sanitizeRunEventForRender(input);
     const row = document.createElement('div');
     row.className = 'run-activity';
     row.dataset.status = event.status || 'info';
     row.dataset.kind = event.kind || 'activity';
-    row.title = buildActivityTooltip(event);
+    row.title = sanitizeAssistantVisibleText(buildActivityTooltip(event));
 
     const marker = document.createElement('span');
     marker.className = 'run-activity-dot';
@@ -7824,7 +8279,7 @@
 
     const label = document.createElement('span');
     label.className = 'run-activity-title';
-    label.textContent = event.title || 'Event';
+    label.append(...buildMarkdownInlineNodes(event.title || 'Event'));
 
     const time = document.createElement('time');
     time.className = 'run-activity-time';
@@ -7899,7 +8354,8 @@
     ].filter(Boolean).join('\n');
   }
 
-  function renderCompletionReport(event) {
+  function renderCompletionReport(input) {
+    const event = sanitizeRunEventForRender(input);
     const report = document.createElement('section');
     report.className = 'run-completion-report';
     report.dataset.status = event.status || 'completed';
@@ -7943,6 +8399,34 @@
       return;
     }
     existing.replaceWith(renderRunCard(run));
+  }
+
+  function isUndoResultEffectivelyApplied(run, result) {
+    if (!result?.skipped?.length) {
+      return true;
+    }
+    const expectedByPath = new Map((run?.undoExpectedFiles || [])
+      .filter(file => file?.path && typeof file.content === 'string')
+      .map(file => [file.path, file.content]));
+    if (!expectedByPath.size) {
+      return false;
+    }
+    const undoRestore = buildNoTraceUndoRestore(run);
+    const editPaths = Array.from(new Set((undoRestore.operations || [])
+      .filter(operation => (
+        operation?.type === 'edit'
+        && operation.path
+        && expectedByPath.has(operation.path)
+      ))
+      .map(operation => operation.path)));
+    if (!editPaths.length) {
+      return false;
+    }
+    return editPaths.every(path => (result.applied || []).some(item => (
+      item?.operation?.type === 'edit'
+      && item.operation.path === path
+      && item?.result?.verifiedContent === expectedByPath.get(path)
+    )));
   }
 
   async function undoRun(runId) {
@@ -7995,28 +8479,29 @@
       detail: { [tr('detailWillUndo')]: formatOperationFiles(undoOperations) }
     });
 
-    const result = await callPageBridge('applyOperations', {
-      operations: undoOperations,
-      baseFiles: run.undoBaseFiles || [],
-      reviewingPolicy: 'no-trace-undo'
-    });
-    appendUndoReviewingPolicyEvent(runId, result.reviewingPolicy);
-    appendRunRecordEvent(runId, {
-      title: tr('undoResult', { applied: result.applied?.length || 0, skipped: result.skipped?.length || 0 }),
-      status: result.skipped?.length ? 'failed' : 'completed',
-      detail: {
-        [tr('detailUndone')]: (result.applied || []).map(item => ({
-          [tr('detailAction')]: formatOperationType(item.operation?.type),
-          [tr('detailFile')]: item.operation?.path
+      const result = await callPageBridge('applyOperations', {
+        operations: undoOperations,
+        baseFiles: run.undoBaseFiles || [],
+        reviewingPolicy: 'no-trace-undo'
+      });
+      const undoApplied = isUndoResultEffectivelyApplied(run, result);
+      appendUndoReviewingPolicyEvent(runId, result.reviewingPolicy);
+      appendRunRecordEvent(runId, {
+        title: tr('undoResult', { applied: result.applied?.length || 0, skipped: result.skipped?.length || 0 }),
+        status: undoApplied ? 'completed' : result.skipped?.length ? 'failed' : 'completed',
+        detail: {
+          [tr('detailUndone')]: (result.applied || []).map(item => ({
+            [tr('detailAction')]: formatOperationType(item.operation?.type),
+            [tr('detailFile')]: item.operation?.path
         })),
         [tr('detailSkipped')]: (result.skipped || []).map(item => ({
           [tr('detailAction')]: formatOperationType(item.operation?.type),
           [tr('detailFile')]: item.operation?.path,
-          [tr('detailReason')]: formatApplyResultReason(item)
-        }))
-      }
-    });
-    setRunUndoStatus(runId, result.skipped?.length ? 'partial' : 'applied');
+            [tr('detailReason')]: formatApplyResultReason(item)
+          }))
+        }
+      });
+      setRunUndoStatus(runId, undoApplied ? 'applied' : 'partial');
   }
 
   async function undoRunTrackedChanges(runId, run) {
@@ -8074,9 +8559,12 @@
     if (!run) {
       return 0;
     }
+    const trackedEditorUndoCount = hasTrackedEditorUndo(run) ? 1 : 0;
+    if (trackedEditorUndoCount) {
+      return trackedEditorUndoCount;
+    }
     return (run.undoOperations?.length || 0)
-      + (run.undoTrackedChanges?.length || 0)
-      + (hasTrackedEditorUndo(run) ? 1 : 0);
+      + (run.undoTrackedChanges?.length || 0);
   }
 
   function appendUndoReviewingPolicyEvent(runId, reviewingPolicy) {
@@ -9005,19 +9493,20 @@
   }
 
   function formatEventDetail(detail) {
-    if (typeof detail === 'string') {
-      return detail;
+    const safeDetail = sanitizeAssistantVisibleValue(detail);
+    if (typeof safeDetail === 'string') {
+      return safeDetail;
     }
-    if (Array.isArray(detail)) {
-      return detail.map(item => typeof item === 'string' ? item : JSON.stringify(item, null, 2)).join('\n');
+    if (Array.isArray(safeDetail)) {
+      return safeDetail.map(item => typeof item === 'string' ? item : JSON.stringify(item, null, 2)).join('\n');
     }
-    if (typeof detail === 'object') {
-      return Object.entries(detail)
+    if (typeof safeDetail === 'object') {
+      return Object.entries(safeDetail)
         .filter(([, value]) => value !== undefined && value !== null && value !== '')
         .map(([key, value]) => `${key}: ${formatDetailValue(value)}`)
-        .join('\n') || JSON.stringify(detail, null, 2);
+        .join('\n') || JSON.stringify(safeDetail, null, 2);
     }
-    return String(detail);
+    return String(safeDetail);
   }
 
   function formatDetailValue(value) {

@@ -239,6 +239,107 @@ test('auto session titles are not persisted as raw prompt snippets while manual 
   assert.equal(manualRecord.title, 'Manual Literature Review Pass');
 });
 
+test('IndexedDB session-record boundary does not persist local absolute paths from compact state', () => {
+  const rawLocalPath = '/Users/alice/.codex-overleaf/projects/project-a/workspace/main.tex:117';
+  const rawLocalPathColumn = '/Users/alice/.codex-overleaf/projects/project-a/workspace/main.tex:117:9';
+  const compact = prepareStateForStorage({
+    activeSessionId: 'session_local_path_boundary',
+    sessions: [{
+      id: 'session_local_path_boundary',
+      title: `Local path boundary ${rawLocalPath}`,
+      titleSource: 'manual',
+      task: `Inspect ${rawLocalPath}`,
+      history: [{
+        task: `History task ${rawLocalPath}`,
+        result: `History result ${rawLocalPathColumn}`,
+        at: '2026-05-06T00:00:00.000Z'
+      }],
+      runs: [{
+        id: 'run_local_path_boundary',
+        task: `Run task ${rawLocalPath}`,
+        status: 'completed',
+        statusText: `Done with ${rawLocalPath}`,
+        events: [{
+          title: `Final answer ${rawLocalPath}`,
+          status: 'completed',
+          kind: 'report',
+          detail: {
+            userReport: `Report ${rawLocalPath}`,
+            assistantMessage: `Assistant ${rawLocalPathColumn}`,
+            path: rawLocalPath
+          }
+        }]
+      }]
+    }]
+  });
+
+  const record = buildSessionRecord({
+    ...compact.sessions[0],
+    projectId: 'proj_local_path_boundary'
+  });
+  const serialized = JSON.stringify(record);
+
+  for (const forbidden of [
+    '/Users/alice',
+    '.codex-overleaf/projects/project-a',
+    rawLocalPath,
+    rawLocalPathColumn
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, `session record leaked ${forbidden}`);
+  }
+});
+
+test('buildSessionRecord directly sanitizes local line refs including inline and fenced code', () => {
+  const rawLocalPath = '/Users/alice/.codex-overleaf/projects/project-a/workspace/main.tex:117';
+  const rawLocalPathColumn = '/Users/alice/.codex-overleaf/projects/project-a/workspace/main.tex:117:9';
+  const record = buildSessionRecord({
+    id: 'session_raw_boundary',
+    projectId: 'proj_raw_boundary',
+    title: `Raw title ${rawLocalPath}`,
+    titleSource: 'manual',
+    task: `Inspect ${rawLocalPath}`,
+    focusFiles: [rawLocalPath],
+    history: [{
+      task: `History task ${rawLocalPath}`,
+      result: [
+        `Inline \`${rawLocalPath}\``,
+        '```',
+        rawLocalPathColumn,
+        '```'
+      ].join('\n'),
+      at: '2026-05-06T00:00:00.000Z'
+    }],
+    runs: [{
+      id: 'run_raw_boundary',
+      task: `Run task ${rawLocalPath}`,
+      status: 'completed',
+      statusText: `Done ${rawLocalPath}`,
+      events: [{
+        title: `Event ${rawLocalPath}`,
+        status: 'completed',
+        kind: 'report',
+        detail: [
+          `Inline \`${rawLocalPath}\``,
+          '```',
+          rawLocalPathColumn,
+          '```'
+        ].join('\n')
+      }]
+    }]
+  });
+  const serialized = JSON.stringify(record);
+
+  for (const forbidden of [
+    '/Users/alice',
+    '.codex-overleaf/projects/project-a',
+    rawLocalPath,
+    rawLocalPathColumn
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, `raw session record leaked ${forbidden}`);
+  }
+  assert.match(serialized, /local path:117/);
+});
+
 test('buildSessionRecord generates id when not provided', () => {
   const record = buildSessionRecord({ projectId: 'proj_3' });
   assert.ok(record.id.startsWith('ses_'));

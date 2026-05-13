@@ -46,6 +46,31 @@ test('builds a Codex prompt with task, mode, and file inventory', () => {
   assert.match(prompt, /During the run, write short user-facing progress messages/);
 });
 
+test('builds a Codex prompt that instructs user reports to cite project-relative locations', () => {
+  const prompt = buildCodexPrompt({
+    mode: 'ask',
+    task: 'Review labels.',
+    focusFiles: ['main.tex', 'sections/intro.tex'],
+    project: {
+      activePath: 'main.tex',
+      files: [
+        { path: 'main.tex', content: '\\label{sec:intro}' },
+        { path: 'sections/intro.tex', content: '\\ref{sec:intro}' }
+      ]
+    }
+  });
+
+  assert.match(prompt, /Overleaf project-relative paths/);
+  assert.match(prompt, /path:LINE\[:COLUMN\]/);
+  assert.match(prompt, /Do not cite local absolute paths/);
+  assert.match(prompt, /file:\/\//);
+  assert.match(prompt, /main\.tex/);
+  assert.match(prompt, /sections\/intro\.tex/);
+  assert.doesNotMatch(prompt, /\/Users\//);
+  assert.doesNotMatch(prompt, /C:\\Users\\/);
+  assert.doesNotMatch(prompt, /\.codex-overleaf\/projects/);
+});
+
 test('builds an output schema for operation results', () => {
   const schema = buildOutputSchema();
 
