@@ -60,8 +60,20 @@
       return treeOperations.getActiveFilePath?.() || '';
     }
 
-    function openFileByPath(filePath) {
-      return treeOperations.openFileByPath?.(filePath) || Promise.resolve({ ok: false, reason: 'Tree operations are unavailable' });
+    function getActiveEditorIdentity() {
+      return typeof deps.getActiveEditorIdentity === 'function'
+        ? deps.getActiveEditorIdentity()
+        : null;
+    }
+
+    function activeEditorIdentityChanged(previous) {
+      return typeof deps.activeEditorIdentityChanged === 'function'
+        ? deps.activeEditorIdentityChanged(previous)
+        : true;
+    }
+
+    function openFileByPath(filePath, options = {}) {
+      return treeOperations.openFileByPath?.(filePath, options) || Promise.resolve({ ok: false, reason: 'Tree operations are unavailable' });
     }
 
     function projectPathExists(filePath) {
@@ -950,34 +962,16 @@
 
   async function applyEditOperation(operation, options = {}) {
     const currentPath = getActiveFilePath();
-    let openedEditorText = null;
-    if (operation.path && currentPath && operation.path !== currentPath) {
-      const previousEditorSignature = contentSignature(readActiveEditorText());
-      const opened = await openFileByPath(operation.path);
-      if (!opened.ok) {
-        return {
-          ok: false,
-          reason: `Cannot edit ${operation.path}; active file is ${currentPath}; ${opened.reason}`
-        };
-      }
-      const ready = await waitForActiveEditorText(operation.path, 2500, {
-        notSignature: previousEditorSignature
-      });
-      if (!ready.ok) {
-        return {
-          ok: false,
-          code: 'editor_content_not_ready',
-          reason: `Cannot edit ${operation.path}; Overleaf selected the file but the editor content did not finish loading. Please retry after the file finishes opening.`
-        };
-      }
-      openedEditorText = ready.text;
+    const editorReady = await ensureEditorReadyForOperation(operation, options.baseFileLookup, currentPath);
+    if (!editorReady.ok) {
+      return editorReady;
     }
 
     const trackReviewingChanges = options.trackReviewingChanges === true;
     const trackedBefore = trackReviewingChanges
       ? collectTrackedChangeRefsForPaths(collectOperationPaths([operation]))
       : [];
-    let current = openedEditorText ?? readActiveEditorText();
+    let current = editorReady.text;
     let freshness = window.CodexOverleafStaleGuard?.checkOperationFreshness(
       operation,
       current,
@@ -1065,6 +1059,87 @@
       expectedLength: String(expected || '').length,
       actualLength: String(actual || '').length
     };
+  }
+
+  async function ensureEditorReadyForOperation(operation, baseFileLookup, initialActivePath) {
+    if (!operation?.path) {
+      return {
+        ok: true,
+        text: readActiveEditorText()
+      };
+    }
+    const filePath = normalizeSafeProjectPath(operation.path);
+    if (!filePath) {
+      return invalidProjectPathResult('operation path');
+    }
+
+    const currentText = readActiveEditorText();
+    if (initialActivePath === filePath && editorContentMatchesBase(filePath, currentText, baseFileLookup)) {
+      return {
+        ok: true,
+        text: currentText
+      };
+    }
+
+    const previousEditorIdentity = getActiveEditorIdentity();
+    const opened = await openFileByPath(filePath, { force: initialActivePath === filePath });
+    if (!opened.ok) {
+      return {
+        ok: false,
+        reason: `Cannot edit ${filePath}; active file is ${initialActivePath || 'unknown'}; ${opened.reason}`
+      };
+    }
+
+    return waitForEditorContentForPath(filePath, previousEditorIdentity, baseFileLookup, 3500);
+  }
+
+  async function waitForEditorContentForPath(filePath, previousEditorIdentity, baseFileLookup, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    let lastText = readActiveEditorText();
+    let lastActivePath = getActiveFilePath();
+    while (Date.now() < deadline) {
+      lastActivePath = getActiveFilePath();
+      lastText = readActiveEditorText();
+      const activeFileMatches = lastActivePath === filePath;
+      const identityChanged = !previousEditorIdentity || activeEditorIdentityChanged(previousEditorIdentity);
+      const baseMatches = editorContentMatchesBase(filePath, lastText, baseFileLookup);
+      if (activeFileMatches && baseMatches && identityChanged) {
+        return {
+          ok: true,
+          text: lastText
+        };
+      }
+      if (activeFileMatches && identityChanged && hasBaseFileContent(filePath, baseFileLookup) && !baseMatches) {
+        return {
+          ok: false,
+          code: 'stale_snapshot',
+          reason: `${filePath} 在任务执行期间被你或协作者改过，Codex 没有覆盖它。请查看差异后重试。`
+        };
+      }
+      await delay(100);
+    }
+    return {
+      ok: false,
+      code: 'editor_document_not_switched',
+      reason: `Cannot edit ${filePath}; Overleaf selected ${lastActivePath || 'unknown file'} but the editor document did not load the target file. Codex did not write to avoid editing the wrong file.`,
+      lastActivePath,
+      lastLength: String(lastText || '').length
+    };
+  }
+
+  function editorContentMatchesBase(filePath, content, baseFileLookup) {
+    if (!hasBaseFileContent(filePath, baseFileLookup)) {
+      return true;
+    }
+    return normalizeEditorTextForComparison(content) === normalizeEditorTextForComparison(baseFileLookup.get(filePath));
+  }
+
+  function hasBaseFileContent(filePath, baseFileLookup) {
+    return Boolean(baseFileLookup && filePath && baseFileLookup.has(filePath));
+  }
+
+  function normalizeEditorTextForComparison(value) {
+    return String(value ?? '').replace(/\r\n/g, '\n');
   }
 
   async function waitForFreshEditorTextForOperation(operation, baseFileLookup, waitMs = 1500) {

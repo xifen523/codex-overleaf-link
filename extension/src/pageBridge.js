@@ -52,6 +52,7 @@
     window
   });
   writebackRouter = requirePageModule('CodexOverleafWritebackRouter').create({
+    activeEditorIdentityChanged,
     clickNode,
     collectElements,
     compact,
@@ -59,6 +60,7 @@
     delay,
     ensureEditing,
     ensureReviewing,
+    getActiveEditorIdentity,
     getReviewingState,
     invalidProjectPathResult,
     isEditingConfirmedForNoTraceUndo,

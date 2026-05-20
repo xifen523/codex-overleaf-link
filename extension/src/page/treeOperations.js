@@ -20,6 +20,10 @@
       : () => '';
     const NodeCtor = window.Node || (typeof Node !== 'undefined' ? Node : null);
     const EventTargetCtor = window.EventTarget || (typeof EventTarget !== 'undefined' ? EventTarget : null);
+    let internalDocPathByIdCache = null;
+    let internalDocPathByIdCacheTime = 0;
+    let domProjectPathCache = null;
+    let domProjectPathCacheTime = 0;
 
   function collectElements(selector, limit) {
     const result = [];
@@ -110,19 +114,27 @@
     return '';
   }
 
-  async function openFileByPath(filePath) {
-    if (getActiveFilePath() === filePath) {
+  async function openFileByPath(filePath, options = {}) {
+    const normalizedPath = normalizeSafeProjectPath(filePath);
+    if (!normalizedPath) {
+      return {
+        ok: false,
+        reason: 'Invalid file path'
+      };
+    }
+
+    if (options.force !== true && getActiveFilePath() === normalizedPath) {
       return {
         ok: true,
         method: 'already-active'
       };
     }
 
-    const node = findFileTreeNode(filePath);
+    const node = findFileTreeNode(normalizedPath);
     if (node) {
-      node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      dispatchFileTreeOpenClick(node);
       await delay(250);
-      const active = await waitForActiveFile(filePath, 2500);
+      const active = await waitForActiveFile(normalizedPath, 2500);
       if (active) {
         return {
           ok: true,
@@ -141,8 +153,8 @@
       }
 
       try {
-        await method.call(manager, filePath);
-        const active = await waitForActiveFile(filePath, 2500);
+        await method.call(manager, normalizedPath);
+        const active = await waitForActiveFile(normalizedPath, 2500);
         if (active) {
           return {
             ok: true,
@@ -156,21 +168,70 @@
 
     return {
       ok: false,
-      reason: `Could not open ${filePath}`
+      reason: `Could not open ${normalizedPath}`
     };
   }
 
+  function dispatchFileTreeOpenClick(node) {
+    const target = findFileTreeOpenClickTarget(node) || node;
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  }
+
+  function findFileTreeOpenClickTarget(node) {
+    const selectors = [
+      '.file-tree-entity-details',
+      '.item-name',
+      '.entity-name',
+      '.file-tree-entity-button',
+      '[role="button"]',
+      'button'
+    ];
+    for (const selector of selectors) {
+      let candidates = [];
+      try {
+        candidates = Array.from(node.querySelectorAll?.(selector) || []);
+      } catch (_error) {
+        candidates = [];
+      }
+      const candidate = candidates.find(item => !isFileTreeMenuControl(item));
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return node;
+  }
+
+  function isFileTreeMenuControl(node) {
+    const signal = [
+      node?.id || '',
+      node?.className || '',
+      node?.getAttribute?.('aria-label') || '',
+      node?.getAttribute?.('title') || '',
+      node?.textContent || ''
+    ].join(' ');
+    return /menu|more_vert|action/i.test(signal);
+  }
+
   function findFileTreeNode(filePath) {
-    const fileName = filePath.split('/').pop();
+    const normalizedPath = normalizeSafeProjectPath(filePath);
+    if (!normalizedPath) {
+      return null;
+    }
+    const fileName = normalizedPath.split('/').pop();
+    const allowBasenameFallback = !normalizedPath.includes('/');
+    const basenameMatches = [];
     const candidates = document.querySelectorAll('[role="treeitem"], [role="row"], .file-tree *, .project-tree *');
     for (const node of candidates) {
       const path = readProjectPathFromNode(node);
-      const text = node.textContent?.trim();
-      if (path === filePath || path === fileName || text === filePath || text === fileName) {
+      const text = normalizeDomText(node.textContent || '');
+      if (path === normalizedPath || text === normalizedPath) {
         return node;
       }
+      if (allowBasenameFallback && (path === fileName || text === fileName)) {
+        basenameMatches.push(node);
+      }
     }
-    return null;
+    return basenameMatches.length === 1 ? basenameMatches[0] : null;
   }
 
   function projectPathExists(filePath) {
@@ -467,14 +528,27 @@
   }
 
   function readProjectPathFromNode(node) {
-    const attrPath = [
+    const explicitAttrPath = [
       node.getAttribute('data-path'),
-      node.getAttribute('data-file-path'),
-      node.getAttribute('data-name')
+      node.getAttribute('data-file-path')
     ].map(normalizeProjectPathCandidate).find(Boolean);
+    if (explicitAttrPath) {
+      if (explicitAttrPath.includes('/')) {
+        return explicitAttrPath;
+      }
+      return resolveProjectPathFromDomDocId(node, explicitAttrPath)
+        || inferPathFromTreeAncestors(node, explicitAttrPath)
+        || (node.parentElement ? resolveProjectPathFromDomTree(node, explicitAttrPath) : '')
+        || explicitAttrPath;
+    }
+
+    const attrPath = normalizeProjectPathCandidate(node.getAttribute('data-name'));
     if (attrPath) {
       if (!attrPath.includes('/')) {
-        return inferPathFromTreeAncestors(node, attrPath) || attrPath;
+        return inferPathFromTreeAncestors(node, attrPath)
+          || resolveProjectPathFromDomDocId(node, attrPath)
+          || resolveProjectPathFromDomTree(node, attrPath)
+          || attrPath;
       }
       return attrPath;
     }
@@ -485,19 +559,184 @@
     ].map(normalizeProjectPathCandidate).find(Boolean);
     if (labelPath) {
       if (!labelPath.includes('/')) {
-        return inferPathFromTreeAncestors(node, labelPath) || labelPath;
+        return inferPathFromTreeAncestors(node, labelPath)
+          || resolveProjectPathFromDomDocId(node, labelPath)
+          || resolveProjectPathFromDomTree(node, labelPath)
+          || labelPath;
       }
       return labelPath;
     }
 
     const textPath = normalizeProjectPathCandidate(node.textContent || '');
     if (!textPath) {
-      return '';
+      const docIdPath = resolveProjectPathFromDomDocId(node);
+      const domTreePath = resolveProjectPathFromDomTree(node);
+      return docIdPath || domTreePath;
     }
     if (!textPath.includes('/')) {
-      return inferPathFromTreeAncestors(node, textPath) || textPath;
+      return inferPathFromTreeAncestors(node, textPath)
+        || resolveProjectPathFromDomDocId(node, textPath)
+        || resolveProjectPathFromDomTree(node, textPath)
+        || textPath;
     }
     return textPath;
+  }
+
+  function resolveProjectPathFromDomTree(node, pathHint = '') {
+    const cache = getDomProjectPathCache();
+    const normalizedHint = normalizeSafeProjectPath(pathHint);
+    let current = node || null;
+    for (let depth = 0; current && depth < 8; depth += 1) {
+      const resolvedPath = cache.get(current) || '';
+      if (resolvedPath && pathMatchesHint(resolvedPath, normalizedHint)) {
+        return resolvedPath;
+      }
+      current = current.parentElement;
+    }
+    return '';
+  }
+
+  function pathMatchesHint(path, hint) {
+    if (!hint) {
+      return true;
+    }
+    if (hint.includes('/')) {
+      return path === hint;
+    }
+    return (path.split('/').pop() || '') === hint;
+  }
+
+  function getDomProjectPathCache() {
+    const now = Date.now();
+    if (domProjectPathCache && now - domProjectPathCacheTime < 1000) {
+      return domProjectPathCache;
+    }
+
+    const pathByNode = new WeakMap();
+    const visited = new WeakSet();
+    const roots = uniqueNodes([
+      ...collectElements('.file-tree', 20),
+      ...collectElements('.project-tree', 20),
+      ...collectElements('.file-tree-inner', 20),
+      ...collectElements('[role="tree"]', 40)
+    ]);
+    for (const root of roots) {
+      walkDomProjectTree(root, '', 0, pathByNode, visited);
+    }
+
+    domProjectPathCache = pathByNode;
+    domProjectPathCacheTime = now;
+    return domProjectPathCache;
+  }
+
+  function walkDomProjectTree(node, folderPath, depth, pathByNode, visited) {
+    if (!node || depth > 60 || visited.has(node)) {
+      return;
+    }
+    visited.add(node);
+
+    const filePath = readFilePathFromTreeNodeSelf(node, folderPath);
+    const folderName = filePath ? '' : readFolderNameFromNode(node);
+    const nextFolderPath = folderName ? joinPath(folderPath, folderName) : folderPath;
+    if (filePath) {
+      pathByNode.set(node, filePath);
+    }
+
+    const children = Array.from(node.children || []);
+    let pendingSiblingFolderPath = '';
+    for (const child of children) {
+      const childFilePath = readFilePathFromTreeNodeSelf(child, nextFolderPath);
+      const childFolderName = childFilePath ? '' : readFolderNameFromNode(child);
+      const childIsNestedList = isNestedFolderListNode(child);
+      const childFolderPath = childIsNestedList && pendingSiblingFolderPath
+        ? pendingSiblingFolderPath
+        : nextFolderPath;
+      walkDomProjectTree(child, childFolderPath, depth + 1, pathByNode, visited);
+
+      if (childFolderName) {
+        pendingSiblingFolderPath = joinPath(nextFolderPath, childFolderName);
+      } else if (!childIsNestedList && childFilePath) {
+        pendingSiblingFolderPath = '';
+      } else if (childIsNestedList && pendingSiblingFolderPath) {
+        pendingSiblingFolderPath = '';
+      }
+    }
+  }
+
+  function isNestedFolderListNode(node) {
+    const className = String(node?.className || '');
+    const role = node?.getAttribute?.('role') || '';
+    return /file-tree-folder-list/i.test(className)
+      || (role === 'tree' && !/file-tree-list/i.test(className));
+  }
+
+  function readFilePathFromTreeNodeSelf(node, folderPath) {
+    const candidates = [
+      node.getAttribute?.('data-path'),
+      node.getAttribute?.('data-file-path'),
+      node.getAttribute?.('data-name'),
+      node.getAttribute?.('aria-label'),
+      node.getAttribute?.('title'),
+      node.textContent || ''
+    ];
+    for (const value of candidates) {
+      const path = normalizeProjectPathCandidate(value);
+      if (!path) {
+        continue;
+      }
+      const resolvedPath = path.includes('/') ? path : joinPath(folderPath, path);
+      if (window.CodexOverleafProjectFiles.isTextProjectPath(resolvedPath)) {
+        return resolvedPath;
+      }
+    }
+    return '';
+  }
+
+  function resolveProjectPathFromDomDocId(node, pathHint = '') {
+    const id = readDomDocId(node);
+    if (!id) {
+      return '';
+    }
+    const resolvedPath = getInternalDocPathByIdMap().get(id) || '';
+    if (!resolvedPath) {
+      return '';
+    }
+    const normalizedHint = normalizeSafeProjectPath(pathHint);
+    if (!normalizedHint) {
+      return resolvedPath;
+    }
+    if (normalizedHint.includes('/')) {
+      return resolvedPath === normalizedHint ? resolvedPath : '';
+    }
+    const resolvedName = resolvedPath.split('/').pop() || '';
+    return resolvedName === normalizedHint ? resolvedPath : '';
+  }
+
+  function getInternalDocPathByIdMap() {
+    const now = Date.now();
+    if (internalDocPathByIdCache && now - internalDocPathByIdCacheTime < 1000) {
+      return internalDocPathByIdCache;
+    }
+
+    const byId = new Map();
+    const ambiguousIds = new Set();
+    for (const record of collectInternalDocRecords({ includeWindowGlobals: false })) {
+      if (!record?.id || !window.CodexOverleafProjectFiles.isTextProjectPath(record.path)) {
+        continue;
+      }
+      const existingPath = byId.get(record.id);
+      if (existingPath && existingPath !== record.path) {
+        ambiguousIds.add(record.id);
+        continue;
+      }
+      byId.set(record.id, record.path);
+    }
+    for (const id of ambiguousIds) {
+      byId.delete(id);
+    }
+    internalDocPathByIdCache = byId;
+    internalDocPathByIdCacheTime = now;
+    return internalDocPathByIdCache;
   }
 
   function normalizeProjectPathCandidate(value) {

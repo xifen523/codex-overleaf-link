@@ -15,7 +15,6 @@
   const TEXT_EXTENSION_PATTERN = '(?:tex|bib|sty|cls|bst|bbx|cbx|lbx|cfg|def|clo|ist|txt|md|latex)';
   const REFERENCE_PREFIX_PATTERN = '(^|[\\s\\[({"\'])';
   const PATH_PATTERN = `([^\\s\\[\\](){}<>"'\`,;]+?\\.${TEXT_EXTENSION_PATTERN})`;
-  const MARKDOWN_LINK_PATTERN = /\[([^\]]*)\]\(([^)]*)\)/g;
   const BARE_LOCAL_PATH_PATTERN = /(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|private|var|tmp)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi;
 
   function parseLineReferencesFromText({ text, mode }) {
@@ -53,7 +52,7 @@
       return '';
     }
 
-    let sanitized = text.replace(MARKDOWN_LINK_PATTERN, (rawMarkdown, label, target) => {
+    let sanitized = replaceMarkdownLinks(text, (_rawMarkdown, label, target) => {
       const sanitizedLabel = sanitizeLocalReferenceText(label, {
         projectFiles,
         placeholderBrackets: false
@@ -81,6 +80,63 @@
       return sanitized;
     }
     return sanitized;
+  }
+
+  function replaceMarkdownLinks(text, replacer) {
+    const source = String(text || '');
+    let output = '';
+    let cursor = 0;
+
+    for (let index = 0; index < source.length; index += 1) {
+      if (source[index] !== '[') {
+        continue;
+      }
+      const closeLabel = source.indexOf(']', index + 1);
+      if (closeLabel === -1 || source[closeLabel + 1] !== '(') {
+        continue;
+      }
+      const targetStart = closeLabel + 2;
+      const targetEnd = findMarkdownTargetEnd(source, targetStart);
+      if (targetEnd === -1) {
+        continue;
+      }
+      output += source.slice(cursor, index);
+      output += replacer(
+        source.slice(index, targetEnd + 1),
+        source.slice(index + 1, closeLabel),
+        unescapeMarkdownTarget(source.slice(targetStart, targetEnd))
+      );
+      cursor = targetEnd + 1;
+      index = targetEnd;
+    }
+
+    return output + source.slice(cursor);
+  }
+
+  function findMarkdownTargetEnd(text, start) {
+    let depth = 0;
+    for (let index = start; index < text.length; index += 1) {
+      const char = text[index];
+      if (char === '\\') {
+        index += 1;
+        continue;
+      }
+      if (char === '(') {
+        depth += 1;
+        continue;
+      }
+      if (char === ')') {
+        if (depth === 0) {
+          return index;
+        }
+        depth -= 1;
+      }
+    }
+    return -1;
+  }
+
+  function unescapeMarkdownTarget(value) {
+    return String(value || '').replace(/\\([()\\])/g, '$1');
   }
 
   function isLocalPathLike(value) {
@@ -113,6 +169,8 @@
     if (!normalized) {
       return '';
     }
+
+    normalized = stripReferenceQueryAndHash(normalized);
 
     if (/^file:\/\//i.test(normalized)) {
       normalized = normalized.replace(/^file:\/\/\/?/i, '/');
@@ -147,6 +205,9 @@
     }
 
     const refs = [];
+    if (mode === 'markdown-link-target') {
+      collectMarkdownTargetReferences(text, mode, refs);
+    }
     collectColonReferences(text, mode, refs);
     collectLineWordReferences(text, mode, refs);
     collectChineseLineReferences(text, mode, refs);
@@ -161,6 +222,28 @@
         deduped.push(ref);
         return deduped;
       }, []);
+  }
+
+  function collectMarkdownTargetReferences(text, mode, refs) {
+    const normalizedText = stripReferenceQueryAndHash(String(text || '').trim());
+    const match = normalizedText.match(new RegExp(`^(.+?\\.${TEXT_EXTENSION_PATTERN}):(\\d+)(?::(\\d+))?$`, 'i'));
+    if (!match) {
+      return;
+    }
+    const line = parsePositiveInteger(match[2]);
+    const column = match[3] ? parsePositiveInteger(match[3]) : null;
+    if (!line || (match[3] && !column)) {
+      return;
+    }
+    refs.push({
+      rawText: text,
+      displayText: text,
+      rawPath: match[1],
+      line,
+      column,
+      source: mode,
+      index: 0
+    });
   }
 
   function collectColonReferences(text, mode, refs) {
@@ -296,6 +379,10 @@
     }
     return collectLineReferences(target, 'markdown-link-target')
       .some(ref => isLocalPathLike(ref.rawPath));
+  }
+
+  function stripReferenceQueryAndHash(value) {
+    return String(value || '').replace(/([:.]\d+(?::\d+)?)(?:[?#].*)$/, '$1');
   }
 
   function collectTextProjectFiles(projectFiles) {

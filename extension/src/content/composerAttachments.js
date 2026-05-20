@@ -9,10 +9,12 @@
     const limits = options.limits || {};
     const maxAttachments = Number(limits.maxAttachments) || 8;
     const maxAttachmentBytes = Number(limits.maxAttachmentBytes) || 12 * 1024 * 1024;
+    const maxAttachmentTotalBytes = Number(limits.maxAttachmentTotalBytes) || 32 * 1024 * 1024;
     const maxPreviewDataUrlChars = Number(limits.maxPreviewDataUrlChars) || 768 * 1024;
 
     let attachments = [];
     const pendingAttachmentKeys = new Set();
+    let pendingAttachmentBytes = 0;
 
     function handlePaste(event) {
       const files = collectFilesFromDataTransfer(event.clipboardData);
@@ -70,7 +72,16 @@
           break;
         }
         validateAttachmentFile(file);
+        const fileSize = Number(file.size) || 0;
+        if (!canReserveAttachmentBytes(fileSize)) {
+          appendPlainLog(tx(
+            `Attachment total limit reached (${formatFileSize(maxAttachmentTotalBytes)}). Remove attachments or use smaller files.`,
+            `附件总大小已达上限（${formatFileSize(maxAttachmentTotalBytes)}）。请移除部分附件或使用更小的文件。`
+          ));
+          continue;
+        }
         pendingAttachmentKeys.add(dedupeKey);
+        pendingAttachmentBytes += fileSize;
         try {
           const dataUrl = await readFileAsDataUrl(file);
           const preview = await buildAttachmentPreviewData(file, dataUrl);
@@ -88,6 +99,7 @@
             attachments.push(attachment);
           }
         } finally {
+          pendingAttachmentBytes = Math.max(0, pendingAttachmentBytes - fileSize);
           pendingAttachmentKeys.delete(dedupeKey);
         }
       }
@@ -147,6 +159,14 @@
       const key = String(dedupeKey || '');
       return pendingAttachmentKeys.has(key) ||
         attachments.some(attachment => buildAttachmentDedupeKey(attachment) === key);
+    }
+
+    function canReserveAttachmentBytes(size) {
+      return getCommittedAttachmentBytes() + pendingAttachmentBytes + size <= maxAttachmentTotalBytes;
+    }
+
+    function getCommittedAttachmentBytes() {
+      return attachments.reduce((total, attachment) => total + (Number(attachment.size) || 0), 0);
     }
 
     function validateAttachmentFile(file) {
@@ -215,6 +235,11 @@
       handleDragLeave,
       handleDrop,
       addFiles,
+      getAttachmentByteUsage: () => ({
+        committed: getCommittedAttachmentBytes(),
+        pending: pendingAttachmentBytes,
+        limit: maxAttachmentTotalBytes
+      }),
       getAttachmentsForRun,
       createRunAttachmentSnapshots,
       renderComposerAttachments,

@@ -3,6 +3,7 @@
 
   const ROOT_CLASS = 'codex-overleaf-panel-mounted';
   const RESIZE_CLASS = 'codex-overleaf-panel-resizing';
+  const COMPACT_CLASS = 'codex-overleaf-panel-compact';
 
   function create(options = {}) {
     const doc = options.document || document;
@@ -16,6 +17,7 @@
       minWidth: options.minWidth || 340,
       maxWidth: options.maxWidth || 760,
       pageMinWidth: options.pageMinWidth || 520,
+      lastDesktopWidth: options.initialWidth || options.defaultWidth || 380,
       listeners: [],
       document: doc,
       window: options.window || window
@@ -64,8 +66,14 @@
     bind(instance, panelEl.querySelector('[data-panel-resize-handle]'), 'pointerdown', event => startResize(instance, event));
     bind(instance, panelEl.querySelector('[data-panel-resize-handle]'), 'dblclick', event => {
       event?.preventDefault?.();
+      if (isCompactViewport(instance)) {
+        return;
+      }
       const width = setWidth(instance, instance.defaultWidth, { notify: false });
       callbacks.onWidthChange?.(width, { persist: true });
+    });
+    bind(instance, instance.window, 'resize', () => {
+      setWidth(instance, instance.lastDesktopWidth || instance.defaultWidth, { notify: true, persist: false });
     });
 
     setWidth(instance, options.initialWidth || instance.defaultWidth, { notify: false });
@@ -96,6 +104,9 @@
       return;
     }
     event.preventDefault();
+    if (isCompactViewport(instance)) {
+      return;
+    }
     const doc = instance.document;
     const startX = event.clientX;
     const startWidth = instance.panelEl?.getBoundingClientRect?.().width || instance.defaultWidth;
@@ -125,15 +136,29 @@
       return 0;
     }
     const nextWidth = clampWidth(instance, width);
+    const compact = updateCompactMode(instance);
     instance.document.documentElement.style.setProperty('--codex-overleaf-panel-width', `${nextWidth}px`);
+    if (!compact) {
+      instance.lastDesktopWidth = nextWidth;
+    }
     if (options.notify !== false) {
-      instance.callbacks.onWidthChange?.(nextWidth, { persist: options.persist !== false });
+      instance.callbacks.onWidthChange?.(nextWidth, { persist: !compact && options.persist !== false });
     }
     return nextWidth;
   }
 
   function clampWidth(instance, width) {
     const viewportWidth = Number(instance.window?.innerWidth);
+    if (isCompactViewport(instance)) {
+      const overlayMax = Number.isFinite(viewportWidth)
+        ? Math.max(240, viewportWidth - 24)
+        : instance.minWidth;
+      const numericCompactWidth = Number(width);
+      const compactWidth = Number.isFinite(numericCompactWidth)
+        ? numericCompactWidth
+        : instance.lastDesktopWidth || instance.defaultWidth;
+      return Math.round(Math.min(instance.maxWidth, overlayMax, Math.max(Math.min(instance.minWidth, overlayMax), compactWidth)));
+    }
     const viewportMax = Number.isFinite(viewportWidth)
       ? Math.max(instance.minWidth, viewportWidth - instance.pageMinWidth)
       : instance.maxWidth;
@@ -145,11 +170,25 @@
     return Math.round(Math.min(maxWidth, Math.max(instance.minWidth, numericWidth)));
   }
 
+  function isCompactViewport(instance) {
+    const viewportWidth = Number(instance.window?.innerWidth);
+    return Number.isFinite(viewportWidth) && viewportWidth < instance.minWidth + instance.pageMinWidth;
+  }
+
+  function updateCompactMode(instance) {
+    const compact = isCompactViewport(instance);
+    instance.document.documentElement.classList.toggle(COMPACT_CLASS, compact);
+    if (!compact) {
+      instance.document.documentElement.classList.remove(COMPACT_CLASS);
+    }
+    return compact;
+  }
+
   function setVisible(panelEl, visible) {
     panelEl?.classList?.toggle('is-open', Boolean(visible));
     document.documentElement.classList.toggle(ROOT_CLASS, Boolean(visible));
     if (!visible) {
-      document.documentElement.classList.remove(RESIZE_CLASS);
+      document.documentElement.classList.remove(RESIZE_CLASS, COMPACT_CLASS);
     }
   }
 
@@ -179,7 +218,7 @@
       target.removeEventListener?.(type, listener, options);
     }
     instance.panelEl?.remove?.();
-    instance.document.documentElement.classList.remove(ROOT_CLASS, RESIZE_CLASS);
+    instance.document.documentElement.classList.remove(ROOT_CLASS, RESIZE_CLASS, COMPACT_CLASS);
   }
 
   window.CodexOverleafPanelRenderer = {

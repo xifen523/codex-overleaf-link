@@ -231,6 +231,56 @@ function loadCreateDiffReviewElementForTest(options = {}) {
   return createDiffReviewElement;
 }
 
+test('content runtime guards duplicate initialization and exposes fail-closed state', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+
+  assert.match(contentScript, /__codexOverleafContentRuntimeInstalled/);
+  assert.match(contentScript, /__codexOverleafContentRuntimeState/);
+  assert.match(contentScript, /stale-panel-before-runtime-init/);
+  assert.match(contentScript, /async-init-failed/);
+  assert.match(contentScript, /alreadyInstalled:\s*true/);
+});
+
+test('panel renderer has compact overlay behavior for narrow viewports', () => {
+  const renderer = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/panelRenderer.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+
+  assert.match(renderer, /codex-overleaf-panel-compact/);
+  assert.match(renderer, /viewportWidth < instance\.minWidth \+ instance\.pageMinWidth/);
+  assert.match(renderer, /persist:\s*!compact && options\.persist !== false/);
+  assert.match(renderer, /isCompactViewport\(instance\)/);
+  assert.match(css, /codex-overleaf-panel-mounted:not\(\.codex-overleaf-panel-compact\) body/);
+  assert.match(css, /max-height:\s*calc\(100vh - 24px\)/);
+  assert.match(css, /codex-panel-resize-handle[\s\S]*display:\s*none/);
+});
+
+test('composer attachments enforce a total raw byte limit before reads', () => {
+  const attachments = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerAttachments.js'),
+    'utf8'
+  );
+  const runtime = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+
+  assert.match(runtime, /MAX_COMPOSER_ATTACHMENT_TOTAL_BYTES = 32 \* 1024 \* 1024/);
+  assert.match(attachments, /maxAttachmentTotalBytes/);
+  assert.match(attachments, /canReserveAttachmentBytes\(fileSize\)/);
+  assert.match(attachments, /pendingAttachmentBytes \+= fileSize/);
+  assert.match(attachments, /pendingAttachmentBytes = Math\.max\(0, pendingAttachmentBytes - fileSize\)/);
+  assert.match(attachments, /readFileAsDataUrl\(file\)/);
+});
+
 test('composer defaults to English task modes and keeps Chinese translations available', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),

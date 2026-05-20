@@ -4,6 +4,23 @@
   function init() {
   'use strict';
 
+  const RUNTIME_INSTALLED_FLAG = '__codexOverleafContentRuntimeInstalled';
+  const RUNTIME_STATE_KEY = '__codexOverleafContentRuntimeState';
+  if (root[RUNTIME_INSTALLED_FLAG]) {
+    return root[RUNTIME_STATE_KEY] || { ok: true, alreadyInstalled: true };
+  }
+  if (root.document?.getElementById?.('codex-overleaf-panel')) {
+    const result = {
+      ok: false,
+      initFailed: true,
+      alreadyInstalled: true,
+      errorCode: 'stale-panel-before-runtime-init'
+    };
+    root[RUNTIME_INSTALLED_FLAG] = true;
+    root[RUNTIME_STATE_KEY] = result;
+    return result;
+  }
+
   const PANEL_ID = 'codex-overleaf-panel';
   const LEGACY_STORAGE_KEY = 'codexOverleafPanelState';
   const RUN_PROJECT_SYNC_MAX_AGE_MS = 30000;
@@ -91,6 +108,7 @@
   const SensitiveScan = window.CodexOverleafSensitiveScan;
   const AuditRecords = window.CodexOverleafAuditRecords;
   const MAX_COMPOSER_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+  const MAX_COMPOSER_ATTACHMENT_TOTAL_BYTES = 32 * 1024 * 1024;
   const MAX_COMPOSER_ATTACHMENTS = 8;
   const MAX_ATTACHMENT_PREVIEW_DATA_URL_CHARS = 768 * 1024;
   const composerAttachmentController = window.CodexOverleafComposerAttachments.createComposerAttachmentController({
@@ -100,6 +118,7 @@
     appendPlainLog,
     limits: {
       maxAttachmentBytes: MAX_COMPOSER_ATTACHMENT_BYTES,
+      maxAttachmentTotalBytes: MAX_COMPOSER_ATTACHMENT_TOTAL_BYTES,
       maxAttachments: MAX_COMPOSER_ATTACHMENTS,
       maxPreviewDataUrlChars: MAX_ATTACHMENT_PREVIEW_DATA_URL_CHARS
     }
@@ -211,6 +230,9 @@
     projectId: ''
   };
 
+  root[RUNTIME_INSTALLED_FLAG] = true;
+  root[RUNTIME_STATE_KEY] = { ok: true, alreadyInstalled: false };
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'codex-overleaf/open-panel') {
       ensurePanelOpen();
@@ -236,7 +258,16 @@
   });
 
   exposeSmokeHelper();
-  init();
+  init().catch(error => {
+    root[RUNTIME_STATE_KEY] = {
+      ok: false,
+      initFailed: true,
+      alreadyInstalled: true,
+      errorCode: 'async-init-failed',
+      message: error?.message || String(error)
+    };
+    throw error;
+  });
 
   async function init() {
     storageKey = getProjectStorageKey(LEGACY_STORAGE_KEY, window.location.href);

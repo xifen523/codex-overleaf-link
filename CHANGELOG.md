@@ -1,5 +1,39 @@
 # Changelog
 
+## v1.2.6 - 2026-05-20
+
+Release metadata alignment patch for v1.2.6 packaging, compatibility, and release tracking surfaces, plus a nested Overleaf file writeback safety fix.
+
+### Fixed
+
+- Fixed nested Overleaf file-tree path resolution for folder-list DOM layouts where a folder row and its child file list are siblings instead of DOM ancestors.
+- Hardened writeback so Codex verifies the active CodeMirror document belongs to the requested project-relative path before applying edits.
+- Forced a target-file reopen when the file tree selected path and the active editor document are out of sync, preventing edits intended for files such as `example/test.tex` from being applied to `main.tex`.
+
+### Changed
+
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.2.6` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.2.6.zip`, `codex-overleaf-native-host-v1.2.6.tar.gz`, and `codex-overleaf-link-1.2.6.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.2.6 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.2.6 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.2.6 -- uninstall-native`.
+
+## v1.2.1 - 2026-05-15
+
+Stability patch for the public v1.2 distribution path.
+
+### Changed
+
+- Hardened content runtime initialization against duplicate injection on long-lived Overleaf tabs.
+- Added compact overlay panel behavior for narrow browser windows so the Overleaf editor is not squeezed below a usable width.
+- Hardened the tag release workflow to build and verify GitHub Release artifacts before npm publication, with retrying npm visibility checks.
+- Updated uninstall documentation to lead with npm-first native host commands.
+- Added a total composer attachment size limit while preserving the existing per-file and count limits.
+- Expanded line reference handling for complex Markdown/local path cases while preserving local path sanitization.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.2.1 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.2.1 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.2.1 -- uninstall-native`.
+
 ## v1.2.0 - 2026-05-13
 
 Release metadata alignment patch for v1.2 packaging, compatibility, and release tracking surfaces.

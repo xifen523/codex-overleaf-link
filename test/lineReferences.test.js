@@ -143,6 +143,33 @@ test('parses markdown label and target references with source mode preserved', (
   );
 });
 
+test('parses markdown file targets with spaces, parentheses, query, and hash suffixes', () => {
+  assert.deepEqual(
+    simplifyRefs(parseLineReferencesFromText({
+      text: 'file:///Users/Alice/path with space/(paper)/main.tex:12#L12',
+      mode: 'markdown-link-target'
+    })),
+    [
+      {
+        rawText: 'file:///Users/Alice/path with space/(paper)/main.tex:12#L12',
+        displayText: 'file:///Users/Alice/path with space/(paper)/main.tex:12#L12',
+        rawPath: 'file:///Users/Alice/path with space/(paper)/main.tex',
+        line: 12,
+        column: null,
+        source: 'markdown-link-target'
+      }
+    ]
+  );
+
+  assert.equal(
+    resolveProjectReference({
+      rawPath: 'file:///Users/Alice/path%20with%20space/(paper)/main.tex',
+      projectFiles
+    })?.path,
+    'main.tex'
+  );
+});
+
 test('normalizes reference paths and detects local path forms', () => {
   assert.equal(normalizeReferencePath('@./sections\\intro.tex'), 'sections/intro.tex');
   assert.equal(normalizeReferencePath('/Users/Alice/workspace/main.tex'), 'Users/Alice/workspace/main.tex');
@@ -240,4 +267,25 @@ test('sanitizes markdown local labels and targets when unresolved', () => {
   assert.equal(sanitized.includes('workspace'), false);
   assert.equal(sanitized.includes('file://'), false);
   assert.match(sanitized, /\[local path:12\]/);
+});
+
+test('sanitizes markdown file targets with balanced parentheses when resolved', () => {
+  assert.equal(
+    sanitizeLocalReferences(
+      '[source](file:///Users/Alice/path with space/(paper)/main.tex:12)',
+      { projectFiles, context: 'render' }
+    ),
+    '[source]'
+  );
+});
+
+test('fails closed for malformed or undecodable local markdown targets', () => {
+  for (const value of [
+    '[source](file:///Users/Alice/(paper/main.tex:12',
+    '[source](file:///Users/Alice/%E0%A4%A/main.tex:12)',
+    '[source](file:///C:/Users/Alice/workspace/missing.tex:12?token=secret)'
+  ]) {
+    const sanitized = sanitizeLocalReferences(value, { projectFiles, context: 'render' });
+    assert.equal(/Users|workspace|file:|secret/.test(sanitized), false);
+  }
 });

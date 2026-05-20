@@ -348,13 +348,13 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   fs.writeFileSync(path.join(rootDir, 'scripts/install-native-host.mjs'), '#!/usr/bin/env node\n');
 }
 
-test('CHANGELOG documents the current v1.2.0 release metadata alignment in release tooling format', async () => {
+test('CHANGELOG documents the current v1.2.6 release metadata alignment in release tooling format', async () => {
   const version = readJson(path.join(repoRoot, 'package.json')).version;
   const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
-  const heading = `## v${version} - 2026-05-13`;
+  const heading = `## v${version} - 2026-05-20`;
   const start = changelog.indexOf(heading);
   assert.notEqual(start, -1, `CHANGELOG.md should contain ${heading}`);
-  assert.equal(changelog.includes(`## [${version}] - 2026-05-13`), false);
+  assert.equal(changelog.includes(`## [${version}] - 2026-05-20`), false);
   assert.equal(changelog.indexOf(heading, start + heading.length), -1, 'CHANGELOG.md should not duplicate the current release heading');
 
   const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
@@ -400,7 +400,7 @@ test('release workflow only publishes semver-like version tags', () => {
   assert.doesNotMatch(triggerSection, /^\s+schedule:/m);
 });
 
-test('release workflow grants publish permission and runs release checks before building', () => {
+test('release workflow grants publish permission and builds/verifies artifacts before npm publish', () => {
   const workflow = readReleaseWorkflow();
   const permissionsSection = getTopLevelYamlSection(workflow, 'permissions');
 
@@ -415,9 +415,10 @@ test('release workflow grants publish permission and runs release checks before 
     'run: npm test',
     'run: npm run verify:release',
     'name: Verify release tag matches package version',
+    'name: Build release artifacts',
+    'name: Verify release artifact contents',
     'name: Publish npm package',
     'name: Verify npm package is published',
-    'run: npm run build:release',
     'uses: softprops/action-gh-release@v2'
   ]);
 });
@@ -433,9 +434,10 @@ test('release workflow fails early when tag and package version differ', () => {
   assertContainsInOrder(workflow, [
     'run: npm run verify:release',
     'name: Verify release tag matches package version',
+    'name: Build release artifacts',
+    'name: Verify release artifact contents',
     'name: Publish npm package',
-    'name: Verify npm package is published',
-    'run: npm run build:release'
+    'name: Verify npm package is published'
   ]);
 });
 
@@ -1482,4 +1484,34 @@ test('extension zip includes loadable extension files and excludes repository/na
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('release workflow builds and verifies artifacts before npm publish with retrying npm visibility', () => {
+  const workflow = readReleaseWorkflow();
+
+  assertContainsInOrder(workflow, [
+    'name: Verify release metadata',
+    'name: Verify release tag matches package version',
+    'name: Build release artifacts',
+    'name: Verify release artifact contents',
+    'name: Publish npm package',
+    'name: Verify npm package is published',
+    'name: Publish GitHub release'
+  ]);
+  assert.match(workflow, /npm run verify:release-artifacts/);
+  assert.match(workflow, /for attempt in 1 2 3 4 5 6 7 8 9 10 11 12;/);
+  assert.match(workflow, /sleep 5/);
+  assert.match(workflow, /overwrite_files:\s*true/);
+});
+
+test('release artifact verifier is wired as an npm script and checks archives', () => {
+  const packageJson = readJson(path.join(repoRoot, 'package.json'));
+  const verifier = readText(path.join(repoRoot, 'scripts/verify-release-artifacts.mjs'));
+
+  assert.equal(packageJson.scripts['verify:release-artifacts'], 'node scripts/verify-release-artifacts.mjs');
+  assert.match(verifier, /codex-overleaf-link-extension-v\$\{version\}\.zip/);
+  assert.match(verifier, /codex-overleaf-native-host-v\$\{version\}\.tar\.gz/);
+  assert.match(verifier, /verifyPackagePaths/);
+  assert.match(verifier, /SHA256SUMS/);
+  assert.match(verifier, /FORBIDDEN_ARCHIVE_PATTERNS/);
 });

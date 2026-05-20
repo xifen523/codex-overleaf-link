@@ -342,6 +342,35 @@ test('page bridge keeps safe nested operation paths working', async () => {
   assert.equal(bridge.getFile('sections/main.tex'), 'beta');
 });
 
+test('page bridge opens nested same-basename files before writeback', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'test.tex',
+    basenameOnlyTreeLabels: true,
+    exposeInternalDocTree: true,
+    files: {
+      'test.tex': 'root alpha',
+      'example/test.tex': 'nested alpha'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'test.tex', content: 'root alpha' },
+      { path: 'example/test.tex', content: 'nested alpha' }
+    ],
+    operations: [
+      { type: 'edit', path: 'example/test.tex', find: 'nested', replace: 'initialized' }
+    ]
+  });
+
+  assert.equal(result.ok, true, result.error || JSON.stringify(result));
+  assert.equal(result.applied.length, 1);
+  assert.equal(result.skipped.length, 0);
+  assert.equal(bridge.getFile('test.tex'), 'root alpha');
+  assert.equal(bridge.getFile('example/test.tex'), 'initialized alpha');
+  assert.equal(bridge.getEditorPath(), 'example/test.tex');
+});
+
 test('page bridge rejects spoofed mutating requests without the content capability', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -2109,7 +2138,9 @@ function createPageBridgeHarness({
   editorUndoTargets = {},
   initialEditorPath = activePath,
   initialEditorCatchUpDelayMs = null,
-  editorSwitchDelayMs = 0
+  editorSwitchDelayMs = 0,
+  basenameOnlyTreeLabels = false,
+  exposeInternalDocTree = false
 }) {
   const fileMap = new Map(Object.entries(files));
   const trackedChanges = [];
@@ -2208,6 +2239,7 @@ function createPageBridgeHarness({
     _ide: {
       editorView: createEditorView(),
       fileTreeManager: createFileTreeManager(),
+      ...(exposeInternalDocTree ? { rootFolder: buildInternalDocTree(Array.from(fileMap.keys())) } : {}),
       ...(internalReviewingState === undefined ? {} : { reviewing: internalReviewingState })
     },
     addEventListener(event, callback) {
@@ -2713,12 +2745,19 @@ function createPageBridgeHarness({
   }
 
   function makeTreeNode(filePath) {
+    const label = basenameOnlyTreeLabels
+      ? String(filePath || '').split('/').filter(Boolean).pop() || filePath
+      : filePath;
+    const docId = makeStableDocId(filePath);
     return {
-      textContent: filePath,
+      textContent: label,
       parentElement: null,
       getAttribute(attribute) {
         if (attribute === 'data-path' || attribute === 'aria-label' || attribute === 'title') {
-          return filePath;
+          return label;
+        }
+        if (attribute === 'data-entity-id' || attribute === 'data-doc-id' || attribute === 'data-id') {
+          return docId;
         }
         return '';
       },
@@ -2734,5 +2773,41 @@ function createPageBridgeHarness({
         return true;
       }
     };
+  }
+
+  function buildInternalDocTree(paths) {
+    const root = { name: '', folders: [], docs: [] };
+    const folders = new Map([['', root]]);
+    for (const filePath of paths) {
+      const parts = String(filePath || '').split('/').filter(Boolean);
+      const fileName = parts.pop();
+      if (!fileName) {
+        continue;
+      }
+      let folderPath = '';
+      let parent = root;
+      for (const folderName of parts) {
+        folderPath = folderPath ? `${folderPath}/${folderName}` : folderName;
+        if (!folders.has(folderPath)) {
+          const folder = { name: folderName, folders: [], docs: [] };
+          folders.set(folderPath, folder);
+          parent.folders.push(folder);
+        }
+        parent = folders.get(folderPath);
+      }
+      parent.docs.push({
+        name: fileName,
+        _id: makeStableDocId(filePath)
+      });
+    }
+    return root;
+  }
+
+  function makeStableDocId(filePath) {
+    let hash = 0;
+    for (const char of String(filePath || '')) {
+      hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
+    }
+    return hash.toString(16).padStart(24, '0').slice(0, 24);
   }
 }

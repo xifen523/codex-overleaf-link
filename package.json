@@ -1,6 +1,6 @@
 {
   "name": "codex-overleaf-link",
-  "version": "1.2.0",
+  "version": "1.2.6",
   "description": "Cross-platform Chrome bridge that connects Codex to the active Overleaf project.",
   "license": "MIT",
   "type": "commonjs",
@@ -19,6 +19,7 @@
     "benchmark:large": "node scripts/benchmark-large-project.mjs --gate",
     "smoke:extension": "node scripts/smoke-extension.mjs",
     "verify:release": "node scripts/verify-release.mjs",
+    "verify:release-artifacts": "node scripts/verify-release-artifacts.mjs",
     "build:release": "node scripts/build-release.mjs",
     "install:native": "node scripts/install-native-host.mjs",
     "uninstall:native": "node scripts/uninstall-native-host.mjs",

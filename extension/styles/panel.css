@@ -2,7 +2,7 @@
   --codex-overleaf-panel-width: 380px;
 }
 
-:root.codex-overleaf-panel-mounted body {
+:root.codex-overleaf-panel-mounted:not(.codex-overleaf-panel-compact) body {
   box-sizing: border-box;
   width: calc(100vw - var(--codex-overleaf-panel-width)) !important;
   max-width: calc(100vw - var(--codex-overleaf-panel-width)) !important;
@@ -24,6 +24,20 @@
   overflow: hidden;
 }
 
+:root.codex-overleaf-panel-compact body {
+  width: auto !important;
+  max-width: none !important;
+}
+
+:root.codex-overleaf-panel-compact #codex-overleaf-panel {
+  inset: 12px 12px 12px auto;
+  width: min(var(--codex-overleaf-panel-width), calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  height: auto;
+  max-height: calc(100vh - 24px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
 :root.codex-overleaf-panel-resizing,
 :root.codex-overleaf-panel-resizing * {
   cursor: col-resize !important;
@@ -38,6 +52,10 @@
   left: -4px;
   width: 8px;
   cursor: col-resize;
+}
+
+:root.codex-overleaf-panel-compact #codex-overleaf-panel .codex-panel-resize-handle {
+  display: none;
 }
 
 #codex-overleaf-panel .codex-panel-resize-handle::after {
