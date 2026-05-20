@@ -106,15 +106,18 @@ function verifyNativeTarball(filePath, errors) {
   const entries = listTarEntries(filePath);
   requireEntries(entries, ['package.json', 'install.sh', 'install.ps1'], 'native tarball', errors);
   assertNoForbiddenEntries(entries, 'native tarball', errors);
-  const invalid = entries.filter(entry => !(
-    /^(package\.json|package-lock\.json|README\.md|LICENSE|install\.sh|install\.ps1)$/.test(entry)
-    || /^native-host\/src\//.test(entry)
-    || /^extension\/src\/shared\//.test(entry)
-    || /^scripts\/(?:codex-json-agent|install-native-host|uninstall-native-host|verify-npm-package)\.mjs$/.test(entry)
-  ));
+  const invalid = entries.filter(entry => !isAllowedNativeTarballEntry(entry));
   if (invalid.length) {
     errors.push(`Native tarball contains entries outside the runtime allowlist:\n${invalid.map(entry => `  - ${entry}`).join('\n')}`);
   }
+}
+
+function isAllowedNativeTarballEntry(entry) {
+  return /^(package\.json|package-lock\.json|README\.md|LICENSE|install\.sh|install\.ps1)$/.test(entry)
+    || /^(native-host\/|native-host\/src\/|extension\/|extension\/src\/|extension\/src\/shared\/|scripts\/)$/.test(entry)
+    || /^native-host\/src\/.+/.test(entry)
+    || /^extension\/src\/shared\/.+/.test(entry)
+    || /^scripts\/(?:codex-json-agent|install-native-host|uninstall-native-host|verify-npm-package)\.mjs$/.test(entry);
 }
 
 function verifyNpmTarball(filePath, errors) {
