@@ -58,6 +58,7 @@
     undefined,
     getCurrentExtensionId()
   ) || 'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash -s -- --extension-id <chrome-extension-id>';
+  const PAGE_BRIDGE_SCRIPT_REVISION = '2026-05-21-editor-readiness-v10';
   const PAGE_BRIDGE_CAPABILITY = createPageBridgeCapability();
   const pageBridgeReady = injectPageBridge();
   const {
@@ -3643,7 +3644,7 @@
     });
 
     await callPageBridge('invalidateProjectSnapshot', {});
-    const freshProject = await callPageBridge('getProjectSnapshot', {
+    const freshProject = sanitizeRunProjectSnapshot(await callPageBridge('getProjectSnapshot', {
       force: true,
       maxAgeMs: 0,
       preferLightweight: true,
@@ -3654,7 +3655,7 @@
       zipOnly: true,
       zipTimeoutMs: RUN_SNAPSHOT_ZIP_TIMEOUT_MS,
       focusFiles: getAppliedOperationPaths(applied)
-    });
+    }));
     if (!freshProject?.files?.length || freshProject?.capabilities?.fullProjectSnapshot === false) {
       appendRunEvent({
         title: tx(
@@ -4715,7 +4716,7 @@
     mirrorPrefetchState.projectId = projectId;
     mirrorPrefetchState.lastAttemptAt = now;
     const inFlight = (async () => {
-      const project = await callPageBridge('getProjectSnapshot', {
+      const project = sanitizeRunProjectSnapshot(await callPageBridge('getProjectSnapshot', {
         force: false,
         maxAgeMs: 30000,
         preferLightweight: false,
@@ -4725,7 +4726,7 @@
         includeBinaryFiles: true,
         zipOnly: true,
         zipTimeoutMs: RUN_SNAPSHOT_ZIP_TIMEOUT_MS
-      });
+      }));
       if (getCurrentProjectId() !== projectId) {
         return { ok: false, skipped: true, reason: 'project_changed' };
       }
@@ -5558,8 +5559,9 @@
       zipTimeoutMs: RUN_SNAPSHOT_ZIP_TIMEOUT_MS,
       focusFiles: getActiveFocusFiles()
     });
-    if (project?.capabilities?.fullProjectSnapshot) {
-      return project;
+    const sanitizedProject = sanitizeRunProjectSnapshot(project);
+    if (sanitizedProject?.capabilities?.fullProjectSnapshot) {
+      return sanitizedProject;
     }
     const pageStateProject = await callPageBridge('getProjectSnapshot', {
       force: true,
@@ -5571,10 +5573,36 @@
       includeBinaryFiles: false,
       focusFiles: getActiveFocusFiles()
     });
-    if (pageStateProject?.capabilities?.fullProjectSnapshot) {
-      return pageStateProject;
+    const sanitizedPageStateProject = sanitizeRunProjectSnapshot(pageStateProject);
+    if (sanitizedPageStateProject?.capabilities?.fullProjectSnapshot) {
+      return sanitizedPageStateProject;
     }
-    return project;
+    return sanitizedProject;
+  }
+
+  function sanitizeRunProjectSnapshot(project) {
+    if (!project || typeof project !== 'object') {
+      return project;
+    }
+    const activePath = normalizeSnapshotPath(project.activePath || '');
+    const files = Array.isArray(project.files) ? project.files : [];
+    const filePathSet = new Set(files.map(file => normalizeSnapshotPath(file?.path || '')).filter(Boolean));
+    const activePathKnown = activePath && filePathSet.has(activePath);
+    if (!activePath || activePathKnown) {
+      return project;
+    }
+    return {
+      ...project,
+      activePath: '',
+      files: files.map(file => file?.active ? { ...file, active: false } : file),
+      capabilities: {
+        ...(project.capabilities || {}),
+        diagnostics: {
+          ...(project.capabilities?.diagnostics || {}),
+          rejectedActivePath: project.activePath
+        }
+      }
+    };
   }
 
   // --- Warm Mirror Controller ---
@@ -6196,6 +6224,8 @@
         if (event.source !== window
           || event.origin !== window.location.origin
           || event.data?.source !== 'codex-overleaf/page'
+          || event.data?.pageBridgeVersion !== CodexOverleafCompatibility?.BUILD_TARGET_VERSION
+          || event.data?.pageBridgeRevision !== PAGE_BRIDGE_SCRIPT_REVISION
           || event.data.id !== id) {
           return;
         }
@@ -6237,6 +6267,7 @@
   async function injectPageBridge() {
     await injectScriptOnce('src/shared/reviewing.js', 'codex-overleaf-reviewing-script');
     await injectScriptOnce('src/shared/projectFiles.js', 'codex-overleaf-project-files-script');
+    await injectScriptOnce('src/shared/compatibility.js', 'codex-overleaf-compatibility-page-script');
     await injectScriptOnce('src/shared/staleGuard.js', 'codex-overleaf-stale-guard-script');
     await injectScriptOnce('src/shared/compileAdapter.js', 'codex-overleaf-compile-adapter-script');
     await injectScriptOnce('src/shared/governanceRules.js', 'codex-overleaf-governance-rules-script');
@@ -6248,10 +6279,10 @@
     await injectScriptOnce('src/page/overleafProjectSnapshot.js', 'codex-overleaf-project-snapshot-script');
     await injectOptionalOtDependencies();
     await injectScriptOnce('src/page/pageBridgeCapability.js', 'codex-overleaf-page-bridge-capability-script');
-    await injectScriptOnce('src/page/treeOperations.js', 'codex-overleaf-tree-operations-script');
+    await injectScriptOnce('src/page/treeOperations.js', 'codex-overleaf-tree-operations-script', { force: true });
     await injectScriptOnce('src/page/snapshotRouter.js', 'codex-overleaf-snapshot-router-script');
-    await injectScriptOnce('src/page/writebackRouter.js', 'codex-overleaf-writeback-router-script');
-    await injectScriptOnce('src/pageBridge.js', 'codex-overleaf-page-bridge-script');
+    await injectScriptOnce('src/page/writebackRouter.js', 'codex-overleaf-writeback-router-script', { force: true });
+    await injectScriptOnce('src/pageBridge.js', 'codex-overleaf-page-bridge-script', { force: true });
     await initializePageBridgeCapability();
   }
 
@@ -6264,12 +6295,14 @@
     }
   }
 
-  function injectScriptOnce(src, id) {
+  function injectScriptOnce(src, id, options = {}) {
     return new Promise((resolve, reject) => {
-      if (document.getElementById(id)) {
+      const existing = document.getElementById(id);
+      if (existing && options.force !== true) {
         resolve();
         return;
       }
+      existing?.remove?.();
       const script = document.createElement('script');
       const timeout = window.setTimeout(() => {
         cleanup();
@@ -9242,49 +9275,50 @@
     const key = result.reasonKey || '';
     const code = result.code || '';
     const filePath = result.reasonParams?.filePath || operation.path || operation.from || operation.to || '';
+    const withDebug = reason => appendApplyResultDebug(reason, result);
     if (key === 'missingBaseFile' || code === 'missing_base_file') {
       const target = filePath || tx('this file', '这个文件');
-      return tx(
+      return withDebug(tx(
         `${target} was not read when the task started. Codex did not overwrite it; refresh the project content and retry.`,
         `${target} 在任务开始时没有被 Codex 读到。Codex 没有覆盖它；请刷新项目内容后重试。`
-      );
+      ));
     }
     if (key === 'staleSnapshot' || code === 'stale_snapshot') {
       const target = filePath || tx('this file', '这个文件');
-      return tx(
+      return withDebug(tx(
         `${target} changed while Codex was working, so Codex did not overwrite it. Review the diff and retry.`,
         `${target} 在任务执行期间被你或协作者改过，Codex 没有覆盖它。请查看差异后重试。`
-      );
+      ));
     }
     if (key === 'stalePatchLocation') {
-      return tx(
+      return withDebug(tx(
         'The edit location no longer matches the current Overleaf content, so nothing was written. Rerun the task.',
         'Codex 要修改的位置已经无法和当前 Overleaf 内容对齐，所以没有写入。请重新运行任务。'
-      );
+      ));
     }
     if (key === 'stalePatchConflict' || code === 'stale_patch_range') {
-      return tx(
+      return withDebug(tx(
         'The exact edit location was changed by you or a collaborator, so Codex did not overwrite it. Review the diff and retry.',
         'Codex 要修改的具体位置已经被你或协作者改过，所以没有覆盖它。请查看差异后重试。'
-      );
+      ));
     }
     if (code === 'stale_patch') {
-      return tx(
+      return withDebug(tx(
         'This exact text changed since Codex read it, so nothing was written. Rerun after Codex reads the latest Overleaf content.',
         '这处内容已经和 Codex 读取时不同，所以没有写入。请重新运行，让 Codex 先读取你的最新 Overleaf 内容。'
-      );
+      ));
     }
     if (code === 'invalid_patch') {
-      return tx(
+      return withDebug(tx(
         'Codex produced an invalid local edit range, so nothing was written.',
         'Codex 生成的局部写入范围无效，所以没有写入。'
-      );
+      ));
     }
     if (code === 'write_verification_failed') {
-      return tx(
+      return withDebug(tx(
         'After writing, the editor content did not match Codex\'s expected result, so the write was not marked successful. Reload Overleaf and retry.',
         '写入后读回内容和 Codex 预期不一致，已停止把这次操作标记为成功。请刷新 Overleaf 后重试。'
-      );
+      ));
     }
     if (code === 'file_tree_verification_failed') {
       return tx(
@@ -9306,7 +9340,42 @@
         `${target} 在任务执行期间被你或协作者新建了，Codex 没有覆盖它。请查看差异后重试。`
       );
     }
-    return localizeVisibleReason(result.reason || result.error || result.code || tr('unknownReason'));
+    return withDebug(localizeVisibleReason(result.reason || result.error || result.code || tr('unknownReason')));
+  }
+
+  function appendApplyResultDebug(reason, result = {}) {
+    const debug = result.debug || result.diagnostics;
+    const text = formatApplyResultDebug(debug);
+    return text ? `${reason} [debug: ${text}]` : reason;
+  }
+
+  function formatApplyResultDebug(debug) {
+    if (!debug || typeof debug !== 'object') {
+      return '';
+    }
+    const parts = [];
+    const add = (key, value) => {
+      if (value === undefined || value === null || value === '') {
+        return;
+      }
+      parts.push(`${key}=${String(value)}`);
+    };
+    add('stage', debug.stage);
+    add('rev', debug.revision);
+    add('op', debug.operationPath);
+    add('active', debug.activePath);
+    add('initial', debug.initialActivePath);
+    add('last', debug.lastActivePath);
+    add('currentLen', debug.current?.length);
+    add('currentNorm', debug.current?.normalizedLength);
+    add('currentHash', debug.current?.hash);
+    add('baseKnown', debug.baseKnown);
+    add('baseLen', debug.base?.length);
+    add('baseNorm', debug.base?.normalizedLength);
+    add('baseHash', debug.base?.hash);
+    add('elapsed', debug.elapsedMs);
+    add('opened', debug.openedMethod);
+    return parts.join(', ');
   }
 
   function formatBridgeResultReason(result = {}, fallbackPath = '') {

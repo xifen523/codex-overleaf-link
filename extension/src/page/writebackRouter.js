@@ -15,6 +15,10 @@
     const normalizeSafeProjectPath = typeof deps.normalizeSafeProjectPath === 'function'
       ? deps.normalizeSafeProjectPath
       : fallbackNormalizeSafeProjectPath;
+    const writebackOpenSettleMs = Number.isFinite(Number(deps.writebackOpenSettleMs))
+      ? Math.max(0, Number(deps.writebackOpenSettleMs))
+      : 1200;
+    const diagnosticsRevision = String(deps.diagnosticsRevision || '');
 
     function invalidProjectPathResult(label = 'path') {
       return typeof deps.invalidProjectPathResult === 'function'
@@ -107,6 +111,21 @@
       return `${text.length}:${text.slice(0, 80)}:${text.slice(-80)}`;
     }
 
+    function contentFingerprint(content) {
+      const text = String(content ?? '');
+      let hash = 2166136261;
+      for (let index = 0; index < text.length; index += 1) {
+        hash ^= text.charCodeAt(index);
+        hash = Math.imul(hash, 16777619) >>> 0;
+      }
+      return {
+        length: text.length,
+        normalizedLength: normalizeEditorTextForComparison(text).length,
+        hash: hash.toString(16).padStart(8, '0'),
+        blank: text.trim().length === 0
+      };
+    }
+
     function replaceActiveEditorText(text) {
       return deps.replaceActiveEditorText?.(text) || { ok: false, reason: 'Editor adapter is unavailable' };
     }
@@ -160,6 +179,33 @@
       }
       const text = String(value || '').replace(/\s+/g, ' ').trim();
       return text.length > limit ? text.slice(0, limit - 3) + '...' : text;
+    }
+
+    function buildWritebackDebug(stage, operation, baseFileLookup, currentText, extra = {}) {
+      const filePath = normalizeSafeProjectPath(operation?.path || '');
+      const baseKnown = Boolean(baseFileLookup && filePath && baseFileLookup.has(filePath));
+      const baseContent = baseKnown ? baseFileLookup.get(filePath) : '';
+      return {
+        stage,
+        revision: diagnosticsRevision,
+        operationPath: filePath,
+        operationType: operation?.type || '',
+        activePath: getActiveFilePath(),
+        current: contentFingerprint(currentText),
+        baseKnown,
+        base: baseKnown ? contentFingerprint(baseContent) : null,
+        ...extra
+      };
+    }
+
+    function attachWritebackDebug(result, stage, operation, baseFileLookup, currentText, extra = {}) {
+      if (!result || typeof result !== 'object') {
+        return result;
+      }
+      return {
+        ...result,
+        debug: buildWritebackDebug(stage, operation, baseFileLookup, currentText, extra)
+      };
     }
 
     function normalizeTextPatches(patches, length) {
@@ -980,7 +1026,11 @@
     if (!freshness.ok) {
       const ready = await waitForFreshEditorTextForOperation(operation, options.baseFileLookup, 1500);
       if (!ready.ok) {
-        return freshness;
+        return attachWritebackDebug(freshness, 'stale_guard', operation, options.baseFileLookup, current, {
+          initialActivePath: currentPath,
+          editorReadyDebug: editorReady.debug || null,
+          waitFresh: ready
+        });
       }
       current = ready.text;
       freshness = { ok: true };
@@ -990,7 +1040,10 @@
     if (Array.isArray(operation.patches) && operation.patches.length) {
       const patched = applyTextPatches(current, operation.patches);
       if (!patched.ok) {
-        return patched;
+        return attachWritebackDebug(patched, 'apply_text_patches', operation, options.baseFileLookup, current, {
+          initialActivePath: currentPath,
+          editorReadyDebug: editorReady.debug || null
+        });
       }
       nextContent = patched.text;
     } else if (typeof operation.replaceAll === 'string') {
@@ -1019,7 +1072,10 @@
 
     const verified = await verifyActiveEditorText(nextContent, operation.path);
     if (!verified.ok) {
-      return verified;
+      return attachWritebackDebug(verified, 'write_verification', operation, options.baseFileLookup, readActiveEditorText(), {
+        initialActivePath: currentPath,
+        editorReadyDebug: editorReady.debug || null
+      });
     }
     const trackedChanges = [];
     if (trackReviewingChanges) {
@@ -1074,46 +1130,56 @@
     }
 
     const currentText = readActiveEditorText();
-    if (initialActivePath === filePath && editorContentMatchesBase(filePath, currentText, baseFileLookup)) {
-      return {
-        ok: true,
-        text: currentText
-      };
-    }
-
     const previousEditorIdentity = getActiveEditorIdentity();
+    const previousSignature = contentSignature(currentText);
     const opened = await openFileByPath(filePath, { force: initialActivePath === filePath });
     if (!opened.ok) {
       return {
         ok: false,
+        code: 'file_open_failed',
+        debug: buildWritebackDebug('open_file_failed', operation, baseFileLookup, currentText, {
+          initialActivePath,
+          opened
+        }),
         reason: `Cannot edit ${filePath}; active file is ${initialActivePath || 'unknown'}; ${opened.reason}`
       };
     }
 
-    return waitForEditorContentForPath(filePath, previousEditorIdentity, baseFileLookup, 3500);
+    return waitForEditorContentForPath(filePath, previousEditorIdentity, baseFileLookup, 9000, {
+      initialActivePath,
+      previousSignature,
+      forceSettledOpen: true,
+      openedMethod: opened.method || ''
+    });
   }
 
-  async function waitForEditorContentForPath(filePath, previousEditorIdentity, baseFileLookup, timeoutMs) {
+  async function waitForEditorContentForPath(filePath, previousEditorIdentity, baseFileLookup, timeoutMs, options = {}) {
     const deadline = Date.now() + timeoutMs;
+    const startedAt = Date.now();
+    const minSettleMs = options.forceSettledOpen ? writebackOpenSettleMs : 0;
     let lastText = readActiveEditorText();
     let lastActivePath = getActiveFilePath();
     while (Date.now() < deadline) {
       lastActivePath = getActiveFilePath();
       lastText = readActiveEditorText();
       const activeFileMatches = lastActivePath === filePath;
-      const identityChanged = !previousEditorIdentity || activeEditorIdentityChanged(previousEditorIdentity);
-      const baseMatches = editorContentMatchesBase(filePath, lastText, baseFileLookup);
-      if (activeFileMatches && baseMatches && identityChanged) {
+      const identityChanged = Boolean(previousEditorIdentity) && activeEditorIdentityChanged(previousEditorIdentity);
+      const baseComparison = compareEditorTextToBase(filePath, lastText, baseFileLookup);
+      const baseMatches = baseComparison.matches;
+      const settledLongEnough = Date.now() - startedAt >= minSettleMs;
+      const switchConfirmed = identityChanged
+        || (options.initialActivePath === filePath
+          && options.previousSignature
+          && contentSignature(lastText) === options.previousSignature
+          && settledLongEnough);
+      const contentNoLongerLooksLikePreviousDocument = !options.previousSignature
+        || contentSignature(lastText) !== options.previousSignature
+        || baseMatches
+        || options.initialActivePath === filePath;
+      if (activeFileMatches && switchConfirmed && settledLongEnough && contentNoLongerLooksLikePreviousDocument) {
         return {
           ok: true,
           text: lastText
-        };
-      }
-      if (activeFileMatches && identityChanged && hasBaseFileContent(filePath, baseFileLookup) && !baseMatches) {
-        return {
-          ok: false,
-          code: 'stale_snapshot',
-          reason: `${filePath} 在任务执行期间被你或协作者改过，Codex 没有覆盖它。请查看差异后重试。`
         };
       }
       await delay(100);
@@ -1123,23 +1189,92 @@
       code: 'editor_document_not_switched',
       reason: `Cannot edit ${filePath}; Overleaf selected ${lastActivePath || 'unknown file'} but the editor document did not load the target file. Codex did not write to avoid editing the wrong file.`,
       lastActivePath,
+      lastLength: String(lastText || '').length,
+      debug: buildWritebackDebug('editor_document_not_switched', { type: 'edit', path: filePath }, baseFileLookup, lastText, {
+        initialActivePath: options.initialActivePath || '',
+        lastActivePath,
+        previous: options.previousSignature || '',
+        currentSignature: contentSignature(lastText),
+        openedMethod: options.openedMethod || '',
+        elapsedMs: Date.now() - startedAt
+      })
+    };
+  }
+
+  async function waitForEditorDocumentForPath(filePath, previousEditorIdentity, timeoutMs, options = {}) {
+    const deadline = Date.now() + timeoutMs;
+    const startedAt = Date.now();
+    const minSettleMs = options.forceSettledOpen ? writebackOpenSettleMs : 0;
+    let lastText = readActiveEditorText();
+    let lastActivePath = getActiveFilePath();
+    while (Date.now() < deadline) {
+      lastActivePath = getActiveFilePath();
+      lastText = readActiveEditorText();
+      const activeFileMatches = lastActivePath === filePath;
+      const identityChanged = Boolean(previousEditorIdentity) && activeEditorIdentityChanged(previousEditorIdentity);
+      const settledLongEnough = Date.now() - startedAt >= minSettleMs;
+      const sameFileReopenSettled = options.initialActivePath === filePath && settledLongEnough;
+      if (activeFileMatches && settledLongEnough && (identityChanged || sameFileReopenSettled)) {
+        return {
+          ok: true,
+          text: lastText
+        };
+      }
+      await delay(100);
+    }
+    return {
+      ok: false,
+      code: 'editor_document_not_switched',
+      reason: `Cannot verify ${filePath}; Overleaf selected ${lastActivePath || 'unknown file'} but the editor document did not confirm the target file.`,
+      lastActivePath,
       lastLength: String(lastText || '').length
     };
   }
 
   function editorContentMatchesBase(filePath, content, baseFileLookup) {
-    if (!hasBaseFileContent(filePath, baseFileLookup)) {
-      return true;
+    return compareEditorTextToBase(filePath, content, baseFileLookup).matches;
+  }
+
+  function compareEditorTextToBase(filePath, content, baseFileLookup) {
+    const normalizedPath = normalizeSafeProjectPath(filePath);
+    const current = normalizeEditorTextForComparison(content);
+    if (!baseFileLookup || !normalizedPath || !baseFileLookup.has(normalizedPath)) {
+      return {
+        known: false,
+        hasContent: false,
+        matches: false,
+        baseLength: null,
+        currentLength: current.length
+      };
     }
-    return normalizeEditorTextForComparison(content) === normalizeEditorTextForComparison(baseFileLookup.get(filePath));
+    const base = normalizeEditorTextForComparison(baseFileLookup.get(normalizedPath));
+    const matches = current === base;
+    if (!matches && base.trim().length > 0) {
+      console.warn('[codex-overleaf] editorContentMatchesBase MISMATCH', filePath,
+        'base.length:', base.length, 'current.length:', current.length,
+        'base[0..80]:', JSON.stringify(base.slice(0, 80)),
+        'current[0..80]:', JSON.stringify(current.slice(0, 80)));
+    }
+    return {
+      known: true,
+      hasContent: base.trim().length > 0,
+      matches,
+      baseLength: base.length,
+      currentLength: current.length
+    };
   }
 
   function hasBaseFileContent(filePath, baseFileLookup) {
-    return Boolean(baseFileLookup && filePath && baseFileLookup.has(filePath));
+    if (!baseFileLookup || !filePath || !baseFileLookup.has(filePath)) {
+      return false;
+    }
+    const content = baseFileLookup.get(filePath);
+    return typeof content === 'string' && content.trim().length > 0;
   }
 
   function normalizeEditorTextForComparison(value) {
-    return String(value ?? '').replace(/\r\n/g, '\n');
+    const normalized = String(value ?? '').replace(/\r\n/g, '\n');
+    return normalized.trim().length === 0 ? '' : normalized;
   }
 
   async function waitForFreshEditorTextForOperation(operation, baseFileLookup, waitMs = 1500) {
@@ -1572,21 +1707,34 @@
   }
 
   async function readCurrentTextFileForFreshness(filePath) {
+    const normalizedPath = normalizeSafeProjectPath(filePath);
+    if (!normalizedPath) {
+      return invalidProjectPathResult('freshness path');
+    }
     const currentPath = getActiveFilePath();
-    if (filePath && currentPath && filePath !== currentPath) {
-      const opened = await openFileByPath(filePath);
-      if (!opened.ok) {
-        return {
-          ok: false,
-          code: 'cannot_verify_current_file',
-          reason: `Cannot safely verify ${filePath}; ${opened.reason || 'open failed'}. Re-run Codex on a fresh snapshot.`
-        };
-      }
+    const previousEditorIdentity = getActiveEditorIdentity();
+    const opened = await openFileByPath(normalizedPath, { force: true });
+    if (!opened.ok) {
+      return {
+        ok: false,
+        code: 'cannot_verify_current_file',
+        reason: `Cannot safely verify ${normalizedPath}; ${opened.reason || 'open failed'}. Re-run Codex on a fresh snapshot.`
+      };
+    }
+    const ready = await waitForEditorDocumentForPath(normalizedPath, previousEditorIdentity, 9000, {
+      initialActivePath: currentPath,
+      forceSettledOpen: true
+    });
+    if (!ready.ok) {
+      return {
+        ...ready,
+        code: 'cannot_verify_current_file'
+      };
     }
 
     return {
       ok: true,
-      text: readActiveEditorText()
+      text: ready.text
     };
   }
 

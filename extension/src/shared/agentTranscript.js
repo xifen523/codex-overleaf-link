@@ -1046,56 +1046,57 @@
     const key = result.reasonKey || '';
     const code = result.code || '';
     const filePath = result.reasonParams?.filePath || operation?.path || operation?.from || operation?.to || '';
+    const withDebug = reason => appendSkippedReasonDebug(reason, result);
     if (key === 'missingBaseFile' || code === 'missing_base_file') {
       const target = filePath || textFor(locale, '这个文件', 'this file');
-      return textFor(
+      return withDebug(textFor(
         locale,
         `${target} 在任务开始时没有被 Codex 读到。Codex 没有覆盖它；请刷新项目内容后重试。`,
         `${target} was not read when the task started. Codex did not overwrite it; refresh the project content and retry.`
-      );
+      ));
     }
     if (key === 'staleSnapshot' || code === 'stale_snapshot') {
       const target = filePath || textFor(locale, '这个文件', 'this file');
-      return textFor(
+      return withDebug(textFor(
         locale,
         `${target} 在任务执行期间被你或协作者改过，Codex 没有覆盖它。请查看差异后重试。`,
         `${target} changed while Codex was working, so Codex did not overwrite it. Review the diff and retry.`
-      );
+      ));
     }
     if (key === 'stalePatchLocation') {
-      return textFor(
+      return withDebug(textFor(
         locale,
         'Codex 要修改的位置已经无法和当前 Overleaf 内容对齐，所以没有写入。请重新运行任务。',
         'The edit location no longer matches the current Overleaf content, so nothing was written. Rerun the task.'
-      );
+      ));
     }
     if (key === 'stalePatchConflict' || code === 'stale_patch_range') {
-      return textFor(
+      return withDebug(textFor(
         locale,
         'Codex 要修改的具体位置已经被你或协作者改过，所以没有覆盖它。请查看差异后重试。',
         'The exact edit location was changed by you or a collaborator, so Codex did not overwrite it. Review the diff and retry.'
-      );
+      ));
     }
     if (code === 'stale_patch') {
-      return textFor(
+      return withDebug(textFor(
         locale,
         '这处内容已经和 Codex 读取时不同，所以没有写入。请重新运行，让 Codex 先读取你的最新 Overleaf 内容。',
         'This exact text changed since Codex read it, so nothing was written. Rerun after Codex reads the latest Overleaf content.'
-      );
+      ));
     }
     if (code === 'invalid_patch') {
-      return textFor(
+      return withDebug(textFor(
         locale,
         'Codex 生成的局部写入范围无效，所以没有写入。',
         'Codex produced an invalid local edit range, so nothing was written.'
-      );
+      ));
     }
     if (code === 'write_verification_failed') {
-      return textFor(
+      return withDebug(textFor(
         locale,
         '写入后读回内容和 Codex 预期不一致，已停止把这次操作标记为成功。请刷新 Overleaf 后重试。',
         'After writing, the editor content did not match Codex\'s expected result, so the write was not marked successful. Reload Overleaf and retry.'
-      );
+      ));
     }
     if (code === 'file_tree_verification_failed') {
       return textFor(
@@ -1120,7 +1121,42 @@
         `${target} was created by you or a collaborator while Codex was working, so Codex did not overwrite it. Review the diff and retry.`
       );
     }
-    return localizeVisibleReason(result.reason || result.error || result.code || textFor(locale, '未知原因', 'unknown reason'), locale);
+    return withDebug(localizeVisibleReason(result.reason || result.error || result.code || textFor(locale, '未知原因', 'unknown reason'), locale));
+  }
+
+  function appendSkippedReasonDebug(reason, result = {}) {
+    const debug = result.debug || result.diagnostics;
+    const text = formatSkippedReasonDebug(debug);
+    return text ? `${reason} [debug: ${text}]` : reason;
+  }
+
+  function formatSkippedReasonDebug(debug) {
+    if (!debug || typeof debug !== 'object') {
+      return '';
+    }
+    const parts = [];
+    const add = (key, value) => {
+      if (value === undefined || value === null || value === '') {
+        return;
+      }
+      parts.push(`${key}=${String(value)}`);
+    };
+    add('stage', debug.stage);
+    add('rev', debug.revision);
+    add('op', debug.operationPath);
+    add('active', debug.activePath);
+    add('initial', debug.initialActivePath);
+    add('last', debug.lastActivePath);
+    add('currentLen', debug.current?.length);
+    add('currentNorm', debug.current?.normalizedLength);
+    add('currentHash', debug.current?.hash);
+    add('baseKnown', debug.baseKnown);
+    add('baseLen', debug.base?.length);
+    add('baseNorm', debug.base?.normalizedLength);
+    add('baseHash', debug.base?.hash);
+    add('elapsed', debug.elapsedMs);
+    add('opened', debug.openedMethod);
+    return parts.join(', ');
   }
 
   function localizeVisibleReason(reason, locale = 'zh') {

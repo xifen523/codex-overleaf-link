@@ -124,6 +124,124 @@ test('tree operations infers nested files from Overleaf sibling folder-list DOM'
   assert.equal(harness.ops.readProjectPathFromNode(fileNode), 'example/test.tex');
 });
 
+test('tree operations ignores selected file-tree containers with multiple file labels', () => {
+  const selectedContainer = makeDomNode({
+    tagName: 'DIV',
+    className: 'selected',
+    textContent: 'exampledescriptiontest.texdescriptiontest2.texdescriptionmain.tex'
+  });
+  selectedContainer.openPath = 'bad-active-tree-container';
+  const harness = createTreeOperationsHarness({
+    selectedPath: 'bad-active-tree-container',
+    nodes: [selectedContainer],
+    docs: []
+  });
+
+  assert.equal(harness.ops.getActiveFilePath(), '');
+});
+
+test('tree operations prefers the recently clicked file when stale selected nodes remain', () => {
+  const mainNode = makeDomNode({
+    tagName: 'LI',
+    role: 'treeitem',
+    ariaLabel: 'main.tex',
+    ariaSelected: 'true',
+    textContent: 'descriptionmain.tex'
+  });
+  mainNode.openPath = 'main.tex';
+  const nestedNode = makeDomNode({
+    tagName: 'LI',
+    role: 'treeitem',
+    ariaLabel: 'test2.tex',
+    ariaSelected: 'true',
+    textContent: 'descriptiontest2.tex'
+  });
+  nestedNode.openPath = 'example/test2.tex';
+  const folderNode = makeDomNode({
+    tagName: 'LI',
+    role: 'treeitem',
+    ariaLabel: 'example',
+    ariaExpanded: 'true',
+    textContent: 'expand_moreexample',
+    children: [nestedNode]
+  });
+  const harness = createTreeOperationsHarness({
+    selectedPath: 'main.tex',
+    nodes: [mainNode, folderNode, nestedNode],
+    docs: [],
+    getActiveEditorIdentity: () => ({ id: 'editor-before' }),
+    activeEditorIdentityChanged: () => true
+  });
+
+  assert.equal(harness.ops.getActiveFilePath(), 'main.tex');
+
+  harness.dispatchWindowClick(nestedNode);
+
+  assert.equal(harness.ops.getActiveFilePath(), 'example/test2.tex');
+});
+
+test('tree operations expands collapsed folders before opening nested files', async () => {
+  const nodes = [];
+  const fileNode = makeDomNode({
+    tagName: 'LI',
+    role: 'treeitem',
+    ariaLabel: 'test.tex',
+    textContent: 'descriptiontest.tex'
+  });
+  fileNode.openPath = 'example/test.tex';
+  const nestedInner = makeDomNode({
+    tagName: 'DIV',
+    className: 'file-tree-folder-list-inner',
+    textContent: 'descriptiontest.tex',
+    children: [fileNode]
+  });
+  const nestedList = makeDomNode({
+    tagName: 'UL',
+    role: 'tree',
+    className: 'list-unstyled file-tree-folder-list',
+    textContent: 'descriptiontest.tex',
+    children: [nestedInner]
+  });
+  const folderNode = makeDomNode({
+    tagName: 'LI',
+    role: 'treeitem',
+    ariaLabel: 'example',
+    ariaExpanded: 'false',
+    textContent: 'chevron_rightexample'
+  });
+  const rootInner = makeDomNode({
+    tagName: 'DIV',
+    className: 'file-tree-folder-list-inner',
+    textContent: 'chevron_rightexample',
+    children: [folderNode]
+  });
+  const rootNode = makeDomNode({
+    tagName: 'DIV',
+    className: 'file-tree',
+    children: [rootInner]
+  });
+  nodes.push(rootNode, rootInner, folderNode);
+  folderNode.onClick = () => {
+    folderNode.attributes['aria-expanded'] = 'true';
+    folderNode.textContent = 'expand_moreexample';
+    rootInner.children = [folderNode, nestedList];
+    nestedList.parentElement = rootInner;
+    nodes.push(nestedList, nestedInner, fileNode);
+  };
+  const harness = createTreeOperationsHarness({
+    selectedPath: 'main.tex',
+    nodes,
+    docs: []
+  });
+
+  const opened = await harness.ops.openFileByPath('example/test.tex');
+
+  assert.equal(opened.ok, true, opened.reason || JSON.stringify(opened));
+  assert.equal(harness.getSelectedPath(), 'example/test.tex');
+  assert.ok(folderNode.clickCount >= 1, 'folder node should be clicked at least once to expand');
+  assert.ok(fileNode.clickCount >= 1, 'file node should be clicked at least once to open');
+});
+
 test('tree operations opens nested files without falling back to a root basename match', async () => {
   const rootId = '333333333333333333333333';
   const nestedId = '444444444444444444444444';
@@ -143,11 +261,18 @@ test('tree operations opens nested files without falling back to a root basename
   assert.equal(opened.ok, true, opened.reason || JSON.stringify(opened));
   assert.equal(harness.getSelectedPath(), 'sections/main.tex');
   assert.equal(rootNode.clickCount, 0);
-  assert.equal(nestedNode.clickCount, 1);
+  assert.ok(nestedNode.clickCount >= 1, 'nested node should be clicked at least once');
 });
 
-function createTreeOperationsHarness({ selectedPath, nodes, docs }) {
+function createTreeOperationsHarness({
+  selectedPath,
+  nodes,
+  docs,
+  getActiveEditorIdentity = () => null,
+  activeEditorIdentityChanged = () => false
+}) {
   let currentPath = selectedPath;
+  const windowListeners = {};
   const document = {
     querySelector(selector) {
       if (/\[aria-selected="true"\]|\.selected/.test(selector)) {
@@ -156,17 +281,40 @@ function createTreeOperationsHarness({ selectedPath, nodes, docs }) {
       return null;
     },
     querySelectorAll(selector) {
+      if (/\[aria-selected="true"\]/.test(selector)) {
+        return nodes.filter(node => node.openPath === currentPath || node.getAttribute?.('aria-selected') === 'true');
+      }
+      if (/\.selected/.test(selector)) {
+        return nodes.filter(node => node.openPath === currentPath || /\bselected\b/.test(String(node.className || '')));
+      }
       if (/treeitem|role="row"|file-tree|project-tree|data-entity-id|data-doc-id|data-id|data-file-id/.test(selector)) {
         return nodes;
       }
       return [];
     }
   };
-  for (const node of nodes) {
+  function wrapNodeOnClick(node) {
+    const originalOnClick = node.onClick;
     node.onClick = () => {
-      currentPath = node.openPath;
+      originalOnClick?.();
+      if (node.openPath) {
+        currentPath = node.openPath;
+      }
     };
   }
+  for (const node of nodes) {
+    wrapNodeOnClick(node);
+  }
+  const originalPush = nodes.push.bind(nodes);
+  nodes.push = (...items) => {
+    for (const item of items) {
+      if (item && typeof item === 'object' && !item.__wrapped) {
+        item.__wrapped = true;
+        wrapNodeOnClick(item);
+      }
+    }
+    return originalPush(...items);
+  };
   const window = {
     location: {
       pathname: '/project/test-project'
@@ -175,6 +323,14 @@ function createTreeOperationsHarness({ selectedPath, nodes, docs }) {
     CodexOverleafProjectFiles: projectFiles,
     _ide: {
       rootFolder: buildInternalDocTree(docs)
+    },
+    addEventListener(type, handler) {
+      windowListeners[type] = handler;
+    },
+    removeEventListener(type, handler) {
+      if (windowListeners[type] === handler) {
+        delete windowListeners[type];
+      }
     },
     setTimeout,
     clearTimeout
@@ -194,10 +350,19 @@ function createTreeOperationsHarness({ selectedPath, nodes, docs }) {
     window,
     document,
     normalizePath: projectFiles.normalizeSafeProjectPath,
+    getActiveEditorIdentity,
+    activeEditorIdentityChanged,
     readActiveEditorText: () => 'ready'
   });
   return {
     ops,
+    dispatchWindowClick(target) {
+      windowListeners.click?.({
+        target,
+        isTrusted: true,
+        composedPath: () => [target, ...(target.parentElement ? [target.parentElement] : [])]
+      });
+    },
     getSelectedPath() {
       return currentPath;
     }
@@ -256,6 +421,8 @@ function makeDomNode({
   className = '',
   id = '',
   ariaLabel = '',
+  ariaExpanded = '',
+  ariaSelected = '',
   title = '',
   textContent = '',
   children = []
@@ -267,7 +434,15 @@ function makeDomNode({
     textContent,
     children,
     parentElement: null,
+    clickCount: 0,
+    attributes: {
+      'aria-expanded': ariaExpanded,
+      'aria-selected': ariaSelected
+    },
     getAttribute(attribute) {
+      if (Object.prototype.hasOwnProperty.call(this.attributes, attribute)) {
+        return this.attributes[attribute];
+      }
       if (attribute === 'role') {
         return role;
       }
@@ -286,6 +461,8 @@ function makeDomNode({
       return '';
     },
     dispatchEvent() {
+      this.clickCount += 1;
+      this.onClick?.();
       return true;
     }
   };

@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.3.0 - 2026-05-21
+
+Nested Overleaf file writeback stabilization release. This version focuses on making subdirectory file edits reliable after the user switches between files, and on aligning extension/native version surfaces for release diagnostics.
+
+### Changed
+
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.3.0` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.3.0.zip`, `codex-overleaf-native-host-v1.3.0.tar.gz`, and `codex-overleaf-link-1.3.0.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.3.0 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.3.0 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.3.0 -- uninstall-native`.
+
+### Fixed
+
+- Hardened nested file-tree navigation so writeback waits for the target CodeMirror document to load before replacing editor content.
+- Fixed blank target-file readiness handling so empty subdirectory files do not falsely match before Overleaf has switched the editor document.
+- Preserved structured writeback diagnostics in skipped-result reporting for future stale-write investigations.
+
 ## v1.2.6 - 2026-05-20
 
 Release metadata alignment patch for v1.2.6 packaging, compatibility, and release tracking surfaces, plus a nested Overleaf file writeback safety fix.

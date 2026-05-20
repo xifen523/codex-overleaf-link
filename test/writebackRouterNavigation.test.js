@@ -155,6 +155,78 @@ test('writeback router force-reopens a selected target when the editor is still 
   assert.equal(files.get('example/test.tex'), 'initialized');
 });
 
+test('writeback router waits for editor document switch before writing identical empty files', async () => {
+  const files = new Map([
+    ['main.tex', ''],
+    ['example/test.tex', '']
+  ]);
+  let selectedPath = 'example/test.tex';
+  let editorPath = 'main.tex';
+  const router = writebackRouter.create({
+    activeEditorIdentityChanged: () => false,
+    compileBridge: { markSourceEdited() {} },
+    getActiveEditorIdentity: () => null,
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    normalizeTextPatches,
+    readActiveEditorText: () => files.get(editorPath) || '',
+    replaceActiveEditorPatches(patches) {
+      const text = files.get(editorPath) || '';
+      const next = patches.slice().sort((left, right) => right.from - left.from).reduce((value, patch) => {
+        return value.slice(0, patch.from) + patch.insert + value.slice(patch.to);
+      }, text);
+      files.set(editorPath, next);
+      return { ok: true, method: 'codemirror-view-patch' };
+    },
+    treeOperations: {
+      contentSignature(content) {
+        const text = String(content || '');
+        return `${text.length}:${text.slice(0, 80)}:${text.slice(-80)}`;
+      },
+      getActiveFilePath: () => selectedPath,
+      openFileByPath(path) {
+        selectedPath = path;
+        setTimeout(() => {
+          editorPath = path;
+        }, 20);
+        return Promise.resolve({ ok: true, method: 'dom-click' });
+      },
+      waitForActiveEditorText(path) {
+        return Promise.resolve({
+          ok: true,
+          path,
+          text: files.get(editorPath) || ''
+        });
+      }
+    },
+    window: {
+      CodexOverleafStaleGuard: staleGuard,
+      setTimeout,
+      clearTimeout
+    },
+    writebackOpenSettleMs: 60
+  });
+
+  const result = await router.applyOperations({
+    baseFiles: [
+      { path: 'main.tex', content: '' },
+      { path: 'example/test.tex', content: '' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'example/test.tex',
+        patches: [
+          { from: 0, to: 0, expected: '', insert: 'initialized' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, true, result.error || JSON.stringify(result));
+  assert.equal(files.get('main.tex'), '');
+  assert.equal(files.get('example/test.tex'), 'initialized');
+});
+
 function normalizeTextPatches(patches, length) {
   const normalized = [];
   for (const patch of patches || []) {

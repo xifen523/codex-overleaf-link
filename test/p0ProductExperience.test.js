@@ -2836,6 +2836,9 @@ test('page bridge messages require same-origin responses in both directions', ()
 
   assert.match(contentScript, /event\.origin !== window\.location\.origin/);
   assert.match(pageBridge, /event\.origin !== window\.location\.origin/);
+  assert.match(contentScript, /pageBridgeVersion !== CodexOverleafCompatibility\?\.BUILD_TARGET_VERSION/);
+  assert.match(pageBridge, /pageBridgeVersion:\s*PAGE_BRIDGE_INSTALL_VERSION/);
+  assert.match(pageBridge, /__codexOverleafPageBridgeInstalledVersion/);
 });
 
 test('page bridge exposes a read-only realtime OT observer', () => {

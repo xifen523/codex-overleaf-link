@@ -41,8 +41,20 @@
     }
 
     const baseContent = baseFileLookup.get(filePath);
+    if (!baseContent || baseContent.trim().length === 0) {
+      if (typeof console !== 'undefined') {
+        console.warn('[codex-overleaf] staleGuard: base empty for', filePath, '→ skipping check');
+      }
+      return { ok: true };
+    }
     const current = normalizeText(currentContent);
     if (current !== baseContent) {
+      if (typeof console !== 'undefined') {
+        console.warn('[codex-overleaf] staleGuard: STALE', filePath,
+          'base.length:', baseContent.length, 'current.length:', current.length,
+          'base[0..80]:', JSON.stringify(baseContent.slice(0, 80)),
+          'current[0..80]:', JSON.stringify(current.slice(0, 80)));
+      }
       const patchRangeFreshness = checkPatchRangeFreshness(operation, current);
       if (patchRangeFreshness) {
         return patchRangeFreshness;

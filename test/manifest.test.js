@@ -23,20 +23,20 @@ const {
 } = require('../native-host/src/nativeHostPlatform');
 const extensionManifest = require('../extension/manifest.json');
 
-test('release metadata is prepared for v1.2.6', () => {
-  assert.equal(packageJson.version, '1.2.6');
+test('release metadata is prepared for v1.3.0', () => {
+  assert.equal(packageJson.version, '1.3.0');
   assert.equal(extensionManifest.version, packageJson.version);
 });
 
-test('release docs carry exact v1.2.6 badge and changelog heading', () => {
+test('release docs carry exact v1.3.0 badge and changelog heading', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
   const changelog = fs.readFileSync(path.join(__dirname, '../CHANGELOG.md'), 'utf8');
   const escapedVersion = packageJson.version.replace(/\./g, '\\.');
 
   assert.match(readme, new RegExp(`version-${escapedVersion}-blue`));
   assert.doesNotMatch(readme, /version-1\.0\.0-blue/);
-  assert.match(changelog, new RegExp(`^## v${escapedVersion} - 2026-05-20$`, 'm'));
-  assert.doesNotMatch(changelog, new RegExp(`^## \\[${escapedVersion}\\] - 2026-05-20$`, 'm'));
+  assert.match(changelog, new RegExp(`^## v${escapedVersion} - 2026-05-21$`, 'm'));
+  assert.doesNotMatch(changelog, new RegExp(`^## \\[${escapedVersion}\\] - 2026-05-21$`, 'm'));
   assert.doesNotMatch(changelog, /^## v1\.0\.0 - 2026-05-07[\s\S]*version-1\.1\.0-blue/m);
 });
 
@@ -326,9 +326,10 @@ test('content script loads governance, sensitive scan, and audit helpers before 
   }
 });
 
-test('page bridge injection can load governance, sensitive scan, and audit shared helpers from web accessible resources', () => {
+test('page bridge injection can load shared helpers from web accessible resources', () => {
   const resources = extensionManifest.web_accessible_resources[0].resources;
   for (const helper of [
+    'src/shared/compatibility.js',
     'src/shared/governanceRules.js',
     'src/shared/sensitiveScan.js',
     'src/shared/auditRecords.js'

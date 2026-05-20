@@ -18,12 +18,22 @@
     const readActiveEditorText = typeof deps.readActiveEditorText === 'function'
       ? deps.readActiveEditorText
       : () => '';
+    const getActiveEditorIdentity = typeof deps.getActiveEditorIdentity === 'function'
+      ? deps.getActiveEditorIdentity
+      : () => null;
+    const activeEditorIdentityChanged = typeof deps.activeEditorIdentityChanged === 'function'
+      ? deps.activeEditorIdentityChanged
+      : () => false;
+    const readActiveFilePathFromEditorStore = typeof deps.getActiveFilePathFromEditorStore === 'function'
+      ? deps.getActiveFilePathFromEditorStore
+      : () => '';
     const NodeCtor = window.Node || (typeof Node !== 'undefined' ? Node : null);
     const EventTargetCtor = window.EventTarget || (typeof EventTarget !== 'undefined' ? EventTarget : null);
     let internalDocPathByIdCache = null;
     let internalDocPathByIdCacheTime = 0;
     let domProjectPathCache = null;
     let domProjectPathCacheTime = 0;
+    let lastFileTreeSelection = null;
 
   function collectElements(selector, limit) {
     const result = [];
@@ -94,6 +104,16 @@
   }
 
   function getActiveFilePath() {
+    const editorStorePath = normalizeSafeProjectPath(readActiveFilePathFromEditorStore());
+    if (editorStorePath && window.CodexOverleafProjectFiles.isTextProjectPath(editorStorePath) && !hasMultipleTextPathExtensions(editorStorePath)) {
+      return editorStorePath;
+    }
+
+    const breadcrumbPath = readActiveFilePathFromEditorBreadcrumb();
+    if (breadcrumbPath) {
+      return breadcrumbPath;
+    }
+
     const selectors = [
       '[aria-selected="true"][role="treeitem"]',
       '[aria-selected="true"][role="row"]',
@@ -103,15 +123,74 @@
       '.project-tree .selected'
     ];
 
+    const candidates = [];
     for (const selector of selectors) {
-      const node = document.querySelector(selector);
-      const path = node ? readProjectPathFromNode(node) : '';
-      if (path) {
-        return path;
+      const nodes = Array.from(document.querySelectorAll?.(selector) || []);
+      for (const node of nodes) {
+        const path = node ? readProjectPathFromNode(node) : '';
+        if (isActiveFilePathCandidate(path, node)) {
+          candidates.push({
+            node,
+            path,
+            score: scoreActiveFilePathCandidate(path, node)
+          });
+        }
       }
     }
 
+    if (candidates.length) {
+      candidates.sort((left, right) => right.score - left.score);
+      return candidates[0].path;
+    }
+
     return '';
+  }
+
+  function scoreActiveFilePathCandidate(path, node) {
+    let score = 0;
+    const selected = getSettledRecentFileTreeSelection();
+    if (selected?.path === path) {
+      score += 1000;
+    }
+    if (node?.getAttribute?.('aria-selected') === 'true') {
+      score += 100;
+    }
+    const className = normalizeDomText(node?.className || '');
+    if (/\b(?:active|current|selected)\b/i.test(className)) {
+      score += 50;
+    }
+    if (isVisibleNode(node)) {
+      score += 10;
+    }
+    return score;
+  }
+
+  function getSettledRecentFileTreeSelection() {
+    if (!lastFileTreeSelection?.path) {
+      return null;
+    }
+    const elapsedMs = Date.now() - lastFileTreeSelection.time;
+    if (elapsedMs < 0 || elapsedMs > 60000) {
+      return null;
+    }
+    if (lastFileTreeSelection.editorIdentityBefore && activeEditorIdentityChanged(lastFileTreeSelection.editorIdentityBefore)) {
+      return lastFileTreeSelection;
+    }
+    const beforeSignature = lastFileTreeSelection.editorTextSignatureBefore || '';
+    if (beforeSignature && contentSignature(readActiveEditorText()) !== beforeSignature) {
+      return lastFileTreeSelection;
+    }
+    return null;
+  }
+
+  function isVisibleNode(node) {
+    if (!node) {
+      return false;
+    }
+    if (typeof node.getClientRects === 'function' && node.getClientRects().length > 0) {
+      return true;
+    }
+    return node.offsetParent != null;
   }
 
   async function openFileByPath(filePath, options = {}) {
@@ -130,11 +209,28 @@
       };
     }
 
-    const node = findFileTreeNode(normalizedPath);
+    const diagnostics = {
+      path: normalizedPath,
+      initialActivePath: getActiveFilePath(),
+      initialDomNodeFound: false,
+      ancestorFolders: [],
+      postExpandDomNodeFound: false,
+      domClickActivePath: '',
+      managerMethods: []
+    };
+
+    let node = findFileTreeNode(normalizedPath, { invalidateCache: true });
+    diagnostics.initialDomNodeFound = Boolean(node);
+    if (!node && normalizedPath.includes('/')) {
+      diagnostics.ancestorFolders = await ensureAncestorFoldersVisible(normalizedPath);
+      node = findFileTreeNode(normalizedPath, { invalidateCache: true });
+      diagnostics.postExpandDomNodeFound = Boolean(node);
+    }
     if (node) {
       dispatchFileTreeOpenClick(node);
       await delay(250);
-      const active = await waitForActiveFile(normalizedPath, 2500);
+      const active = await waitForActiveFile(normalizedPath, 5000);
+      diagnostics.domClickActivePath = getActiveFilePath();
       if (active) {
         return {
           ok: true,
@@ -145,6 +241,7 @@
 
     const manager = findFileTreeManager();
     const openMethods = ['openDoc', 'openFile', 'selectFile', 'selectEntity'];
+    const openArgs = buildManagerOpenArgs(normalizedPath);
 
     for (const methodName of openMethods) {
       const method = manager?.[methodName];
@@ -152,29 +249,99 @@
         continue;
       }
 
-      try {
-        await method.call(manager, normalizedPath);
-        const active = await waitForActiveFile(normalizedPath, 2500);
-        if (active) {
-          return {
-            ok: true,
-            method: `fileTreeManager.${methodName}`
-          };
+      for (const openArg of openArgs) {
+        const methodDiagnostics = {
+          method: methodName,
+          argType: openArg.type,
+          ok: false,
+          activePath: ''
+        };
+        try {
+          await method.call(manager, openArg.value);
+          const active = await waitForActiveFile(normalizedPath, 5000);
+          methodDiagnostics.ok = active;
+          methodDiagnostics.activePath = getActiveFilePath();
+          diagnostics.managerMethods.push(methodDiagnostics);
+          if (active) {
+            return {
+              ok: true,
+              method: `fileTreeManager.${methodName}:${openArg.type}`
+            };
+          }
+        } catch (error) {
+          methodDiagnostics.error = error?.message || String(error || '');
+          methodDiagnostics.activePath = getActiveFilePath();
+          diagnostics.managerMethods.push(methodDiagnostics);
         }
-      } catch (_error) {
-        // Try DOM fallback next.
       }
     }
 
     return {
       ok: false,
-      reason: `Could not open ${normalizedPath}`
+      reason: `Could not open ${normalizedPath}; ${formatOpenDiagnostics(diagnostics)}`,
+      diagnostics
     };
   }
 
+  function buildManagerOpenArgs(filePath) {
+    const normalizedPath = normalizeSafeProjectPath(filePath);
+    const record = collectDocRecords({ includeWindowGlobals: true }).find(item => item.path === normalizedPath);
+    const args = [
+      { type: 'path', value: normalizedPath }
+    ];
+    if (record?.id) {
+      args.unshift({ type: 'doc-id', value: record.id });
+      args.push({ type: 'doc-record', value: { ...record } });
+      args.push({ type: 'doc-record-with-path', value: { ...record, path: normalizedPath, name: normalizedPath.split('/').pop() || normalizedPath } });
+    }
+    return args;
+  }
+
+  function formatOpenDiagnostics(diagnostics = {}) {
+    const folders = (diagnostics.ancestorFolders || [])
+      .map(item => `${item.path}:found=${item.found ? 'yes' : 'no'},expanded=${item.expandedBefore ? 'yes' : 'no'},visible=${item.visibleAfter ? 'yes' : 'no'}`)
+      .join('|') || 'none';
+    const managers = (diagnostics.managerMethods || [])
+      .map(item => `${item.method}/${item.argType}:ok=${item.ok ? 'yes' : 'no'},active=${item.activePath || 'unknown'}${item.error ? ',error=' + item.error : ''}`)
+      .slice(0, 8)
+      .join('|') || 'none';
+    return `open diagnostics initial=${diagnostics.initialActivePath || 'unknown'}, initialNode=${diagnostics.initialDomNodeFound ? 'yes' : 'no'}, folders=${folders}, postExpandNode=${diagnostics.postExpandDomNodeFound ? 'yes' : 'no'}, domClickActive=${diagnostics.domClickActivePath || 'unknown'}, manager=${managers}`;
+  }
+
   function dispatchFileTreeOpenClick(node) {
+    const path = readProjectPathFromNode(node);
+    if (isActiveFilePathCandidate(path, node)) {
+      recordFileTreeSelection(path, 'script');
+    }
     const target = findFileTreeOpenClickTarget(node) || node;
-    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    dispatchActivationSequence(target);
+  }
+
+  function dispatchActivationSequence(node) {
+    if (!node) {
+      return;
+    }
+    try {
+      node.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    } catch (_error) {
+      // Ignore scroll failures in synthetic DOM test harnesses.
+    }
+    try {
+      node.focus?.({ preventScroll: true });
+    } catch (_error) {
+      try {
+        node.focus?.();
+      } catch (_nestedError) {
+        // Ignore focus failures.
+      }
+    }
+    for (const type of ['pointerdown', 'mousedown', 'mouseup', 'click']) {
+      try {
+        node.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      } catch (_error) {
+        // Keep trying the rest of the activation sequence.
+      }
+    }
   }
 
   function findFileTreeOpenClickTarget(node) {
@@ -202,36 +369,332 @@
   }
 
   function isFileTreeMenuControl(node) {
+    if (!node || typeof node.getAttribute !== 'function') {
+      return false;
+    }
+    const role = node.getAttribute('role') || '';
+    if (/^(?:treeitem|row)$/i.test(role)) {
+      return false;
+    }
     const signal = [
       node?.id || '',
       node?.className || '',
       node?.getAttribute?.('aria-label') || '',
-      node?.getAttribute?.('title') || '',
-      node?.textContent || ''
+      node?.getAttribute?.('title') || ''
     ].join(' ');
-    return /menu|more_vert|action/i.test(signal);
+    if (/\b(?:menu|more_vert|action)\b/i.test(signal)) {
+      return true;
+    }
+    const text = normalizeDomText(node.textContent || '');
+    return /^(?:more_vert|menu|action menu)$/i.test(text);
   }
 
-  function findFileTreeNode(filePath) {
+  function installFileTreeSelectionTracking() {
+    const handlerKey = '__codexOverleafFileTreeSelectionHandler';
+    if (typeof window.removeEventListener === 'function' && typeof window[handlerKey] === 'function') {
+      window.removeEventListener('click', window[handlerKey], true);
+    }
+    const handler = event => {
+      const path = readFileTreePathFromClickEvent(event);
+      if (path) {
+        recordFileTreeSelection(path, event?.isTrusted === true ? 'user' : 'script');
+      }
+    };
+    window[handlerKey] = handler;
+    if (typeof window.addEventListener === 'function') {
+      window.addEventListener('click', handler, true);
+    }
+  }
+
+  function readFileTreePathFromClickEvent(event) {
+    const pathNodes = typeof event?.composedPath === 'function'
+      ? event.composedPath()
+      : [];
+    for (const node of pathNodes) {
+      if (!node || typeof node.getAttribute !== 'function') {
+        continue;
+      }
+      const path = readProjectPathFromNode(node);
+      if (isActiveFilePathCandidate(path, node)) {
+        return path;
+      }
+      if (isFileTreeMenuControl(node)) {
+        return '';
+      }
+    }
+
+    const targetNode = event?.target;
+    const treeNode = targetNode?.closest?.('[role="treeitem"], [role="row"], .file-tree li, .project-tree li');
+    if (treeNode && !isFileTreeMenuControl(targetNode)) {
+      const path = readProjectPathFromNode(treeNode);
+      if (isActiveFilePathCandidate(path, treeNode)) {
+        return path;
+      }
+    }
+    return '';
+  }
+
+  function recordFileTreeSelection(path, source) {
+    const normalizedPath = normalizeSafeProjectPath(path);
+    if (!window.CodexOverleafProjectFiles.isTextProjectPath(normalizedPath)) {
+      return;
+    }
+    lastFileTreeSelection = {
+      path: normalizedPath,
+      source,
+      time: Date.now(),
+      editorIdentityBefore: getActiveEditorIdentity(),
+      editorTextSignatureBefore: contentSignature(readActiveEditorText())
+    };
+  }
+
+  function getRecentFileTreeSelectionPath() {
+    return getSettledRecentFileTreeSelection()?.path || '';
+  }
+
+  function readActiveFilePathFromEditorBreadcrumb() {
+    const roots = document.querySelectorAll?.(
+      '.ol-cm-breadcrumbs, [data-testid="editor-breadcrumbs"], .editor-breadcrumbs'
+    ) || [];
+    for (const root of roots) {
+      const path = readProjectPathFromBreadcrumbRoot(root);
+      if (path) {
+        return path;
+      }
+    }
+    return '';
+  }
+
+  function readProjectPathFromBreadcrumbRoot(root) {
+    const rawParts = Array.from(root.querySelectorAll?.('*') || [])
+      .map(node => normalizeDomText(node.innerText || node.textContent || ''))
+      .filter(Boolean);
+    const parts = [];
+    for (const part of rawParts) {
+      if (isBreadcrumbIconText(part)) {
+        continue;
+      }
+      if (parts[parts.length - 1] === part) {
+        continue;
+      }
+      parts.push(part);
+    }
+    if (!parts.length) {
+      return '';
+    }
+    for (let start = 0; start < parts.length; start += 1) {
+      const candidate = normalizeSafeProjectPath(parts.slice(start).join('/'));
+      if (window.CodexOverleafProjectFiles.isTextProjectPath(candidate) && !hasMultipleTextPathExtensions(candidate)) {
+        return candidate;
+      }
+    }
+    return '';
+  }
+
+  function isBreadcrumbIconText(text) {
+    return /^(?:chevron_right|description|book_5|image|insert_drive_file|article|folder|expand_more|keyboard_arrow_down)$/i
+      .test(String(text || '').trim());
+  }
+
+  function findFileTreeNode(filePath, options = {}) {
     const normalizedPath = normalizeSafeProjectPath(filePath);
     if (!normalizedPath) {
       return null;
     }
+    if (normalizedPath.includes('/') && options.invalidateCache === true) {
+      invalidateDomProjectPathCache();
+    }
     const fileName = normalizedPath.split('/').pop();
     const allowBasenameFallback = !normalizedPath.includes('/');
     const basenameMatches = [];
+    let firstPathMatch = null;
     const candidates = document.querySelectorAll('[role="treeitem"], [role="row"], .file-tree *, .project-tree *');
     for (const node of candidates) {
       const path = readProjectPathFromNode(node);
       const text = normalizeDomText(node.textContent || '');
       if (path === normalizedPath || text === normalizedPath) {
-        return node;
+        const role = node.getAttribute?.('role') || '';
+        if (/^(treeitem|row)$/i.test(role)) {
+          return node;
+        }
+        if (!firstPathMatch) {
+          firstPathMatch = node;
+        }
       }
       if (allowBasenameFallback && (path === fileName || text === fileName)) {
         basenameMatches.push(node);
       }
     }
-    return basenameMatches.length === 1 ? basenameMatches[0] : null;
+    if (firstPathMatch) {
+      return firstPathMatch;
+    }
+    if (basenameMatches.length === 1) {
+      return basenameMatches[0];
+    }
+    if (normalizedPath.includes('/')) {
+      return findFileTreeNodeByDocId(normalizedPath, fileName);
+    }
+    return null;
+  }
+
+  function findFileTreeNodeByDocId(filePath, fileName) {
+    const record = collectDocRecords({ includeWindowGlobals: true }).find(item => item.path === filePath);
+    if (!record?.id) {
+      return null;
+    }
+    const idSelectors = [
+      `[data-entity-id="${record.id}"]`,
+      `[data-doc-id="${record.id}"]`,
+      `[data-file-id="${record.id}"]`,
+      `[data-id="${record.id}"]`
+    ];
+    for (const selector of idSelectors) {
+      let nodes = [];
+      try {
+        nodes = Array.from(document.querySelectorAll(selector));
+      } catch (_error) {
+        continue;
+      }
+      for (const node of nodes) {
+        const role = node.getAttribute?.('role') || '';
+        if (/^(treeitem|row)$/i.test(role)) {
+          return node;
+        }
+      }
+      if (nodes.length) {
+        return nodes[0];
+      }
+    }
+    const allNodes = document.querySelectorAll('[role="treeitem"], [role="row"], .file-tree *, .project-tree *');
+    for (const node of allNodes) {
+      const nodeId = readDomDocId(node);
+      if (nodeId === record.id) {
+        return node;
+      }
+    }
+    return null;
+  }
+
+  async function ensureAncestorFoldersVisible(filePath) {
+    const parts = String(filePath || '').split('/').filter(Boolean);
+    const diagnostics = [];
+    if (parts.length < 2) {
+      return diagnostics;
+    }
+
+    let folderPath = '';
+    for (const folderName of parts.slice(0, -1)) {
+      folderPath = folderPath ? `${folderPath}/${folderName}` : folderName;
+      const folderNode = findFolderTreeNode(folderPath);
+      const entry = {
+        path: folderPath,
+        found: Boolean(folderNode),
+        expandedBefore: folderNode ? isFolderExpanded(folderNode) : false,
+        visibleAfter: false
+      };
+      if (!folderNode || isFolderExpanded(folderNode)) {
+        entry.visibleAfter = hasVisibleFolderDescendant(folderPath);
+        diagnostics.push(entry);
+        continue;
+      }
+      dispatchFolderExpandClick(folderNode);
+      invalidateDomProjectPathCache();
+      const visible = await waitForFolderVisible(folderPath, 2000);
+      entry.visibleAfter = visible;
+      if (!visible) {
+        const refreshedFolderNode = findFolderTreeNode(folderPath) || folderNode;
+        if (refreshedFolderNode && refreshedFolderNode !== folderNode) {
+          dispatchFolderExpandClick(refreshedFolderNode);
+        } else {
+          dispatchActivationSequence(folderNode);
+        }
+        invalidateDomProjectPathCache();
+        entry.visibleAfter = await waitForFolderVisible(folderPath, 2500);
+      }
+      diagnostics.push(entry);
+    }
+    return diagnostics;
+  }
+
+  function findFolderTreeNode(folderPath) {
+    const normalizedPath = normalizeSafeProjectPath(folderPath);
+    if (!normalizedPath || window.CodexOverleafProjectFiles.isTextProjectPath(normalizedPath)) {
+      return null;
+    }
+    const folderName = normalizedPath.split('/').pop() || '';
+    const matches = [];
+    const candidates = document.querySelectorAll('[role="treeitem"], [role="row"], .file-tree li, .project-tree li');
+    for (const node of candidates) {
+      const name = readFolderNameFromNode(node);
+      if (name !== folderName) {
+        continue;
+      }
+      const inferredPath = inferFolderPathFromTreeAncestors(node, name) || name;
+      if (inferredPath === normalizedPath) {
+        return node;
+      }
+      if (name === folderName) {
+        matches.push(node);
+      }
+    }
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  function isFolderExpanded(node) {
+    const expanded = node?.getAttribute?.('aria-expanded');
+    if (expanded === 'true') {
+      return true;
+    }
+    if (expanded === 'false') {
+      return false;
+    }
+    const signal = normalizeDomText(node?.textContent || '');
+    return /expand_more|folder_open/i.test(signal);
+  }
+
+  function dispatchFolderExpandClick(node) {
+    const target = findFolderExpandClickTarget(node) || node;
+    dispatchActivationSequence(target);
+  }
+
+  function findFolderExpandClickTarget(node) {
+    const selectors = [
+      '.file-tree-entity-button',
+      '.item-name',
+      '.entity-name',
+      '[role="button"]',
+      'button'
+    ];
+    for (const selector of selectors) {
+      let candidates = [];
+      try {
+        candidates = Array.from(node.querySelectorAll?.(selector) || []);
+      } catch (_error) {
+        candidates = [];
+      }
+      const candidate = candidates.find(item => !isFileTreeMenuControl(item));
+      if (candidate) {
+        return candidate;
+      }
+    }
+    return node;
+  }
+
+  async function waitForFolderVisible(folderPath, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const folderNode = findFolderTreeNode(folderPath);
+      if (!folderNode || isFolderExpanded(folderNode) || hasVisibleFolderDescendant(folderPath)) {
+        return true;
+      }
+      await delay(100);
+    }
+    return hasVisibleFolderDescendant(folderPath);
+  }
+
+  function hasVisibleFolderDescendant(folderPath) {
+    const prefix = `${folderPath}/`;
+    return collectDomProjectPaths().some(path => path.startsWith(prefix));
   }
 
   function projectPathExists(filePath) {
@@ -582,6 +1045,25 @@
     return textPath;
   }
 
+  function isActiveFilePathCandidate(path, node) {
+    if (!path || !window.CodexOverleafProjectFiles.isTextProjectPath(path)) {
+      return false;
+    }
+    if (hasMultipleTextPathExtensions(path)) {
+      return false;
+    }
+    if (isFolderTreeNode(node)) {
+      return false;
+    }
+    const text = normalizeDomText(node?.textContent || '');
+    return !hasMultipleTextPathExtensions(text);
+  }
+
+  function isFolderTreeNode(node) {
+    const expanded = node?.getAttribute?.('aria-expanded');
+    return (expanded === 'true' || expanded === 'false') && Boolean(readFolderNameFromNode(node));
+  }
+
   function resolveProjectPathFromDomTree(node, pathHint = '') {
     const cache = getDomProjectPathCache();
     const normalizedHint = normalizeSafeProjectPath(pathHint);
@@ -762,8 +1244,13 @@
   }
 
   function hasMultipleTextPathExtensions(value) {
-    const matches = normalizeDomText(value).match(new RegExp(`\\.${TEXT_PATH_EXTENSION_PATTERN}\\b`, 'gi')) || [];
-    return matches.length > 1;
+    const text = normalizeDomText(value);
+    const pattern = new RegExp(`\\.${TEXT_PATH_EXTENSION_PATTERN}`, 'gi');
+    const matches = text.match(pattern) || [];
+    if (matches.length > 1) {
+      return true;
+    }
+    return false;
   }
 
   function stripOverleafIconAffixes(value) {
@@ -796,6 +1283,25 @@
     }
     const path = normalizeSafeProjectPath([...folders, fileName].join('/'));
     return window.CodexOverleafProjectFiles.isTextProjectPath(path) ? path : '';
+  }
+
+  function inferFolderPathFromTreeAncestors(node, folderName) {
+    const folders = [];
+    let current = node?.parentElement || null;
+    for (let depth = 0; current && depth < 8; depth += 1) {
+      const parentFolderName = readFolderNameFromNode(current);
+      if (parentFolderName) {
+        folders.unshift(parentFolderName);
+      }
+      current = current.parentElement;
+    }
+    const path = normalizeSafeProjectPath([...folders, folderName].join('/'));
+    return path && !window.CodexOverleafProjectFiles.isTextProjectPath(path) ? path : '';
+  }
+
+  function invalidateDomProjectPathCache() {
+    domProjectPathCache = null;
+    domProjectPathCacheTime = 0;
   }
 
   function readFolderNameFromNode(node) {
@@ -1040,6 +1546,8 @@
       return Number.isFinite(value) && value >= 0 ? value : fallback;
     }
 
+    installFileTreeSelectionTracking();
+
     return {
       collectDocRecords,
       collectDomProjectPaths,
@@ -1053,6 +1561,7 @@
       findFileTreeNode,
       findHistoryObject,
       getActiveFilePath,
+      getRecentFileTreeSelectionPath,
       getProjectId,
       navigateToFile,
       openFileByPath,

@@ -1,10 +1,18 @@
 (function initCodexOverleafPageBridge() {
   'use strict';
 
-  if (window.__codexOverleafPageBridgeInstalled) {
+  const PAGE_BRIDGE_INSTALL_VERSION = window.CodexOverleafCompatibility?.BUILD_TARGET_VERSION || 'dev';
+  const PAGE_BRIDGE_INSTALL_REVISION = '2026-05-21-editor-readiness-v10';
+  if (window.__codexOverleafPageBridgeInstalledVersion === PAGE_BRIDGE_INSTALL_VERSION
+    && window.__codexOverleafPageBridgeInstalledRevision === PAGE_BRIDGE_INSTALL_REVISION) {
     return;
   }
+  if (typeof window.__codexOverleafPageBridgeMessageHandler === 'function') {
+    window.removeEventListener('message', window.__codexOverleafPageBridgeMessageHandler);
+  }
   window.__codexOverleafPageBridgeInstalled = true;
+  window.__codexOverleafPageBridgeInstalledVersion = PAGE_BRIDGE_INSTALL_VERSION;
+  window.__codexOverleafPageBridgeInstalledRevision = PAGE_BRIDGE_INSTALL_REVISION;
 
   const PAGE_BRIDGE_CAPABILITY_METHOD = 'initializeCapability';
   const pageBridgeCapabilityGuard = window.CodexOverleafPageBridgeCapability.create();
@@ -33,7 +41,10 @@
     normalizeTextPatches
   });
   treeOperations = requirePageModule('CodexOverleafTreeOperations').create({
+    activeEditorIdentityChanged,
     document,
+    getActiveFilePathFromEditorStore,
+    getActiveEditorIdentity,
     normalizePath: normalizeSafeProjectPath,
     readActiveEditorText,
     window
@@ -58,6 +69,7 @@
     compact,
     compileBridge,
     delay,
+    diagnosticsRevision: PAGE_BRIDGE_INSTALL_REVISION,
     ensureEditing,
     ensureReviewing,
     getActiveEditorIdentity,
@@ -102,7 +114,7 @@
     }
   }
 
-  window.addEventListener('message', async event => {
+  const pageBridgeMessageHandler = async event => {
     if (event.source !== window
       || event.origin !== window.location.origin
       || event.data?.source !== 'codex-overleaf/content') {
@@ -129,9 +141,13 @@
     window.postMessage({
       source: 'codex-overleaf/page',
       id,
+      pageBridgeVersion: PAGE_BRIDGE_INSTALL_VERSION,
+      pageBridgeRevision: PAGE_BRIDGE_INSTALL_REVISION,
       result
     }, window.location.origin);
-  });
+  };
+  window.__codexOverleafPageBridgeMessageHandler = pageBridgeMessageHandler;
+  window.addEventListener('message', pageBridgeMessageHandler);
 
   async function dispatch(method, params) {
     if (method === 'probe') {
@@ -1888,7 +1904,56 @@
   }
 
   function getActiveFilePath() {
-    return treeOperations?.getActiveFilePath?.() || '';
+    return getActiveFilePathFromEditorStore()
+      || treeOperations?.getActiveFilePath?.()
+      || treeOperations?.getRecentFileTreeSelectionPath?.()
+      || '';
+  }
+
+  function getActiveFilePathFromEditorStore() {
+    const store = getOverleafUnstableStore();
+    const docId = normalizeDocId(firstStringValue([
+      readStoreValue(store, 'editor.open_doc_id'),
+      readStoreValue(store, 'editor.openDocId'),
+      window._ide?.editor?.open_doc_id,
+      window._ide?.editor?.openDocId
+    ]));
+    if (docId) {
+      const record = collectDocRecords({ includeWindowGlobals: true }).find(item => item.id === docId);
+      if (record?.path) {
+        return record.path;
+      }
+    }
+
+    const docName = normalizeSafeProjectPath(firstStringValue([
+      readStoreValue(store, 'editor.open_doc_name'),
+      readStoreValue(store, 'editor.openDocName'),
+      window._ide?.editor?.open_doc_name,
+      window._ide?.editor?.openDocName
+    ]));
+    if (!docName || !window.CodexOverleafProjectFiles.isTextProjectPath(docName)) {
+      return '';
+    }
+    if (docName.includes('/')) {
+      return docName;
+    }
+    const matches = collectDocRecords({ includeWindowGlobals: true })
+      .filter(item => item.path === docName || item.path.endsWith(`/${docName}`));
+    return matches.length === 1 ? matches[0].path : docName;
+  }
+
+  function normalizeDocId(value) {
+    const text = String(value || '').trim();
+    return /^[a-f0-9]{24}$/i.test(text) ? text : '';
+  }
+
+  function firstStringValue(values = []) {
+    for (const value of values) {
+      if (typeof value === 'string' && value.trim()) {
+        return value;
+      }
+    }
+    return '';
   }
 
   function openFileByPath(filePath) {
