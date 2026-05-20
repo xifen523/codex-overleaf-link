@@ -104,7 +104,7 @@
   }
 
   function getActiveFilePath() {
-    const editorStorePath = normalizeSafeProjectPath(readActiveFilePathFromEditorStore());
+    const editorStorePath = getEditorStoreFilePath({ disambiguateBasename: true });
     if (editorStorePath && window.CodexOverleafProjectFiles.isTextProjectPath(editorStorePath) && !hasMultipleTextPathExtensions(editorStorePath)) {
       return editorStorePath;
     }
@@ -144,6 +144,10 @@
     }
 
     return '';
+  }
+
+  function getEditorStoreFilePath(options = {}) {
+    return normalizeSafeProjectPath(readActiveFilePathFromEditorStore(options));
   }
 
   function scoreActiveFilePathCandidate(path, node) {
@@ -1561,6 +1565,7 @@
       findFileTreeNode,
       findHistoryObject,
       getActiveFilePath,
+      getEditorStoreFilePath,
       getRecentFileTreeSelectionPath,
       getProjectId,
       navigateToFile,

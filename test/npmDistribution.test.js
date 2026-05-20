@@ -188,7 +188,7 @@ function bridgePathForHome(tempDir) {
 
 test('package metadata is configured for npm distribution', () => {
   assert.equal(packageJson.name, 'codex-overleaf-link');
-  assert.equal(packageJson.version, '1.2.6');
+  assert.equal(packageJson.version, '1.3.0');
   assert.equal(packageJson.bin['codex-overleaf-link'], 'bin/codex-overleaf-link.mjs');
   assert.match(packageJson.packageManager, /^npm@/);
   assert.deepEqual(packageJson.repository, {
@@ -309,13 +309,13 @@ test('packed npm tarball installs executable CLI and manages temp native host', 
   const runtimeRoot = path.join(tempDir, 'runtime');
   const runtimeRootArgs = process.platform === 'win32' ? [] : ['--runtime-root', runtimeRoot];
   const tarballName = `${packageJson.name}-${packageJson.version}.tgz`;
-  const tarballPath = path.join(repoRoot, tarballName);
+  const tarballPath = path.join(tempDir, tarballName);
   const { env, fakeRegistry } = makeTarballSmokeEnv(tempDir);
 
   try {
     fs.rmSync(tarballPath, { force: true });
 
-    const pack = runNpm(['pack'], { env });
+    const pack = runNpm(['pack', '--pack-destination', tempDir], { env });
     assert.equal(pack.status, 0, pack.stderr || pack.stdout);
     assert.equal(fs.existsSync(tarballPath), true);
 
@@ -323,7 +323,7 @@ test('packed npm tarball installs executable CLI and manages temp native host', 
       'install',
       '--prefix',
       installPrefix,
-      `./${tarballName}`,
+      tarballPath,
       '--no-audit',
       '--fund=false'
     ], { env });

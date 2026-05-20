@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.3.0 - 2026-05-21
+## v1.3.0 - 2026-05-20
 
 Nested Overleaf file writeback stabilization release. This version focuses on making subdirectory file edits reliable after the user switches between files, and on aligning extension/native version surfaces for release diagnostics.
 

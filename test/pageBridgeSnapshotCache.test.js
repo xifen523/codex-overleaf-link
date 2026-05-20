@@ -1082,6 +1082,12 @@ function createSnapshotHarness({
   let openClickCount = 0;
   let treeQueryCount = 0;
   let selectedPath = Array.from(fileMap.keys())[0];
+  if (activePathKnown) {
+    internalState.editor = {
+      ...(internalState.editor || {}),
+      open_doc_name: internalState.editor?.open_doc_name || selectedPath
+    };
+  }
   const bridgeCapability = 'test-page-bridge-capability';
   let capabilityInitialized = false;
   const treeNodes = treePaths
@@ -1170,6 +1176,12 @@ function createSnapshotHarness({
           options,
           setActivePath(path) {
             selectedPath = path;
+            if (activePathKnown) {
+              internalState.editor = {
+                ...(internalState.editor || {}),
+                open_doc_name: path
+              };
+            }
           }
         });
       }
@@ -1290,6 +1302,12 @@ function createSnapshotHarness({
     },
     setActivePath(path) {
       selectedPath = path;
+      if (activePathKnown) {
+        internalState.editor = {
+          ...(internalState.editor || {}),
+          open_doc_name: path
+        };
+      }
     },
     setFetchMode(mode) {
       fetchMode = mode;

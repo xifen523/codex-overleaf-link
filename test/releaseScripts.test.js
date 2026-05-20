@@ -348,7 +348,7 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   fs.writeFileSync(path.join(rootDir, 'scripts/install-native-host.mjs'), '#!/usr/bin/env node\n');
 }
 
-test('CHANGELOG documents the current v1.2.6 release metadata alignment in release tooling format', async () => {
+test('CHANGELOG documents the current release metadata alignment in release tooling format', async () => {
   const version = readJson(path.join(repoRoot, 'package.json')).version;
   const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
   const heading = `## v${version} - 2026-05-20`;
@@ -362,7 +362,7 @@ test('CHANGELOG documents the current v1.2.6 release metadata alignment in relea
   const section = extractReleaseNotes(changelog, version);
   const escapedVersion = version.replace(/\./g, '\\.');
 
-  assert.match(section, /Release metadata alignment patch/i);
+  assert.match(section, /writeback stabilization|release metadata alignment/i);
   assert.match(section, /package, extension manifest, compatibility target/i);
   assert.match(section, new RegExp(`codex-overleaf-link-extension-v${escapedVersion}\\.zip`));
   assert.match(section, new RegExp(`codex-overleaf-native-host-v${escapedVersion}\\.tar\\.gz`));

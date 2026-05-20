@@ -1910,7 +1910,7 @@
       || '';
   }
 
-  function getActiveFilePathFromEditorStore() {
+  function getActiveFilePathFromEditorStore(options = {}) {
     const store = getOverleafUnstableStore();
     const docId = normalizeDocId(firstStringValue([
       readStoreValue(store, 'editor.open_doc_id'),
@@ -1935,6 +1935,9 @@
       return '';
     }
     if (docName.includes('/')) {
+      return docName;
+    }
+    if (options.passive === true) {
       return docName;
     }
     const matches = collectDocRecords({ includeWindowGlobals: true })

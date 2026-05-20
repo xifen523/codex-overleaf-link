@@ -30,6 +30,11 @@
       return treeOperations.getActiveFilePath?.() || '';
     }
 
+    function getPassiveActiveFilePath() {
+      const path = treeOperations.getEditorStoreFilePath?.({ passive: true }) || '';
+      return normalizeSafeProjectPath(path);
+    }
+
     function collectDocRecords(options = {}) {
       return treeOperations.collectDocRecords?.(options) || [];
     }
@@ -427,8 +432,8 @@
   }
 
   async function buildZipOnlyProjectSnapshot(params = {}) {
-    const activePath = getActiveFilePath();
-    const activeText = readActiveEditorText();
+    const activePath = getPassiveActiveFilePath();
+    const activeText = activePath ? readActiveEditorText() : '';
 
     const zipSnapshot = await fetchProjectZipSnapshot(params);
     if (zipSnapshot.ok && zipSnapshot.files.length) {
