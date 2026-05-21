@@ -5,8 +5,10 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  ensureCodexOverleafSkillInstalled,
   installCodexOverleafSkill,
   installProjectSkill,
+  listCodexOverleafSkills,
   loadSelectedCodexOverleafSkill,
   materializeProjectSkillsAsCodexSkills
 } = require('../native-host/src/localSkills');
@@ -113,5 +115,62 @@ test('materializeProjectSkillsAsCodexSkills exposes project-local skills as Code
     );
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('ensureCodexOverleafSkillInstalled writes SKILL.md when absent', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-ensure-skill-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  const content = '# Test Skill\n\nTest content.';
+  try {
+    ensureCodexOverleafSkillInstalled({ skillId: 'annotated-rewrite', content, env });
+    const skillPath = path.join(overleafSkillsRoot, 'annotated-rewrite', 'SKILL.md');
+    assert.equal(fs.readFileSync(skillPath, 'utf8'), content);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('ensureCodexOverleafSkillInstalled does not overwrite an existing skill file', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-ensure-skill-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  const original = '# Original\n\nOriginal content.';
+  const updated = '# Updated\n\nUpdated content.';
+  try {
+    ensureCodexOverleafSkillInstalled({ skillId: 'annotated-rewrite', content: original, env });
+    ensureCodexOverleafSkillInstalled({ skillId: 'annotated-rewrite', content: updated, env });
+    const skillPath = path.join(overleafSkillsRoot, 'annotated-rewrite', 'SKILL.md');
+    assert.equal(fs.readFileSync(skillPath, 'utf8'), original);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('listCodexOverleafSkills includes official and removable flags', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-skills-list-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  try {
+    installCodexOverleafSkill({
+      skillId: 'annotated-rewrite',
+      content: '# Annotated Rewrite\n\nContent.',
+      env
+    });
+    installCodexOverleafSkill({
+      skillId: 'custom-style',
+      content: '# Custom Style\n\nContent.',
+      env
+    });
+    const { skills } = listCodexOverleafSkills({ env });
+    const official = skills.find(s => s.id === 'annotated-rewrite');
+    const custom = skills.find(s => s.id === 'custom-style');
+    assert.equal(official.official, true);
+    assert.equal(official.removable, false);
+    assert.equal(custom.official, false);
+    assert.equal(custom.removable, true);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });

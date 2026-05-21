@@ -13,6 +13,7 @@ const MAX_SKILL_CONTENT_CHARS = MAX_SKILL_CONTENT_BYTES;
 const MAX_SKILL_PREVIEW_CHARS = 240;
 const PROJECT_SKILL_SCOPE = 'project';
 const CODEX_OVERLEAF_SKILL_SCOPE = 'codex-overleaf';
+const OFFICIAL_CODEX_OVERLEAF_SKILL_IDS = ['annotated-rewrite'];
 
 function listProjectSkills({ projectId, rootDir } = {}) {
   const skillsDir = getProjectSkillsDir(projectId, { rootDir });
@@ -110,13 +111,18 @@ function listCodexOverleafSkills({ env = process.env, skillsRoot } = {}) {
       continue;
     }
     const content = fs.readFileSync(filePath, 'utf8');
-    skills.push(buildSkillMetadata({
-      id: entry.name,
-      content,
-      size: stat.size,
-      updatedAt: stat.mtime.toISOString(),
-      scope: CODEX_OVERLEAF_SKILL_SCOPE
-    }));
+    const isOfficial = OFFICIAL_CODEX_OVERLEAF_SKILL_IDS.includes(entry.name);
+    skills.push({
+      ...buildSkillMetadata({
+        id: entry.name,
+        content,
+        size: stat.size,
+        updatedAt: stat.mtime.toISOString(),
+        scope: CODEX_OVERLEAF_SKILL_SCOPE
+      }),
+      official: isOfficial,
+      removable: !isOfficial
+    });
   }
 
   return { skills: skills.sort((left, right) => left.id.localeCompare(right.id)) };
@@ -154,6 +160,21 @@ function removeCodexOverleafSkill({ skillId, env = process.env, skillsRoot } = {
     fs.rmSync(skillDir, { recursive: true, force: true });
   }
   return { id, scope: CODEX_OVERLEAF_SKILL_SCOPE, removed };
+}
+
+function ensureCodexOverleafSkillInstalled({ skillId, content, env } = {}) {
+  const skillPath = resolveCodexOverleafSkillPath(skillId, { env });
+  if (fs.existsSync(skillPath)) {
+    const stat = fs.lstatSync(skillPath);
+    if (stat.isFile() && !stat.isSymbolicLink()) {
+      assertNoSymlinkEscape(skillPath, path.dirname(skillPath),
+        'Existing official skill path is unsafe');
+      return;
+    }
+    // symlink, directory, or other — remove and reinstall
+    fs.rmSync(skillPath, { recursive: true, force: true });
+  }
+  installCodexOverleafSkill({ skillId, content, env });
 }
 
 function loadSelectedProjectSkills({ projectId, selectedSkillIds, rootDir, projectRoot } = {}) {
@@ -461,7 +482,9 @@ module.exports = {
   CODEX_OVERLEAF_SKILL_SCOPE,
   MAX_SKILL_CONTENT_BYTES,
   MAX_SKILL_CONTENT_CHARS,
+  OFFICIAL_CODEX_OVERLEAF_SKILL_IDS,
   PROJECT_SKILL_SCOPE,
+  ensureCodexOverleafSkillInstalled,
   getDefaultCodexOverleafSkillsRoot,
   getCodexOverleafSkillsRoot,
   installCodexOverleafSkill,
