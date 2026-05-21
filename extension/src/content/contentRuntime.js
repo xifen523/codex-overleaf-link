@@ -691,8 +691,7 @@
       ? normalizeCustomInstructionsByProject(state?.customInstructionsByProject)[normalizedProjectId] || ''
       : '';
     input.placeholder = tr('customInstructionsPlaceholder');
-    const settingsPanel = panel?.querySelector('[data-custom-instructions-panel]');
-    const editorIsOpen = settingsPanel?.hidden === false;
+    const editorIsOpen = panel?.dataset?.view === 'settings';
     const editorIsDirty = normalizedProjectId
       && customInstructionsEditorProjectId === normalizedProjectId
       && input.value !== customInstructionsEditorValue;

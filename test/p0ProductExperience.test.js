@@ -3386,16 +3386,11 @@ test('mirror prefetch state sync preserves unsaved custom instructions for same 
       value: '',
       placeholder: ''
     };
-    const customInstructionsPanel = {
-      hidden: false
-    };
     const panel = {
+      dataset: { view: 'settings' },
       querySelector(selector) {
         if (selector === '[data-custom-instructions-input]') {
           return customInstructionsInput;
-        }
-        if (selector === '[data-custom-instructions-panel]') {
-          return customInstructionsPanel;
         }
         return null;
       }

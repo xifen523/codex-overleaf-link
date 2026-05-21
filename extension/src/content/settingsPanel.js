@@ -59,7 +59,7 @@
     `;
 
     container.querySelector('[data-settings-back]')?.addEventListener('click', () => instance.callbacks.onBack?.());
-    // Personalization textarea: auto-save on blur (change event only — avoids per-keystroke saves).
+    // Personalization textarea: auto-save on change (the change event fires on blur — avoids per-keystroke saves).
     const customInstructionsInput = container.querySelector('[data-custom-instructions-input]');
     customInstructionsInput?.addEventListener('change', event => instance.callbacks.onInputChange?.(event));
     // Governance and skill fields: auto-save on change and input for immediate response.
