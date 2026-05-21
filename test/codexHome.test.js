@@ -109,7 +109,7 @@ test('plugin Codex home reuses local Codex skills and plugin config without link
       path.join(userCodexHome, 'skills', 'user-skill')
     );
     assert.equal(fs.lstatSync(path.join(pluginHome, 'plugins')).isSymbolicLink(), true);
-    assert.equal(fs.lstatSync(path.join(pluginHome, 'rules')).isSymbolicLink(), true);
+    assert.equal(fs.existsSync(path.join(pluginHome, 'rules')), false);
     assert.equal(fs.existsSync(path.join(pluginHome, 'sessions')), false);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -562,6 +562,108 @@ test('plugin Codex config strips multi-line personality values (basic and litera
     assert.doesNotMatch(pluginConfig, /Literal personality line/);
     assert.match(pluginConfig, /model = "gpt-5\.5"/);
     assert.match(pluginConfig, /\[features\]/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('plugin Codex home does not inherit the user global AGENTS.md', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-agents-'));
+  const userCodexHome = path.join(home, '.codex');
+  try {
+    fs.mkdirSync(userCodexHome, { recursive: true });
+    fs.writeFileSync(path.join(userCodexHome, 'AGENTS.md'), 'Answer in the third person.\n', 'utf8');
+    fs.writeFileSync(path.join(userCodexHome, 'auth.json'), '{"token":"user-token"}\n', 'utf8');
+
+    preparePluginCodexHome({ HOME: home });
+    const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+
+    assert.equal(fs.existsSync(path.join(pluginHome, 'AGENTS.md')), false);
+    assert.equal(fs.existsSync(path.join(pluginHome, 'auth.json')), true);
+    assert.equal(fs.readFileSync(path.join(userCodexHome, 'AGENTS.md'), 'utf8'), 'Answer in the third person.\n');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('plugin Codex home does not symlink the user global rules and memories', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-rules-memories-'));
+  const userCodexHome = path.join(home, '.codex');
+  try {
+    fs.mkdirSync(path.join(userCodexHome, 'rules'), { recursive: true });
+    fs.mkdirSync(path.join(userCodexHome, 'memories'), { recursive: true });
+    fs.writeFileSync(path.join(userCodexHome, 'rules', 'default.rules'), 'allow\n', 'utf8');
+
+    preparePluginCodexHome({ HOME: home });
+    const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+
+    assert.equal(fs.existsSync(path.join(pluginHome, 'rules')), false);
+    assert.equal(fs.existsSync(path.join(pluginHome, 'memories')), false);
+    assert.equal(fs.existsSync(path.join(userCodexHome, 'rules', 'default.rules')), true);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('plugin Codex home removes stale AGENTS.md and rules/memories left by earlier runs', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-stale-'));
+  const userCodexHome = path.join(home, '.codex');
+  const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+  try {
+    fs.mkdirSync(path.join(userCodexHome, 'rules'), { recursive: true });
+    fs.mkdirSync(path.join(userCodexHome, 'memories'), { recursive: true });
+    fs.writeFileSync(path.join(userCodexHome, 'auth.json'), '{"token":"user-token"}\n', 'utf8');
+    fs.mkdirSync(pluginHome, { recursive: true });
+    fs.writeFileSync(path.join(pluginHome, 'AGENTS.md'), 'stale global guidance\n', 'utf8');
+    fs.symlinkSync(path.join(userCodexHome, 'rules'), path.join(pluginHome, 'rules'), 'dir');
+    fs.symlinkSync(path.join(userCodexHome, 'memories'), path.join(pluginHome, 'memories'), 'dir');
+
+    preparePluginCodexHome({ HOME: home });
+
+    assert.equal(fs.existsSync(path.join(pluginHome, 'AGENTS.md')), false);
+    assert.equal(fs.existsSync(path.join(pluginHome, 'rules')), false);
+    assert.equal(fs.existsSync(path.join(pluginHome, 'memories')), false);
+    assert.equal(fs.existsSync(path.join(userCodexHome, 'rules')), true);
+    assert.equal(fs.existsSync(path.join(userCodexHome, 'memories')), true);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('plugin Codex home removes a stale config.toml when the user config.toml is gone', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-missing-config-'));
+  const userCodexHome = path.join(home, '.codex');
+  const pluginHome = path.join(home, '.codex-overleaf', 'codex-home');
+  try {
+    fs.mkdirSync(userCodexHome, { recursive: true });
+    fs.writeFileSync(path.join(userCodexHome, 'auth.json'), '{"token":"user-token"}\n', 'utf8');
+    fs.mkdirSync(pluginHome, { recursive: true });
+    fs.writeFileSync(path.join(pluginHome, 'config.toml'), 'personality = "stale"\n', 'utf8');
+
+    preparePluginCodexHome({ HOME: home });
+
+    assert.equal(fs.existsSync(path.join(pluginHome, 'config.toml')), false);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('preparePluginCodexHome leaves a shared user/plugin home untouched', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-samepath-'));
+  const sharedHome = path.join(home, 'shared-codex');
+  try {
+    fs.mkdirSync(path.join(sharedHome, 'rules'), { recursive: true });
+    fs.writeFileSync(path.join(sharedHome, 'AGENTS.md'), 'shared guidance\n', 'utf8');
+
+    const prepared = preparePluginCodexHome({
+      HOME: home,
+      CODEX_OVERLEAF_USER_CODEX_HOME: sharedHome,
+      CODEX_OVERLEAF_CODEX_HOME: sharedHome
+    });
+
+    assert.equal(prepared.userHome, prepared.pluginHome);
+    assert.equal(fs.existsSync(path.join(sharedHome, 'AGENTS.md')), true);
+    assert.equal(fs.existsSync(path.join(sharedHome, 'rules')), true);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

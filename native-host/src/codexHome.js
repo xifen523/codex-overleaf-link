@@ -16,17 +16,21 @@ const {
 const COPIED_USER_CODEX_FILES = [
   'auth.json',
   'config.toml',
-  'AGENTS.md',
   'installation_id',
   'models_cache.json',
   'version.json'
 ];
 
 const LINKED_USER_CODEX_DIRS = [
-  'rules',
-  'memories',
   'vendor_imports'
 ];
+
+// User-global Codex instruction/memory entries that must never enter the plugin
+// Codex home. The extension supplies its own per-project personalization via the
+// prompt; inheriting the user's global Codex guidance here is a leak. The plugin
+// home is reused across runs, so these are removed every prepare to also clear
+// entries left by earlier extension versions.
+const ISOLATED_USER_INSTRUCTION_ENTRIES = ['AGENTS.md', 'rules', 'memories'];
 
 const LOCAL_SKILL_USER_CODEX_DIRS = [
   'plugins',
@@ -93,6 +97,18 @@ function preparePluginCodexHome(env = process.env, options = {}) {
       chmodIfPossible(target, 0o600);
     }
     copied.push(fileName);
+  }
+
+  // Personalization isolation: the plugin Codex home must never inherit the
+  // user's global Codex instructions/memory. Remove them every run — this also
+  // clears stale entries left by earlier extension versions. This runs after
+  // the samePath early-return above, so it never touches the user's real
+  // ~/.codex when the plugin home and user home are the same directory.
+  for (const entryName of ISOLATED_USER_INSTRUCTION_ENTRIES) {
+    removePluginHomeEntry(pluginHome, entryName, skippedLinks);
+  }
+  if (!isRegularFile(path.join(userHome, 'config.toml'))) {
+    removePluginHomeEntry(pluginHome, 'config.toml', skippedLinks);
   }
 
   if (!loadCodexLocalSkills) {
