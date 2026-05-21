@@ -10,7 +10,8 @@ const {
   installProjectSkill,
   listCodexOverleafSkills,
   loadSelectedCodexOverleafSkill,
-  materializeProjectSkillsAsCodexSkills
+  materializeProjectSkillsAsCodexSkills,
+  removeCodexOverleafSkill
 } = require('../native-host/src/localSkills');
 
 test('loadSelectedCodexOverleafSkill reads selected Codex Overleaf SKILL.md content', () => {
@@ -143,6 +144,48 @@ test('ensureCodexOverleafSkillInstalled does not overwrite an existing skill fil
     ensureCodexOverleafSkillInstalled({ skillId: 'annotated-rewrite', content: updated, env });
     const skillPath = path.join(overleafSkillsRoot, 'annotated-rewrite', 'SKILL.md');
     assert.equal(fs.readFileSync(skillPath, 'utf8'), original);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('ensureCodexOverleafSkillInstalled removes a non-file at the skill path and reinstalls', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-ensure-skill-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  const content = '# Test Skill\n\nTest content.';
+  try {
+    // Place a directory where the SKILL.md file should go
+    const skillPath = path.join(overleafSkillsRoot, 'annotated-rewrite', 'SKILL.md');
+    fs.mkdirSync(skillPath, { recursive: true });
+    assert.ok(fs.statSync(skillPath).isDirectory());
+
+    ensureCodexOverleafSkillInstalled({ skillId: 'annotated-rewrite', content, env });
+
+    assert.ok(fs.statSync(skillPath).isFile());
+    assert.equal(fs.readFileSync(skillPath, 'utf8'), content);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('removeCodexOverleafSkill throws when attempting to remove an official skill', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-remove-official-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  try {
+    installCodexOverleafSkill({
+      skillId: 'annotated-rewrite',
+      content: '# Annotated Rewrite\n\nContent.',
+      env
+    });
+    assert.throws(
+      () => removeCodexOverleafSkill({ skillId: 'annotated-rewrite', env }),
+      /Cannot remove official skill/
+    );
+    // File should still be present
+    const skillPath = path.join(overleafSkillsRoot, 'annotated-rewrite', 'SKILL.md');
+    assert.ok(fs.existsSync(skillPath));
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

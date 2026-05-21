@@ -153,6 +153,9 @@ function installCodexOverleafSkill({ skillId, content, env = process.env, skills
 
 function removeCodexOverleafSkill({ skillId, env = process.env, skillsRoot } = {}) {
   const id = validateSkillId(skillId);
+  if (OFFICIAL_CODEX_OVERLEAF_SKILL_IDS.includes(id)) {
+    throw new Error(`Cannot remove official skill: ${id}`);
+  }
   const root = getCodexOverleafSkillsRoot({ env, skillsRoot });
   const skillDir = resolveInside(root, id, 'Unsafe Codex Overleaf skill path');
   const removed = fs.existsSync(skillDir);
@@ -162,13 +165,13 @@ function removeCodexOverleafSkill({ skillId, env = process.env, skillsRoot } = {
   return { id, scope: CODEX_OVERLEAF_SKILL_SCOPE, removed };
 }
 
-function ensureCodexOverleafSkillInstalled({ skillId, content, env } = {}) {
+function ensureCodexOverleafSkillInstalled({ skillId, content, env = process.env } = {}) {
+  const root = getCodexOverleafSkillsRoot({ env });
   const skillPath = resolveCodexOverleafSkillPath(skillId, { env });
   if (fs.existsSync(skillPath)) {
+    assertNoSymlinkEscape(skillPath, root, 'Existing official skill path is unsafe');
     const stat = fs.lstatSync(skillPath);
-    if (stat.isFile() && !stat.isSymbolicLink()) {
-      assertNoSymlinkEscape(skillPath, path.dirname(skillPath),
-        'Existing official skill path is unsafe');
+    if (stat.isFile()) {
       return;
     }
     // symlink, directory, or other — remove and reinstall
