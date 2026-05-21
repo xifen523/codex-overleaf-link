@@ -165,8 +165,8 @@ function copyUserCodexFile(source, target, fileName, options = {}) {
 // feature) so the plugin Codex home never inherits the user's global
 // personalization. Only the top-level key is removed — a `personality` key
 // inside a [section] is a different key and is preserved. Handles single-line
-// values and both multi-line string forms (""" basic and ''' literal). Lines
-// other than the personality assignment are passed through unchanged.
+// values and both multi-line string forms (""" basic and ''' literal). All
+// other lines pass through unchanged, aside from line endings being normalized to LF.
 function stripPersonalizationFromCodexConfig(content) {
   const lines = String(content || '').split(/\r?\n/);
   const output = [];
@@ -178,6 +178,7 @@ function stripPersonalizationFromCodexConfig(content) {
       if (line.includes(closingDelimiter)) {
         closingDelimiter = '';
       }
+      // Drop every line of the multi-line value, including the one that closes it.
       continue;
     }
     if (parseTomlSectionName(line)) {

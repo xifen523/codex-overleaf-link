@@ -500,6 +500,7 @@ test('plugin Codex config strips only the top-level personality key', () => {
       'personality = "provider-scoped value"'
     ].join('\n'), 'utf8');
 
+    // Both toggle states: the personality strip (Layer A) is unconditional. Layer B skill-config stripping is covered separately by the "strips local plugin config" test.
     for (const loadCodexLocalSkills of [true, false]) {
       preparePluginCodexHome({ HOME: home }, { loadCodexLocalSkills });
       const pluginConfig = fs.readFileSync(pluginConfigPath, 'utf8');
@@ -508,6 +509,7 @@ test('plugin Codex config strips only the top-level personality key', () => {
       assert.match(pluginConfig, /model = "gpt-5\.5"/);
       assert.match(pluginConfig, /\[features\]/);
       assert.match(pluginConfig, /personality = "provider-scoped value"/);
+      assert.equal((pluginConfig.match(/^\s*personality\s*=/gm) || []).length, 1);
     }
 
     assert.match(
