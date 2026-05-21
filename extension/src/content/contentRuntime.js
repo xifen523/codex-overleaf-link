@@ -969,7 +969,7 @@
     setElementTitleAndAria('[data-diagnostics-menu]', tr('diagnosticsMenu'), tr('diagnosticsMenu'));
     setElementTitleAndAria('[data-diagnostics-result-close]', tr('close'), tr('closeDiagnostics'));
     setElementTitleAndAria('[data-new-session]', tr('newSession'), tr('newSession'));
-    setElementTitleAndAria('[data-custom-instructions-settings]', tr('customInstructionsSettings'), tr('customInstructionsSettings'));
+    setElementTitleAndAria('[data-custom-instructions-settings]', tr('projectSettings'), tr('projectSettings'));
     setElementTitleAndAria('[data-settings-back]', tr('settingsBack'), tr('settingsBack'));
     setElementTitleAndAria('[data-add-context]', tr('addContext'), tr('addContext'));
     setElementTitleAndAria('[data-context-refresh]', tr('refreshFileList'), tr('refreshFileList'));

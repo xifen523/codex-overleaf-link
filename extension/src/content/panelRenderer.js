@@ -33,7 +33,7 @@
           <button type="button" data-refresh title="Refresh current file status. This will not sync or modify files." aria-label="Refresh current file status. This will not sync or modify files.">↻</button>
           <div data-diagnostics-slot></div>
           <button type="button" data-new-session title="New Session" aria-label="New Session">✎</button>
-          <button type="button" data-custom-instructions-settings title="Custom Instructions" aria-label="Custom Instructions" aria-expanded="false">⚙</button>
+          <button type="button" data-custom-instructions-settings title="Project Settings" aria-label="Project Settings" aria-expanded="false">⚙</button>
         </div>
       </div>
       <div data-settings-slot></div>

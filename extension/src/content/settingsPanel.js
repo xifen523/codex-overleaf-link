@@ -18,42 +18,47 @@
           <button type="button" data-settings-back title="Back" aria-label="Back">‹</button>
           <div>
             <div class="codex-custom-instructions-title" data-i18n="projectSettingsTitle">Project Settings</div>
-            <span data-i18n="customInstructionsTitle" hidden>Custom Instructions</span>
-            <span data-i18n="customInstructionsSubtitle" hidden>Give Codex extra instructions and context for this Overleaf project.</span>
-            <div class="codex-custom-instructions-subtitle" data-i18n="projectSettingsSubtitle">Governance, local skills, and custom instructions for this Overleaf project.</div>
-            <a class="codex-custom-instructions-learn-more" data-custom-instructions-learn-more data-i18n="customInstructionsLearnMore" href="https://developers.openai.com/codex/guides/agents-md#create-global-guidance" target="_blank" rel="noopener noreferrer">Learn more</a>
+            <div class="codex-custom-instructions-subtitle" data-i18n="projectSettingsSubtitle">Customize how Codex behaves in this and all projects.</div>
           </div>
           <span class="codex-settings-save-status" data-settings-save-status data-i18n="settingsSaved">Saved</span>
         </div>
-        <label class="codex-custom-instructions-label" for="codex-custom-instructions-input" data-i18n="personalizationConfig">Personalization</label>
-        <textarea id="codex-custom-instructions-input" class="codex-custom-instructions-input" data-custom-instructions-input rows="7" placeholder="Style, terminology, venue constraints, and LaTeX conventions for this project."></textarea>
-        <div class="codex-project-settings-section">
-          <div class="codex-project-settings-section-title" data-i18n="governanceRulesTitle">Governance Rules</div>
-          <label class="codex-custom-instructions-label" for="codex-governance-readonly-patterns" data-i18n="governanceReadonlyPatterns">Read-only patterns</label>
-          <textarea id="codex-governance-readonly-patterns" class="codex-project-settings-textarea" data-governance-readonly-patterns rows="3" placeholder="paper/accepted/**&#10;main.tex"></textarea>
-          <label class="codex-custom-instructions-label" for="codex-governance-writable-patterns" data-i18n="governanceWritablePatterns">Writable patterns</label>
-          <textarea id="codex-governance-writable-patterns" class="codex-project-settings-textarea" data-governance-writable-patterns rows="3" placeholder="sections/**&#10;figures/**"></textarea>
-          <label class="codex-project-settings-check">
-            <input type="checkbox" data-sensitive-check-enabled>
-            <span data-i18n="sensitiveCheckEnabled">Check for sensitive content before Codex runs</span>
-          </label>
-          <label class="codex-project-settings-check">
-            <input type="checkbox" data-sensitive-confirm-allowed>
-            <span data-i18n="sensitiveConfirmAllowed">Allow explicit confirmation when sensitive findings exist</span>
-          </label>
+        <div class="codex-project-settings-status" data-project-settings-status></div>
+        <div class="codex-project-settings-scope">
+          <div class="codex-project-settings-scope-title" data-i18n="settingsScopeProjectTitle">This project</div>
+          <div class="codex-project-settings-scope-subtitle" data-i18n="settingsScopeProjectSubtitle">Instructions and rules applied to this Overleaf project only.</div>
+          <label class="codex-custom-instructions-label" for="codex-custom-instructions-input" data-i18n="personalizationConfig">Personalization</label>
+          <textarea id="codex-custom-instructions-input" class="codex-custom-instructions-input" data-custom-instructions-input rows="7" placeholder="Style, terminology, venue constraints, and LaTeX conventions for this project."></textarea>
+          <div class="codex-project-settings-section">
+            <div class="codex-project-settings-section-title" data-i18n="governanceRulesTitle">Governance Rules</div>
+            <label class="codex-custom-instructions-label" for="codex-governance-readonly-patterns" data-i18n="governanceReadonlyPatterns">Read-only patterns</label>
+            <textarea id="codex-governance-readonly-patterns" class="codex-project-settings-textarea" data-governance-readonly-patterns rows="3" placeholder="paper/accepted/**&#10;main.tex"></textarea>
+            <label class="codex-custom-instructions-label" for="codex-governance-writable-patterns" data-i18n="governanceWritablePatterns">Writable patterns</label>
+            <textarea id="codex-governance-writable-patterns" class="codex-project-settings-textarea" data-governance-writable-patterns rows="3" placeholder="sections/**&#10;figures/**"></textarea>
+            <label class="codex-project-settings-check">
+              <input type="checkbox" data-sensitive-check-enabled>
+              <span data-i18n="sensitiveCheckEnabled">Check for sensitive content before Codex runs</span>
+            </label>
+            <label class="codex-project-settings-check">
+              <input type="checkbox" data-sensitive-confirm-allowed>
+              <span data-i18n="sensitiveConfirmAllowed">Allow explicit confirmation when sensitive findings exist</span>
+            </label>
+          </div>
         </div>
-        <div class="codex-project-settings-section">
-          <div class="codex-project-settings-section-title" data-i18n="localSkillsTitle">Local Skills</div>
-          <label class="codex-project-settings-check">
-            <input type="checkbox" data-load-codex-local-skills>
-            <span data-i18n="loadCodexLocalSkills">Load local Codex skills</span>
-          </label>
-          <label class="codex-project-settings-check">
-            <input type="checkbox" data-load-codex-overleaf-skills>
-            <span data-i18n="loadCodexOverleafSkills">Load Codex Overleaf skills</span>
-          </label>
-          <div class="codex-local-skill-list" data-local-skill-list></div>
-          <div class="codex-project-settings-status" data-project-settings-status></div>
+        <div class="codex-project-settings-scope codex-project-settings-scope--global">
+          <div class="codex-project-settings-scope-title" data-i18n="settingsScopeGlobalTitle">All projects</div>
+          <div class="codex-project-settings-scope-subtitle" data-i18n="settingsScopeGlobalSubtitle">Skill loading settings that apply across all Overleaf projects.</div>
+          <div class="codex-project-settings-section">
+            <div class="codex-project-settings-section-title" data-i18n="localSkillsTitle">Skills</div>
+            <label class="codex-project-settings-check">
+              <input type="checkbox" data-load-codex-local-skills>
+              <span data-i18n="loadCodexLocalSkills">Load local Codex skills</span>
+            </label>
+            <label class="codex-project-settings-check">
+              <input type="checkbox" data-load-codex-overleaf-skills>
+              <span data-i18n="loadCodexOverleafSkills">Load Codex Overleaf skills</span>
+            </label>
+            <div class="codex-local-skill-list" data-local-skill-list></div>
+          </div>
         </div>
       </section>
     `;

@@ -3011,13 +3011,12 @@ test('header exposes project custom instructions settings and editor surface', (
   assert.match(settingsSource, /data-custom-instructions-panel/);
   assert.match(settingsSource, /data-custom-instructions-input/);
   assert.doesNotMatch(settingsSource, /data-custom-instructions-save/);
-  assert.match(settingsSource, /<a class="codex-custom-instructions-learn-more" data-custom-instructions-learn-more data-i18n="customInstructionsLearnMore"/);
+  assert.doesNotMatch(settingsSource, /data-custom-instructions-learn-more/);
   for (const key of [
-    'customInstructionsTitle',
-    'customInstructionsSubtitle',
-    'customInstructionsLearnMore',
     'personalizationConfig',
-    'customInstructionsPlaceholder'
+    'customInstructionsPlaceholder',
+    'settingsScopeProjectTitle',
+    'settingsScopeGlobalTitle'
   ]) {
     assert.match(settingsSource, new RegExp(`data-i18n="${key}"|tr\\('${key}'\\)`), `settings panel should use ${key}`);
     assert.match(i18n, new RegExp(`${key}:\\s*'`), `i18n should define ${key}`);
@@ -3026,21 +3025,18 @@ test('header exposes project custom instructions settings and editor surface', (
   assert.match(css, /\.codex-custom-instructions-input/);
 });
 
-test('project custom instructions Learn more control is actionable', () => {
-  const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
-    'utf8'
-  );
+test('project custom instructions Learn more link has been removed', () => {
   const settingsPanel = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/settingsPanel.js'),
     'utf8'
   );
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
   const contentSurface = `${contentScript}\n${settingsPanel}`;
 
-  assert.match(contentSurface, /data-custom-instructions-learn-more/);
-  assert.match(contentSurface, /href="https:\/\/developers\.openai\.com\/codex\/guides\/agents-md#create-global-guidance"/);
-  assert.match(contentSurface, /target="_blank"/);
-  assert.match(contentSurface, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(contentSurface, /data-custom-instructions-learn-more/);
   assert.doesNotMatch(contentScript, /showCustomInstructionsLearnMore/);
   assert.doesNotMatch(contentScript, /customInstructionsLearnMoreToast/);
 });

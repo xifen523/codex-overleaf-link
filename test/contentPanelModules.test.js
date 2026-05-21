@@ -826,3 +826,66 @@ test('confirm failure restores Confirm button and toggle so user can retry', asy
   assert.equal(confirmBtn.textContent, 'localSkillRemoveConfirm', 'Confirm button text should be restored after removal failure');
   assert.equal(toggle.disabled, false, 'Per-skill enable toggle should be re-enabled after removal failure');
 });
+
+// Task 5: labels, scope sectioning, cleanup, and type hierarchy
+
+function buildSettingsPanel() {
+  const { doc } = buildFakeDocument();
+  const container = doc.createElement('div');
+  doc.documentElement._children.push(container);
+  const fakeWin = {};
+  const src = read('extension/src/content/settingsPanel.js');
+  // eslint-disable-next-line no-new-func
+  new Function('window', 'document', src)(fakeWin, doc);
+  const SettingsPanel = fakeWin.CodexOverleafSettingsPanel;
+  SettingsPanel.create({ container });
+  return { container };
+}
+
+test('settingsPanel renders NO [data-custom-instructions-learn-more] element', () => {
+  const { container } = buildSettingsPanel();
+  const learnMore = container.querySelector('[data-custom-instructions-learn-more]');
+  assert.equal(learnMore, null, 'should NOT render [data-custom-instructions-learn-more] after Task 5 cleanup');
+});
+
+test('settingsPanel renders NO hidden span with data-i18n="customInstructionsTitle"', () => {
+  const { container } = buildSettingsPanel();
+  // Query all spans and look for any with dataset.i18n === 'customInstructionsTitle'
+  function findAll(el, pred, acc = []) {
+    if (pred(el)) acc.push(el);
+    for (const child of el._children || []) findAll(child, pred, acc);
+    return acc;
+  }
+  const deadSpans = findAll(container, el =>
+    el.tag === 'span' && el.dataset && el.dataset.i18n === 'customInstructionsTitle'
+  );
+  assert.equal(deadSpans.length, 0, 'should NOT render a span with data-i18n="customInstructionsTitle" (dead markup removed)');
+});
+
+test('settingsPanel source includes scope section headings for "This project" and "All projects"', () => {
+  // Verify the raw source markup contains the scope heading i18n keys.
+  // (The fake DOM parser doesn't handle deeply nested divs, so we test the source directly.)
+  const src = read('extension/src/content/settingsPanel.js');
+  assert.match(src, /data-i18n="settingsScopeProjectTitle"/, 'settingsPanel should include data-i18n="settingsScopeProjectTitle"');
+  assert.match(src, /data-i18n="settingsScopeGlobalTitle"/, 'settingsPanel should include data-i18n="settingsScopeGlobalTitle"');
+});
+
+test('[data-project-settings-status] appears before skill loading controls in settingsPanel source', () => {
+  // Verify [data-project-settings-status] is positioned at panel level (before the skill toggles),
+  // not nested inside the skill list section. We check source order as a proxy for DOM position.
+  const src = read('extension/src/content/settingsPanel.js');
+  const statusIdx = src.indexOf('data-project-settings-status');
+  const skillToggleIdx = src.indexOf('data-load-codex-local-skills');
+  const skillListIdx = src.indexOf('data-local-skill-list');
+  assert.ok(statusIdx >= 0, '[data-project-settings-status] must appear in settingsPanel source');
+  assert.ok(skillToggleIdx >= 0, '[data-load-codex-local-skills] must appear in settingsPanel source');
+  assert.ok(skillListIdx >= 0, '[data-local-skill-list] must appear in settingsPanel source');
+  assert.ok(
+    statusIdx < skillToggleIdx,
+    '[data-project-settings-status] must appear before [data-load-codex-local-skills] in source (panel-level, not inside skills section)'
+  );
+  assert.ok(
+    statusIdx < skillListIdx,
+    '[data-project-settings-status] must appear before [data-local-skill-list] in source (panel-level, not inside skills section)'
+  );
+});

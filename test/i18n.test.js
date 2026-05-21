@@ -49,8 +49,6 @@ test('i18n covers plugin dialogs, diff review, toasts, and undo actions', () => 
   assert.equal(I18n.t('zh', 'undoRun'), '撤销改动');
   assert.equal(I18n.t('en', 'undoApplied'), 'Undone');
   assert.equal(I18n.t('zh', 'undoApplied'), '已撤销');
-  assert.equal(I18n.t('en', 'projectSettingsSavedToast'), 'Project settings saved.');
-  assert.equal(I18n.t('zh', 'projectSettingsSavedToast'), '项目设置已保存。');
   assert.equal(I18n.t('en', 'dismissNotification'), 'Dismiss notification');
   assert.equal(I18n.t('zh', 'dismissNotification'), '关闭通知');
 });
