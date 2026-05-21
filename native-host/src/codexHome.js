@@ -7,8 +7,10 @@ const {
   getNativeHostPlatform
 } = require('./nativeHostPlatform');
 const {
+  ensureCodexOverleafSkillInstalled,
   getCodexOverleafSkillsRoot,
-  materializeProjectSkillsAsCodexSkills
+  materializeProjectSkillsAsCodexSkills,
+  OFFICIAL_CODEX_OVERLEAF_SKILL_IDS
 } = require('./localSkills');
 
 const COPIED_USER_CODEX_FILES = [
@@ -119,6 +121,8 @@ function preparePluginCodexHome(env = process.env, options = {}) {
     linked.push(dirName);
   }
 
+  ensureDefaultCodexOverleafSkills({ env });
+
   const skillsResult = composePluginSkillsDirectory({
     userHome,
     pluginHome,
@@ -135,6 +139,14 @@ function preparePluginCodexHome(env = process.env, options = {}) {
   skippedLinks.push(...skillsResult.skippedLinks);
 
   return { userHome, pluginHome, copied, linked, skippedLinks };
+}
+
+function ensureDefaultCodexOverleafSkills({ env = process.env } = {}) {
+  for (const id of OFFICIAL_CODEX_OVERLEAF_SKILL_IDS) {
+    const src = path.resolve(__dirname, 'skills', id, 'SKILL.md');
+    const content = fs.readFileSync(src, 'utf8');
+    ensureCodexOverleafSkillInstalled({ skillId: id, content, env });
+  }
 }
 
 function copyUserCodexFile(source, target, fileName, options = {}) {
@@ -532,6 +544,7 @@ module.exports = {
   buildCodexHomeEnv,
   clearPluginCodexHistory,
   composePluginSkillsDirectory,
+  ensureDefaultCodexOverleafSkills,
   getPluginCodexHome,
   getUserCodexHome,
   preparePluginCodexHome

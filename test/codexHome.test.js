@@ -7,6 +7,7 @@ const test = require('node:test');
 const {
   buildCodexHomeEnv,
   clearPluginCodexHistory,
+  ensureDefaultCodexOverleafSkills,
   getPluginCodexHome,
   getUserCodexHome,
   preparePluginCodexHome
@@ -305,7 +306,10 @@ test('plugin Codex home reports skipped links while preserving copied auth/confi
     assert.equal(fs.readFileSync(path.join(pluginHome, 'auth.json'), 'utf8'), '{"token":"user-token"}\n');
     assert.equal(fs.readFileSync(path.join(pluginHome, 'config.toml'), 'utf8'), 'model = "gpt-5.5"\n');
     assert.deepEqual(prepared.linked, []);
-    assert.deepEqual(prepared.skippedLinks.map(link => [link.name, link.reason]), [['skills/user-skill', 'EPERM']]);
+    assert.deepEqual(prepared.skippedLinks.map(link => [link.name, link.reason]), [
+      ['skills/user-skill', 'EPERM'],
+      ['skills/annotated-rewrite', 'EPERM']
+    ]);
   } finally {
     fs.symlinkSync = originalSymlinkSync;
     fs.rmSync(home, { recursive: true, force: true });
@@ -331,10 +335,12 @@ test('Windows plugin Codex directory links request junction semantics', () => {
     }, { platform: 'win32' });
 
     assert.deepEqual(prepared.linked, ['skills']);
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 2);
     assert.equal(calls[0].source, path.join(userCodexHome, 'skills', 'user-skill'));
     assert.equal(calls[0].target, path.join(pluginHome, 'skills', 'user-skill'));
     assert.equal(calls[0].type, 'junction');
+    assert.equal(calls[1].target, path.join(pluginHome, 'skills', 'annotated-rewrite'));
+    assert.equal(calls[1].type, 'junction');
   } finally {
     fs.symlinkSync = originalSymlinkSync;
     fs.rmSync(home, { recursive: true, force: true });
@@ -410,6 +416,67 @@ test('clearing plugin Codex history by thread id removes only that Codex thread'
     assert.equal(fs.existsSync(archivedThreadFile), false);
     assert.equal(fs.existsSync(otherPluginThreadFile), true);
     assert.equal(fs.existsSync(userSessionFile), true);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('bundled annotated-rewrite SKILL.md is present and non-empty', () => {
+  const skillPath = path.resolve(__dirname, '../native-host/src/skills/annotated-rewrite/SKILL.md');
+  const content = fs.readFileSync(skillPath, 'utf8');
+  assert.ok(content.length > 0);
+  assert.match(content, /annotated-rewrite/);
+});
+
+test('ensureDefaultCodexOverleafSkills restores official skill after deletion', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-default-skills-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  try {
+    ensureDefaultCodexOverleafSkills({ env });
+    const skillPath = path.join(overleafSkillsRoot, 'annotated-rewrite', 'SKILL.md');
+    assert.ok(fs.existsSync(skillPath));
+
+    // Delete it and re-run
+    fs.rmSync(skillPath, { force: true });
+    assert.ok(!fs.existsSync(skillPath));
+
+    ensureDefaultCodexOverleafSkills({ env });
+    assert.ok(fs.existsSync(skillPath));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('ensureDefaultCodexOverleafSkills installs content matching the bundled SKILL.md', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-default-skills-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  try {
+    ensureDefaultCodexOverleafSkills({ env });
+    const installed = fs.readFileSync(
+      path.join(overleafSkillsRoot, 'annotated-rewrite', 'SKILL.md'),
+      'utf8'
+    );
+    const bundled = fs.readFileSync(
+      path.resolve(__dirname, '../native-host/src/skills/annotated-rewrite/SKILL.md'),
+      'utf8'
+    );
+    assert.equal(installed, bundled);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('preparePluginCodexHome automatically installs the annotated-rewrite skill', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-default-skills-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  try {
+    preparePluginCodexHome(env);
+    const skillPath = path.join(overleafSkillsRoot, 'annotated-rewrite', 'SKILL.md');
+    assert.ok(fs.existsSync(skillPath));
+    assert.ok(fs.readFileSync(skillPath, 'utf8').length > 0);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
