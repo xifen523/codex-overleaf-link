@@ -49,23 +49,28 @@
 
     async function refreshLocalSkills() {
       showSkillListLoading();
-      const codexOverleafResponse = await sendBackgroundNative({
-        method: 'skills.list',
-        params: { scope: 'codex-overleaf' }
-      });
-      if (!codexOverleafResponse?.ok) {
-        throw new Error(codexOverleafResponse?.error?.message || 'native host did not return Codex Overleaf skills');
+      try {
+        const codexOverleafResponse = await sendBackgroundNative({
+          method: 'skills.list',
+          params: { scope: 'codex-overleaf' }
+        });
+        if (!codexOverleafResponse?.ok) {
+          throw new Error(codexOverleafResponse?.error?.message || 'native host did not return Codex Overleaf skills');
+        }
+        const codexOverleafSkills = Array.isArray(codexOverleafResponse.result?.skills)
+          ? codexOverleafResponse.result.skills
+          : [];
+        const state = getState() || {};
+        setState({
+          ...state,
+          codexOverleafSkills
+        });
+        setSlashCodexOverleafSkills(codexOverleafSkills);
+        renderLocalSkillList();
+      } catch (err) {
+        renderLocalSkillList();
+        throw err;
       }
-      const codexOverleafSkills = Array.isArray(codexOverleafResponse.result?.skills)
-        ? codexOverleafResponse.result.skills
-        : [];
-      const state = getState() || {};
-      setState({
-        ...state,
-        codexOverleafSkills
-      });
-      setSlashCodexOverleafSkills(codexOverleafSkills);
-      renderLocalSkillList();
     }
 
     function showSkillListLoading() {
@@ -94,6 +99,7 @@
       if (!list) {
         return;
       }
+      confirmingRowId = null;
       const codexOverleafSkills = getCodexOverleafSkillsForSettings();
       const codexOverleafEnabled = getSkillLoadingSettings().loadCodexOverleafSkills !== false;
       list.textContent = '';
@@ -186,14 +192,16 @@
 
         confirmBtn.addEventListener('click', event => {
           event.preventDefault();
-          // In-progress: disable Confirm and the enable toggle; update text.
+          // In-progress: disable Confirm, Cancel, and the enable toggle; update text.
           confirmBtn.disabled = true;
+          cancelBtn.disabled = true;
           toggle.disabled = true;
           confirmBtn.textContent = tr('localSkillRemoving');
           removeCodexOverleafSkill(id).catch(error => {
             setProjectSettingsStatus(tx(`Failed to remove Codex Overleaf skill: ${error.message}`, `删除 Codex Overleaf 技能失败：${error.message}`), 'failed');
             // Restore row on failure so the user can retry.
             confirmBtn.disabled = false;
+            cancelBtn.disabled = false;
             toggle.disabled = !masterEnabled;
             confirmBtn.textContent = tr('localSkillRemoveConfirm');
           });
@@ -215,7 +223,7 @@
       if (!list) {
         return;
       }
-      for (const child of list._children || list.children || []) {
+      for (const child of Array.from(list.children || [])) {
         if (child._skillId === confirmingRowId && child._exitConfirming) {
           child._exitConfirming();
           break;
