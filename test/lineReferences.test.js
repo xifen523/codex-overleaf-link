@@ -70,6 +70,92 @@ test('parses supported local line reference spellings from plain text', () => {
   );
 });
 
+test('parses adjacent comma and CJK punctuation separated line references', () => {
+  assert.deepEqual(
+    simplifyRefs(parseLineReferencesFromText({
+      text: '对应位置包括 camera_ready.tex:169、camera_ready.tex:225，camera_ready.tex:248;camera_ready.tex:252,camera_ready.tex:270。',
+      mode: 'plain-text-token'
+    })),
+    [
+      {
+        rawText: 'camera_ready.tex:169',
+        displayText: 'camera_ready.tex:169',
+        rawPath: 'camera_ready.tex',
+        line: 169,
+        column: null,
+        source: 'plain-text-token'
+      },
+      {
+        rawText: 'camera_ready.tex:225',
+        displayText: 'camera_ready.tex:225',
+        rawPath: 'camera_ready.tex',
+        line: 225,
+        column: null,
+        source: 'plain-text-token'
+      },
+      {
+        rawText: 'camera_ready.tex:248',
+        displayText: 'camera_ready.tex:248',
+        rawPath: 'camera_ready.tex',
+        line: 248,
+        column: null,
+        source: 'plain-text-token'
+      },
+      {
+        rawText: 'camera_ready.tex:252',
+        displayText: 'camera_ready.tex:252',
+        rawPath: 'camera_ready.tex',
+        line: 252,
+        column: null,
+        source: 'plain-text-token'
+      },
+      {
+        rawText: 'camera_ready.tex:270',
+        displayText: 'camera_ready.tex:270',
+        rawPath: 'camera_ready.tex',
+        line: 270,
+        column: null,
+        source: 'plain-text-token'
+      }
+    ]
+  );
+});
+
+test('parses fullwidth colon separated line references without confusing it with the ASCII line-number colon', () => {
+  assert.deepEqual(
+    simplifyRefs(parseLineReferencesFromText({
+      text: 'changes：camera_ready.tex:42！camera_ready.tex:99？camera_ready.tex:7',
+      mode: 'plain-text-token'
+    })),
+    [
+      {
+        rawText: 'camera_ready.tex:42',
+        displayText: 'camera_ready.tex:42',
+        rawPath: 'camera_ready.tex',
+        line: 42,
+        column: null,
+        source: 'plain-text-token'
+      },
+      {
+        rawText: 'camera_ready.tex:99',
+        displayText: 'camera_ready.tex:99',
+        rawPath: 'camera_ready.tex',
+        line: 99,
+        column: null,
+        source: 'plain-text-token'
+      },
+      {
+        rawText: 'camera_ready.tex:7',
+        displayText: 'camera_ready.tex:7',
+        rawPath: 'camera_ready.tex',
+        line: 7,
+        column: null,
+        source: 'plain-text-token'
+      }
+    ]
+  );
+});
+
 test('parses final colon line suffix without treating Windows drive colon as a line marker', () => {
   assert.deepEqual(
     simplifyRefs(parseLineReferencesFromText({

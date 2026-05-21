@@ -13,8 +13,9 @@
     'markdown-link-target'
   ]);
   const TEXT_EXTENSION_PATTERN = '(?:tex|bib|sty|cls|bst|bbx|cbx|lbx|cfg|def|clo|ist|txt|md|latex)';
-  const REFERENCE_PREFIX_PATTERN = '(^|[\\s\\[({"\'])';
-  const PATH_PATTERN = `([^\\s\\[\\](){}<>"'\`,;]+?\\.${TEXT_EXTENSION_PATTERN})`;
+  const CJK_PUNCTUATION = '、，；。！？：';
+  const REFERENCE_PREFIX_PATTERN = `(^|[\\s\\[({\"',;${CJK_PUNCTUATION}])`;
+  const PATH_PATTERN = `([^\\s\\[\\](){}<>"'\`,;${CJK_PUNCTUATION}]+?\\.${TEXT_EXTENSION_PATTERN})`;
   const BARE_LOCAL_PATH_PATTERN = /(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|private|var|tmp)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi;
 
   function parseLineReferencesFromText({ text, mode }) {
@@ -76,9 +77,6 @@
       placeholderBrackets: true
     });
 
-    if (context === 'render' || context === 'persist') {
-      return sanitized;
-    }
     return sanitized;
   }
 
@@ -460,7 +458,7 @@
   }
 
   function splitTrailingPunctuation(value) {
-    const match = String(value || '').match(/^(.*?)([.,;!?]+)$/);
+    const match = String(value || '').match(/^(.*?)([.,;!?、，；。！？：]+)$/);
     if (!match) {
       return { value, trailing: '' };
     }
