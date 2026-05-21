@@ -387,3 +387,151 @@ test('settingsPanel renders a [data-settings-save-status] element', () => {
   const statusEl = container.querySelector('[data-settings-save-status]');
   assert.ok(statusEl, 'should render a [data-settings-save-status] element');
 });
+
+// Task 3: per-skill enable toggles for Codex Overleaf skills
+
+test('codexOverleafSkillEnabled defaults to {} in DEFAULT_PANEL_STATE', () => {
+  const SessionState = require('../extension/src/shared/sessionState');
+  assert.deepEqual(SessionState.DEFAULT_PANEL_STATE.codexOverleafSkillEnabled, {});
+});
+
+test('normalizePanelState preserves codexOverleafSkillEnabled map with valid boolean values', () => {
+  const SessionState = require('../extension/src/shared/sessionState');
+  const state = SessionState.normalizePanelState({ codexOverleafSkillEnabled: { 'my-skill': false, 'other-skill': true } });
+  assert.deepEqual(state.codexOverleafSkillEnabled, { 'my-skill': false, 'other-skill': true });
+});
+
+test('normalizePanelState drops non-boolean values from codexOverleafSkillEnabled', () => {
+  const SessionState = require('../extension/src/shared/sessionState');
+  const state = SessionState.normalizePanelState({ codexOverleafSkillEnabled: { 'good': false, 'bad-string': 'yes', 'bad-num': 42, 'bad-null': null } });
+  assert.deepEqual(state.codexOverleafSkillEnabled, { 'good': false });
+});
+
+test('normalizePanelState coerces non-object codexOverleafSkillEnabled to {}', () => {
+  const SessionState = require('../extension/src/shared/sessionState');
+  const a = SessionState.normalizePanelState({ codexOverleafSkillEnabled: null });
+  const b = SessionState.normalizePanelState({ codexOverleafSkillEnabled: 'bad' });
+  const c = SessionState.normalizePanelState({ codexOverleafSkillEnabled: [1, 2] });
+  assert.deepEqual(a.codexOverleafSkillEnabled, {});
+  assert.deepEqual(b.codexOverleafSkillEnabled, {});
+  assert.deepEqual(c.codexOverleafSkillEnabled, {});
+});
+
+test('normalizePanelState absent codexOverleafSkillEnabled becomes {}', () => {
+  const SessionState = require('../extension/src/shared/sessionState');
+  const state = SessionState.normalizePanelState({});
+  assert.deepEqual(state.codexOverleafSkillEnabled, {});
+});
+
+test('extractLightweightPrefs round-trips codexOverleafSkillEnabled', () => {
+  const StorageDb = require('../extension/src/shared/storageDb');
+  const prefs = StorageDb.extractLightweightPrefs({ codexOverleafSkillEnabled: { 'skill-a': false, 'skill-b': true } }, 'proj1');
+  assert.deepEqual(prefs.codexOverleafSkillEnabled, { 'skill-a': false, 'skill-b': true });
+});
+
+test('extractLightweightPrefs drops non-string keys and non-boolean values from codexOverleafSkillEnabled', () => {
+  const StorageDb = require('../extension/src/shared/storageDb');
+  const prefs = StorageDb.extractLightweightPrefs({ codexOverleafSkillEnabled: { 'ok': false, 'bad': 'yes', 42: true } }, 'proj1');
+  // non-string key (42) is cast to string by JS object, but value 'yes' is non-boolean and should be dropped
+  assert.equal(prefs.codexOverleafSkillEnabled['ok'], false);
+  assert.ok(!Object.prototype.hasOwnProperty.call(prefs.codexOverleafSkillEnabled, 'bad'), 'non-boolean value should be dropped');
+});
+
+test('localSkillsPanel renders per-skill enable checkbox for each codex-overleaf skill row', () => {
+  const { doc } = buildFakeDocument();
+  const listEl = doc.createElement('div');
+  listEl.dataset.localSkillList = '';
+  doc.documentElement._children.push(listEl);
+
+  const LocalSkillsPanel = require('../extension/src/content/localSkillsPanel');
+  const enabledMap = {};
+  const calls = [];
+
+  const controller = LocalSkillsPanel.createLocalSkillsPanelController({
+    document: doc,
+    getPanel: () => ({ querySelector: sel => sel === '[data-local-skill-list]' ? listEl : null }),
+    getState: () => ({ codexOverleafSkills: [{ id: 'my-skill', title: 'My Skill', removable: false }], codexOverleafSkillEnabled: enabledMap }),
+    setState: () => {},
+    getSkillLoadingSettings: () => ({ loadCodexOverleafSkills: true }),
+    isCodexOverleafSkillEnabled: (id) => enabledMap[id] !== false,
+    setCodexOverleafSkillEnabled: (id, val) => calls.push({ id, val }),
+    tr: key => key,
+    tx: (en) => en
+  });
+
+  controller.renderLocalSkillList();
+
+  const rows = listEl.querySelectorAll
+    ? listEl._children.filter(c => c.className && c.className.includes('codex-local-skill-row'))
+    : [];
+  assert.equal(rows.length, 1, 'should render one skill row');
+
+  const checkbox = rows[0]._children.find(c => c.tag === 'input' && c.type === 'checkbox');
+  assert.ok(checkbox, 'each skill row should have a leading enable checkbox');
+  assert.equal(checkbox.checked, true, 'checkbox should be checked when skill is enabled (default true)');
+});
+
+test('localSkillsPanel per-skill toggle fires setCodexOverleafSkillEnabled on change', () => {
+  const { doc } = buildFakeDocument();
+  const listEl = doc.createElement('div');
+  listEl.dataset.localSkillList = '';
+  doc.documentElement._children.push(listEl);
+
+  const LocalSkillsPanel = require('../extension/src/content/localSkillsPanel');
+  const calls = [];
+
+  const controller = LocalSkillsPanel.createLocalSkillsPanelController({
+    document: doc,
+    getPanel: () => ({ querySelector: sel => sel === '[data-local-skill-list]' ? listEl : null }),
+    getState: () => ({ codexOverleafSkills: [{ id: 'toggle-skill', title: 'Toggle Skill', removable: false }], codexOverleafSkillEnabled: {} }),
+    setState: () => {},
+    getSkillLoadingSettings: () => ({ loadCodexOverleafSkills: true }),
+    isCodexOverleafSkillEnabled: () => true,
+    setCodexOverleafSkillEnabled: (id, val) => calls.push({ id, val }),
+    tr: key => key,
+    tx: (en) => en
+  });
+
+  controller.renderLocalSkillList();
+
+  const rows = listEl._children.filter(c => c.className && c.className.includes('codex-local-skill-row'));
+  assert.equal(rows.length, 1);
+  const checkbox = rows[0]._children.find(c => c.tag === 'input' && c.type === 'checkbox');
+  assert.ok(checkbox, 'toggle checkbox must exist');
+
+  // Simulate unchecking (disable skill)
+  checkbox.checked = false;
+  checkbox._fire('change', { target: checkbox });
+
+  assert.equal(calls.length, 1, 'setCodexOverleafSkillEnabled should be called once');
+  assert.equal(calls[0].id, 'toggle-skill');
+  assert.equal(calls[0].val, false);
+});
+
+test('localSkillsPanel disables per-skill toggle when master toggle is off', () => {
+  const { doc } = buildFakeDocument();
+  const listEl = doc.createElement('div');
+  listEl.dataset.localSkillList = '';
+  doc.documentElement._children.push(listEl);
+
+  const LocalSkillsPanel = require('../extension/src/content/localSkillsPanel');
+
+  const controller = LocalSkillsPanel.createLocalSkillsPanelController({
+    document: doc,
+    getPanel: () => ({ querySelector: sel => sel === '[data-local-skill-list]' ? listEl : null }),
+    getState: () => ({ codexOverleafSkills: [{ id: 'a-skill', title: 'A Skill', removable: false }], codexOverleafSkillEnabled: {} }),
+    setState: () => {},
+    getSkillLoadingSettings: () => ({ loadCodexOverleafSkills: false }),
+    isCodexOverleafSkillEnabled: () => true,
+    setCodexOverleafSkillEnabled: () => {},
+    tr: key => key,
+    tx: (en) => en
+  });
+
+  controller.renderLocalSkillList();
+
+  const rows = listEl._children.filter(c => c.className && c.className.includes('codex-local-skill-row'));
+  const checkbox = rows[0]?._children.find(c => c.tag === 'input' && c.type === 'checkbox');
+  assert.ok(checkbox, 'toggle checkbox must exist even when master is off');
+  assert.equal(checkbox.disabled, true, 'per-skill toggle should be disabled when master toggle is off');
+});

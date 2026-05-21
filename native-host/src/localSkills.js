@@ -254,6 +254,7 @@ function materializeProjectSkillsAsCodexSkills({
 function loadSelectedCodexOverleafSkill({
   skillId,
   loadCodexOverleafSkills = true,
+  enabledCodexOverleafSkillIds,
   env = process.env,
   skillsRoot
 } = {}) {
@@ -269,6 +270,18 @@ function loadSelectedCodexOverleafSkill({
       ignored: [{
         id,
         reason: 'codex_overleaf_skills_disabled'
+      }]
+    };
+  }
+  // Per-skill enable check: if enabledCodexOverleafSkillIds is provided and does not include
+  // this skill, treat it as not available. Absent param = all enabled (backward-safe).
+  if (Array.isArray(enabledCodexOverleafSkillIds) && !enabledCodexOverleafSkillIds.includes(id)) {
+    return {
+      skill: null,
+      missing: [],
+      ignored: [{
+        id,
+        reason: 'codex_overleaf_skill_disabled'
       }]
     };
   }

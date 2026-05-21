@@ -68,6 +68,7 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
   const codexSkillInvocationContext = loadCodexSkillInvocationContext({
     skillInvocation,
     loadCodexOverleafSkills: skillLoading.loadCodexOverleafSkills,
+    enabledCodexOverleafSkillIds: params.enabledCodexOverleafSkillIds,
     env,
     emit
   });
@@ -385,6 +386,7 @@ function normalizeSkillLoadingSettings(params = {}) {
 function loadCodexSkillInvocationContext({
   skillInvocation,
   loadCodexOverleafSkills = true,
+  enabledCodexOverleafSkillIds,
   env = process.env,
   emit = () => {}
 } = {}) {
@@ -399,6 +401,7 @@ function loadCodexSkillInvocationContext({
   const result = loadSelectedCodexOverleafSkill({
     skillId: invocation.id,
     loadCodexOverleafSkills,
+    enabledCodexOverleafSkillIds,
     env
   });
   if (result.missing.length) {

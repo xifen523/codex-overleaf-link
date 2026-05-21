@@ -17,6 +17,7 @@
     autoOpen: true,
     loadCodexLocalSkills: true,
     loadCodexOverleafSkills: true,
+    codexOverleafSkillEnabled: {},
     panelWidth: 380,
     task: '',
     focusFiles: [],
@@ -105,6 +106,7 @@
     state.autoOpen = state.autoOpen !== false;
     state.loadCodexLocalSkills = state.loadCodexLocalSkills !== false;
     state.loadCodexOverleafSkills = state.loadCodexOverleafSkills !== false;
+    state.codexOverleafSkillEnabled = normalizeCodexOverleafSkillEnabled(state.codexOverleafSkillEnabled);
     state.panelWidth = normalizePanelWidth(state.panelWidth);
     state.task = typeof state.task === 'string' ? state.task : '';
     state.model = typeof state.model === 'string' && state.model ? state.model : DEFAULT_PANEL_STATE.model;
@@ -669,6 +671,23 @@
     return result;
   }
 
+  function normalizeCodexOverleafSkillEnabled(value) {
+    const result = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    for (const key of Object.keys(value)) {
+      if (typeof key !== 'string' || !key) {
+        continue;
+      }
+      if (typeof value[key] !== 'boolean') {
+        continue;
+      }
+      result[key] = value[key];
+    }
+    return result;
+  }
+
   function normalizeProjectPrefKey(value) {
     const key = typeof value === 'string' ? value.trim() : '';
     if (!key) {
@@ -714,6 +733,7 @@
       autoOpen: source.autoOpen !== false,
       loadCodexLocalSkills: source.loadCodexLocalSkills !== false,
       loadCodexOverleafSkills: source.loadCodexOverleafSkills !== false,
+      codexOverleafSkillEnabled: normalizeCodexOverleafSkillEnabled(source.codexOverleafSkillEnabled),
       panelWidth: normalizePanelWidth(source.panelWidth),
       task: summarizeTextForStorage(active?.task || source.task || '', 'task'),
       focusFiles: normalizeFocusFiles(active?.focusFiles || source.focusFiles),

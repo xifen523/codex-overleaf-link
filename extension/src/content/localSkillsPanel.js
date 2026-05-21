@@ -20,6 +20,12 @@
     const getSkillLoadingSettings = typeof deps.getSkillLoadingSettings === 'function'
       ? deps.getSkillLoadingSettings
       : () => ({ loadCodexOverleafSkills: true });
+    const isCodexOverleafSkillEnabled = typeof deps.isCodexOverleafSkillEnabled === 'function'
+      ? deps.isCodexOverleafSkillEnabled
+      : () => true;
+    const setCodexOverleafSkillEnabled = typeof deps.setCodexOverleafSkillEnabled === 'function'
+      ? deps.setCodexOverleafSkillEnabled
+      : () => {};
     const setProjectSettingsStatus = typeof deps.setProjectSettingsStatus === 'function'
       ? deps.setProjectSettingsStatus
       : () => {};
@@ -87,7 +93,7 @@
       }
     }
 
-    function renderCodexOverleafSkillRow(list, skill, enabled) {
+    function renderCodexOverleafSkillRow(list, skill, masterEnabled) {
       const id = String(skill?.id || '').trim();
       if (!id) {
         return;
@@ -95,9 +101,23 @@
       const row = document.createElement('div');
       row.className = 'codex-local-skill-row';
       row.dataset.scope = 'codex-overleaf';
-      if (!enabled) {
+      if (!masterEnabled) {
         row.dataset.disabled = 'true';
       }
+
+      // Leading per-skill enable toggle
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.checked = isCodexOverleafSkillEnabled(id);
+      toggle.setAttribute('aria-label', tr('codexOverleafSkillEnableToggle'));
+      if (!masterEnabled) {
+        toggle.disabled = true;
+      }
+      toggle.addEventListener('change', event => {
+        setCodexOverleafSkillEnabled(id, event.target.checked);
+      });
+      row.append(toggle);
+
       const text = document.createElement('span');
       text.textContent = skill.title ? `${skill.title} (${id})` : id;
       text.title = text.textContent;

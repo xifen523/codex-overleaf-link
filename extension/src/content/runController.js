@@ -21,6 +21,7 @@
     codexThreadId,
     customInstructions,
     skillLoadingSettings,
+    enabledCodexOverleafSkillIds,
     attachments,
     skillInvocation,
     compileLogContext,
@@ -30,6 +31,9 @@
     const normalizedCustomInstructions = String(customInstructions || '').trim();
     const normalizedAttachments = normalizeComposerAttachments(attachments);
     const normalizedSkillInvocation = normalizeSkillInvocation(skillInvocation);
+    const normalizedEnabledSkillIds = Array.isArray(enabledCodexOverleafSkillIds)
+      ? enabledCodexOverleafSkillIds.filter(id => typeof id === 'string' && id.trim())
+      : undefined;
     const params = {
       projectId: currentProjectId,
       mode: submittedMode || state.mode,
@@ -50,6 +54,7 @@
       customInstructions: normalizedCustomInstructions || undefined,
       loadCodexLocalSkills: skillLoadingSettings?.loadCodexLocalSkills !== false,
       loadCodexOverleafSkills: skillLoadingSettings?.loadCodexOverleafSkills !== false,
+      enabledCodexOverleafSkillIds: normalizedEnabledSkillIds,
       skillInvocation: normalizedSkillInvocation || undefined,
       attachments: normalizedAttachments.length ? normalizedAttachments : undefined
     };

@@ -342,9 +342,29 @@
       experimentalOtByProject: normalizeBooleanMap(state.experimentalOtByProject),
       customInstructionsByProject: normalizeStringMap(state.customInstructionsByProject),
       governanceRulesByProject: normalizeGovernanceRulesMap(state.governanceRulesByProject),
-      selectedLocalSkillIdsByProject: normalizeStringListMap(state.selectedLocalSkillIdsByProject)
+      selectedLocalSkillIdsByProject: normalizeStringListMap(state.selectedLocalSkillIdsByProject),
+      codexOverleafSkillEnabled: normalizeCodexOverleafSkillEnabledMap(state.codexOverleafSkillEnabled)
     };
     return prefs;
+  }
+
+  function normalizeCodexOverleafSkillEnabledMap(value) {
+    var result = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return result;
+    }
+    var keys = Object.keys(value);
+    for (var i = 0; i < keys.length; i++) {
+      var key = keys[i];
+      if (typeof key !== 'string' || !key) {
+        continue;
+      }
+      if (typeof value[key] !== 'boolean') {
+        continue;
+      }
+      result[key] = value[key];
+    }
+    return result;
   }
 
   function normalizeBooleanMap(value) {

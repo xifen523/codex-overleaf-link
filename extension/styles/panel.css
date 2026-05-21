@@ -473,7 +473,7 @@
 }
 
 #codex-overleaf-panel .codex-local-skill-row[data-scope="codex-overleaf"] {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 #codex-overleaf-panel .codex-local-skill-row[data-disabled="true"] {

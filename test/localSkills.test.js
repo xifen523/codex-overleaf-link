@@ -217,3 +217,87 @@ test('listCodexOverleafSkills includes official and removable flags', () => {
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+// Task 3: per-skill enable toggles — native host honoring
+
+test('loadSelectedCodexOverleafSkill ignores a skill whose id is not in the enabled set', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-per-skill-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  try {
+    installCodexOverleafSkill({
+      skillId: 'venue-style',
+      content: '# Venue Style\n\nPrefer concise claims.',
+      env
+    });
+
+    // enabledCodexOverleafSkillIds is provided but does not include 'venue-style'
+    const result = loadSelectedCodexOverleafSkill({
+      skillId: 'venue-style',
+      loadCodexOverleafSkills: true,
+      enabledCodexOverleafSkillIds: ['other-skill'],
+      env
+    });
+
+    assert.equal(result.skill, null);
+    assert.deepEqual(result.missing, []);
+    assert.ok(result.ignored.length > 0, 'should report the skill as ignored');
+    assert.equal(result.ignored[0].id, 'venue-style');
+    assert.equal(result.ignored[0].reason, 'codex_overleaf_skill_disabled');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('loadSelectedCodexOverleafSkill loads skill when it IS in the enabled set', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-per-skill-enabled-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  try {
+    installCodexOverleafSkill({
+      skillId: 'venue-style',
+      content: '# Venue Style\n\nPrefer concise claims.',
+      env
+    });
+
+    const result = loadSelectedCodexOverleafSkill({
+      skillId: 'venue-style',
+      loadCodexOverleafSkills: true,
+      enabledCodexOverleafSkillIds: ['venue-style'],
+      env
+    });
+
+    assert.ok(result.skill, 'skill should be loaded when it is in the enabled set');
+    assert.equal(result.skill.id, 'venue-style');
+    assert.deepEqual(result.missing, []);
+    assert.deepEqual(result.ignored, []);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('loadSelectedCodexOverleafSkill treats all skills as enabled when enabledCodexOverleafSkillIds is absent', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-per-skill-absent-'));
+  const overleafSkillsRoot = path.join(home, '.codex-overleaf', 'skills');
+  const env = { HOME: home, CODEX_OVERLEAF_SKILLS_ROOT: overleafSkillsRoot };
+  try {
+    installCodexOverleafSkill({
+      skillId: 'venue-style',
+      content: '# Venue Style\n\nPrefer concise claims.',
+      env
+    });
+
+    // No enabledCodexOverleafSkillIds param — backward-safe default: all enabled
+    const result = loadSelectedCodexOverleafSkill({
+      skillId: 'venue-style',
+      loadCodexOverleafSkills: true,
+      env
+    });
+
+    assert.ok(result.skill, 'skill should load when enabledCodexOverleafSkillIds is absent (backward-safe)');
+    assert.deepEqual(result.missing, []);
+    assert.deepEqual(result.ignored, []);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
