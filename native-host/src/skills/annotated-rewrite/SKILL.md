@@ -15,7 +15,7 @@ This lets the user review exactly what changed before accepting the edit.
 
 ## When to apply
 
-Default to this pattern whenever the replaced content is **more than a short inline phrase**, regardless of content type — prose, equations, lists, environment bodies, or any contiguous block. Use it as often as possible — when in doubt, use it.
+Default to this pattern whenever the replaced content is **more than a short inline phrase** (see the word-level exception below), regardless of content type — prose, equations, lists, environment bodies, or any contiguous block. Use it as often as possible — when in doubt, use it.
 
 A useful guide: if the replaced content is **3 or more source lines**, always apply it. For shorter replacements (1-2 source lines), lean toward applying it unless the change is purely **word-level**: replacing a single word, fixing a typo, or changing a run of 1-5 words within an unbroken clause.
 
