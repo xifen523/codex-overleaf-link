@@ -509,7 +509,7 @@
         i18n: { tr },
         button: panel.querySelector('[data-custom-instructions-settings]'),
         callbacks: {
-          onClose: () => closeCustomInstructionsSettings(),
+          onBack: () => closeCustomInstructionsSettings(),
           onSave: () => {
             saveCustomInstructionsSettings().catch(error => {
               appendStorageNoticeOnce('custom-instructions-save-failed', tx(`Failed to save custom instructions: ${error.message}`, `保存自定义指令失败：${error.message}`));
@@ -664,6 +664,9 @@
     clearProjectSettingsStatus();
     syncCustomInstructionsEditorForProject(getCurrentProjectId(), { force: true });
     syncProjectSettingsEditorForProject();
+    if (typeof panelRendererInstance !== 'undefined') {
+      panelRendererInstance?.setView?.('settings');
+    }
     SettingsPanel.show(settingsPanelInstance);
     if (typeof refreshLocalSkills === 'function') {
       refreshLocalSkills().catch(error => setProjectSettingsStatus(tx(`Could not list local skills: ${error.message}`, `无法列出本地技能：${error.message}`), 'failed'));
@@ -679,6 +682,9 @@
   }
 
   function closeCustomInstructionsSettings() {
+    if (typeof panelRendererInstance !== 'undefined') {
+      panelRendererInstance?.setView?.('session');
+    }
     SettingsPanel.hide(settingsPanelInstance);
   }
 
@@ -967,7 +973,7 @@
     setElementTitleAndAria('[data-diagnostics-result-close]', tr('close'), tr('closeDiagnostics'));
     setElementTitleAndAria('[data-new-session]', tr('newSession'), tr('newSession'));
     setElementTitleAndAria('[data-custom-instructions-settings]', tr('customInstructionsSettings'), tr('customInstructionsSettings'));
-    setElementTitleAndAria('[data-custom-instructions-close]', tr('close'), tr('customInstructionsClose'));
+    setElementTitleAndAria('[data-settings-back]', tr('settingsBack'), tr('settingsBack'));
     setElementTitleAndAria('[data-add-context]', tr('addContext'), tr('addContext'));
     setElementTitleAndAria('[data-context-refresh]', tr('refreshFileList'), tr('refreshFileList'));
     setElementTitleAndAria('[data-run]', currentRunView ? tr('cancelRun') : tr('send'), currentRunView ? tr('cancelRun') : tr('send'));

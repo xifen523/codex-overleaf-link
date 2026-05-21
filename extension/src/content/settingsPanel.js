@@ -13,8 +13,9 @@
     };
 
     container.innerHTML = `
-      <section class="codex-custom-instructions-panel codex-project-settings-panel" data-custom-instructions-panel data-project-settings-panel hidden>
+      <section class="codex-custom-instructions-panel codex-project-settings-panel" data-custom-instructions-panel data-project-settings-panel>
         <div class="codex-custom-instructions-head">
+          <button type="button" data-settings-back title="Back" aria-label="Back">‹</button>
           <div>
             <div class="codex-custom-instructions-title" data-i18n="projectSettingsTitle">Project Settings</div>
             <span data-i18n="customInstructionsTitle" hidden>Custom Instructions</span>
@@ -22,7 +23,6 @@
             <div class="codex-custom-instructions-subtitle" data-i18n="projectSettingsSubtitle">Governance, local skills, and custom instructions for this Overleaf project.</div>
             <a class="codex-custom-instructions-learn-more" data-custom-instructions-learn-more data-i18n="customInstructionsLearnMore" href="https://developers.openai.com/codex/guides/agents-md#create-global-guidance" target="_blank" rel="noopener noreferrer">Learn more</a>
           </div>
-          <button type="button" data-custom-instructions-close title="Close" aria-label="Close">×</button>
         </div>
         <label class="codex-custom-instructions-label" for="codex-custom-instructions-input" data-i18n="personalizationConfig">Personalization</label>
         <textarea id="codex-custom-instructions-input" class="codex-custom-instructions-input" data-custom-instructions-input rows="7" placeholder="Style, terminology, venue constraints, and LaTeX conventions for this project."></textarea>
@@ -60,7 +60,7 @@
       </section>
     `;
 
-    container.querySelector('[data-custom-instructions-close]')?.addEventListener('click', () => instance.callbacks.onClose?.());
+    container.querySelector('[data-settings-back]')?.addEventListener('click', () => instance.callbacks.onBack?.());
     container.querySelector('[data-custom-instructions-save]')?.addEventListener('click', () => instance.callbacks.onSave?.(readState(instance)));
     for (const selector of ['[data-governance-readonly-patterns]', '[data-governance-writable-patterns]', '[data-sensitive-check-enabled]', '[data-sensitive-confirm-allowed]', '[data-load-codex-local-skills]', '[data-load-codex-overleaf-skills]']) {
       const element = container.querySelector(selector);
@@ -86,7 +86,6 @@
     if (!root) {
       return;
     }
-    root.hidden = false;
     const button = getButton(instance);
     if (button) {
       button.dataset.active = 'true';
@@ -101,7 +100,6 @@
     if (!root) {
       return;
     }
-    root.hidden = true;
     const button = getButton(instance);
     if (button) {
       button.dataset.active = 'false';
@@ -112,7 +110,14 @@
 
   function isVisible(target) {
     const instance = target?._instance || target;
-    return getRoot(instance)?.hidden === false;
+    // Visibility is governed by the panel root's data-view attribute.
+    const panelRoot = instance?.container?.closest?.('[data-view]') ||
+      instance?.container?.ownerDocument?.querySelector?.('[data-view]');
+    if (panelRoot) {
+      return panelRoot.dataset.view === 'settings';
+    }
+    // Fallback: treat as not visible if we cannot read the view state.
+    return false;
   }
 
   function loadState(target, state = {}) {

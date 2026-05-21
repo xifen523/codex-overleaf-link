@@ -24,6 +24,7 @@
     };
 
     panelEl.id = options.panelId || 'codex-overleaf-panel';
+    panelEl.dataset.view = 'session';
     panelEl.innerHTML = `
       <div class="codex-panel-resize-handle" data-panel-resize-handle title="Drag to resize the Codex panel. Double click to reset." aria-label="Drag to resize the Codex panel. Double click to reset." role="separator"></div>
       <div class="codex-vscode-head" data-panel-header>
@@ -86,6 +87,7 @@
       settingsSlot: instance.settingsSlot,
       sessionSlot: instance.sessionSlot,
       composerSlot: instance.composerSlot,
+      setView: view => { panelEl.dataset.view = view; },
       destroy: () => destroy(instance),
       _instance: instance
     };

@@ -298,27 +298,32 @@
   border-color: #8a3a32;
 }
 
-#codex-overleaf-panel .codex-custom-instructions-panel {
-  position: fixed;
-  z-index: 2147483647;
-  top: 44px;
-  right: 12px;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: min(340px, calc(var(--codex-overleaf-panel-width) - 24px));
-  max-height: min(540px, calc(100vh - 64px));
-  overflow: auto;
-  border: 1px solid #3a3d41;
-  border-radius: 8px;
-  background: #1f1f1f;
-  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.48);
-  padding: 12px;
+/* View-state rules: hide session elements when in settings view, and vice versa */
+#codex-overleaf-panel[data-view="settings"] .codex-vscode-head,
+#codex-overleaf-panel[data-view="settings"] [data-main],
+#codex-overleaf-panel[data-view="settings"] [data-probe-status],
+#codex-overleaf-panel[data-view="settings"] [data-composer-slot] {
+  display: none;
 }
 
-#codex-overleaf-panel .codex-custom-instructions-panel[hidden] {
+#codex-overleaf-panel[data-view="session"] [data-settings-slot] {
   display: none;
+}
+
+#codex-overleaf-panel[data-view="settings"] [data-settings-slot] {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#codex-overleaf-panel .codex-custom-instructions-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  background: #1f1f1f;
+  padding: 12px;
 }
 
 #codex-overleaf-panel .codex-custom-instructions-head {
@@ -362,7 +367,7 @@
   text-decoration: underline;
 }
 
-#codex-overleaf-panel .codex-custom-instructions-head [data-custom-instructions-close] {
+#codex-overleaf-panel .codex-custom-instructions-head [data-settings-back] {
   flex: 0 0 auto;
   width: 24px;
   height: 24px;
@@ -399,11 +404,6 @@
 
 #codex-overleaf-panel .codex-custom-instructions-input::placeholder {
   color: #777d83;
-}
-
-#codex-overleaf-panel .codex-project-settings-panel {
-  width: min(380px, calc(var(--codex-overleaf-panel-width) - 24px));
-  max-height: min(680px, calc(100vh - 64px));
 }
 
 #codex-overleaf-panel .codex-project-settings-section {
