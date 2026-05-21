@@ -150,12 +150,58 @@ function ensureDefaultCodexOverleafSkills({ env = process.env } = {}) {
 }
 
 function copyUserCodexFile(source, target, fileName, options = {}) {
-  if (fileName !== 'config.toml' || options.loadCodexLocalSkills !== false) {
+  if (fileName !== 'config.toml') {
     fs.copyFileSync(source, target);
     return;
   }
-  const content = fs.readFileSync(source, 'utf8');
-  fs.writeFileSync(target, sanitizeCodexConfigForLocalSkillIsolation(content), 'utf8');
+  let content = stripPersonalizationFromCodexConfig(fs.readFileSync(source, 'utf8'));
+  if (options.loadCodexLocalSkills === false) {
+    content = sanitizeCodexConfigForLocalSkillIsolation(content);
+  }
+  fs.writeFileSync(target, content, 'utf8');
+}
+
+// Removes the top-level `personality` key (Codex's built-in "personality"
+// feature) so the plugin Codex home never inherits the user's global
+// personalization. Only the top-level key is removed — a `personality` key
+// inside a [section] is a different key and is preserved. Handles single-line
+// values and both multi-line string forms (""" basic and ''' literal). Lines
+// other than the personality assignment are passed through unchanged.
+function stripPersonalizationFromCodexConfig(content) {
+  const lines = String(content || '').split(/\r?\n/);
+  const output = [];
+  let beforeFirstSection = true;
+  let closingDelimiter = '';
+
+  for (const line of lines) {
+    if (closingDelimiter) {
+      if (line.includes(closingDelimiter)) {
+        closingDelimiter = '';
+      }
+      continue;
+    }
+    if (parseTomlSectionName(line)) {
+      beforeFirstSection = false;
+      output.push(line);
+      continue;
+    }
+    if (beforeFirstSection) {
+      const match = line.match(/^\s*personality\s*=\s*(.*)$/);
+      if (match) {
+        const value = match[1];
+        const opener = value.startsWith('"""') ? '"""'
+          : value.startsWith("'''") ? "'''"
+            : '';
+        if (opener && value.indexOf(opener, opener.length) === -1) {
+          closingDelimiter = opener;
+        }
+        continue;
+      }
+    }
+    output.push(line);
+  }
+
+  return output.join('\n');
 }
 
 function sanitizeCodexConfigForLocalSkillIsolation(content) {

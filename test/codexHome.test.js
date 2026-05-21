@@ -481,3 +481,86 @@ test('preparePluginCodexHome automatically installs the annotated-rewrite skill'
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('plugin Codex config strips only the top-level personality key', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-personality-'));
+  const userCodexHome = path.join(home, '.codex');
+  const pluginConfigPath = path.join(home, '.codex-overleaf', 'codex-home', 'config.toml');
+  try {
+    fs.mkdirSync(userCodexHome, { recursive: true });
+    fs.writeFileSync(path.join(userCodexHome, 'config.toml'), [
+      'model = "gpt-5.5"',
+      'personality = "Answer in the third person."',
+      '',
+      '[features]',
+      'multi_agent = true',
+      '',
+      '[model_providers.openai_official]',
+      'name = "OpenAI Official"',
+      'personality = "provider-scoped value"'
+    ].join('\n'), 'utf8');
+
+    for (const loadCodexLocalSkills of [true, false]) {
+      preparePluginCodexHome({ HOME: home }, { loadCodexLocalSkills });
+      const pluginConfig = fs.readFileSync(pluginConfigPath, 'utf8');
+
+      assert.doesNotMatch(pluginConfig, /Answer in the third person/);
+      assert.match(pluginConfig, /model = "gpt-5\.5"/);
+      assert.match(pluginConfig, /\[features\]/);
+      assert.match(pluginConfig, /personality = "provider-scoped value"/);
+    }
+
+    assert.match(
+      fs.readFileSync(path.join(userCodexHome, 'config.toml'), 'utf8'),
+      /personality = "Answer in the third person\."/
+    );
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('plugin Codex config strips multi-line personality values (basic and literal)', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-personality-multiline-'));
+  const userCodexHome = path.join(home, '.codex');
+  const userConfigPath = path.join(userCodexHome, 'config.toml');
+  const pluginConfigPath = path.join(home, '.codex-overleaf', 'codex-home', 'config.toml');
+  try {
+    fs.mkdirSync(userCodexHome, { recursive: true });
+
+    fs.writeFileSync(userConfigPath, [
+      'model = "gpt-5.5"',
+      'personality = """',
+      'Answer in the third person.',
+      'Avoid the X-not-Y pattern.',
+      '"""',
+      '',
+      '[features]',
+      'multi_agent = true'
+    ].join('\n'), 'utf8');
+    preparePluginCodexHome({ HOME: home }, { loadCodexLocalSkills: true });
+    let pluginConfig = fs.readFileSync(pluginConfigPath, 'utf8');
+    assert.doesNotMatch(pluginConfig, /personality/);
+    assert.doesNotMatch(pluginConfig, /third person/);
+    assert.doesNotMatch(pluginConfig, /X-not-Y/);
+    assert.match(pluginConfig, /model = "gpt-5\.5"/);
+    assert.match(pluginConfig, /\[features\]/);
+
+    fs.writeFileSync(userConfigPath, [
+      'model = "gpt-5.5"',
+      "personality = '''",
+      'Literal personality line.',
+      "'''",
+      '',
+      '[features]',
+      'multi_agent = true'
+    ].join('\n'), 'utf8');
+    preparePluginCodexHome({ HOME: home }, { loadCodexLocalSkills: true });
+    pluginConfig = fs.readFileSync(pluginConfigPath, 'utf8');
+    assert.doesNotMatch(pluginConfig, /personality/);
+    assert.doesNotMatch(pluginConfig, /Literal personality line/);
+    assert.match(pluginConfig, /model = "gpt-5\.5"/);
+    assert.match(pluginConfig, /\[features\]/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
