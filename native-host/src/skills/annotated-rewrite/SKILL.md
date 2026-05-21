@@ -1,35 +1,25 @@
 ---
 name: annotated-rewrite
 description: >
-  When rewriting paragraphs or larger blocks in .tex files, comment out the
-  original content and write the replacement below it so the user can review
-  the before/after diff directly in the source.
+  When rewriting `.tex` content spanning more than a few words, comment out the
+  original and write the replacement below it so the user can review the
+  before/after diff directly in the source.
 ---
 
 # Annotated Rewrite
 
-When rewriting `.tex` file content at paragraph level or larger, preserve the
-original by commenting it out rather than deleting it, then write the replacement
-below. This lets the user review exactly what changed before accepting the edit.
+When rewriting `.tex` file content (paragraphs, sentences, equations, list
+bodies, or any block larger than a few words), preserve the original by
+commenting it out rather than deleting it, then write the replacement below.
+This lets the user review exactly what changed before accepting the edit.
 
 ## When to apply
 
-Default to this pattern. Apply whenever the rewrite is longer than a single
-short phrase, regardless of whether it's a sentence, a paragraph, an
-environment body, or a contiguous block. Use it as often as possible — when
-in doubt, use it.
+Default to this pattern whenever the replaced content is **more than a short inline phrase**, regardless of content type — prose, equations, lists, environment bodies, or any contiguous block. Use it as often as possible — when in doubt, use it.
 
-A useful rule of thumb: if the replaced content spans **3 or more sentences or
-3 or more lines**, always apply it. For shorter rewrites (1-2 sentences or
-1-2 lines), lean toward applying it unless the edit is purely at the
-**word level** — correcting a single word, fixing a typo, or adjusting a
-short phrase in-place.
+A useful guide: if the replaced content is **3 or more source lines**, always apply it. For shorter replacements (1-2 source lines), lean toward applying it unless the change is purely **word-level**: replacing a single word, fixing a typo, or changing a run of 1-5 words within an unbroken clause.
 
-The word-level exception is the only case where skipping the annotated format
-is clearly appropriate (subject to the structural exceptions in Rule 8). For
-non-prose blocks (equations, lists, `\begin{figure}...\end{figure}`, and
-similar environments), treat each line as equivalent to a sentence when
-evaluating the threshold.
+Word-level edits are the only case where skipping the annotated format is clearly appropriate (subject to the structural exceptions in Rule 8).
 
 ## Edit format
 
@@ -72,8 +62,9 @@ Training minimises a softmax loss over in-batch negatives.
    `% [original]` / `% [revised]` block, edit only the active content after
    `% [revised]` — do not re-wrap the existing annotated block or create a new
    outer annotation around it
-8. **Structure safety**: only apply this pattern at block-level prose context
-   (paragraph or environment body). Do NOT insert `% [original]` / `% [revised]` inside
+8. **Structure safety**: only apply this pattern at **block level** (paragraph,
+   sentence, equation block, list body, or environment body). Do NOT insert
+   `% [original]` / `% [revised]` inside
    macro arguments, table rows, math expressions, `\caption{...}`,
    `\item[...]`, or preamble commands — make minimal direct edits there instead,
    or ask for confirmation before changing structurally sensitive content
