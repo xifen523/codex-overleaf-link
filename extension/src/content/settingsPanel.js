@@ -23,6 +23,7 @@
             <div class="codex-custom-instructions-subtitle" data-i18n="projectSettingsSubtitle">Governance, local skills, and custom instructions for this Overleaf project.</div>
             <a class="codex-custom-instructions-learn-more" data-custom-instructions-learn-more data-i18n="customInstructionsLearnMore" href="https://developers.openai.com/codex/guides/agents-md#create-global-guidance" target="_blank" rel="noopener noreferrer">Learn more</a>
           </div>
+          <span class="codex-settings-save-status" data-settings-save-status data-i18n="settingsSaved">Saved</span>
         </div>
         <label class="codex-custom-instructions-label" for="codex-custom-instructions-input" data-i18n="personalizationConfig">Personalization</label>
         <textarea id="codex-custom-instructions-input" class="codex-custom-instructions-input" data-custom-instructions-input rows="7" placeholder="Style, terminology, venue constraints, and LaTeX conventions for this project."></textarea>
@@ -54,14 +55,14 @@
           <div class="codex-local-skill-list" data-local-skill-list></div>
           <div class="codex-project-settings-status" data-project-settings-status></div>
         </div>
-        <div class="codex-custom-instructions-actions">
-          <button type="button" data-custom-instructions-save data-i18n="save">Save</button>
-        </div>
       </section>
     `;
 
     container.querySelector('[data-settings-back]')?.addEventListener('click', () => instance.callbacks.onBack?.());
-    container.querySelector('[data-custom-instructions-save]')?.addEventListener('click', () => instance.callbacks.onSave?.(readState(instance)));
+    // Personalization textarea: auto-save on blur (change event only — avoids per-keystroke saves).
+    const customInstructionsInput = container.querySelector('[data-custom-instructions-input]');
+    customInstructionsInput?.addEventListener('change', event => instance.callbacks.onInputChange?.(event));
+    // Governance and skill fields: auto-save on change and input for immediate response.
     for (const selector of ['[data-governance-readonly-patterns]', '[data-governance-writable-patterns]', '[data-sensitive-check-enabled]', '[data-sensitive-confirm-allowed]', '[data-load-codex-local-skills]', '[data-load-codex-overleaf-skills]']) {
       const element = container.querySelector(selector);
       element?.addEventListener?.('change', event => instance.callbacks.onInputChange?.(event));

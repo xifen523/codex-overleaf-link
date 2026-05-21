@@ -328,3 +328,62 @@ test('clicking [data-settings-back] fires the onBack callback', () => {
   backBtn._fire('click');
   assert.equal(called, true, 'onBack callback should be fired when back button is clicked');
 });
+
+// Task 2: unified auto-save and save-status indicator
+
+test('a change event on [data-custom-instructions-input] fires the onInputChange callback', () => {
+  const { doc } = buildFakeDocument();
+  const container = doc.createElement('div');
+  doc.documentElement._children.push(container);
+
+  const fakeWindow4 = {};
+  const src = read('extension/src/content/settingsPanel.js');
+  // eslint-disable-next-line no-new-func
+  new Function('window', 'document', src)(fakeWindow4, doc);
+
+  const SettingsPanel = fakeWindow4.CodexOverleafSettingsPanel;
+  let callCount = 0;
+  SettingsPanel.create({
+    container,
+    callbacks: { onInputChange: () => { callCount++; } }
+  });
+
+  const input = container.querySelector('[data-custom-instructions-input]');
+  assert.ok(input, '[data-custom-instructions-input] must exist');
+  input._fire('change');
+  assert.equal(callCount, 1, 'onInputChange should be called once on change event from [data-custom-instructions-input]');
+});
+
+test('settingsPanel renders NO [data-custom-instructions-save] button', () => {
+  const { doc } = buildFakeDocument();
+  const container = doc.createElement('div');
+  doc.documentElement._children.push(container);
+
+  const fakeWindow5 = {};
+  const src = read('extension/src/content/settingsPanel.js');
+  // eslint-disable-next-line no-new-func
+  new Function('window', 'document', src)(fakeWindow5, doc);
+
+  const SettingsPanel = fakeWindow5.CodexOverleafSettingsPanel;
+  SettingsPanel.create({ container });
+
+  const saveBtn = container.querySelector('[data-custom-instructions-save]');
+  assert.equal(saveBtn, null, 'should NOT render [data-custom-instructions-save] button after Task 2');
+});
+
+test('settingsPanel renders a [data-settings-save-status] element', () => {
+  const { doc } = buildFakeDocument();
+  const container = doc.createElement('div');
+  doc.documentElement._children.push(container);
+
+  const fakeWindow6 = {};
+  const src = read('extension/src/content/settingsPanel.js');
+  // eslint-disable-next-line no-new-func
+  new Function('window', 'document', src)(fakeWindow6, doc);
+
+  const SettingsPanel = fakeWindow6.CodexOverleafSettingsPanel;
+  SettingsPanel.create({ container });
+
+  const statusEl = container.querySelector('[data-settings-save-status]');
+  assert.ok(statusEl, 'should render a [data-settings-save-status] element');
+});

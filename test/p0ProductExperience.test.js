@@ -2991,7 +2991,7 @@ test('header exposes project custom instructions settings and editor surface', (
   );
   assert.match(settingsSource, /data-custom-instructions-panel/);
   assert.match(settingsSource, /data-custom-instructions-input/);
-  assert.match(settingsSource, /data-custom-instructions-save/);
+  assert.doesNotMatch(settingsSource, /data-custom-instructions-save/);
   assert.match(settingsSource, /<a class="codex-custom-instructions-learn-more" data-custom-instructions-learn-more data-i18n="customInstructionsLearnMore"/);
   for (const key of [
     'customInstructionsTitle',
@@ -3026,7 +3026,7 @@ test('project custom instructions Learn more control is actionable', () => {
   assert.doesNotMatch(contentScript, /customInstructionsLearnMoreToast/);
 });
 
-test('project custom instructions editor saves and restores by project', async () => {
+test('project custom instructions editor auto-saves on change and restores by project', async () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
@@ -3034,7 +3034,6 @@ test('project custom instructions editor saves and restores by project', async (
   const harness = Function(`
     let currentProjectId = 'project_a';
     let savedCount = 0;
-    let lastToast = '';
     let focused = false;
     let customInstructionsEditorProjectId = '';
     let customInstructionsEditorValue = '';
@@ -3046,38 +3045,46 @@ test('project custom instructions editor saves and restores by project', async (
       placeholder: '',
       focus() { focused = true; }
     };
-    const customInstructionsPanel = {
-      hidden: true
-    };
     const settingsButton = {
-      dataset: {},
+      dataset: { view: 'settings' },
       setAttribute(name, value) { this[name] = value; }
     };
+    const fakeInput = (value = '') => ({ value, checked: false });
     const controls = {
       '[data-custom-instructions-input]': customInstructionsInput,
-      '[data-custom-instructions-panel]': customInstructionsPanel,
-      '[data-custom-instructions-settings]': settingsButton
+      '[data-custom-instructions-settings]': settingsButton,
+      '[data-reasoning]': fakeInput(),
+      '[data-mode]': fakeInput('ask'),
+      '[data-task]': fakeInput(),
+      '[data-speed]': fakeInput('standard'),
+      '[data-require-reviewing]': fakeInput(),
+      '[data-auto-recompile]': fakeInput(),
+      '[data-experimental-ot]': null,
+      '[data-model]': null,
+      '[data-project-settings-panel]': null
     };
+    // panel.dataset.view drives the settings-visibility guard in readPanelInputs
     const panel = {
+      dataset: { view: 'settings' },
       querySelector(selector) {
-        return controls[selector] || null;
-      }
+        return Object.prototype.hasOwnProperty.call(controls, selector) ? controls[selector] : null;
+      },
+      querySelectorAll() { return []; }
     };
     const settingsPanelInstance = {};
     const SettingsPanel = {
       show() {
-        customInstructionsPanel.hidden = false;
         settingsButton.dataset.active = 'true';
         settingsButton.setAttribute('aria-expanded', 'true');
         customInstructionsInput.focus();
       },
       hide() {
-        customInstructionsPanel.hidden = true;
         settingsButton.dataset.active = 'false';
         settingsButton.setAttribute('aria-expanded', 'false');
       },
       setStatus() {},
       clearStatus() {},
+      isVisible() { return panel.dataset.view === 'settings'; },
       loadState() {},
       readState() {
         return {
@@ -3086,7 +3093,9 @@ test('project custom instructions editor saves and restores by project', async (
         };
       }
     };
-    const panelRendererInstance = null;
+    const panelRendererInstance = {
+      setView(v) { panel.dataset.view = v; }
+    };
     function getCurrentProjectId() { return currentProjectId; }
     function closeDiagnosticsMenu() {}
     function closeDiagnosticsResult() {}
@@ -3094,8 +3103,24 @@ test('project custom instructions editor saves and restores by project', async (
     function closeContextTray() {}
     function syncProjectSettingsEditorForProject() {}
     function refreshLocalSkills() { return Promise.resolve(); }
+    function setGovernanceRulesForCurrentProject() {}
+    function readGovernanceRulesFromSettings() { return {}; }
+    function setSkillLoadingSettings() {}
+    function readSkillLoadingSettingsFromSettings() { return {}; }
+    function syncExperimentalOtToggleForProject() {}
+    let lastExperimentalOtProjectId = '';
+    function setExperimentalOtEnabledForProject() {}
+    function updateActiveSession(s) { return s; }
+    function readSelectedModelInput() { return ''; }
+    function readSelectedSpeedInput() { return 'standard'; }
+    function getRenderedModelEntries() { return []; }
+    function renderSpeedOptions() {}
+    function renderModelConfigChoices() {}
+    function updateModelDisplay() {}
+    function syncModeControls() {}
+    function applySessionLabel() {}
+    function renderSessionList() {}
     function tr(key) { return key; }
-    function showPluginToast(message) { lastToast = message; }
     async function saveState() { savedCount++; }
     ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
     ${extractFunction(contentScript, 'getCustomInstructionsForCurrentProject')}
@@ -3104,39 +3129,37 @@ test('project custom instructions editor saves and restores by project', async (
     ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
     ${extractFunction(contentScript, 'openCustomInstructionsSettings')}
     ${extractFunction(contentScript, 'closeCustomInstructionsSettings')}
-    ${extractFunction(contentScript, 'saveCustomInstructionsSettings')}
+    ${extractFunction(contentScript, 'setSettingsSaveStatus')}
+    ${extractFunction(contentScript, 'readPanelInputs')}
+    ${extractFunction(contentScript, 'persistPanelInputs')}
     return {
       input: customInstructionsInput,
-      settingsPanel: customInstructionsPanel,
+      panel,
       settingsButton,
       getState: () => state,
       getSavedCount: () => savedCount,
-      getToast: () => lastToast,
       wasFocused: () => focused,
       navigate(projectId) {
         currentProjectId = projectId;
         syncCustomInstructionsEditorForProject(projectId);
       },
       openCustomInstructionsSettings,
-      saveCustomInstructionsSettings
+      closeCustomInstructionsSettings,
+      persistPanelInputs
     };
   `)();
 
   harness.openCustomInstructionsSettings();
-  assert.equal(harness.settingsPanel.hidden, false);
   assert.equal(harness.wasFocused(), true);
+  assert.equal(harness.panel.dataset.view, 'settings');
 
   harness.input.value = 'Use NeurIPS style and \\\\cref{}.';
-  await harness.saveCustomInstructionsSettings();
+  await harness.persistPanelInputs();
   assert.equal(
     harness.getState().customInstructionsByProject.project_a,
     'Use NeurIPS style and \\\\cref{}.'
   );
   assert.equal(harness.getSavedCount(), 1);
-  assert.equal(harness.getToast(), 'projectSettingsSavedToast');
-  assert.equal(harness.settingsPanel.hidden, true);
-  assert.equal(harness.settingsButton.dataset.active, 'false');
-  assert.equal(harness.settingsButton['aria-expanded'], 'false');
 
   harness.navigate('project_b');
   assert.equal(harness.input.value, '');

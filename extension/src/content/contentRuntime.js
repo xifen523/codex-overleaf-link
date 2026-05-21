@@ -510,11 +510,6 @@
         button: panel.querySelector('[data-custom-instructions-settings]'),
         callbacks: {
           onBack: () => closeCustomInstructionsSettings(),
-          onSave: () => {
-            saveCustomInstructionsSettings().catch(error => {
-              appendStorageNoticeOnce('custom-instructions-save-failed', tx(`Failed to save custom instructions: ${error.message}`, `保存自定义指令失败：${error.message}`));
-            });
-          },
           onInputChange: () => persistPanelInputs()
         }
       });
@@ -682,27 +677,6 @@
   function closeCustomInstructionsSettings() {
     panelRendererInstance?.setView?.('session');
     SettingsPanel.hide(settingsPanelInstance);
-  }
-
-  async function saveCustomInstructionsSettings() {
-    const input = panel?.querySelector('[data-custom-instructions-input]');
-    if (!input) {
-      return;
-    }
-    setCustomInstructionsForProject(getCurrentProjectId(), input.value);
-    if (typeof setGovernanceRulesForCurrentProject === 'function' && typeof readGovernanceRulesFromSettings === 'function') {
-      setGovernanceRulesForCurrentProject(readGovernanceRulesFromSettings());
-    }
-    if (typeof setSkillLoadingSettings === 'function' && typeof readSkillLoadingSettingsFromSettings === 'function') {
-      setSkillLoadingSettings(readSkillLoadingSettingsFromSettings());
-    }
-    syncCustomInstructionsEditorForProject(getCurrentProjectId(), { force: true });
-    if (typeof syncProjectSettingsEditorForProject === 'function') {
-      syncProjectSettingsEditorForProject(getCurrentProjectId());
-    }
-    await saveState();
-    showPluginToast(tr('projectSettingsSavedToast'), { status: 'completed' });
-    closeCustomInstructionsSettings();
   }
 
   function syncCustomInstructionsEditorForProject(projectId = getCurrentProjectId(), options) {
@@ -6527,12 +6501,21 @@
     return error?.message || String(error);
   }
 
+  function setSettingsSaveStatus(key) {
+    const statusEl = panel?.querySelector('[data-settings-save-status]');
+    if (statusEl) {
+      statusEl.textContent = tr(key);
+    }
+  }
+
   async function persistPanelInputs() {
     readPanelInputs();
     renderSpeedOptions(getRenderedModelEntries());
     renderModelConfigChoices();
     updateModelDisplay();
+    setSettingsSaveStatus('settingsSaving');
     await saveState();
+    setSettingsSaveStatus('settingsSaved');
     syncModeControls();
     applySessionLabel();
     renderSessionList();
@@ -6588,7 +6571,11 @@
     if (experimentalOtCheckbox) {
       setExperimentalOtEnabledForProject(projectId, experimentalOtCheckbox.checked);
     }
-    if (panel?.querySelector('[data-project-settings-panel]')?.hidden === false) {
+    if (panel?.dataset?.view === 'settings') {
+      const customInstructionsInput = panel?.querySelector('[data-custom-instructions-input]');
+      if (customInstructionsInput) {
+        setCustomInstructionsForProject(projectId, customInstructionsInput.value);
+      }
       setGovernanceRulesForCurrentProject(readGovernanceRulesFromSettings());
       setSkillLoadingSettings(readSkillLoadingSettingsFromSettings());
     }

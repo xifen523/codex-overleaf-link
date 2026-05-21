@@ -505,24 +505,14 @@
   color: #9be9a8;
 }
 
-#codex-overleaf-panel .codex-custom-instructions-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-#codex-overleaf-panel .codex-custom-instructions-actions button {
-  min-width: 72px;
-  height: 28px;
-  border: 1px solid #2f6f43;
-  border-radius: 6px;
-  background: #173f27;
-  color: #bdf4c8;
-  padding: 0 12px;
-  font-size: 12px;
-}
-
-#codex-overleaf-panel .codex-custom-instructions-actions button:hover {
-  background: #205432;
+#codex-overleaf-panel .codex-settings-save-status {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: 2px;
+  color: #6a6f73;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
 #codex-overleaf-panel .codex-diagnostics-result-head {
