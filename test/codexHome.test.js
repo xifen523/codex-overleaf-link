@@ -612,6 +612,8 @@ test('plugin Codex home removes stale AGENTS.md and rules/memories left by earli
   try {
     fs.mkdirSync(path.join(userCodexHome, 'rules'), { recursive: true });
     fs.mkdirSync(path.join(userCodexHome, 'memories'), { recursive: true });
+    fs.writeFileSync(path.join(userCodexHome, 'rules', 'sentinel.txt'), 'survives\n', 'utf8');
+    fs.writeFileSync(path.join(userCodexHome, 'memories', 'sentinel.txt'), 'survives\n', 'utf8');
     fs.writeFileSync(path.join(userCodexHome, 'auth.json'), '{"token":"user-token"}\n', 'utf8');
     fs.mkdirSync(pluginHome, { recursive: true });
     fs.writeFileSync(path.join(pluginHome, 'AGENTS.md'), 'stale global guidance\n', 'utf8');
@@ -625,6 +627,8 @@ test('plugin Codex home removes stale AGENTS.md and rules/memories left by earli
     assert.equal(fs.existsSync(path.join(pluginHome, 'memories')), false);
     assert.equal(fs.existsSync(path.join(userCodexHome, 'rules')), true);
     assert.equal(fs.existsSync(path.join(userCodexHome, 'memories')), true);
+    assert.equal(fs.existsSync(path.join(userCodexHome, 'rules', 'sentinel.txt')), true);
+    assert.equal(fs.existsSync(path.join(userCodexHome, 'memories', 'sentinel.txt')), true);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
