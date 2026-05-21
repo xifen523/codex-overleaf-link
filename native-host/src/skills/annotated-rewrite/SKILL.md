@@ -14,13 +14,22 @@ below. This lets the user review exactly what changed before accepting the edit.
 
 ## When to apply
 
-Default to this pattern. Apply whenever a rewrite spans **3 or more sentences**,
-regardless of whether it's a paragraph, environment body, or contiguous block.
-Use it as often as possible — when in doubt, use it.
+Default to this pattern. Apply whenever the rewrite is longer than a single
+short phrase, regardless of whether it's a sentence, a paragraph, an
+environment body, or a contiguous block. Use it as often as possible — when
+in doubt, use it.
 
-The only exception is **word-level edits**: correcting a single word, fixing a
-typo, or adjusting a short phrase in-place. Everything else gets the annotated
-format (subject to the structural exceptions in Rule 8).
+A useful rule of thumb: if the replaced content spans **3 or more sentences or
+3 or more lines**, always apply it. For shorter rewrites (1-2 sentences or
+1-2 lines), lean toward applying it unless the edit is purely at the
+**word level** — correcting a single word, fixing a typo, or adjusting a
+short phrase in-place.
+
+The word-level exception is the only case where skipping the annotated format
+is clearly appropriate (subject to the structural exceptions in Rule 8). For
+non-prose blocks (equations, lists, `\begin{figure}...\end{figure}`, and
+similar environments), treat each line as equivalent to a sentence when
+evaluating the threshold.
 
 ## Edit format
 
