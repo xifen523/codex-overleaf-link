@@ -664,9 +664,7 @@
     clearProjectSettingsStatus();
     syncCustomInstructionsEditorForProject(getCurrentProjectId(), { force: true });
     syncProjectSettingsEditorForProject();
-    if (typeof panelRendererInstance !== 'undefined') {
-      panelRendererInstance?.setView?.('settings');
-    }
+    panelRendererInstance?.setView?.('settings');
     SettingsPanel.show(settingsPanelInstance);
     if (typeof refreshLocalSkills === 'function') {
       refreshLocalSkills().catch(error => setProjectSettingsStatus(tx(`Could not list local skills: ${error.message}`, `无法列出本地技能：${error.message}`), 'failed'));
@@ -682,9 +680,7 @@
   }
 
   function closeCustomInstructionsSettings() {
-    if (typeof panelRendererInstance !== 'undefined') {
-      panelRendererInstance?.setView?.('session');
-    }
+    panelRendererInstance?.setView?.('session');
     SettingsPanel.hide(settingsPanelInstance);
   }
 

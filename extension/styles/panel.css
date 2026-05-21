@@ -324,6 +324,7 @@
   overflow-y: auto;
   background: #1f1f1f;
   padding: 12px;
+  gap: 10px;
 }
 
 #codex-overleaf-panel .codex-custom-instructions-head {

@@ -3086,6 +3086,7 @@ test('project custom instructions editor saves and restores by project', async (
         };
       }
     };
+    const panelRendererInstance = null;
     function getCurrentProjectId() { return currentProjectId; }
     function closeDiagnosticsMenu() {}
     function closeDiagnosticsResult() {}
@@ -3199,6 +3200,7 @@ test('project settings gear toggles the settings panel closed when already open'
       clearStatus() {},
       loadState() {}
     };
+    const panelRendererInstance = null;
     function getCurrentProjectId() { return currentProjectId; }
     function closeDiagnosticsMenu() {}
     function closeDiagnosticsResult() {}
@@ -3296,6 +3298,7 @@ test('project settings transient status is cleared when reopening the panel', ()
       },
       loadState() {}
     };
+    const panelRendererInstance = null;
     function getCurrentProjectId() { return currentProjectId; }
     function closeDiagnosticsMenu() {}
     function closeDiagnosticsResult() {}
