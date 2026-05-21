@@ -657,6 +657,7 @@ test('preparePluginCodexHome leaves a shared user/plugin home untouched', () => 
   const sharedHome = path.join(home, 'shared-codex');
   try {
     fs.mkdirSync(path.join(sharedHome, 'rules'), { recursive: true });
+    fs.mkdirSync(path.join(sharedHome, 'memories'), { recursive: true });
     fs.writeFileSync(path.join(sharedHome, 'AGENTS.md'), 'shared guidance\n', 'utf8');
 
     const prepared = preparePluginCodexHome({
@@ -668,6 +669,7 @@ test('preparePluginCodexHome leaves a shared user/plugin home untouched', () => 
     assert.equal(prepared.userHome, prepared.pluginHome);
     assert.equal(fs.existsSync(path.join(sharedHome, 'AGENTS.md')), true);
     assert.equal(fs.existsSync(path.join(sharedHome, 'rules')), true);
+    assert.equal(fs.existsSync(path.join(sharedHome, 'memories')), true);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
