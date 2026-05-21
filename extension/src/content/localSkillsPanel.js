@@ -101,14 +101,18 @@
       const text = document.createElement('span');
       text.textContent = skill.title ? `${skill.title} (${id})` : id;
       text.title = text.textContent;
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.textContent = tr('localSkillRemove');
-      remove.addEventListener('click', event => {
-        event.preventDefault();
-        removeCodexOverleafSkill(id).catch(error => setProjectSettingsStatus(tx(`Failed to remove Codex Overleaf skill: ${error.message}`, `删除 Codex Overleaf 技能失败：${error.message}`), 'failed'));
-      });
-      row.append(text, remove);
+      if (skill.removable !== false) {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = tr('localSkillRemove');
+        remove.addEventListener('click', event => {
+          event.preventDefault();
+          removeCodexOverleafSkill(id).catch(error => setProjectSettingsStatus(tx(`Failed to remove Codex Overleaf skill: ${error.message}`, `删除 Codex Overleaf 技能失败：${error.message}`), 'failed'));
+        });
+        row.append(text, remove);
+      } else {
+        row.append(text);
+      }
       list.append(row);
     }
 

@@ -515,6 +515,83 @@ test('project settings renders only Codex Overleaf managed skills', async () => 
   assert.match(collectElementText(list), /Auto Rebuttal \(auto-rebuttal\)/);
 });
 
+test('project settings omits the remove button for official skills with removable: false', async () => {
+  delete require.cache[require.resolve('../extension/src/content/localSkillsPanel')];
+  const LocalSkillsPanel = require('../extension/src/content/localSkillsPanel');
+  const document = createMinimalDocument();
+  const panel = document.createElement('div');
+  const list = document.createElement('div');
+  list.setAttribute('data-local-skill-list', '');
+  panel.append(list);
+  let state = {};
+  const labels = {
+    codexOverleafSkillsTitle: 'Codex Overleaf skills',
+    codexOverleafSkillsEmpty: 'No Codex Overleaf skills installed.',
+    codexOverleafSkillsDisabled: 'Codex Overleaf skills are disabled.',
+    localSkillRemove: 'Remove'
+  };
+  const controller = LocalSkillsPanel.createLocalSkillsPanelController({
+    document,
+    getPanel: () => panel,
+    getState: () => state,
+    setState: nextState => {
+      state = nextState;
+    },
+    getCurrentProjectId: () => 'project-1',
+    getSkillLoadingSettings: () => ({ loadCodexOverleafSkills: true }),
+    tr: key => labels[key] || key,
+    sendBackgroundNative() {
+      return Promise.resolve({
+        ok: true,
+        result: {
+          skills: [
+            {
+              id: 'annotated-rewrite',
+              title: 'Annotated Rewrite',
+              scope: 'codex-overleaf',
+              official: true,
+              removable: false
+            },
+            {
+              id: 'custom-style',
+              title: 'Custom Style',
+              scope: 'codex-overleaf',
+              official: false,
+              removable: true
+            }
+          ]
+        }
+      });
+    },
+    setSlashCodexOverleafSkills() {}
+  });
+
+  await controller.refreshLocalSkills();
+
+  const rows = collectElements(
+    list,
+    node => node.className === 'codex-local-skill-row'
+  );
+  const officialRow = rows.find(row =>
+    collectElementText(row).includes('annotated-rewrite')
+  );
+  const customRow = rows.find(row =>
+    collectElementText(row).includes('custom-style')
+  );
+
+  assert.ok(officialRow, 'official skill row should be present');
+  assert.equal(
+    collectElements(officialRow, node => node.tagName === 'BUTTON').length,
+    0,
+    'official skill should not have a remove button'
+  );
+  assert.ok(customRow, 'custom skill row should be present');
+  assert.ok(
+    collectElements(customRow, node => node.tagName === 'BUTTON').length > 0,
+    'custom skill should have a remove button'
+  );
+});
+
 test('composer slash menu offers Codex Overleaf skill installation and installed skills', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
@@ -3731,6 +3808,41 @@ test('line-reference button clicks distinguish line and line-column jumps', asyn
       params: { path: 'main.tex', line: 42, column: 7, selectLine: false }
     }
   ]);
+});
+
+test('markdown renderer makes every adjacent punctuation-separated line reference clickable', async () => {
+  const harness = loadMarkdownRendererHarness([{ path: 'camera_ready.tex', kind: 'text' }]);
+  const target = createMinimalDocument().createElement('div');
+
+  harness.renderMarkdownInlineText(
+    target,
+    '对应位置包括 camera_ready.tex:169、camera_ready.tex:225，camera_ready.tex:248,camera_ready.tex:252。'
+  );
+
+  const buttons = findLineReferenceButtons(target);
+  assert.deepEqual(
+    buttons.map(button => button.textContent),
+    [
+      'camera_ready.tex:169',
+      'camera_ready.tex:225',
+      'camera_ready.tex:248',
+      'camera_ready.tex:252'
+    ]
+  );
+
+  for (const button of buttons) {
+    await button.click();
+  }
+
+  assert.deepEqual(
+    harness.pageBridgeCalls.map(call => call.params),
+    [
+      { path: 'camera_ready.tex', line: 169, selectLine: true },
+      { path: 'camera_ready.tex', line: 225, selectLine: true },
+      { path: 'camera_ready.tex', line: 248, selectLine: true },
+      { path: 'camera_ready.tex', line: 252, selectLine: true }
+    ]
+  );
 });
 
 test('markdown renderer sanitizes local path labels while preserving HTTPS links', () => {
