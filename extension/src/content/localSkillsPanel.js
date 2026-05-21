@@ -48,6 +48,7 @@
       : () => {};
 
     async function refreshLocalSkills() {
+      showSkillListLoading();
       const codexOverleafResponse = await sendBackgroundNative({
         method: 'skills.list',
         params: { scope: 'codex-overleaf' }
@@ -66,6 +67,22 @@
       setSlashCodexOverleafSkills(codexOverleafSkills);
       renderLocalSkillList();
     }
+
+    function showSkillListLoading() {
+      const list = getPanel()?.querySelector('[data-local-skill-list]');
+      if (!list) {
+        return;
+      }
+      list.textContent = '';
+      const placeholder = document.createElement('div');
+      placeholder.className = 'codex-project-settings-empty';
+      placeholder.textContent = tr('codexOverleafSkillsLoading');
+      list.append(placeholder);
+    }
+
+    // Tracks which row is currently in "confirming remove" state.
+    // Only one row may be in this state at a time.
+    let confirmingRowId = null;
 
     function getCodexOverleafSkillsForSettings() {
       const state = getState() || {};
@@ -122,17 +139,88 @@
       text.textContent = skill.title ? `${skill.title} (${id})` : id;
       text.title = text.textContent;
       row.append(text);
+
       if (skill.removable !== false) {
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.textContent = tr('localSkillRemove');
-        remove.addEventListener('click', event => {
+        // Remove button — clicking it enters the inline confirmation state.
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.textContent = tr('localSkillRemove');
+
+        // Confirm and Cancel buttons — only in the DOM while confirming.
+        const confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.textContent = tr('localSkillRemoveConfirm');
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.textContent = tr('localSkillRemoveCancel');
+
+        function enterConfirming() {
+          // Reset any previously confirming row back to its Remove button state.
+          if (confirmingRowId !== null && confirmingRowId !== id) {
+            resetConfirmingRow();
+          }
+          confirmingRowId = id;
+          removeBtn.remove();
+          row.dataset.confirming = 'true';
+          row.append(confirmBtn, cancelBtn);
+        }
+
+        function exitConfirming() {
+          confirmingRowId = null;
+          confirmBtn.remove();
+          cancelBtn.remove();
+          delete row.dataset.confirming;
+          row.append(removeBtn);
+        }
+
+        removeBtn.addEventListener('click', event => {
           event.preventDefault();
-          removeCodexOverleafSkill(id).catch(error => setProjectSettingsStatus(tx(`Failed to remove Codex Overleaf skill: ${error.message}`, `删除 Codex Overleaf 技能失败：${error.message}`), 'failed'));
+          enterConfirming();
         });
-        row.append(remove);
+
+        cancelBtn.addEventListener('click', event => {
+          event.preventDefault();
+          exitConfirming();
+        });
+
+        confirmBtn.addEventListener('click', event => {
+          event.preventDefault();
+          // In-progress: disable Confirm and the enable toggle; update text.
+          confirmBtn.disabled = true;
+          toggle.disabled = true;
+          confirmBtn.textContent = tr('localSkillRemoving');
+          removeCodexOverleafSkill(id).catch(error => {
+            setProjectSettingsStatus(tx(`Failed to remove Codex Overleaf skill: ${error.message}`, `删除 Codex Overleaf 技能失败：${error.message}`), 'failed');
+            // Restore row on failure so the user can retry.
+            confirmBtn.disabled = false;
+            toggle.disabled = !masterEnabled;
+            confirmBtn.textContent = tr('localSkillRemoveConfirm');
+          });
+        });
+
+        row.append(removeBtn);
+
+        // Store references so resetConfirmingRow can find and reset this row.
+        row._exitConfirming = exitConfirming;
+        row._skillId = id;
       }
+
       list.append(row);
+    }
+
+    function resetConfirmingRow() {
+      // Walk the skill list to find the row whose id matches confirmingRowId.
+      const list = getPanel()?.querySelector('[data-local-skill-list]');
+      if (!list) {
+        return;
+      }
+      for (const child of list._children || list.children || []) {
+        if (child._skillId === confirmingRowId && child._exitConfirming) {
+          child._exitConfirming();
+          break;
+        }
+      }
     }
 
     function appendLocalSkillGroupTitle(list, text) {

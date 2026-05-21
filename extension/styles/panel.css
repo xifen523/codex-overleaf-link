@@ -476,6 +476,10 @@
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
+#codex-overleaf-panel .codex-local-skill-row[data-scope="codex-overleaf"][data-confirming="true"] {
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+}
+
 #codex-overleaf-panel .codex-local-skill-row[data-disabled="true"] {
   opacity: 0.6;
 }

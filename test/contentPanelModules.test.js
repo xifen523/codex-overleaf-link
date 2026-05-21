@@ -129,6 +129,17 @@ function buildFakeDocument() {
         parseHtml(el, html, makeEl, elements);
       }
     });
+    // Intercept textContent setter: setting it clears child elements (real DOM behavior)
+    let _textContent = '';
+    Object.defineProperty(el, 'textContent', {
+      get() { return _textContent; },
+      set(value) {
+        _textContent = String(value);
+        if (_textContent === '') {
+          el._children = [];
+        }
+      }
+    });
     elements.push(el);
     return el;
   }
@@ -534,4 +545,223 @@ test('localSkillsPanel disables per-skill toggle when master toggle is off', () 
   const checkbox = rows[0]?._children.find(c => c.tag === 'input' && c.type === 'checkbox');
   assert.ok(checkbox, 'toggle checkbox must exist even when master is off');
   assert.equal(checkbox.disabled, true, 'per-skill toggle should be disabled when master toggle is off');
+});
+
+// Task 4: skill remove-confirmation + loading states
+
+function buildSkillRowWithRemove(doc, listEl, deps = {}) {
+  const LocalSkillsPanel = require('../extension/src/content/localSkillsPanel');
+  const nativeCalls = [];
+  const controller = LocalSkillsPanel.createLocalSkillsPanelController({
+    document: doc,
+    getPanel: () => ({ querySelector: sel => sel === '[data-local-skill-list]' ? listEl : null }),
+    getState: () => ({ codexOverleafSkills: [{ id: 'removable-skill', title: 'My Skill', removable: true }], codexOverleafSkillEnabled: {} }),
+    setState: () => {},
+    getSkillLoadingSettings: () => ({ loadCodexOverleafSkills: true }),
+    isCodexOverleafSkillEnabled: () => true,
+    setCodexOverleafSkillEnabled: () => {},
+    setProjectSettingsStatus: () => {},
+    tr: key => key,
+    tx: (en) => en,
+    sendBackgroundNative(req) {
+      nativeCalls.push(req);
+      return deps.nativeResolve
+        ? new Promise(resolve => deps.nativeResolve.push(resolve))
+        : Promise.resolve({ ok: true });
+    },
+    normalizeComposerSkillInvocation: v => v,
+    getComposerSkillInvocation: () => null,
+    clearComposerSkillInvocation: () => {},
+    setSlashCodexOverleafSkills: () => {},
+    clearSlashCodexOverleafSkills: () => {},
+    saveState: () => Promise.resolve()
+  });
+  controller.renderLocalSkillList();
+  return { controller, nativeCalls };
+}
+
+test('clicking Remove button shows Confirm/Cancel and does NOT call skills.remove', () => {
+  const { doc } = buildFakeDocument();
+  const listEl = doc.createElement('div');
+  listEl.dataset.localSkillList = '';
+  doc.documentElement._children.push(listEl);
+
+  // Clear module cache so require gets a fresh copy
+  delete require.cache[require.resolve('../extension/src/content/localSkillsPanel')];
+  const { nativeCalls } = buildSkillRowWithRemove(doc, listEl);
+
+  const rows = listEl._children.filter(c => c.className && c.className.includes('codex-local-skill-row'));
+  assert.equal(rows.length, 1, 'should have one skill row');
+
+  // Find the Remove button
+  const removeBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  assert.ok(removeBtn, 'Remove button must exist');
+
+  // Click it — should NOT call skills.remove
+  removeBtn._fire('click', { preventDefault() {} });
+
+  assert.equal(nativeCalls.filter(r => r.method === 'skills.remove').length, 0, 'clicking Remove should NOT call skills.remove');
+
+  // Row should now have Confirm and Cancel buttons
+  const btns = rows[0]._children.filter(c => c.tag === 'button');
+  const confirmBtn = btns.find(b => b.textContent === 'localSkillRemoveConfirm');
+  const cancelBtn = btns.find(b => b.textContent === 'localSkillRemoveCancel');
+  assert.ok(confirmBtn, 'Confirm button should be shown after clicking Remove');
+  assert.ok(cancelBtn, 'Cancel button should be shown after clicking Remove');
+
+  // Original Remove button should be gone
+  const originalRemove = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  assert.equal(originalRemove, undefined, 'Original Remove button should not be visible during confirmation');
+});
+
+test('clicking Cancel restores the original Remove button', () => {
+  const { doc } = buildFakeDocument();
+  const listEl = doc.createElement('div');
+  listEl.dataset.localSkillList = '';
+  doc.documentElement._children.push(listEl);
+
+  delete require.cache[require.resolve('../extension/src/content/localSkillsPanel')];
+  buildSkillRowWithRemove(doc, listEl);
+
+  const rows = listEl._children.filter(c => c.className && c.className.includes('codex-local-skill-row'));
+  const removeBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  removeBtn._fire('click', { preventDefault() {} });
+
+  // Cancel should restore
+  const cancelBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveCancel');
+  assert.ok(cancelBtn, 'Cancel button should be present');
+  cancelBtn._fire('click', { preventDefault() {} });
+
+  const restoredRemove = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  assert.ok(restoredRemove, 'Original Remove button should be restored after Cancel');
+
+  const confirmAfterCancel = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveConfirm');
+  assert.equal(confirmAfterCancel, undefined, 'Confirm button should be gone after Cancel');
+});
+
+test('clicking Confirm calls skills.remove', async () => {
+  const { doc } = buildFakeDocument();
+  const listEl = doc.createElement('div');
+  listEl.dataset.localSkillList = '';
+  doc.documentElement._children.push(listEl);
+
+  delete require.cache[require.resolve('../extension/src/content/localSkillsPanel')];
+  const { nativeCalls } = buildSkillRowWithRemove(doc, listEl);
+
+  const rows = listEl._children.filter(c => c.className && c.className.includes('codex-local-skill-row'));
+  const removeBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  removeBtn._fire('click', { preventDefault() {} });
+
+  const confirmBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveConfirm');
+  assert.ok(confirmBtn, 'Confirm button should be present');
+  confirmBtn._fire('click', { preventDefault() {} });
+
+  // Allow the async remove to settle
+  await new Promise(resolve => setImmediate(resolve));
+
+  assert.equal(
+    nativeCalls.filter(r => r.method === 'skills.remove').length,
+    1,
+    'clicking Confirm should call skills.remove exactly once'
+  );
+  assert.equal(nativeCalls.find(r => r.method === 'skills.remove').params.id, 'removable-skill');
+});
+
+test('one-at-a-time: opening confirm on a second row resets the first', () => {
+  const { doc } = buildFakeDocument();
+  const listEl = doc.createElement('div');
+  listEl.dataset.localSkillList = '';
+  doc.documentElement._children.push(listEl);
+
+  delete require.cache[require.resolve('../extension/src/content/localSkillsPanel')];
+  const LocalSkillsPanel = require('../extension/src/content/localSkillsPanel');
+  const controller = LocalSkillsPanel.createLocalSkillsPanelController({
+    document: doc,
+    getPanel: () => ({ querySelector: sel => sel === '[data-local-skill-list]' ? listEl : null }),
+    getState: () => ({
+      codexOverleafSkills: [
+        { id: 'skill-a', title: 'Skill A', removable: true },
+        { id: 'skill-b', title: 'Skill B', removable: true }
+      ],
+      codexOverleafSkillEnabled: {}
+    }),
+    setState: () => {},
+    getSkillLoadingSettings: () => ({ loadCodexOverleafSkills: true }),
+    isCodexOverleafSkillEnabled: () => true,
+    setCodexOverleafSkillEnabled: () => {},
+    setProjectSettingsStatus: () => {},
+    tr: key => key,
+    tx: (en) => en,
+    sendBackgroundNative: () => Promise.resolve({ ok: true }),
+    normalizeComposerSkillInvocation: v => v,
+    getComposerSkillInvocation: () => null,
+    clearComposerSkillInvocation: () => {},
+    setSlashCodexOverleafSkills: () => {},
+    clearSlashCodexOverleafSkills: () => {},
+    saveState: () => Promise.resolve()
+  });
+  controller.renderLocalSkillList();
+
+  const rows = listEl._children.filter(c => c.className && c.className.includes('codex-local-skill-row'));
+  assert.equal(rows.length, 2, 'should have two skill rows');
+
+  // Open confirm on first row
+  const removeA = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  removeA._fire('click', { preventDefault() {} });
+  assert.ok(rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveConfirm'), 'row 0 should show Confirm');
+
+  // Open confirm on second row — should reset first row back to Remove
+  const removeB = rows[1]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  removeB._fire('click', { preventDefault() {} });
+
+  assert.equal(rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveConfirm'), undefined, 'row 0 Confirm should be gone when row 1 enters confirm');
+  assert.ok(rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove'), 'row 0 should have its Remove button restored');
+  assert.ok(rows[1]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveConfirm'), 'row 1 should now show Confirm');
+});
+
+test('skill list shows loading placeholder before refreshLocalSkills resolves', async () => {
+  const { doc } = buildFakeDocument();
+  const listEl = doc.createElement('div');
+  listEl.dataset.localSkillList = '';
+  doc.documentElement._children.push(listEl);
+
+  delete require.cache[require.resolve('../extension/src/content/localSkillsPanel')];
+  const LocalSkillsPanel = require('../extension/src/content/localSkillsPanel');
+
+  let resolveNative;
+  const nativePromise = new Promise(resolve => { resolveNative = resolve; });
+
+  const controller = LocalSkillsPanel.createLocalSkillsPanelController({
+    document: doc,
+    getPanel: () => ({ querySelector: sel => sel === '[data-local-skill-list]' ? listEl : null }),
+    getState: () => ({ codexOverleafSkills: [], codexOverleafSkillEnabled: {} }),
+    setState: () => {},
+    getSkillLoadingSettings: () => ({ loadCodexOverleafSkills: true }),
+    isCodexOverleafSkillEnabled: () => true,
+    setCodexOverleafSkillEnabled: () => {},
+    setProjectSettingsStatus: () => {},
+    tr: key => key,
+    tx: (en) => en,
+    sendBackgroundNative: () => nativePromise,
+    setSlashCodexOverleafSkills: () => {},
+    clearSlashCodexOverleafSkills: () => {}
+  });
+
+  // Start the refresh (don't await yet)
+  const refreshPromise = controller.refreshLocalSkills();
+
+  // Give the microtask queue a tick to allow the loading state to appear
+  await new Promise(resolve => setImmediate(resolve));
+
+  // Loading placeholder should be visible before native resolves
+  const allText = listEl._children.map(c => c.textContent).join('');
+  assert.match(allText, /codexOverleafSkillsLoading/, 'loading placeholder should appear before refreshLocalSkills resolves');
+
+  // Now resolve the native call
+  resolveNative({ ok: true, result: { skills: [] } });
+  await refreshPromise;
+
+  // After resolution, loading placeholder should be gone
+  const afterText = listEl._children.map(c => c.textContent).join('');
+  assert.doesNotMatch(afterText, /codexOverleafSkillsLoading/, 'loading placeholder should be gone after refreshLocalSkills resolves');
 });
