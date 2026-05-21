@@ -863,6 +863,7 @@ test('settingsPanel renders NO hidden span with data-i18n="customInstructionsTit
 });
 
 test('settingsPanel source includes scope section headings for "This project" and "All projects"', () => {
+  // Source-text assertion: the fake-DOM parser cannot resolve nested same-tag <div> structure. TODO: switch to a DOM ancestry assertion if the parser is upgraded.
   // Verify the raw source markup contains the scope heading i18n keys.
   // (The fake DOM parser doesn't handle deeply nested divs, so we test the source directly.)
   const src = read('extension/src/content/settingsPanel.js');
@@ -871,15 +872,18 @@ test('settingsPanel source includes scope section headings for "This project" an
 });
 
 test('[data-project-settings-status] appears before skill loading controls in settingsPanel source', () => {
+  // Source-text assertion: the fake-DOM parser cannot resolve nested same-tag <div> structure. TODO: switch to a DOM ancestry assertion if the parser is upgraded.
   // Verify [data-project-settings-status] is positioned at panel level (before the skill toggles),
   // not nested inside the skill list section. We check source order as a proxy for DOM position.
   const src = read('extension/src/content/settingsPanel.js');
   const statusIdx = src.indexOf('data-project-settings-status');
   const skillToggleIdx = src.indexOf('data-load-codex-local-skills');
   const skillListIdx = src.indexOf('data-local-skill-list');
+  const scopeIdx = src.indexOf('codex-project-settings-scope');
   assert.ok(statusIdx >= 0, '[data-project-settings-status] must appear in settingsPanel source');
   assert.ok(skillToggleIdx >= 0, '[data-load-codex-local-skills] must appear in settingsPanel source');
   assert.ok(skillListIdx >= 0, '[data-local-skill-list] must appear in settingsPanel source');
+  assert.ok(scopeIdx >= 0, 'codex-project-settings-scope must appear in settingsPanel source');
   assert.ok(
     statusIdx < skillToggleIdx,
     '[data-project-settings-status] must appear before [data-load-codex-local-skills] in source (panel-level, not inside skills section)'
@@ -887,5 +891,9 @@ test('[data-project-settings-status] appears before skill loading controls in se
   assert.ok(
     statusIdx < skillListIdx,
     '[data-project-settings-status] must appear before [data-local-skill-list] in source (panel-level, not inside skills section)'
+  );
+  assert.ok(
+    statusIdx < scopeIdx,
+    '[data-project-settings-status] must appear before the first codex-project-settings-scope block in source (panel-level, not inside a scope)'
   );
 });
