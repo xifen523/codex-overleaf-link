@@ -2565,12 +2565,31 @@ test('content script run-param wrapper uses explicit custom instructions before 
     const state = {
       mode: 'auto',
       model: 'gpt-5.5',
-      reasoningEffort: 'xhigh'
+      reasoningEffort: 'xhigh',
+      codexOverleafSkills: [],
+      codexOverleafSkillEnabled: {}
     };
     function getCurrentProjectId() { return 'project-123'; }
     function getCustomInstructionsForCurrentProject() {
       getterCalls++;
       return getterValue;
+    }
+    function getCodexOverleafSkillEnabled() {
+      const map = state.codexOverleafSkillEnabled;
+      return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
+    }
+    function isCodexOverleafSkillEnabled(skillId) {
+      const map = getCodexOverleafSkillEnabled();
+      if (!Object.prototype.hasOwnProperty.call(map, skillId)) {
+        return true;
+      }
+      return map[skillId] !== false;
+    }
+    function getEnabledCodexOverleafSkillIds() {
+      const skills = Array.isArray(state.codexOverleafSkills) ? state.codexOverleafSkills : [];
+      return skills
+        .map(skill => String(skill && skill.id || '').trim())
+        .filter(id => id && isCodexOverleafSkillEnabled(id));
     }
     ${wrapperSource}
     return {
@@ -3105,8 +3124,19 @@ test('project custom instructions editor auto-saves on change and restores by pr
     function refreshLocalSkills() { return Promise.resolve(); }
     function setGovernanceRulesForCurrentProject() {}
     function readGovernanceRulesFromSettings() { return {}; }
-    function setSkillLoadingSettings() {}
+    function getSkillLoadingSettings() {
+      return {
+        loadCodexLocalSkills: state.loadCodexLocalSkills !== false,
+        loadCodexOverleafSkills: state.loadCodexOverleafSkills !== false
+      };
+    }
+    function setSkillLoadingSettings(settings) {
+      if (settings && typeof settings === 'object') {
+        state = { ...state, ...settings };
+      }
+    }
     function readSkillLoadingSettingsFromSettings() { return {}; }
+    function renderLocalSkillList() {}
     function syncExperimentalOtToggleForProject() {}
     let lastExperimentalOtProjectId = '';
     function setExperimentalOtEnabledForProject() {}
@@ -3457,6 +3487,7 @@ test('saveState merges latest lightweight prefs before saving project-scoped set
       autoRecompile: false,
       panelWidth: 420,
       activeSessionId: 'session_current',
+      codexOverleafSkillEnabled: { 'venue-style': false },
       experimentalOtByProject: {
         project_a: false,
         project_b: false
@@ -3549,6 +3580,10 @@ test('saveState merges latest lightweight prefs before saving project-scoped set
       CodexOverleafStorageMigration: Migration
     };
     function getCurrentProjectId() { return 'project_a'; }
+    function getCodexOverleafSkillEnabled() {
+      const map = state.codexOverleafSkillEnabled;
+      return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
+    }
     ${extractFunction(contentScript, 'normalizeExperimentalOtByProject')}
     ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
     ${extractFunction(contentScript, 'saveState')}
@@ -3587,6 +3622,7 @@ test('saveState merges latest lightweight prefs before saving project-scoped set
   assert.equal(harness.getStoredSessionRecords()[0].runs[0].statusText, 'Done 7s');
   assert.equal(harness.getStoredSessionRecords()[0].runs[0].events[0].detail, '结论：刷新后历史仍应显示这段回答。');
   assert.deepEqual(harness.getDeletedSessionIds(), ['old_project_session']);
+  assert.deepEqual(harness.getSavedPrefs().codexOverleafSkillEnabled, { 'venue-style': false });
 });
 
 test('experimental OT sync ignores stale responses and reverts failed starts to default off', () => {

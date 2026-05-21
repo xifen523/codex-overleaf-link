@@ -812,7 +812,7 @@
       ...state,
       codexOverleafSkillEnabled: {
         ...map,
-        [skillId]: enabled !== false
+        [skillId]: Boolean(enabled)
       }
     };
     saveStateSoon();
@@ -2722,9 +2722,7 @@
           ? getSkillLoadingSettings()
           : { loadCodexLocalSkills: true, loadCodexOverleafSkills: true })
         : skillLoadingSettings,
-      enabledCodexOverleafSkillIds: typeof getEnabledCodexOverleafSkillIds === 'function'
-        ? getEnabledCodexOverleafSkillIds()
-        : undefined,
+      enabledCodexOverleafSkillIds: getEnabledCodexOverleafSkillIds(),
       attachments,
       skillInvocation,
       compileLogContext,
@@ -6429,9 +6427,7 @@
       compactState.autoRecompile = state.autoRecompile;
       compactState.loadCodexLocalSkills = state.loadCodexLocalSkills !== false;
       compactState.loadCodexOverleafSkills = state.loadCodexOverleafSkills !== false;
-      compactState.codexOverleafSkillEnabled = typeof getCodexOverleafSkillEnabled === 'function'
-        ? getCodexOverleafSkillEnabled()
-        : {};
+      compactState.codexOverleafSkillEnabled = getCodexOverleafSkillEnabled();
       compactState.experimentalOtByProject = state.experimentalOtByProject;
       compactState.customInstructionsByProject = state.customInstructionsByProject;
       compactState.governanceRulesByProject = state.governanceRulesByProject;
@@ -6623,15 +6619,11 @@
         setCustomInstructionsForProject(projectId, customInstructionsInput.value);
       }
       setGovernanceRulesForCurrentProject(readGovernanceRulesFromSettings());
-      const prevOverleafSkills = typeof getSkillLoadingSettings === 'function'
-        ? getSkillLoadingSettings().loadCodexOverleafSkills
-        : undefined;
-      setSkillLoadingSettings(readSkillLoadingSettingsFromSettings());
+      const newSettings = readSkillLoadingSettingsFromSettings();
+      const prevOverleafSkills = getSkillLoadingSettings().loadCodexOverleafSkills;
+      setSkillLoadingSettings(newSettings);
       // Re-render skill list when master toggle changes so per-skill toggles update their disabled state.
-      const nextOverleafSkills = typeof getSkillLoadingSettings === 'function'
-        ? getSkillLoadingSettings().loadCodexOverleafSkills
-        : undefined;
-      if (prevOverleafSkills !== nextOverleafSkills && typeof renderLocalSkillList === 'function') {
+      if (prevOverleafSkills !== getSkillLoadingSettings().loadCodexOverleafSkills) {
         renderLocalSkillList();
       }
     }
