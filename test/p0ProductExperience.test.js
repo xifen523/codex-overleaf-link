@@ -3194,6 +3194,154 @@ test('project custom instructions editor auto-saves on change and restores by pr
   assert.equal(harness.input.value, 'Use NeurIPS style and \\\\cref{}.');
 });
 
+test('persistPanelInputs save-status lifecycle: success path ends at settingsSaved', async () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const statusHistory = [];
+  const harness = Function('pushStatus', `
+    let currentProjectId = 'project_a';
+    let state = { customInstructionsByProject: {} };
+    const customInstructionsInput = { value: '', placeholder: '', focus() {} };
+    const settingsButton = { dataset: {}, setAttribute() {} };
+    const statusEl = { set textContent(v) { pushStatus(v); } };
+    const fakeInput = (value = '') => ({ value, checked: false });
+    const controls = {
+      '[data-custom-instructions-input]': customInstructionsInput,
+      '[data-custom-instructions-settings]': settingsButton,
+      '[data-reasoning]': fakeInput(),
+      '[data-mode]': fakeInput('ask'),
+      '[data-task]': fakeInput(),
+      '[data-speed]': fakeInput('standard'),
+      '[data-require-reviewing]': fakeInput(),
+      '[data-auto-recompile]': fakeInput(),
+      '[data-experimental-ot]': null,
+      '[data-model]': null,
+      '[data-project-settings-panel]': null,
+      '[data-settings-save-status]': statusEl
+    };
+    const panel = {
+      dataset: { view: 'settings' },
+      querySelector(selector) {
+        return Object.prototype.hasOwnProperty.call(controls, selector) ? controls[selector] : null;
+      },
+      querySelectorAll() { return []; }
+    };
+    function getCurrentProjectId() { return currentProjectId; }
+    function setGovernanceRulesForCurrentProject() {}
+    function readGovernanceRulesFromSettings() { return {}; }
+    function getSkillLoadingSettings() {
+      return { loadCodexLocalSkills: true, loadCodexOverleafSkills: true };
+    }
+    function setSkillLoadingSettings() {}
+    function readSkillLoadingSettingsFromSettings() { return {}; }
+    function renderLocalSkillList() {}
+    function syncExperimentalOtToggleForProject() {}
+    let lastExperimentalOtProjectId = '';
+    function setExperimentalOtEnabledForProject() {}
+    function updateActiveSession(s) { return s; }
+    function readSelectedModelInput() { return ''; }
+    function readSelectedSpeedInput() { return 'standard'; }
+    function getRenderedModelEntries() { return []; }
+    function renderSpeedOptions() {}
+    function renderModelConfigChoices() {}
+    function updateModelDisplay() {}
+    function syncModeControls() {}
+    function applySessionLabel() {}
+    function renderSessionList() {}
+    function tr(key) { return key; }
+    async function saveState() {}
+    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
+    ${extractFunction(contentScript, 'getCustomInstructionsForCurrentProject')}
+    ${extractFunction(contentScript, 'setCustomInstructionsForProject')}
+    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
+    ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
+    ${extractFunction(contentScript, 'setSettingsSaveStatus')}
+    ${extractFunction(contentScript, 'readPanelInputs')}
+    ${extractFunction(contentScript, 'persistPanelInputs')}
+    return { persistPanelInputs };
+  `)(v => statusHistory.push(v));
+
+  await harness.persistPanelInputs();
+  assert.deepEqual(statusHistory, ['settingsSaving', 'settingsSaved'],
+    'success path: status should be settingsSaving then settingsSaved');
+});
+
+test('persistPanelInputs save-status lifecycle: status ends at settingsSaved even when saveState rejects', async () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const statusHistory = [];
+  const harness = Function('pushStatus', `
+    let currentProjectId = 'project_a';
+    let state = { customInstructionsByProject: {} };
+    const customInstructionsInput = { value: '', placeholder: '', focus() {} };
+    const settingsButton = { dataset: {}, setAttribute() {} };
+    const statusEl = { set textContent(v) { pushStatus(v); } };
+    const fakeInput = (value = '') => ({ value, checked: false });
+    const controls = {
+      '[data-custom-instructions-input]': customInstructionsInput,
+      '[data-custom-instructions-settings]': settingsButton,
+      '[data-reasoning]': fakeInput(),
+      '[data-mode]': fakeInput('ask'),
+      '[data-task]': fakeInput(),
+      '[data-speed]': fakeInput('standard'),
+      '[data-require-reviewing]': fakeInput(),
+      '[data-auto-recompile]': fakeInput(),
+      '[data-experimental-ot]': null,
+      '[data-model]': null,
+      '[data-project-settings-panel]': null,
+      '[data-settings-save-status]': statusEl
+    };
+    const panel = {
+      dataset: { view: 'settings' },
+      querySelector(selector) {
+        return Object.prototype.hasOwnProperty.call(controls, selector) ? controls[selector] : null;
+      },
+      querySelectorAll() { return []; }
+    };
+    function getCurrentProjectId() { return currentProjectId; }
+    function setGovernanceRulesForCurrentProject() {}
+    function readGovernanceRulesFromSettings() { return {}; }
+    function getSkillLoadingSettings() {
+      return { loadCodexLocalSkills: true, loadCodexOverleafSkills: true };
+    }
+    function setSkillLoadingSettings() {}
+    function readSkillLoadingSettingsFromSettings() { return {}; }
+    function renderLocalSkillList() {}
+    function syncExperimentalOtToggleForProject() {}
+    let lastExperimentalOtProjectId = '';
+    function setExperimentalOtEnabledForProject() {}
+    function updateActiveSession(s) { return s; }
+    function readSelectedModelInput() { return ''; }
+    function readSelectedSpeedInput() { return 'standard'; }
+    function getRenderedModelEntries() { return []; }
+    function renderSpeedOptions() {}
+    function renderModelConfigChoices() {}
+    function updateModelDisplay() {}
+    function syncModeControls() {}
+    function applySessionLabel() {}
+    function renderSessionList() {}
+    function tr(key) { return key; }
+    async function saveState() { throw new Error('storage quota exceeded'); }
+    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
+    ${extractFunction(contentScript, 'getCustomInstructionsForCurrentProject')}
+    ${extractFunction(contentScript, 'setCustomInstructionsForProject')}
+    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
+    ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
+    ${extractFunction(contentScript, 'setSettingsSaveStatus')}
+    ${extractFunction(contentScript, 'readPanelInputs')}
+    ${extractFunction(contentScript, 'persistPanelInputs')}
+    return { persistPanelInputs };
+  `)(v => statusHistory.push(v));
+
+  await assert.rejects(harness.persistPanelInputs());
+  assert.deepEqual(statusHistory, ['settingsSaving', 'settingsSaved'],
+    'error path: status must still end at settingsSaved despite saveState throwing');
+});
+
 test('project settings gear toggles the settings panel closed when already open', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),

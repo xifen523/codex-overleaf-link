@@ -6556,8 +6556,11 @@
     renderModelConfigChoices();
     updateModelDisplay();
     setSettingsSaveStatus('settingsSaving');
-    await saveState();
-    setSettingsSaveStatus('settingsSaved');
+    try {
+      await saveState();
+    } finally {
+      setSettingsSaveStatus('settingsSaved');
+    }
     syncModeControls();
     applySessionLabel();
     renderSessionList();
