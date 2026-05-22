@@ -5,6 +5,8 @@ const {
   computeTextPatches,
   computeLineAnchoredChangeGroups,
   computeGroupMetrics,
+  computeTokenAnchoredPatches,
+  classifyChangedGroup,
   splitParagraphs,
   splitSentences,
   hasOriginalMarkerLine,
@@ -13,6 +15,19 @@ const {
   countNonEmptyLines,
   countSentenceTerminators
 } = require('../native-host/src/textPatch');
+
+// Builds the `{group, tokenPatches, metrics}` triple the way the orchestration
+// will: real token patches via `computeTokenAnchoredPatches`, real metrics via
+// `computeGroupMetrics`. `classifyChangedGroup` is then called with all three.
+function classifyGroup(group) {
+  const tokenPatches = computeTokenAnchoredPatches(
+    group.oldText,
+    group.newText,
+    group.oldStart
+  );
+  const metrics = computeGroupMetrics(group, tokenPatches);
+  return classifyChangedGroup(group, tokenPatches, metrics);
+}
 
 test('computes a small insertion patch instead of a full-file replacement', () => {
   const patches = computeTextPatches('hello world\n', 'hello brave world\n');
@@ -361,6 +376,180 @@ test('computeGroupMetrics reports null token fields when tokenPatches is null', 
   assert.equal(metrics.newNonEmptyLineCount, 4);
   assert.equal(metrics.maxNonEmptyLineCount, 4);
   assert.equal(metrics.changedSpanChars, Math.max(group.oldText.length, group.newText.length));
+});
+
+test('classifyChangedGroup classifies an annotated rewrite block as annotated_block', () => {
+  const newText = [
+    '% [original]\n',
+    '% old paragraph sentence one. old paragraph sentence two.\n',
+    '\n',
+    '% [revised]\n',
+    'new paragraph sentence one. new paragraph sentence two.\n'
+  ].join('');
+  const group = {
+    oldStart: 0,
+    oldText: 'old paragraph sentence one. old paragraph sentence two.\n',
+    newText
+  };
+
+  assert.deepEqual(classifyGroup(group), { type: 'annotated_block' });
+});
+
+test('classifyChangedGroup keeps annotated_block precedence over paragraph thresholds', () => {
+  // This group also satisfies paragraph thresholds (>= 3 non-empty lines and
+  // >= 2 sentence terminators on each side), but the markers must win.
+  const oldText = [
+    'old line one with first sentence. and a second sentence here.\n',
+    'old line two continues the prose.\n',
+    'old line three closes the prose.\n'
+  ].join('');
+  const newText = [
+    '% [original]\n',
+    '% old line one with first sentence. and a second sentence here.\n',
+    '% old line two continues the prose.\n',
+    '% old line three closes the prose.\n',
+    '\n',
+    '% [revised]\n',
+    'new line one with first sentence. and a second sentence here.\n',
+    'new line two continues the prose.\n',
+    'new line three closes the prose.\n'
+  ].join('');
+  const group = { oldStart: 0, oldText, newText };
+  const metrics = computeGroupMetrics(
+    group,
+    computeTokenAnchoredPatches(group.oldText, group.newText, group.oldStart)
+  );
+
+  // Sanity check: the paragraph predicate would otherwise fire.
+  assert.ok(metrics.maxNonEmptyLineCount >= 3);
+  assert.deepEqual(classifyGroup(group), { type: 'annotated_block' });
+});
+
+test('classifyChangedGroup classifies a multi-line rewrite without markers as paragraph_rewrite', () => {
+  const oldText = [
+    'old first line of the paragraph body.\n',
+    'old second line of the paragraph body.\n',
+    'old third line of the paragraph body.\n'
+  ].join('');
+  const newText = [
+    'new first line of the paragraph body.\n',
+    'new second line of the paragraph body.\n',
+    'new third line of the paragraph body.\n'
+  ].join('');
+  const group = { oldStart: 0, oldText, newText };
+
+  assert.deepEqual(classifyGroup(group), { type: 'paragraph_rewrite' });
+});
+
+test('classifyChangedGroup classifies a dense single-line token rewrite as paragraph_rewrite', () => {
+  // One non-empty line with no sentence terminators, but many scattered token
+  // patches over a wide (>= 160 char) span: isDenseTokenRewrite alone must
+  // push this to paragraph_rewrite.
+  const oldText =
+    'alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega aa bb cc dd ee ff gg hh ii jj kk ll mm here';
+  const newText =
+    'alpha BETA gamma DELTA epsilon ZETA eta THETA iota KAPPA lambda MU nu XI omicron PI rho SIGMA tau UPSILON phi CHI psi OMEGA aa BB cc DD ee FF gg HH ii JJ kk LL mm here';
+  const group = { oldStart: 0, oldText, newText };
+  const tokenPatches = computeTokenAnchoredPatches(group.oldText, group.newText, group.oldStart);
+  const metrics = computeGroupMetrics(group, tokenPatches);
+
+  // Sanity check: confirm the dense-token preconditions hold and that the
+  // line-count / sentence-terminator paragraph branches do NOT.
+  assert.ok(tokenPatches !== null);
+  assert.ok(metrics.tokenPatchCount >= 6);
+  assert.ok(metrics.changedSpanChars >= 160);
+  assert.ok(metrics.maxNonEmptyLineCount <= 2);
+  assert.ok(metrics.tokenPatchCount / Math.max(1, metrics.maxNonEmptyLineCount) >= 2);
+  assert.ok(metrics.newSentenceTerminatorCount < 2);
+  assert.deepEqual(classifyChangedGroup(group, tokenPatches, metrics), {
+    type: 'paragraph_rewrite'
+  });
+});
+
+test('classifyChangedGroup classifies a medium single-sentence rewrite as sentence_rewrite', () => {
+  // One sentence on one line, >= 3 token patches all inside it, span >= 80 chars,
+  // and only one sentence terminator so the paragraph branch does not fire.
+  const oldText =
+    'The proposed algorithm achieves sublinear regret and bounded constraint violation under mild assumptions.';
+  const newText =
+    'The proposed method achieves logarithmic regret and tight constraint violation under standard assumptions.';
+  const group = { oldStart: 0, oldText, newText };
+  const tokenPatches = computeTokenAnchoredPatches(group.oldText, group.newText, group.oldStart);
+  const metrics = computeGroupMetrics(group, tokenPatches);
+
+  // Sanity check: confirm sentence-rewrite preconditions.
+  assert.ok(tokenPatches !== null);
+  assert.ok(metrics.tokenPatchCount >= 3);
+  assert.ok(metrics.maxNonEmptyLineCount <= 2);
+  assert.deepEqual(classifyChangedGroup(group, tokenPatches, metrics), {
+    type: 'sentence_rewrite'
+  });
+});
+
+test('classifyChangedGroup classifies a one-or-two token-patch change as small_edit', () => {
+  const oldText = 'The system runs fast in practice.\n';
+  const newText = 'The system runs faster in practice.\n';
+  const group = { oldStart: 0, oldText, newText };
+  const tokenPatches = computeTokenAnchoredPatches(group.oldText, group.newText, group.oldStart);
+  const metrics = computeGroupMetrics(group, tokenPatches);
+
+  // Sanity check: this is a single token patch.
+  assert.ok(tokenPatches !== null);
+  assert.ok(metrics.tokenPatchCount <= 2);
+  assert.deepEqual(classifyChangedGroup(group, tokenPatches, metrics), {
+    type: 'small_edit'
+  });
+});
+
+test('classifyChangedGroup classifies a short multi-token change under thresholds as small_edit', () => {
+  // More than two token patches, but they are spread across two sentences of
+  // the old text (so they do not fall inside one confident sentence span) and
+  // the total changed chars stay well under 80 on a single line. This must
+  // reach small_edit via the totalTokenChangedChars branch, not sentence_rewrite.
+  const oldText = 'Use Eq (3) here. Then Fig (4) applies.\n';
+  const newText = 'Use Eq (7) here, then Fig (8) applies\n';
+  const group = { oldStart: 0, oldText, newText };
+  const tokenPatches = computeTokenAnchoredPatches(group.oldText, group.newText, group.oldStart);
+  const metrics = computeGroupMetrics(group, tokenPatches);
+
+  // Sanity check: more than 2 token patches, small total changed chars, one
+  // line, and the new side has < 2 terminators so paragraph_rewrite stays off.
+  assert.ok(tokenPatches !== null);
+  assert.ok(metrics.tokenPatchCount >= 3);
+  assert.ok(metrics.totalTokenChangedChars < 80);
+  assert.ok(metrics.maxNonEmptyLineCount <= 2);
+  assert.ok(metrics.newSentenceTerminatorCount < 2);
+  assert.deepEqual(classifyChangedGroup(group, tokenPatches, metrics), {
+    type: 'small_edit'
+  });
+});
+
+test('classifyChangedGroup classifies a null-tokenPatches multi-line group as paragraph_rewrite', () => {
+  const group = {
+    oldStart: 0,
+    oldText: 'old line one\nold line two\nold line three',
+    newText: 'new line one\nnew line two\nnew line three'
+  };
+  const metrics = computeGroupMetrics(group, null);
+
+  // Sanity check: token-independent paragraph branch via line count.
+  assert.equal(metrics.maxNonEmptyLineCount, 3);
+  assert.deepEqual(classifyChangedGroup(group, null, metrics), {
+    type: 'paragraph_rewrite'
+  });
+});
+
+test('classifyChangedGroup falls back when tokenPatches is null and the group is tiny', () => {
+  const group = {
+    oldStart: 0,
+    oldText: 'short old',
+    newText: 'short new'
+  };
+  const metrics = computeGroupMetrics(group, null);
+
+  // Sanity check: no markers, < 3 lines, < 2 terminators per side.
+  assert.ok(metrics.maxNonEmptyLineCount < 3);
+  assert.deepEqual(classifyChangedGroup(group, null, metrics), { type: 'fallback' });
 });
 
 function applyPatches(text, patches) {

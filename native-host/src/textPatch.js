@@ -516,10 +516,138 @@ function computeGroupMetrics(group, tokenPatches) {
   };
 }
 
+// Resolves the sentence-span quantities used by the `isSentenceRewrite`
+// predicate (the design spec leaves them undefined). It segments the changed
+// group's OLD text into sentence spans and checks whether every token patch's
+// old range maps within a single span.
+//
+// Returns:
+// - `fitsOneSpan`: true iff exactly one sentence span contains every token
+//   patch's old range (relative to the group).
+// - `spanChars` / `spanTokenCount`: the char length / token count of that
+//   single span when `fitsOneSpan` is true; `0` otherwise (irrelevant then).
+//
+// When `tokenPatches` is `null` or empty, `fitsOneSpan` is false.
+function resolveTokenPatchSentenceSpan(group, tokenPatches) {
+  const empty = { fitsOneSpan: false, spanChars: 0, spanTokenCount: 0 };
+  if (tokenPatches === null || tokenPatches.length === 0) {
+    return empty;
+  }
+
+  const sentenceSpans = splitSentences(group.oldText);
+  let containingSpan = null;
+
+  for (const span of sentenceSpans) {
+    const containsEveryPatch = tokenPatches.every(patch => {
+      const relativeFrom = patch.from - group.oldStart;
+      const relativeTo = patch.to - group.oldStart;
+      return relativeFrom >= span.start && relativeTo <= span.end;
+    });
+    if (!containsEveryPatch) {
+      continue;
+    }
+    if (containingSpan !== null) {
+      // More than one span contains every patch (possible for a zero-length
+      // patch sitting on a span boundary). Not a confident single sentence.
+      return empty;
+    }
+    containingSpan = span;
+  }
+
+  if (containingSpan === null) {
+    return empty;
+  }
+  return {
+    fitsOneSpan: true,
+    spanChars: containingSpan.text.length,
+    spanTokenCount: splitTextTokens(containingSpan.text).length
+  };
+}
+
+// Classifies a changed group into a natural review granularity. Pure function.
+//
+// `group` is `{oldStart, oldText, newText}`; `tokenPatches` is the array from
+// `computeTokenAnchoredPatches(group.oldText, group.newText, group.oldStart)`
+// or `null`; `metrics` is the object from `computeGroupMetrics(group,
+// tokenPatches)`.
+//
+// Returns `{type}` where `type` is one of `annotated_block`,
+// `paragraph_rewrite`, `sentence_rewrite`, `small_edit`, `fallback`. The
+// predicates are evaluated in first-match order: annotated_block →
+// paragraph_rewrite → sentence_rewrite → small_edit → fallback. When
+// `tokenPatches === null`, every token-dependent predicate is false, so the
+// only reachable results are `annotated_block`, `paragraph_rewrite` (via the
+// line-count or sentence-terminator branch), and `fallback`.
+function classifyChangedGroup(group, tokenPatches, metrics) {
+  const newGroupText = group.newText;
+  const {
+    maxNonEmptyLineCount,
+    changedSpanChars,
+    tokenPatchCount,
+    totalTokenChangedChars,
+    oldSentenceTerminatorCount,
+    newSentenceTerminatorCount
+  } = metrics;
+
+  const isAnnotatedBlock = hasOriginalMarkerLine(newGroupText)
+    && hasLaterRevisedMarkerLine(newGroupText)
+    && maxNonEmptyLineCount >= 3;
+  if (isAnnotatedBlock) {
+    return { type: 'annotated_block' };
+  }
+
+  const isDenseTokenRewrite = tokenPatches !== null
+    && tokenPatchCount >= 6
+    && changedSpanChars >= 160
+    && tokenPatchCount / Math.max(1, maxNonEmptyLineCount) >= 2;
+
+  const isParagraphRewrite = !isAnnotatedBlock
+    && (
+      maxNonEmptyLineCount >= 3
+      || (oldSentenceTerminatorCount >= 2 && newSentenceTerminatorCount >= 2)
+      || isDenseTokenRewrite
+    );
+  if (isParagraphRewrite) {
+    return { type: 'paragraph_rewrite' };
+  }
+
+  const sentenceSpan = resolveTokenPatchSentenceSpan(group, tokenPatches);
+
+  const isSentenceRewrite = !isAnnotatedBlock
+    && !isParagraphRewrite
+    && tokenPatches !== null
+    && tokenPatchCount >= 3
+    && sentenceSpan.fitsOneSpan
+    && (sentenceSpan.spanChars >= 80 || sentenceSpan.spanTokenCount >= 12);
+  if (isSentenceRewrite) {
+    return { type: 'sentence_rewrite' };
+  }
+
+  const isSmallEdit = !isAnnotatedBlock
+    && !isParagraphRewrite
+    && !isSentenceRewrite
+    && tokenPatches !== null
+    && (
+      tokenPatchCount <= 2
+      || (
+        totalTokenChangedChars < 80
+        && maxNonEmptyLineCount <= 2
+        && !hasAnyAnnotatedMarker(newGroupText)
+      )
+    );
+  if (isSmallEdit) {
+    return { type: 'small_edit' };
+  }
+
+  return { type: 'fallback' };
+}
+
 module.exports = {
   computeTextPatches,
   computeLineAnchoredChangeGroups,
+  computeTokenAnchoredPatches,
   computeGroupMetrics,
+  classifyChangedGroup,
   splitParagraphs,
   splitSentences,
   hasOriginalMarkerLine,
