@@ -3,7 +3,14 @@ const test = require('node:test');
 
 const {
   computeTextPatches,
-  computeLineAnchoredChangeGroups
+  computeLineAnchoredChangeGroups,
+  computeGroupMetrics,
+  splitParagraphs,
+  hasOriginalMarkerLine,
+  hasLaterRevisedMarkerLine,
+  hasAnyAnnotatedMarker,
+  countNonEmptyLines,
+  countSentenceTerminators
 } = require('../native-host/src/textPatch');
 
 test('computes a small insertion patch instead of a full-file replacement', () => {
@@ -157,6 +164,127 @@ test('computeLineAnchoredChangeGroups returns no groups when line-level limits a
   const newText = newLines.join('');
 
   assert.deepEqual(computeLineAnchoredChangeGroups(oldText, newText), []);
+});
+
+test('countNonEmptyLines counts only lines with non-empty trimmed content', () => {
+  assert.equal(countNonEmptyLines(''), 0);
+  assert.equal(countNonEmptyLines('\n\n'), 0);
+  assert.equal(countNonEmptyLines('   \n\t\n'), 0);
+  assert.equal(countNonEmptyLines('one line'), 1);
+  assert.equal(countNonEmptyLines('first\nsecond\nthird\n'), 3);
+  assert.equal(countNonEmptyLines('first\n\n   \nsecond\n'), 2);
+});
+
+test('countSentenceTerminators counts ASCII and CJK sentence terminators', () => {
+  assert.equal(countSentenceTerminators(''), 0);
+  assert.equal(countSentenceTerminators('No terminators here'), 0);
+  assert.equal(countSentenceTerminators('One sentence.'), 1);
+  assert.equal(countSentenceTerminators('First. Second! Third?'), 3);
+  assert.equal(countSentenceTerminators('CJK terminators。And？And！'), 3);
+});
+
+test('countSentenceTerminators does not count a dot inside a decimal number', () => {
+  assert.equal(countSentenceTerminators('The value is 1.23 here'), 0);
+  assert.equal(countSentenceTerminators('Pi is 3.14159 roughly.'), 1);
+});
+
+test('hasOriginalMarkerLine detects an [original] marker line', () => {
+  assert.equal(hasOriginalMarkerLine('% [original]'), true);
+  assert.equal(hasOriginalMarkerLine('  %  [original]  '), true);
+  assert.equal(hasOriginalMarkerLine('intro\n% [original]\nbody'), true);
+  assert.equal(hasOriginalMarkerLine('% [revised]'), false);
+  assert.equal(hasOriginalMarkerLine('text with [original] inline'), false);
+  assert.equal(hasOriginalMarkerLine('% [original] trailing words'), false);
+});
+
+test('hasLaterRevisedMarkerLine requires a revised marker after the original marker', () => {
+  assert.equal(
+    hasLaterRevisedMarkerLine('% [original]\nold\n\n% [revised]\nnew'),
+    true
+  );
+  assert.equal(
+    hasLaterRevisedMarkerLine('% [revised]\nnew\n\n% [original]\nold'),
+    false
+  );
+  assert.equal(hasLaterRevisedMarkerLine('% [revised]\nnew'), false);
+  assert.equal(hasLaterRevisedMarkerLine('% [original]\nold'), false);
+});
+
+test('hasAnyAnnotatedMarker detects either marker line', () => {
+  assert.equal(hasAnyAnnotatedMarker('% [original]\nold'), true);
+  assert.equal(hasAnyAnnotatedMarker('intro\n% [revised]\nnew'), true);
+  assert.equal(hasAnyAnnotatedMarker('plain paragraph text'), false);
+});
+
+test('splitParagraphs returns ordered segments that reconstruct the input exactly', () => {
+  const text = 'first paragraph\n\nsecond paragraph\n\n\nthird paragraph';
+  const segments = splitParagraphs(text);
+
+  assert.ok(segments.length >= 1);
+  assert.equal(segments.map(segment => segment.text).join(''), text);
+  for (const segment of segments) {
+    assert.equal(text.slice(segment.start, segment.start + segment.text.length), segment.text);
+  }
+});
+
+test('splitParagraphs keeps a single segment when there is no blank line', () => {
+  const text = 'one paragraph\nwith two lines';
+  const segments = splitParagraphs(text);
+
+  assert.equal(segments.map(segment => segment.text).join(''), text);
+  assert.equal(segments[0].start, 0);
+});
+
+test('splitParagraphs reconstructs input with leading and trailing blank lines', () => {
+  const text = '\n\nmiddle paragraph\n\n';
+  const segments = splitParagraphs(text);
+
+  assert.equal(segments.map(segment => segment.text).join(''), text);
+  for (const segment of segments) {
+    assert.equal(text.slice(segment.start, segment.start + segment.text.length), segment.text);
+  }
+});
+
+test('computeGroupMetrics reports counts and char spans for a group with token patches', () => {
+  const group = {
+    oldStart: 5,
+    oldText: 'First sentence. Second sentence.',
+    newText: 'First sentence rewritten. Second sentence here. Third one.'
+  };
+  const tokenPatches = [
+    { from: 5, to: 10, expected: 'First', insert: 'Initial' },
+    { from: 20, to: 20, expected: '', insert: ' added words' }
+  ];
+
+  const metrics = computeGroupMetrics(group, tokenPatches);
+
+  assert.deepEqual(metrics, {
+    oldNonEmptyLineCount: 1,
+    newNonEmptyLineCount: 1,
+    maxNonEmptyLineCount: 1,
+    changedSpanChars: Math.max(group.oldText.length, group.newText.length),
+    tokenPatchCount: 2,
+    totalTokenChangedChars: Math.max(5, 'Initial'.length) + Math.max(0, ' added words'.length),
+    oldSentenceTerminatorCount: 2,
+    newSentenceTerminatorCount: 3
+  });
+});
+
+test('computeGroupMetrics reports null token fields when tokenPatches is null', () => {
+  const group = {
+    oldStart: 0,
+    oldText: 'line one\nline two\nline three',
+    newText: 'line one changed\nline two\nline three\nline four'
+  };
+
+  const metrics = computeGroupMetrics(group, null);
+
+  assert.equal(metrics.tokenPatchCount, null);
+  assert.equal(metrics.totalTokenChangedChars, null);
+  assert.equal(metrics.oldNonEmptyLineCount, 3);
+  assert.equal(metrics.newNonEmptyLineCount, 4);
+  assert.equal(metrics.maxNonEmptyLineCount, 4);
+  assert.equal(metrics.changedSpanChars, Math.max(group.oldText.length, group.newText.length));
 });
 
 function applyPatches(text, patches) {

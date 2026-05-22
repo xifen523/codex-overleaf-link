@@ -293,7 +293,112 @@ function computePartEdits(oldParts, newParts) {
   return edits;
 }
 
+function countNonEmptyLines(text) {
+  const value = String(text ?? '');
+  let count = 0;
+  for (const line of value.split('\n')) {
+    if (line.trim() !== '') {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function countSentenceTerminators(text) {
+  const value = String(text ?? '');
+  let count = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === '。' || char === '？' || char === '！') {
+      count += 1;
+      continue;
+    }
+    if (char === '.' || char === '?' || char === '!') {
+      if (
+        char === '.'
+        && /[0-9]/.test(value[index - 1] || '')
+        && /[0-9]/.test(value[index + 1] || '')
+      ) {
+        // Decimal point inside a number such as `1.23` is not a boundary.
+        continue;
+      }
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function hasOriginalMarkerLine(text) {
+  return String(text ?? '')
+    .split('\n')
+    .some(line => /^\s*%\s*\[original\]\s*$/.test(line));
+}
+
+function hasLaterRevisedMarkerLine(text) {
+  const lines = String(text ?? '').split('\n');
+  const originalIndex = lines.findIndex(line => /^\s*%\s*\[original\]\s*$/.test(line));
+  if (originalIndex === -1) {
+    return false;
+  }
+  return lines.some((line, index) => (
+    index > originalIndex && /^\s*%\s*\[revised\]\s*$/.test(line)
+  ));
+}
+
+function hasAnyAnnotatedMarker(text) {
+  return String(text ?? '')
+    .split('\n')
+    .some(line => (
+      /^\s*%\s*\[original\]\s*$/.test(line) || /^\s*%\s*\[revised\]\s*$/.test(line)
+    ));
+}
+
+function splitParagraphs(text) {
+  const value = String(text ?? '');
+  const separator = /\n\s*\n/g;
+  const segments = [];
+  let lastIndex = 0;
+  let match = separator.exec(value);
+
+  while (match) {
+    segments.push({ text: value.slice(lastIndex, match.index), start: lastIndex });
+    segments.push({ text: match[0], start: match.index });
+    lastIndex = match.index + match[0].length;
+    match = separator.exec(value);
+  }
+  segments.push({ text: value.slice(lastIndex), start: lastIndex });
+
+  return segments;
+}
+
+function computeGroupMetrics(group, tokenPatches) {
+  const oldNonEmptyLineCount = countNonEmptyLines(group.oldText);
+  const newNonEmptyLineCount = countNonEmptyLines(group.newText);
+
+  return {
+    oldNonEmptyLineCount,
+    newNonEmptyLineCount,
+    maxNonEmptyLineCount: Math.max(oldNonEmptyLineCount, newNonEmptyLineCount),
+    changedSpanChars: Math.max(group.oldText.length, group.newText.length),
+    tokenPatchCount: tokenPatches === null ? null : tokenPatches.length,
+    totalTokenChangedChars: tokenPatches === null
+      ? null
+      : tokenPatches.reduce((sum, patch) => (
+          sum + Math.max(patch.to - patch.from, patch.insert.length)
+        ), 0),
+    oldSentenceTerminatorCount: countSentenceTerminators(group.oldText),
+    newSentenceTerminatorCount: countSentenceTerminators(group.newText)
+  };
+}
+
 module.exports = {
   computeTextPatches,
-  computeLineAnchoredChangeGroups
+  computeLineAnchoredChangeGroups,
+  computeGroupMetrics,
+  splitParagraphs,
+  hasOriginalMarkerLine,
+  hasLaterRevisedMarkerLine,
+  hasAnyAnnotatedMarker,
+  countNonEmptyLines,
+  countSentenceTerminators
 };
