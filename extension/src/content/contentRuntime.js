@@ -8912,7 +8912,8 @@
     try {
       result = await callPageBridge('acceptTrackedChanges', {
         trackedChanges: run.undoTrackedChanges || [],
-        expectedFiles: run.undoExpectedFiles || []
+        expectedFiles: run.undoExpectedFiles || [],
+        postFiles: buildTrackedUndoPostFiles(run)
       });
     } finally {
       trackedChangeInFlight.delete(runId);
@@ -8932,6 +8933,21 @@
         }))
       }
     });
+    // Accept All is editor-undo + untracked replay. If the editor-undo could not
+    // reach the pre-write state (content drifted), the page layer bails without
+    // re-writing and returns not-ok. The run then stays `pending` so the user
+    // can retry — it does NOT go to a decisive terminal status.
+    if (result.ok === false) {
+      appendRunRecordEvent(runId, {
+        title: tr('runAcceptTrackedFailed'),
+        status: 'failed',
+        detail: {
+          [tr('detailReason')]: tr('runAcceptTrackedFailedReason')
+        }
+      });
+      refreshRunCardControls(runId);
+      return;
+    }
     applyTerminalTrackedChangeStatus(runId, 'accepted');
   }
 

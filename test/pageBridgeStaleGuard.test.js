@@ -1278,11 +1278,20 @@ test('page bridge records and rejects Overleaf tracked changes for Reviewing wri
   assert.equal(bridge.getRejectClickCount(), 1);
 });
 
-test('page bridge routes acceptTrackedChanges to the writeback router for Reviewing writes', async () => {
+test('page bridge routes acceptTrackedChanges to the writeback router: editor-undo then untracked replay', async () => {
+  // Accept All no longer hunts per-change Accept controls. It editor-undoes the
+  // run's tracked writeback back to its pre-write content, then re-applies the
+  // post-write content as a plain (untracked) edit. The harness's editor-undo
+  // button restores editorUndoTargets[path] (the pre-write content); the
+  // mode button toggles so Editing-mode replay + Reviewing restore both work.
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
     reviewingOk: true,
+    reviewingClickBehavior: 'toggle',
     trackChangesOnDispatch: true,
+    editorUndoTargets: {
+      'main.tex': 'alpha beta gamma'
+    },
     files: {
       'main.tex': 'alpha beta gamma'
     }
@@ -1310,16 +1319,82 @@ test('page bridge routes acceptTrackedChanges to the writeback router for Review
   assert.equal(write.trackedChanges[0].path, 'main.tex');
 
   const accept = await bridge.call('acceptTrackedChanges', {
-    trackedChanges: write.trackedChanges
+    trackedChanges: write.trackedChanges,
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    postFiles: [
+      { path: 'main.tex', content: 'alpha delta gamma' }
+    ]
   });
 
   assert.equal(accept.ok, true, accept.error || JSON.stringify(accept));
-  assert.equal(accept.applied.length, 1);
+  assert.ok(accept.applied.length >= 1);
   assert.equal(accept.skipped.length, 0);
+  // The run's post-write content is in the document as plain text.
   assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+  // The editor-undo cleared the run's tracked changes; the replay was untracked.
   assert.equal(bridge.getTrackedChangeCount(), 0);
-  assert.equal(bridge.getAcceptClickCount(), 1);
+  assert.equal(bridge.getEditorUndoClickCount(), 1);
+  // No per-change Accept / Reject control hunting.
+  assert.equal(bridge.getAcceptClickCount(), 0);
   assert.equal(bridge.getRejectClickCount(), 0);
+  // The prior Reviewing mode is restored.
+  assert.equal(bridge.isReviewingActive(), true);
+});
+
+test('page bridge acceptTrackedChanges bails without re-writing when editor content has drifted', async () => {
+  // The editor-undo cannot reach the pre-write content (the user manually
+  // edited after the run). Accept All must bail WITHOUT re-writing so it never
+  // makes the document worse — same safety stance as Undo.
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    reviewingClickBehavior: 'toggle',
+    trackChangesOnDispatch: true,
+    editorUndoTargets: {
+      'main.tex': 'alpha beta gamma'
+    },
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      }
+    ]
+  });
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+
+  // The user edits the document after the run; the post-write content the run
+  // hands Accept All no longer matches what is in the editor.
+  bridge.setFile('main.tex', 'alpha delta gamma plus user edit');
+
+  const accept = await bridge.call('acceptTrackedChanges', {
+    trackedChanges: write.trackedChanges,
+    expectedFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    postFiles: [
+      { path: 'main.tex', content: 'alpha delta gamma' }
+    ]
+  });
+
+  assert.equal(accept.ok, false, JSON.stringify(accept));
+  // The drifted document is left untouched — no re-write.
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma plus user edit');
+  assert.equal(bridge.getEditorUndoClickCount(), 0, 'a drifted post-write content is detected before any undo');
 });
 
 test('page bridge rejects unsafe tracked-change paths before clicking reject controls', async () => {

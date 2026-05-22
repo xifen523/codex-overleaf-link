@@ -574,106 +574,152 @@
     };
   }
 
+  // Accept All — instead of hunting Overleaf's per-change Accept controls (which
+  // is unreliable in real browser use), reuse two proven-reliable mechanisms:
+  //
+  //   1. Editor-undo the run's tracked writeback back to its pre-write content
+  //      (the reject path's primary mechanism), which makes every one of the
+  //      run's tracked changes vanish.
+  //   2. Switch Overleaf to Editing mode (Track Changes OFF) and re-apply the
+  //      run's post-write content as a plain, untracked edit.
+  //
+  // Net result: the run's new content lands as permanent, untracked text — the
+  // run is decisively accepted, with no DOM-control hunting.
+  //
+  // If the editor-undo cannot reach the pre-write state (content drifted — e.g.
+  // the user edited after the run), this bails WITHOUT re-writing so it never
+  // makes the document worse, mirroring Undo's safety stance.
   async function acceptTrackedChanges(params = {}) {
-    const trackedChanges = normalizeTrackedChangeRefs(params.trackedChanges || []);
+    const expectedFiles = Array.isArray(params.expectedFiles) ? params.expectedFiles : [];
+    const postFiles = Array.isArray(params.postFiles) ? params.postFiles : [];
     const applied = [];
     const skipped = [];
-    const invalidTrackedChange = trackedChanges.find(trackedChange => trackedChange.invalidProjectPath);
-    if (invalidTrackedChange) {
+
+    const expectedByPath = new Map(expectedFiles
+      .filter(file => file?.path && typeof file.content === 'string')
+      .map(file => [normalizeSafeProjectPath(file.path), file.content])
+      .filter(([path]) => path));
+    const postByPath = new Map(postFiles
+      .filter(file => file?.path && typeof file.content === 'string')
+      .map(file => [normalizeSafeProjectPath(file.path), file.content])
+      .filter(([path]) => path));
+    const paths = Array.from(expectedByPath.keys()).filter(path => postByPath.has(path));
+    if (!paths.length) {
       return {
         ok: false,
         applied,
         skipped: [{
-          trackedChange: invalidTrackedChange,
-          result: invalidProjectPathResult('tracked-change path')
+          trackedChange: null,
+          result: {
+            ok: false,
+            code: 'accept_missing_run_content',
+            reason: '这轮写入没有可识别的写入前/写入后内容；Codex 没有把留痕改动接受为永久文本。'
+          }
         }]
       };
     }
 
-    for (const trackedChange of orderTrackedChangesForReviewAction(trackedChanges)) {
-      if (trackedChange.path && getActiveFilePath() !== trackedChange.path) {
-        const opened = await openFileByPath(trackedChange.path);
-        if (!opened.ok) {
-          if (trackedChange.path) {
-            continue;
-          }
-          skipped.push({
-            trackedChange,
-            result: {
+    // Step 1: editor-undo the run's tracked writeback back to its pre-write
+    // content, removing every tracked change. This reuses the exact mechanism
+    // the reject path relies on (its primary path).
+    const editorUndo = await rejectTrackedChangesViaEditorUndo(expectedFiles, postFiles, applied);
+    if (!editorUndo.ok) {
+      // Drift bail: the editor-undo could not reach the pre-write state. Do NOT
+      // re-write — that would only make the document worse. Return not-ok so the
+      // run stays pending and the user can retry, same as Undo.
+      return {
+        ok: false,
+        applied: [],
+        skipped: [{
+          trackedChange: null,
+          result: editorUndo.attempted || editorUndo.code
+            ? editorUndo
+            : {
               ok: false,
-              code: 'tracked_change_file_open_failed',
-              reason: `无法打开 ${trackedChange.path} 来查找这轮写入的留痕记录；Codex 没有接受这条留痕。`
+              code: 'accept_editor_undo_unavailable',
+              reason: '没有可执行的 Overleaf 原生撤销来清掉本轮留痕；Codex 没有接受这轮改动。'
             }
-          });
-          continue;
-        }
-      }
+        }]
+      };
+    }
 
-      const node = findTrackedChangeNode(trackedChange);
-      if (!node) {
-        if (trackedChange.path) {
-          continue;
-        }
-        skipped.push({
-          trackedChange,
+    // Step 2: switch to Editing mode (Track Changes OFF) so the replay lands as
+    // plain, untracked text.
+    const editing = await ensureEditing({ waitMs: 1800 });
+    if (!editing.ok) {
+      // The undo already reverted the writeback; without Editing mode the replay
+      // would itself be tracked. Bail rather than re-introduce tracked changes.
+      return {
+        ok: false,
+        applied: [],
+        skipped: [{
+          trackedChange: null,
           result: {
             ok: false,
-            code: 'tracked_change_not_found',
-            reason: '没有在 Overleaf 页面里找到这轮写入对应的留痕记录；Codex 没有接受这条留痕。'
+            code: editing.code || 'accept_editing_not_confirmed',
+            reason: editing.reason || '无法确认 Overleaf 已切换到 Editing 模式；Codex 没有把本轮改动重写为永久文本。'
           }
-        });
-        continue;
-      }
+        }]
+      };
+    }
+    const editingActivated = editing.activated === true;
 
-      const acceptControl = findAcceptControlForTrackedChangeNode(node);
-      if (!acceptControl) {
-        if (trackedChange.path) {
-          continue;
-        }
-        skipped.push({
-          trackedChange,
-          result: {
-            ok: false,
-            code: 'tracked_change_accept_control_not_found',
-            reason: '找到了这轮写入的留痕记录，但没有找到对应的 Accept/接受按钮；Codex 没有接受这条留痕。'
-          }
-        });
-        continue;
-      }
-
-      clickNode(acceptControl);
-      await delay(180);
-
-      if (findTrackedChangeNode(trackedChange)) {
-        if (trackedChange.path) {
-          continue;
-        }
-        skipped.push({
-          trackedChange,
-          result: {
-            ok: false,
-            code: 'tracked_change_accept_not_confirmed',
-            reason: 'Codex 点击了 Accept/接受，但 Overleaf 页面仍显示这条留痕记录；请在 Overleaf 审阅面板手动接受。'
-          }
-        });
-        continue;
-      }
-
+    // Step 3: re-apply each file's post-write content as a plain edit. With
+    // tracking off these land as permanent, untracked text. Reuse the writeback
+    // patch-apply machinery via applyOperationsCore.
+    const operations = paths.map(path => ({
+      type: 'edit',
+      path,
+      replaceAll: postByPath.get(path),
+      reason: 'Accept tracked edit (replay untracked)'
+    }));
+    const replay = await applyOperationsCore(operations, {
+      baseFiles: paths.map(path => ({
+        path,
+        content: expectedByPath.get(path)
+      }))
+    });
+    for (const item of replay.applied || []) {
       applied.push({
-        trackedChange,
+        trackedChange: {
+          key: `accept-replay:${item.operation?.path || ''}`,
+          id: '',
+          path: item.operation?.path || '',
+          label: 'Accept All (untracked replay)'
+        },
         result: {
-          ok: true,
-          method: 'overleaf-review-accept'
+          ...item.result,
+          method: 'overleaf-accept-untracked-replay'
         }
       });
     }
-
-    const completion = await acceptRemainingTrackedChangesForTrackedPaths(trackedChanges, applied);
-    if (!completion.ok) {
+    for (const item of replay.skipped || []) {
       skipped.push({
-        trackedChange: null,
-        result: completion
+        trackedChange: {
+          key: `accept-replay:${item.operation?.path || ''}`,
+          id: '',
+          path: item.operation?.path || '',
+          label: 'Accept All (untracked replay)'
+        },
+        result: item.result
       });
+    }
+
+    // Step 4: restore the prior Reviewing mode. A tracked-change run was written
+    // in Reviewing mode; re-enable it so the document is left as the user had it.
+    // Only restore if this call switched the mode itself.
+    if (editingActivated) {
+      const restored = await setReviewingEnabled(true, { waitMs: 1800 });
+      if (!restored.ok) {
+        skipped.push({
+          trackedChange: null,
+          result: {
+            ok: false,
+            code: restored.code || 'accept_reviewing_restore_failed',
+            reason: restored.reason || '接受改动后未能确认 Overleaf Reviewing/Track Changes 已恢复；请在 Overleaf 手动恢复审阅模式。'
+          }
+        });
+      }
     }
 
     if (applied.length > 0) {
@@ -1046,84 +1092,6 @@
       ok: false,
       code: 'tracked_change_undo_max_iterations',
       reason: `${file.path} 仍有未完成的留痕记录；Codex 已停止以避免误拒绝其它改动。`
-    };
-  }
-
-  async function acceptRemainingTrackedChangesForTrackedPaths(trackedChanges, applied) {
-    const appliedBeforeSweep = applied.length;
-    const paths = Array.from(new Set((trackedChanges || [])
-      .map(change => normalizeSafeProjectPath(change?.path || ''))
-      .filter(Boolean)));
-    if (!paths.length) {
-      const activePath = normalizeSafeProjectPath(getActiveFilePath());
-      if (!activePath || !applied.length) {
-        return { ok: true };
-      }
-      paths.push(activePath);
-    }
-
-    for (const path of paths) {
-      const result = await acceptRemainingTrackedChangesForPath(path, applied, appliedBeforeSweep);
-      if (!result.ok) {
-        return result;
-      }
-    }
-    return { ok: true };
-  }
-
-  async function acceptRemainingTrackedChangesForPath(path, applied, appliedBeforeSweep) {
-    if (path && getActiveFilePath() !== path) {
-      const opened = await openFileByPath(path);
-      if (!opened.ok) {
-        return {
-          ok: false,
-          code: 'tracked_change_file_open_failed',
-          reason: `无法打开 ${path} 来继续接受这轮留痕记录；请在 Overleaf 审阅面板手动处理。`
-        };
-      }
-    }
-
-    const appliedCountBefore = applied.length;
-    const maxAttempts = 200;
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const node = findLastTrackedChangeNodeForPath(path);
-      if (!node) {
-        if (applied.length > appliedCountBefore || appliedBeforeSweep > 0) {
-          return { ok: true };
-        }
-        return {
-          ok: false,
-          code: 'tracked_change_not_found',
-          reason: '没有在 Overleaf 页面里找到这轮写入对应的留痕记录；Codex 没有接受这条留痕。'
-        };
-      }
-
-      const acceptControl = findAcceptControlForTrackedChangeNode(node);
-      if (!acceptControl) {
-        return {
-          ok: false,
-          code: 'tracked_change_accept_control_not_found',
-          reason: `还有 ${path || '当前文件'} 的留痕记录未处理，但没有找到对应的 Accept/接受按钮；请在 Overleaf 审阅面板手动接受。`
-        };
-      }
-
-      const trackedChange = trackedChangeRefFromNode(node, path);
-      const beforeText = readActiveEditorText();
-      clickNode(acceptControl);
-      await waitForTrackedChangeRejectProgress(trackedChange, path, beforeText, 1200);
-      applied.push({
-        trackedChange,
-        result: {
-          ok: true,
-          method: 'overleaf-review-accept-sweep'
-        }
-      });
-    }
-
-    return {
-      ok: false,
-      code: 'tracked_change_undo_max_iterations',
-      reason: `${path || '当前文件'} 仍有未完成的留痕记录；Codex 已停止以避免误接受其它改动。`
     };
   }
 
@@ -2236,41 +2204,6 @@
     }
     return /\b(?:reject|decline|discard|revert|拒绝|丢弃|还原)\b/i.test(signal);
   }
-
-  function findAcceptControlForTrackedChangeNode(node) {
-    const scopes = [];
-    let current = node;
-    for (let index = 0; current && index < 6; index += 1) {
-      scopes.push(current);
-      current = current.parentElement;
-    }
-
-    for (const scope of scopes) {
-      const candidates = typeof scope.querySelectorAll === 'function'
-        ? Array.from(scope.querySelectorAll('button,[role="button"],[aria-label],[title]'))
-        : [];
-      const accept = candidates.find(isAcceptTrackedChangeControl);
-      if (accept) {
-        return accept;
-      }
-    }
-    return isAcceptTrackedChangeControl(node) ? node : null;
-  }
-
-  function isAcceptTrackedChangeControl(node) {
-    if (!node || node.disabled) {
-      return false;
-    }
-    if (/^(true|disabled)$/i.test(node.getAttribute?.('aria-disabled') || '')) {
-      return false;
-    }
-    const signal = normalizeReviewingSignalText(readNodeSignalText(node));
-    if (/\b(?:reject|decline|discard|revert|拒绝|丢弃|还原)\b/i.test(signal)) {
-      return false;
-    }
-    return /\b(?:accept|approve|接受|批准)\b/i.test(signal);
-  }
-
 
     async function applyOperationsForBridge(operationsOrOptions, options = {}) {
       if (Array.isArray(operationsOrOptions)) {
