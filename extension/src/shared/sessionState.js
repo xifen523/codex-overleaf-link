@@ -7,6 +7,10 @@
 })(typeof globalThis !== 'undefined' ? globalThis : window, function sessionStateFactory() {
   'use strict';
 
+  const i18n = (typeof module === 'object' && module.exports)
+    ? require('./i18n')
+    : (typeof globalThis !== 'undefined' ? globalThis : window).CodexOverleafI18n;
+
   const DEFAULT_PANEL_STATE = {
     mode: 'confirm',
     model: 'gpt-5.4',
@@ -111,8 +115,9 @@
     state.task = typeof state.task === 'string' ? state.task : '';
     state.model = typeof state.model === 'string' && state.model ? state.model : DEFAULT_PANEL_STATE.model;
     state.customInstructionsByProject = normalizeCustomInstructionsByProject(state.customInstructionsByProject);
-    state.runs = normalizeRuns(state.runs, options);
-    state.sessions = normalizeSessions(state, input, options);
+    const localizedOptions = { ...options, locale: state.locale };
+    state.runs = normalizeRuns(state.runs, localizedOptions);
+    state.sessions = normalizeSessions(state, input, localizedOptions);
     state.activeSessionId = resolveActiveSessionId(state.sessions, input.activeSessionId);
 
     return mirrorActiveSession(state);
@@ -499,12 +504,13 @@
 
   function normalizeRun(run, options = {}) {
     const shouldStopRestoredRun = options.restoreRunningRuns === true && run.status === 'running';
+    const locale = options.locale || i18n.DEFAULT_LOCALE;
     const events = normalizeRunEvents(run.events);
     if (shouldStopRestoredRun) {
       events.push({
-        title: '页面刷新后已停止跟踪这轮任务',
+        title: i18n.t(locale, 'restoredRunStoppedTitle'),
         status: 'failed',
-        detail: '插件重新加载时发现这轮任务还标记为处理中。为了避免继续显示过期状态，已把它标记为中断；可以重新运行任务。',
+        detail: i18n.t(locale, 'restoredRunStoppedDetail'),
         timestamp: new Date().toISOString()
       });
     }
@@ -517,7 +523,7 @@
       reasoningEffort: typeof run.reasoningEffort === 'string' ? run.reasoningEffort : '',
       speedTier: typeof run.speedTier === 'string' ? run.speedTier : '',
       status: shouldStopRestoredRun ? 'failed' : normalizeRunStatus(run.status),
-      statusText: shouldStopRestoredRun ? '页面刷新后已停止跟踪' : sanitizeAssistantVisibleText(run.statusText),
+      statusText: shouldStopRestoredRun ? i18n.t(locale, 'restoredRunStoppedStatus') : sanitizeAssistantVisibleText(run.statusText),
       startedAt: typeof run.startedAt === 'string' ? run.startedAt : '',
       finishedAt: shouldStopRestoredRun ? new Date().toISOString() : typeof run.finishedAt === 'string' ? run.finishedAt : '',
       events: events.slice(-MAX_RUN_EVENTS),

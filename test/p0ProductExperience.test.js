@@ -1543,12 +1543,17 @@ test('running tasks are only marked interrupted when restoring persisted state a
     path.join(__dirname, '../extension/src/shared/sessionState.js'),
     'utf8'
   );
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
 
   assert.match(contentScript, /normalizePanelState\(await loadStoredState\(\),\s*\{\s*restoreRunningRuns:\s*true\s*\}\)/);
   assert.match(sessionState, /restoreRunningRuns/);
   assert.doesNotMatch(sessionState, /Run interrupted by page reload/);
   assert.doesNotMatch(sessionState, /Interrupted by page reload/);
-  assert.match(sessionState, /页面刷新后已停止跟踪这轮任务/);
+  assert.match(sessionState, /i18n\.t\(locale, 'restoredRunStoppedTitle'\)/);
+  assert.match(i18n, /页面刷新后已停止跟踪这轮任务/);
 });
 
 test('session list keeps the selected historical session reachable', () => {

@@ -955,8 +955,31 @@ test('marks restored persisted running runs as no longer tracked after reload', 
   });
 
   assert.equal(state.runs[0].status, 'failed');
+  assert.equal(state.runs[0].statusText, 'Stopped tracking after a page refresh');
+  assert.equal(state.runs[0].events[1].title, 'Stopped tracking this run after a page refresh');
+});
+
+test('localizes restored running run stop messages when locale is Chinese', () => {
+  const state = normalizePanelState({
+    locale: 'zh',
+    runs: [{
+      id: 'run_active',
+      task: 'still running before reload',
+      status: 'running',
+      statusText: 'Running',
+      events: [{ title: 'Codex exec started', status: 'running' }]
+    }]
+  }, {
+    restoreRunningRuns: true
+  });
+
+  assert.equal(state.runs[0].status, 'failed');
   assert.equal(state.runs[0].statusText, '页面刷新后已停止跟踪');
   assert.equal(state.runs[0].events[1].title, '页面刷新后已停止跟踪这轮任务');
+  assert.equal(
+    state.runs[0].events[1].detail,
+    '插件重新加载时发现这轮任务还标记为处理中。为了避免继续显示过期状态，已把它标记为中断；可以重新运行任务。'
+  );
 });
 
 test('prepares a compact persisted state without storing huge historical payloads', () => {

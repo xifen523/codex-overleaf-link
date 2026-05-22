@@ -277,7 +277,10 @@
       refreshProbeFailed: 'Refresh failed. Reload Overleaf and try again.',
       processedFailed: 'Failed {elapsed}',
       processing: 'Running {elapsed}',
-      processed: 'Done {elapsed}'
+      processed: 'Done {elapsed}',
+      restoredRunStoppedTitle: 'Stopped tracking this run after a page refresh',
+      restoredRunStoppedDetail: 'The plugin reloaded while this run was still marked in progress. It has been marked interrupted to avoid showing a stale status — run the task again to continue.',
+      restoredRunStoppedStatus: 'Stopped tracking after a page refresh'
     },
     zh: {
       resizePanel: '拖动调整 Codex 面板宽度，双击恢复默认宽度',
@@ -545,7 +548,10 @@
       refreshProbeFailed: '检测失败：请刷新 Overleaf 页面后重试',
       processedFailed: '处理失败 {elapsed}',
       processing: '处理中 {elapsed}',
-      processed: '已处理 {elapsed}'
+      processed: '已处理 {elapsed}',
+      restoredRunStoppedTitle: '页面刷新后已停止跟踪这轮任务',
+      restoredRunStoppedDetail: '插件重新加载时发现这轮任务还标记为处理中。为了避免继续显示过期状态，已把它标记为中断；可以重新运行任务。',
+      restoredRunStoppedStatus: '页面刷新后已停止跟踪'
     }
   };
 
