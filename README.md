@@ -27,42 +27,43 @@ Codex Overleaf Link bridges the two: it adds a Codex panel directly inside Overl
 
 ## Install
 
-Codex Overleaf Link has two pieces, installed separately:
+Two pieces, installed separately: the **native host** (one command) and the **Chrome extension** (a manual unpacked load — Chrome requires that for unpacked extensions).
 
-- **Native host** — installed and updated with the pinned npm package. npm installs, updates, uninstalls, and diagnoses the native host *only*; it never installs the Chrome extension.
-- **Chrome extension** — loaded manually as an unpacked extension from the GitHub Release zip (or a source checkout). The bundled extension key gives the official build a stable id, so normal installs do not need `--extension-id`.
+### 1. Install the native host
 
-**1. Install or update the native host:**
+Any one of these one-command installers works — pick whichever you prefer.
+
+**npm** — any platform:
 
 ```bash
 npm exec --yes codex-overleaf-link@1.3.5 -- install-native
 ```
 
-**2. Load the extension:** Download `codex-overleaf-link-extension-v1.3.5.zip` from the [v1.3.5 GitHub Release](https://github.com/Ghqqqq/codex-overleaf-link/releases/tag/v1.3.5) and unzip it to a stable local folder. In `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select that folder.
-
-**3. Open any Overleaf project.** The Codex panel appears on the right; confirm the native host is connected from the panel diagnostics.
-
-Start in Ask mode; switch to Suggest mode for reviewed edits, or Auto mode once project governance and checkpoint settings are ready for direct writeback.
-
-If Chrome assigns a custom build a different id, rerun the native install with `--extension-id <chrome-extension-id>` so the native manifest `allowed_origins` entry matches.
-
-### Source installer fallback
-
-If npm is unavailable, use the release-pinned script for your platform. These also serve development and source-checkout installs.
-
-macOS / Linux:
+**curl** — macOS / Linux:
 
 ```bash
 CODEX_OVERLEAF_REF=v1.3.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.3.5/install.sh)"
 ```
 
-Windows PowerShell:
+**PowerShell** — Windows:
 
 ```powershell
 iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.3.5/install.ps1 -OutFile install.ps1
 $env:CODEX_OVERLEAF_REF='v1.3.5'
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
+
+All three install and update the native host only — none of them install the Chrome extension. The curl and PowerShell scripts also serve development and source-checkout installs.
+
+### 2. Load the Chrome extension
+
+Download `codex-overleaf-link-extension-v1.3.5.zip` from the [v1.3.5 GitHub Release](https://github.com/Ghqqqq/codex-overleaf-link/releases/tag/v1.3.5) and unzip it to a stable local folder. In `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select that folder.
+
+The bundled extension key gives the official build a stable id, so normal installs do not need `--extension-id`. If Chrome assigns a custom build a different id, rerun the native install with `--extension-id <chrome-extension-id>` so the native manifest `allowed_origins` entry matches.
+
+### 3. Open any Overleaf project
+
+The Codex panel appears on the right; confirm the native host is connected from the panel diagnostics. Start in Ask mode; switch to Suggest mode for reviewed edits, or Auto mode once project governance and checkpoint settings are ready for direct writeback.
 
 <details>
 <summary><strong>Manual checkout install</strong> (custom location)</summary>
@@ -91,9 +92,7 @@ Use `--extension-id <chrome-extension-id>` only for a custom/dev unpacked extens
 
 ## Update
 
-For a deterministic v1.3.5 update, run the pinned npm install command above. This is also the native mismatch recovery command shown by the popup and panel when they report **Native host update required** — it fixes extension/native version mismatch and native protocol mismatch.
-
-If npm is unavailable, run the [source installer fallback](#source-installer-fallback) for your platform. After updating, reload the extension in `chrome://extensions` and refresh the Overleaf page.
+To update, re-run any of the [native host installers](#1-install-the-native-host) — they install and update the same way. This is also the native mismatch recovery command shown by the popup and panel when they report **Native host update required**; it fixes extension/native version mismatch and native protocol mismatch. After updating, reload the extension in `chrome://extensions` and refresh the Overleaf page.
 
 ## GitHub Release Artifacts
 
@@ -284,7 +283,7 @@ Composer attachments are turn-scoped Codex context. Limits are 8 attachments per
 
 **Native host missing or update required**
 
-Run the pinned npm native-host installer, reload the extension in `chrome://extensions`, then refresh the Overleaf tab. This also fixes extension/native version mismatch and native protocol mismatch. If npm is unavailable, use the [source installer fallback](#source-installer-fallback) for your platform.
+Re-run any [native host installer](#1-install-the-native-host), reload the extension in `chrome://extensions`, then refresh the Overleaf tab. This also fixes extension/native version mismatch and native protocol mismatch.
 
 ```bash
 npm exec --yes codex-overleaf-link@1.3.5 -- install-native
