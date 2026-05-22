@@ -439,7 +439,7 @@ test('project settings expose governed rules and local skills without Overleaf a
   assert.match(i18n, /localSkillsTitle/);
   assert.doesNotMatch(i18n, /projectLocalSkillsTitle/);
   assert.doesNotMatch(i18n, /localSkillsEmpty/);
-  assert.match(i18n, /codexOverleafSkillsTitle/);
+  assert.doesNotMatch(i18n, /codexOverleafSkillsTitle/);
   assert.match(i18n, /codexOverleafSkillsEmpty/);
   assert.match(i18n, /loadCodexLocalSkills/);
   assert.match(i18n, /loadCodexOverleafSkills/);
@@ -459,7 +459,6 @@ test('project settings renders only Codex Overleaf managed skills', async () => 
   let overleafEnabled = true;
   let slashSkills = [];
   const labels = {
-    codexOverleafSkillsTitle: 'Codex Overleaf skills',
     codexOverleafSkillsEmpty: 'No Codex Overleaf skills installed.',
     codexOverleafSkillsDisabled: 'Codex Overleaf skills are disabled.',
     localSkillRemove: 'Remove'
@@ -505,7 +504,6 @@ test('project settings renders only Codex Overleaf managed skills', async () => 
   );
   assert.equal(slashSkills[0]?.id, 'auto-rebuttal');
   assert.doesNotMatch(collectElementText(list), /project-local/i);
-  assert.match(collectElementText(list), /Codex Overleaf skills/);
   assert.match(collectElementText(list), /Auto Rebuttal \(auto-rebuttal\)/);
 
   overleafEnabled = false;
@@ -525,7 +523,6 @@ test('project settings omits the remove button for official skills with removabl
   panel.append(list);
   let state = {};
   const labels = {
-    codexOverleafSkillsTitle: 'Codex Overleaf skills',
     codexOverleafSkillsEmpty: 'No Codex Overleaf skills installed.',
     codexOverleafSkillsDisabled: 'Codex Overleaf skills are disabled.',
     localSkillRemove: 'Remove'

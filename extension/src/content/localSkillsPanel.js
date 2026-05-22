@@ -103,7 +103,6 @@
       const codexOverleafSkills = getCodexOverleafSkillsForSettings();
       const codexOverleafEnabled = getSkillLoadingSettings().loadCodexOverleafSkills !== false;
       list.textContent = '';
-      appendLocalSkillGroupTitle(list, tr('codexOverleafSkillsTitle'));
       if (!codexOverleafEnabled) {
         appendLocalSkillEmpty(list, tr('codexOverleafSkillsDisabled'));
       }
@@ -229,13 +228,6 @@
           break;
         }
       }
-    }
-
-    function appendLocalSkillGroupTitle(list, text) {
-      const title = document.createElement('div');
-      title.className = 'codex-local-skill-group-title';
-      title.textContent = text;
-      list.append(title);
     }
 
     function appendLocalSkillEmpty(list, text) {
