@@ -8,6 +8,7 @@ const {
   getActiveSession,
   isDisplayableSession,
   normalizePanelState,
+  normalizeRuns,
   prepareStateForStorage,
   estimateJsonBytes,
   recordSessionResult,
@@ -1173,4 +1174,213 @@ test('updateActiveSession can set codexThreadId', () => {
 test('createSession defaults codexThreadId to empty string', () => {
   const session = createSession({});
   assert.strictEqual(session.codexThreadId, '');
+});
+
+const STABLE_TRACKED_CHANGE_STATUSES = [
+  'pending',
+  'accepted',
+  'partial_accept',
+  'rejected',
+  'partial_reject',
+  'resolved_elsewhere'
+];
+const TERMINAL_TRACKED_CHANGE_STATUSES = ['accepted', 'rejected', 'resolved_elsewhere'];
+
+function trackedChangeRefs() {
+  return [{ key: 'tc-1', id: 'change-1', path: 'main.tex', label: 'Change 1' }];
+}
+
+function normalizeRun(run, options) {
+  return normalizeRuns([run], options)[0];
+}
+
+for (const status of STABLE_TRACKED_CHANGE_STATUSES) {
+  test(`normalizeRun keeps the stable trackedChangeStatus value "${status}"`, () => {
+    const run = normalizeRun({
+      id: 'run_tc',
+      task: 'tracked change run',
+      status: 'completed',
+      trackedChangeStatus: status,
+      undoTrackedChanges: trackedChangeRefs(),
+      undoExpectedFiles: [{ path: 'main.tex', content: 'after' }]
+    });
+
+    assert.equal(run.trackedChangeStatus, status);
+  });
+}
+
+test('normalizeRun migrates a pre-feature run with refs and a non-applied undoStatus to pending', () => {
+  const run = normalizeRun({
+    id: 'run_tc',
+    task: 'tracked change run',
+    status: 'completed',
+    undoTrackedChanges: trackedChangeRefs(),
+    undoExpectedFiles: [{ path: 'main.tex', content: 'after' }],
+    undoStatus: ''
+  });
+
+  assert.equal(run.trackedChangeStatus, 'pending');
+  assert.equal(run.undoTrackedChanges.length, 1);
+  assert.equal(run.undoExpectedFiles.length, 1);
+});
+
+test('normalizeRun migrates a pre-feature run with refs and undoStatus "applied" to rejected and empties the payload', () => {
+  const run = normalizeRun({
+    id: 'run_tc',
+    task: 'tracked change run',
+    status: 'completed',
+    undoTrackedChanges: trackedChangeRefs(),
+    undoExpectedFiles: [{ path: 'main.tex', content: 'after' }],
+    undoStatus: 'applied'
+  });
+
+  assert.equal(run.trackedChangeStatus, 'rejected');
+  assert.deepEqual(run.undoTrackedChanges, []);
+  assert.deepEqual(run.undoExpectedFiles, []);
+});
+
+test('normalizeRun leaves a run with no trackedChangeStatus and no tracked-change refs as a legacy-undo run', () => {
+  const run = normalizeRun({
+    id: 'run_legacy',
+    task: 'legacy undo run',
+    status: 'completed',
+    undoTrackedChanges: [],
+    undoExpectedFiles: []
+  });
+
+  assert.equal('trackedChangeStatus' in run, false);
+});
+
+test('normalizeRun recovers a stray trackedChangeStatus value to pending when refs are present', () => {
+  for (const stray of ['accepting', 'bogus']) {
+    const run = normalizeRun({
+      id: 'run_stray',
+      task: 'stray status run',
+      status: 'completed',
+      trackedChangeStatus: stray,
+      undoTrackedChanges: trackedChangeRefs(),
+      undoExpectedFiles: [{ path: 'main.tex', content: 'after' }]
+    });
+
+    assert.equal(run.trackedChangeStatus, 'pending', `stray "${stray}" with refs`);
+  }
+});
+
+test('normalizeRun drops a stray trackedChangeStatus value when no tracked-change refs are present', () => {
+  for (const stray of ['accepting', 'bogus']) {
+    const run = normalizeRun({
+      id: 'run_stray',
+      task: 'stray status run',
+      status: 'completed',
+      trackedChangeStatus: stray,
+      undoTrackedChanges: [],
+      undoExpectedFiles: []
+    });
+
+    assert.equal('trackedChangeStatus' in run, false, `stray "${stray}" without refs`);
+  }
+});
+
+for (const terminal of TERMINAL_TRACKED_CHANGE_STATUSES) {
+  test(`normalizeRun empties the payload for terminal trackedChangeStatus "${terminal}" but keeps the status`, () => {
+    const run = normalizeRun({
+      id: 'run_terminal',
+      task: 'terminal run',
+      status: 'completed',
+      trackedChangeStatus: terminal,
+      undoTrackedChanges: trackedChangeRefs(),
+      undoExpectedFiles: [{ path: 'main.tex', content: 'after' }]
+    });
+
+    assert.equal(run.trackedChangeStatus, terminal);
+    assert.deepEqual(run.undoTrackedChanges, []);
+    assert.deepEqual(run.undoExpectedFiles, []);
+  });
+}
+
+test('normalizeRun trackedChangeStatus normalization is idempotent', () => {
+  const cases = [
+    ...STABLE_TRACKED_CHANGE_STATUSES.map(status => ({
+      id: 'run_idem',
+      task: 'idempotence run',
+      status: 'completed',
+      trackedChangeStatus: status,
+      undoTrackedChanges: trackedChangeRefs(),
+      undoExpectedFiles: [{ path: 'main.tex', content: 'after' }]
+    })),
+    {
+      id: 'run_idem',
+      task: 'idempotence run',
+      status: 'completed',
+      undoTrackedChanges: trackedChangeRefs(),
+      undoExpectedFiles: [{ path: 'main.tex', content: 'after' }],
+      undoStatus: ''
+    },
+    {
+      id: 'run_idem',
+      task: 'idempotence run',
+      status: 'completed',
+      undoTrackedChanges: trackedChangeRefs(),
+      undoExpectedFiles: [{ path: 'main.tex', content: 'after' }],
+      undoStatus: 'applied'
+    },
+    {
+      id: 'run_idem',
+      task: 'idempotence run',
+      status: 'completed',
+      undoTrackedChanges: [],
+      undoExpectedFiles: []
+    },
+    {
+      id: 'run_idem',
+      task: 'idempotence run',
+      status: 'completed',
+      trackedChangeStatus: 'accepting',
+      undoTrackedChanges: trackedChangeRefs(),
+      undoExpectedFiles: [{ path: 'main.tex', content: 'after' }]
+    },
+    {
+      id: 'run_idem',
+      task: 'idempotence run',
+      status: 'completed',
+      trackedChangeStatus: 'bogus',
+      undoTrackedChanges: [],
+      undoExpectedFiles: []
+    }
+  ];
+
+  for (const input of cases) {
+    const once = normalizeRun(input);
+    const twice = normalizeRun(once);
+    assert.deepEqual(twice, once);
+  }
+});
+
+test('trackedChangeStatus survives storage compaction as a lightweight field', () => {
+  const state = normalizePanelState({
+    activeSessionId: 'session_tc',
+    sessions: [{
+      id: 'session_tc',
+      title: 'Tracked change session',
+      runs: [{
+        id: 'run_tc_accepted',
+        task: 'accepted tracked change run',
+        status: 'completed',
+        trackedChangeStatus: 'accepted'
+      }, {
+        id: 'run_tc_pending',
+        task: 'pending tracked change run',
+        status: 'completed',
+        trackedChangeStatus: 'pending',
+        undoTrackedChanges: trackedChangeRefs(),
+        undoExpectedFiles: [{ path: 'main.tex', content: 'after' }]
+      }]
+    }]
+  });
+
+  const compact = prepareStateForStorage(state);
+  const runs = compact.sessions[0].runs;
+
+  assert.equal(runs.find(run => run.id === 'run_tc_accepted').trackedChangeStatus, 'accepted');
+  assert.equal(runs.find(run => run.id === 'run_tc_pending').trackedChangeStatus, 'pending');
 });

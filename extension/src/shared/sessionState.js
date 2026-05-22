@@ -38,6 +38,15 @@
   const VALID_LOCALES = new Set(['en', 'zh']);
   const VALID_EVENT_STATUSES = new Set(['info', 'running', 'completed', 'failed', 'warning', 'blocked', 'skipped', 'pending']);
   const VALID_TITLE_SOURCES = new Set(['auto', 'manual']);
+  const VALID_TRACKED_CHANGE_STATUS = new Set([
+    'pending',
+    'accepted',
+    'partial_accept',
+    'rejected',
+    'partial_reject',
+    'resolved_elsewhere'
+  ]);
+  const TERMINAL_TRACKED_CHANGE_STATUS = new Set(['accepted', 'rejected', 'resolved_elsewhere']);
   const LEGACY_DEFAULT_SESSION_TITLE = 'New task';
   const SESSION_AUTO_TITLE_CHARS = 24;
   const MAX_RUN_EVENTS = 300;
@@ -515,7 +524,7 @@
       });
     }
 
-    return {
+    const normalized = {
       id: run.id,
       task: sanitizeAssistantVisibleText(run.task) || 'untitled task',
       mode: typeof run.mode === 'string' ? run.mode : '',
@@ -535,6 +544,45 @@
       undoExpectedFiles: normalizeRunFiles(run.undoExpectedFiles),
       undoStatus: sanitizeAssistantVisibleText(run.undoStatus)
     };
+
+    applyTrackedChangeStatus(normalized, run.trackedChangeStatus);
+
+    return normalized;
+  }
+
+  // Resolves `trackedChangeStatus` on an already-normalized run via three ordered
+  // steps: (1) value recovery, (2) migration of pre-feature runs, (3) terminal
+  // payload cleanup. Mutates `run` in place. Idempotent: re-running it on its own
+  // output yields the same result.
+  function applyTrackedChangeStatus(run, rawStatus) {
+    const hasRefs = run.undoTrackedChanges.length > 0;
+    const hasRawStatus = rawStatus !== undefined && rawStatus !== null && rawStatus !== '';
+
+    // Step 1 — value recovery. Keep a stable value; recover any other present
+    // value to `pending` (with refs) or drop it. An absent value falls through.
+    let status;
+    if (VALID_TRACKED_CHANGE_STATUS.has(rawStatus)) {
+      status = rawStatus;
+    } else if (hasRawStatus) {
+      status = hasRefs ? 'pending' : undefined;
+    } else {
+      status = undefined;
+    }
+
+    // Step 2 — migration of pre-feature runs (no status after step 1).
+    if (status === undefined && hasRefs) {
+      status = run.undoStatus === 'applied' ? 'rejected' : 'pending';
+    }
+
+    // Step 3 — terminal payload cleanup; keeps `trackedChangeStatus`.
+    if (TERMINAL_TRACKED_CHANGE_STATUS.has(status)) {
+      run.undoTrackedChanges = [];
+      run.undoExpectedFiles = [];
+    }
+
+    if (status !== undefined) {
+      run.trackedChangeStatus = status;
+    }
   }
 
   function normalizeRunStatus(status) {
@@ -861,7 +909,7 @@
 
   function compactRunForStorage(run, limits, keepUndoPayload) {
     const undoPayload = compactUndoPayload(run, limits, keepUndoPayload);
-    return {
+    const compact = {
       id: run.id,
       task: summarizeTextForStorage(run.task || 'untitled task', 'run task'),
       mode: typeof run.mode === 'string' ? run.mode : '',
@@ -881,6 +929,10 @@
       undoExpectedFiles: undoPayload.undoExpectedFiles,
       undoStatus: summarizeTextForStorage(run.undoStatus, 'undo status')
     };
+    if (VALID_TRACKED_CHANGE_STATUS.has(run.trackedChangeStatus)) {
+      compact.trackedChangeStatus = run.trackedChangeStatus;
+    }
+    return compact;
   }
 
   function compactRunEvents(events, limits) {
