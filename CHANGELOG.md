@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.3.6 - 2026-05-22
+
+Writeback patch granularity release, with release metadata alignment for the v1.3.6 packaging, compatibility, and release tracking surfaces. This version makes Overleaf writeback patches match editing intent so reviewed changes land as coherent units, and fixes Reviewing-mode undo and a hardcoded-Chinese restored-run message.
+
+### Changed
+
+- Overleaf writeback patches are now generated to match editing intent: a paragraph rewrite produces one coherent paragraph patch/hunk, a sentence rewrite one sentence patch, and a newly inserted annotated-rewrite `% [original]` / `% [revised]` block one block patch, while small word fixes stay small token patches and far-apart edits stay independent. This replaces the previous token-minimizing strategy that fragmented a paragraph rewrite into many tiny tracked changes in Overleaf Reviewing.
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, and release tracking metadata for the v1.3.6 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.3.6` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.3.6.zip`, `codex-overleaf-native-host-v1.3.6.tar.gz`, and `codex-overleaf-link-1.3.6.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.3.6 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.3.6 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.3.6 -- uninstall-native`.
+- Reorganized the README install section into two clear paths — the installer script (sets up the native host and the extension) and npm (native host only).
+
+### Fixed
+
+- Reviewing-mode undo could leave a wide paragraph rewrite only partially reverted; undo now uses the writeback's verified post-write content instead of a re-derivation that could drift from the editor state.
+- The restored-run "stopped tracking after a page refresh" messages were hardcoded in Chinese and showed Chinese text in the English UI; they are now localized.
+
+### Notes
+
+- Native protocol stays `1`; this release changes writeback patch granularity, undo handling, localization, and packaging metadata, not the native messaging protocol.
+
 ## v1.3.5 - 2026-05-22
 
 Personalization isolation and settings experience release, with release metadata alignment for the v1.3.5 packaging, compatibility, and release tracking surfaces. This version stops the plugin Codex home from inheriting global Codex personalization, ships a new bundled annotated-rewrite skill, and reworks settings into a full-screen view with unified auto-save and per-skill enable toggles.
