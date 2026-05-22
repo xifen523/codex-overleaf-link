@@ -439,7 +439,8 @@ test('project settings expose governed rules and local skills without Overleaf a
   assert.match(i18n, /localSkillsTitle/);
   assert.doesNotMatch(i18n, /projectLocalSkillsTitle/);
   assert.doesNotMatch(i18n, /localSkillsEmpty/);
-  assert.doesNotMatch(i18n, /codexOverleafSkillsTitle/);
+  // codexOverleafSkillsTitle is the dedicated skills sub-page header title.
+  assert.match(i18n, /codexOverleafSkillsTitle/);
   assert.match(i18n, /codexOverleafSkillsEmpty/);
   assert.match(i18n, /loadCodexLocalSkills/);
   assert.match(i18n, /loadCodexOverleafSkills/);
@@ -3130,6 +3131,7 @@ test('project custom instructions editor auto-saves on change and restores by pr
     }
     function readSkillLoadingSettingsFromSettings() { return {}; }
     function renderLocalSkillList() {}
+    function updateSkillsEntrySummary() {}
     function syncExperimentalOtToggleForProject() {}
     let lastExperimentalOtProjectId = '';
     function setExperimentalOtEnabledForProject() {}
@@ -3234,6 +3236,7 @@ test('persistPanelInputs save-status lifecycle: success path ends at settingsSav
     function setSkillLoadingSettings() {}
     function readSkillLoadingSettingsFromSettings() { return {}; }
     function renderLocalSkillList() {}
+    function updateSkillsEntrySummary() {}
     function syncExperimentalOtToggleForProject() {}
     let lastExperimentalOtProjectId = '';
     function setExperimentalOtEnabledForProject() {}
@@ -3308,6 +3311,7 @@ test('persistPanelInputs save-status lifecycle: status ends at settingsSaved eve
     function setSkillLoadingSettings() {}
     function readSkillLoadingSettingsFromSettings() { return {}; }
     function renderLocalSkillList() {}
+    function updateSkillsEntrySummary() {}
     function syncExperimentalOtToggleForProject() {}
     let lastExperimentalOtProjectId = '';
     function setExperimentalOtEnabledForProject() {}

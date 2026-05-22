@@ -298,11 +298,15 @@
   border-color: #8a3a32;
 }
 
-/* View-state rules: hide session elements when in settings view, and vice versa */
+/* View-state rules: hide session elements when in settings/skills view, and vice versa */
 #codex-overleaf-panel[data-view="settings"] .codex-vscode-head,
 #codex-overleaf-panel[data-view="settings"] [data-main],
 #codex-overleaf-panel[data-view="settings"] [data-probe-status],
-#codex-overleaf-panel[data-view="settings"] [data-composer-slot] {
+#codex-overleaf-panel[data-view="settings"] [data-composer-slot],
+#codex-overleaf-panel[data-view="skills"] .codex-vscode-head,
+#codex-overleaf-panel[data-view="skills"] [data-main],
+#codex-overleaf-panel[data-view="skills"] [data-probe-status],
+#codex-overleaf-panel[data-view="skills"] [data-composer-slot] {
   display: none;
 }
 
@@ -310,10 +314,20 @@
   display: none;
 }
 
-#codex-overleaf-panel[data-view="settings"] [data-settings-slot] {
+#codex-overleaf-panel[data-view="settings"] [data-settings-slot],
+#codex-overleaf-panel[data-view="skills"] [data-settings-slot] {
   display: flex;
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* The settings slot holds both screens (the settings screen and the skills
+   sub-page); both carry the shared .codex-custom-instructions-panel layout.
+   data-view selects which one shows by hiding the other. These attribute-
+   scoped selectors outrank the shared layout rule, so the toggle is reliable. */
+#codex-overleaf-panel[data-view="skills"] .codex-project-settings-panel,
+#codex-overleaf-panel[data-view="settings"] .codex-skills-panel {
+  display: none;
 }
 
 #codex-overleaf-panel .codex-custom-instructions-panel {
@@ -467,33 +481,35 @@
 }
 
 #codex-overleaf-panel .codex-local-skill-row {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  display: flex;
   gap: 8px;
   align-items: center;
   color: #d4d4d4;
   font-size: 12px;
 }
 
-#codex-overleaf-panel .codex-local-skill-row[data-scope="codex-overleaf"] {
-  grid-template-columns: auto minmax(0, 1fr) auto;
+/* Skill name fills the row; actions and the enable switch stay on the right. */
+#codex-overleaf-panel .codex-local-skill-row > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-#codex-overleaf-panel .codex-local-skill-row[data-scope="codex-overleaf"][data-confirming="true"] {
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+#codex-overleaf-panel .codex-local-skill-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
 }
 
 #codex-overleaf-panel .codex-local-skill-row[data-disabled="true"] {
   opacity: 0.6;
 }
 
-#codex-overleaf-panel .codex-local-skill-row span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#codex-overleaf-panel .codex-project-settings-panel button {
+#codex-overleaf-panel .codex-project-settings-panel button,
+#codex-overleaf-panel .codex-skills-panel button {
   white-space: nowrap;
 }
 
@@ -520,6 +536,123 @@
   font-size: 11px;
   line-height: 1.35;
   white-space: nowrap;
+}
+
+/* Sliding switch — used for skill enablement (distinct from governance checkboxes).
+   A styled checkbox: track + knob, with :checked sliding the knob right. */
+#codex-overleaf-panel .codex-switch {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  position: relative;
+  width: 32px;
+  height: 18px;
+  margin: 0;
+  border-radius: 9px;
+  background: #3a3d41;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+#codex-overleaf-panel .codex-switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #d4d4d4;
+  transition: transform 120ms ease;
+}
+
+#codex-overleaf-panel .codex-switch:checked {
+  background: #2f6f43;
+}
+
+#codex-overleaf-panel .codex-switch:checked::before {
+  transform: translateX(14px);
+  background: #e8f5ec;
+}
+
+#codex-overleaf-panel .codex-switch:focus-visible {
+  outline: 2px solid #4dd0be;
+  outline-offset: 1px;
+}
+
+#codex-overleaf-panel .codex-switch:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* A settings row with a label on the left and a sliding switch on the right. */
+#codex-overleaf-panel .codex-project-settings-row--switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #d4d4d4;
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+#codex-overleaf-panel .codex-project-settings-row-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Settings entry row — navigates to the Codex Overleaf skills sub-page. */
+#codex-overleaf-panel .codex-skills-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid #3a3d41;
+  border-radius: 6px;
+  background: #181818;
+  color: #d4d4d4;
+  padding: 9px 10px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+#codex-overleaf-panel .codex-skills-entry:hover {
+  background: #232323;
+}
+
+#codex-overleaf-panel .codex-skills-entry-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#codex-overleaf-panel .codex-skills-entry-summary {
+  flex: 0 0 auto;
+  color: #9da1a6;
+  font-size: 11px;
+}
+
+#codex-overleaf-panel .codex-skills-entry-chevron {
+  flex: 0 0 auto;
+  color: #777d83;
+  font-size: 14px;
+}
+
+/* Skills sub-page list: full width (the settings-screen list is indented under
+   its master toggle; on the dedicated sub-page it spans the panel). The shared
+   .codex-custom-instructions-panel layout already supplies flex/scroll. */
+#codex-overleaf-panel .codex-skills-panel .codex-local-skill-list {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: 0;
+  max-height: none;
+}
+
+#codex-overleaf-panel .codex-skills-divider {
+  height: 1px;
+  background: #2d2d30;
 }
 
 #codex-overleaf-panel .codex-diagnostics-result-head {

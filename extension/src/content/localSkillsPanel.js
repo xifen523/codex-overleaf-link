@@ -127,9 +127,17 @@
         row.dataset.disabled = 'true';
       }
 
-      // Leading per-skill enable toggle
+      // Skill name + "(id)" on the left.
+      const text = document.createElement('span');
+      text.textContent = skill.title ? `${skill.title} (${id})` : id;
+      text.title = text.textContent;
+      row.append(text);
+
+      // Per-skill enable switch — appended last so it sits on the right of the
+      // row, after the Remove control. It remains a real checkbox input.
       const toggle = document.createElement('input');
       toggle.type = 'checkbox';
+      toggle.className = 'codex-switch';
       toggle.checked = isCodexOverleafSkillEnabled(id);
       toggle.setAttribute('aria-label', tr('codexOverleafSkillEnableToggle'));
       if (!masterEnabled) {
@@ -138,14 +146,14 @@
       toggle.addEventListener('change', event => {
         setCodexOverleafSkillEnabled(id, event.target.checked);
       });
-      row.append(toggle);
-
-      const text = document.createElement('span');
-      text.textContent = skill.title ? `${skill.title} (${id})` : id;
-      text.title = text.textContent;
-      row.append(text);
 
       if (skill.removable !== false) {
+        // The Remove / Confirm / Cancel controls share an actions container so
+        // the per-skill switch always stays rightmost in the row, regardless of
+        // the inline confirmation state.
+        const actions = document.createElement('div');
+        actions.className = 'codex-local-skill-actions';
+
         // Remove button — clicking it enters the inline confirmation state.
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
@@ -168,7 +176,7 @@
           confirmingRowId = id;
           removeBtn.remove();
           row.dataset.confirming = 'true';
-          row.append(confirmBtn, cancelBtn);
+          actions.append(confirmBtn, cancelBtn);
         }
 
         function exitConfirming() {
@@ -176,7 +184,7 @@
           confirmBtn.remove();
           cancelBtn.remove();
           delete row.dataset.confirming;
-          row.append(removeBtn);
+          actions.append(removeBtn);
         }
 
         removeBtn.addEventListener('click', event => {
@@ -206,12 +214,16 @@
           });
         });
 
-        row.append(removeBtn);
+        actions.append(removeBtn);
+        row.append(actions);
 
         // Store references so resetConfirmingRow can find and reset this row.
         row._exitConfirming = exitConfirming;
         row._skillId = id;
       }
+
+      // Per-skill enable switch is always the last child (rightmost).
+      row.append(toggle);
 
       list.append(row);
     }

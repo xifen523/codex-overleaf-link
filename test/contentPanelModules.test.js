@@ -161,12 +161,15 @@ function buildFakeDocument() {
 function parseHtml(parent, html, makeEl, registry) {
   // Simple parser: extract top-level tags and their immediate content.
   // Good enough for the flat templates in panelRenderer and settingsPanel.
-  const tagRe = /<(\w[\w-]*)([^>]*)>([\s\S]*?)<\/\1>|<(\w[\w-]*)([^>]*)\/>/g;
+  // The void-element branch is FIRST so <input> (which has no closing tag and
+  // is commonly written without a trailing slash) is matched as a leaf before
+  // the paired-tag branch tries to pair it with a distant closing tag.
+  const tagRe = /<(input|br|hr|img|meta|link)\b([^>]*?)\/?>|<(\w[\w-]*)([^>]*)>([\s\S]*?)<\/\3>|<(\w[\w-]*)([^>]*)\/>/g;
   let m;
   while ((m = tagRe.exec(html)) !== null) {
-    const tag = m[1] || m[4];
-    const attrs = m[2] || m[5] || '';
-    const inner = m[3] || '';
+    const tag = m[1] || m[3] || m[6];
+    const attrs = m[2] || m[4] || m[7] || '';
+    const inner = m[5] || '';
     const el = makeEl(tag);
     registry.push(el);
 
@@ -292,6 +295,9 @@ test('panelRenderer.create sets data-view="session" and setView updates it', () 
 
   result.setView('settings');
   assert.equal(result.panelEl.dataset.view, 'settings', 'setView("settings") should update data-view');
+
+  result.setView('skills');
+  assert.equal(result.panelEl.dataset.view, 'skills', 'setView("skills") should update data-view to the third view');
 
   result.setView('session');
   assert.equal(result.panelEl.dataset.view, 'session', 'setView("session") should revert data-view');
@@ -550,6 +556,21 @@ test('localSkillsPanel disables per-skill toggle when master toggle is off', () 
 
 // Task 4: skill remove-confirmation + loading states
 
+// Recursively flatten a fake-DOM element tree. Skill rows nest their
+// Remove/Confirm/Cancel buttons inside a [codex-local-skill-actions] wrapper,
+// so a non-recursive _children scan no longer finds them.
+function descendants(el, acc = []) {
+  for (const child of el?._children || []) {
+    acc.push(child);
+    descendants(child, acc);
+  }
+  return acc;
+}
+
+function findRowButton(row, label) {
+  return descendants(row).find(c => c.tag === 'button' && c.textContent === label);
+}
+
 function buildSkillRowWithRemove(doc, listEl, deps = {}) {
   const LocalSkillsPanel = require('../extension/src/content/localSkillsPanel');
   const nativeCalls = [];
@@ -595,7 +616,7 @@ test('clicking Remove button shows Confirm/Cancel and does NOT call skills.remov
   assert.equal(rows.length, 1, 'should have one skill row');
 
   // Find the Remove button
-  const removeBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  const removeBtn = findRowButton(rows[0], 'localSkillRemove');
   assert.ok(removeBtn, 'Remove button must exist');
 
   // Click it — should NOT call skills.remove
@@ -604,14 +625,13 @@ test('clicking Remove button shows Confirm/Cancel and does NOT call skills.remov
   assert.equal(nativeCalls.filter(r => r.method === 'skills.remove').length, 0, 'clicking Remove should NOT call skills.remove');
 
   // Row should now have Confirm and Cancel buttons
-  const btns = rows[0]._children.filter(c => c.tag === 'button');
-  const confirmBtn = btns.find(b => b.textContent === 'localSkillRemoveConfirm');
-  const cancelBtn = btns.find(b => b.textContent === 'localSkillRemoveCancel');
+  const confirmBtn = findRowButton(rows[0], 'localSkillRemoveConfirm');
+  const cancelBtn = findRowButton(rows[0], 'localSkillRemoveCancel');
   assert.ok(confirmBtn, 'Confirm button should be shown after clicking Remove');
   assert.ok(cancelBtn, 'Cancel button should be shown after clicking Remove');
 
   // Original Remove button should be gone
-  const originalRemove = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  const originalRemove = findRowButton(rows[0], 'localSkillRemove');
   assert.equal(originalRemove, undefined, 'Original Remove button should not be visible during confirmation');
 });
 
@@ -625,18 +645,18 @@ test('clicking Cancel restores the original Remove button', () => {
   buildSkillRowWithRemove(doc, listEl);
 
   const rows = listEl._children.filter(c => c.className && c.className.includes('codex-local-skill-row'));
-  const removeBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  const removeBtn = findRowButton(rows[0], 'localSkillRemove');
   removeBtn._fire('click', { preventDefault() {} });
 
   // Cancel should restore
-  const cancelBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveCancel');
+  const cancelBtn = findRowButton(rows[0], 'localSkillRemoveCancel');
   assert.ok(cancelBtn, 'Cancel button should be present');
   cancelBtn._fire('click', { preventDefault() {} });
 
-  const restoredRemove = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  const restoredRemove = findRowButton(rows[0], 'localSkillRemove');
   assert.ok(restoredRemove, 'Original Remove button should be restored after Cancel');
 
-  const confirmAfterCancel = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveConfirm');
+  const confirmAfterCancel = findRowButton(rows[0], 'localSkillRemoveConfirm');
   assert.equal(confirmAfterCancel, undefined, 'Confirm button should be gone after Cancel');
 });
 
@@ -650,10 +670,10 @@ test('clicking Confirm calls skills.remove', async () => {
   const { nativeCalls } = buildSkillRowWithRemove(doc, listEl);
 
   const rows = listEl._children.filter(c => c.className && c.className.includes('codex-local-skill-row'));
-  const removeBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  const removeBtn = findRowButton(rows[0], 'localSkillRemove');
   removeBtn._fire('click', { preventDefault() {} });
 
-  const confirmBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveConfirm');
+  const confirmBtn = findRowButton(rows[0], 'localSkillRemoveConfirm');
   assert.ok(confirmBtn, 'Confirm button should be present');
   confirmBtn._fire('click', { preventDefault() {} });
 
@@ -707,17 +727,17 @@ test('one-at-a-time: opening confirm on a second row resets the first', () => {
   assert.equal(rows.length, 2, 'should have two skill rows');
 
   // Open confirm on first row
-  const removeA = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  const removeA = findRowButton(rows[0], 'localSkillRemove');
   removeA._fire('click', { preventDefault() {} });
-  assert.ok(rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveConfirm'), 'row 0 should show Confirm');
+  assert.ok(findRowButton(rows[0], 'localSkillRemoveConfirm'), 'row 0 should show Confirm');
 
   // Open confirm on second row — should reset first row back to Remove
-  const removeB = rows[1]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  const removeB = findRowButton(rows[1], 'localSkillRemove');
   removeB._fire('click', { preventDefault() {} });
 
-  assert.equal(rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveConfirm'), undefined, 'row 0 Confirm should be gone when row 1 enters confirm');
-  assert.ok(rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove'), 'row 0 should have its Remove button restored');
-  assert.ok(rows[1]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveConfirm'), 'row 1 should now show Confirm');
+  assert.equal(findRowButton(rows[0], 'localSkillRemoveConfirm'), undefined, 'row 0 Confirm should be gone when row 1 enters confirm');
+  assert.ok(findRowButton(rows[0], 'localSkillRemove'), 'row 0 should have its Remove button restored');
+  assert.ok(findRowButton(rows[1], 'localSkillRemoveConfirm'), 'row 1 should now show Confirm');
 });
 
 test('skill list shows loading placeholder before refreshLocalSkills resolves', async () => {
@@ -807,11 +827,11 @@ test('confirm failure restores Confirm button and toggle so user can retry', asy
   assert.equal(rows.length, 1, 'should have one skill row');
 
   // Click Remove, then Confirm
-  const removeBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemove');
+  const removeBtn = findRowButton(rows[0], 'localSkillRemove');
   assert.ok(removeBtn, 'Remove button must exist');
   removeBtn._fire('click', { preventDefault() {} });
 
-  const confirmBtn = rows[0]._children.find(c => c.tag === 'button' && c.textContent === 'localSkillRemoveConfirm');
+  const confirmBtn = findRowButton(rows[0], 'localSkillRemoveConfirm');
   assert.ok(confirmBtn, 'Confirm button should be present after clicking Remove');
   const toggle = rows[0]._children.find(c => c.tag === 'input' && c.type === 'checkbox');
   assert.ok(toggle, 'Toggle checkbox must exist');
@@ -896,4 +916,149 @@ test('[data-project-settings-status] appears before skill loading controls in se
     statusIdx < scopeIdx,
     '[data-project-settings-status] must appear before the first codex-project-settings-scope block in source (panel-level, not inside a scope)'
   );
+});
+
+// Task 6: Codex Overleaf skills moved to a dedicated sub-page with sliding switches
+
+test('settingsPanel renders a navigable [data-skills-entry] row and NOT the inline master/list', () => {
+  const { container } = buildSettingsPanel();
+
+  const entry = container.querySelector('[data-skills-entry]');
+  assert.ok(entry, 'settings screen should render a [data-skills-entry] navigation row');
+
+  const summary = container.querySelector('[data-skills-entry-summary]');
+  assert.ok(summary, 'the skills entry row should have a [data-skills-entry-summary] element');
+
+  // The inline master checkbox and skill list move to the skills screen,
+  // so they must no longer live inside the settings screen <section>.
+  const settingsScreen = container.querySelector('[data-project-settings-panel]');
+  assert.ok(settingsScreen, 'settings screen section must exist');
+  assert.equal(
+    settingsScreen.querySelector('[data-load-codex-overleaf-skills]'),
+    null,
+    'the master "Load Codex Overleaf skills" control must NOT be inside the settings screen'
+  );
+  assert.equal(
+    settingsScreen.querySelector('[data-local-skill-list]'),
+    null,
+    'the [data-local-skill-list] must NOT be inside the settings screen'
+  );
+});
+
+test('settingsPanel renders a dedicated skills screen with its own header, master toggle, and skill list', () => {
+  const { container } = buildSettingsPanel();
+
+  const skillsScreen = container.querySelector('[data-skills-screen]');
+  assert.ok(skillsScreen, 'a [data-skills-screen] section must be rendered');
+
+  const backBtn = skillsScreen.querySelector('[data-skills-back]');
+  assert.ok(backBtn, 'the skills screen must render a [data-skills-back] button');
+
+  const masterToggle = skillsScreen.querySelector('[data-load-codex-overleaf-skills]');
+  assert.ok(masterToggle, 'the master "Load Codex Overleaf skills" toggle must live on the skills screen');
+  assert.equal(masterToggle.type, 'checkbox', 'the master toggle must remain a real checkbox input');
+
+  const list = skillsScreen.querySelector('[data-local-skill-list]');
+  assert.ok(list, 'the [data-local-skill-list] must live on the skills screen');
+});
+
+test('clicking [data-skills-back] fires the onSkillsBack callback', () => {
+  const { doc } = buildFakeDocument();
+  const container = doc.createElement('div');
+  doc.documentElement._children.push(container);
+
+  const fakeWin = {};
+  const src = read('extension/src/content/settingsPanel.js');
+  // eslint-disable-next-line no-new-func
+  new Function('window', 'document', src)(fakeWin, doc);
+
+  const SettingsPanel = fakeWin.CodexOverleafSettingsPanel;
+  let called = false;
+  SettingsPanel.create({
+    container,
+    callbacks: { onSkillsBack: () => { called = true; } }
+  });
+
+  const backBtn = container.querySelector('[data-skills-back]');
+  assert.ok(backBtn, 'skills back button must exist');
+  backBtn._fire('click');
+  assert.equal(called, true, 'onSkillsBack callback should fire when the skills back button is clicked');
+});
+
+test('clicking [data-skills-entry] fires the onSkillsOpen callback', () => {
+  const { doc } = buildFakeDocument();
+  const container = doc.createElement('div');
+  doc.documentElement._children.push(container);
+
+  const fakeWin = {};
+  const src = read('extension/src/content/settingsPanel.js');
+  // eslint-disable-next-line no-new-func
+  new Function('window', 'document', src)(fakeWin, doc);
+
+  const SettingsPanel = fakeWin.CodexOverleafSettingsPanel;
+  let called = false;
+  SettingsPanel.create({
+    container,
+    callbacks: { onSkillsOpen: () => { called = true; } }
+  });
+
+  const entry = container.querySelector('[data-skills-entry]');
+  assert.ok(entry, 'skills entry row must exist');
+  entry._fire('click');
+  assert.equal(called, true, 'onSkillsOpen callback should fire when the skills entry row is clicked');
+});
+
+test('settingsPanel.setSkillsSummary updates the [data-skills-entry-summary] text', () => {
+  const { doc } = buildFakeDocument();
+  const container = doc.createElement('div');
+  doc.documentElement._children.push(container);
+
+  const fakeWin = {};
+  const src = read('extension/src/content/settingsPanel.js');
+  // eslint-disable-next-line no-new-func
+  new Function('window', 'document', src)(fakeWin, doc);
+
+  const SettingsPanel = fakeWin.CodexOverleafSettingsPanel;
+  const instance = SettingsPanel.create({ container });
+
+  instance.setSkillsSummary('3 enabled');
+  assert.equal(
+    container.querySelector('[data-skills-entry-summary]').textContent,
+    '3 enabled',
+    'setSkillsSummary should write the summary text into the entry row'
+  );
+
+  instance.setSkillsSummary('Off');
+  assert.equal(
+    container.querySelector('[data-skills-entry-summary]').textContent,
+    'Off',
+    'setSkillsSummary should overwrite the summary text'
+  );
+});
+
+test('settingsPanel exposes setSkillsSummary in its module API', () => {
+  const settingsPanelSrc = read('extension/src/content/settingsPanel.js');
+  assert.match(settingsPanelSrc, /window\.CodexOverleafSettingsPanel\s*=\s*\{/);
+  assert.match(settingsPanelSrc, /setSkillsSummary/);
+});
+
+test('the "Load local Codex skills" control and skill toggles render as sliding switches', () => {
+  const settingsPanelSrc = read('extension/src/content/settingsPanel.js');
+  const localSkillsSrc = read('extension/src/content/localSkillsPanel.js');
+
+  // The local-skills control row must carry the sliding-switch class.
+  assert.match(settingsPanelSrc, /codex-switch/, 'settingsPanel should use the codex-switch sliding-switch class');
+  // The per-skill enable toggle must carry the sliding-switch class.
+  assert.match(localSkillsSrc, /codex-switch/, 'localSkillsPanel should render the per-skill toggle as a codex-switch');
+
+  // Governance options remain plain checkboxes (no switch class on those rows).
+  const governanceBlock = settingsPanelSrc.match(/data-sensitive-check-enabled[\s\S]*?data-sensitive-confirm-allowed/)?.[0] || '';
+  assert.doesNotMatch(governanceBlock, /codex-switch/, 'governance checkboxes must NOT be rendered as sliding switches');
+});
+
+test('panel.css defines the sliding-switch component and the data-view="skills" rules', () => {
+  const css = read('extension/styles/panel.css');
+  assert.match(css, /\.codex-switch/, 'panel.css must define the .codex-switch sliding-switch component');
+  assert.match(css, /\[data-view="skills"\]/, 'panel.css must define [data-view="skills"] visibility rules');
+  assert.match(css, /\.codex-skills-entry/, 'panel.css must style the skills entry row');
 });

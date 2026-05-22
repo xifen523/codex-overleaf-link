@@ -512,7 +512,9 @@
         button: panel.querySelector('[data-custom-instructions-settings]'),
         callbacks: {
           onBack: () => closeCustomInstructionsSettings(),
-          onInputChange: () => persistPanelInputs()
+          onInputChange: () => persistPanelInputs(),
+          onSkillsOpen: () => openSkillsView(),
+          onSkillsBack: () => closeSkillsView()
         }
       });
 
@@ -679,6 +681,39 @@
   function closeCustomInstructionsSettings() {
     panelRendererInstance?.setView?.('session');
     SettingsPanel.hide(settingsPanelInstance);
+  }
+
+  // Skills sub-page: reached from the settings screen's Codex Overleaf skills
+  // entry row. Its in-memory view-state is the panel root's data-view="skills".
+  function openSkillsView() {
+    if (!settingsPanelInstance) {
+      return;
+    }
+    panelRendererInstance?.setView?.('skills');
+    refreshLocalSkills().catch(error => setProjectSettingsStatus(tx(`Could not list local skills: ${error.message}`, `无法列出本地技能：${error.message}`), 'failed'));
+  }
+
+  function closeSkillsView() {
+    // The skills screen's back button returns to the settings screen.
+    panelRendererInstance?.setView?.('settings');
+  }
+
+  function updateSkillsEntrySummary() {
+    if (!settingsPanelInstance) {
+      return;
+    }
+    const summary = getSkillLoadingSettings().loadCodexOverleafSkills === false
+      ? tr('codexOverleafSkillsSummaryOff')
+      : tr('codexOverleafSkillsSummaryCount', { count: countEnabledCodexOverleafSkills() });
+    SettingsPanel.setSkillsSummary(settingsPanelInstance, summary);
+  }
+
+  function countEnabledCodexOverleafSkills() {
+    const skills = Array.isArray(state?.codexOverleafSkills) ? state.codexOverleafSkills : [];
+    return skills.reduce((total, skill) => {
+      const id = String(skill?.id || '').trim();
+      return id && isCodexOverleafSkillEnabled(id) ? total + 1 : total;
+    }, 0);
   }
 
   function syncCustomInstructionsEditorForProject(projectId = getCurrentProjectId(), options) {
@@ -849,6 +884,9 @@
 
   function renderLocalSkillList() {
     localSkillsPanel.renderLocalSkillList();
+    // Keep the settings-screen entry-row summary in sync with the skill list:
+    // it reflects the enabled-skill count (or "Off" when the master is off).
+    updateSkillsEntrySummary();
   }
 
   function handleComposerPaste(event) {
@@ -971,6 +1009,7 @@
     setElementTitleAndAria('[data-new-session]', tr('newSession'), tr('newSession'));
     setElementTitleAndAria('[data-custom-instructions-settings]', tr('projectSettings'), tr('projectSettings'));
     setElementTitleAndAria('[data-settings-back]', tr('settingsBack'), tr('settingsBack'));
+    setElementTitleAndAria('[data-skills-back]', tr('settingsBack'), tr('settingsBack'));
     setElementTitleAndAria('[data-add-context]', tr('addContext'), tr('addContext'));
     setElementTitleAndAria('[data-context-refresh]', tr('refreshFileList'), tr('refreshFileList'));
     setElementTitleAndAria('[data-run]', currentRunView ? tr('cancelRun') : tr('send'), currentRunView ? tr('cancelRun') : tr('send'));
@@ -6616,7 +6655,10 @@
     if (experimentalOtCheckbox) {
       setExperimentalOtEnabledForProject(projectId, experimentalOtCheckbox.checked);
     }
-    if (panel?.dataset?.view === 'settings') {
+    // The settings surface spans two screens: the settings screen and the
+    // skills sub-page. The Codex Overleaf master toggle lives on the skills
+    // screen, so both views must persist the settings inputs.
+    if (panel?.dataset?.view === 'settings' || panel?.dataset?.view === 'skills') {
       const customInstructionsInput = panel?.querySelector('[data-custom-instructions-input]');
       if (customInstructionsInput) {
         setCustomInstructionsForProject(projectId, customInstructionsInput.value);
@@ -6629,6 +6671,7 @@
       if (prevOverleafSkills !== getSkillLoadingSettings().loadCodexOverleafSkills) {
         renderLocalSkillList();
       }
+      updateSkillsEntrySummary();
     }
   }
 

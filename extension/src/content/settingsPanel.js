@@ -49,21 +49,37 @@
           <div class="codex-project-settings-scope-subtitle" data-i18n="settingsScopeGlobalSubtitle">Skill loading settings that apply across all Overleaf projects.</div>
           <div class="codex-project-settings-section">
             <div class="codex-project-settings-section-title" data-i18n="localSkillsTitle">Skills</div>
-            <label class="codex-project-settings-check">
-              <input type="checkbox" data-load-codex-local-skills>
-              <span data-i18n="loadCodexLocalSkills">Load local Codex skills</span>
+            <label class="codex-project-settings-row codex-project-settings-row--switch">
+              <span class="codex-project-settings-row-label" data-i18n="loadCodexLocalSkills">Load local Codex skills</span>
+              <input type="checkbox" class="codex-switch" data-load-codex-local-skills>
             </label>
-            <label class="codex-project-settings-check">
-              <input type="checkbox" data-load-codex-overleaf-skills>
-              <span data-i18n="loadCodexOverleafSkills">Load Codex Overleaf skills</span>
-            </label>
-            <div class="codex-local-skill-list" data-local-skill-list></div>
+            <button type="button" class="codex-skills-entry" data-skills-entry>
+              <span class="codex-skills-entry-label" data-i18n="codexOverleafSkillsEntry">Codex Overleaf skills</span>
+              <span class="codex-skills-entry-summary" data-skills-entry-summary></span>
+              <span class="codex-skills-entry-chevron" aria-hidden="true">›</span>
+            </button>
           </div>
         </div>
+      </section>
+      <section class="codex-custom-instructions-panel codex-skills-panel" data-skills-screen>
+        <div class="codex-custom-instructions-head">
+          <button type="button" data-skills-back title="Back" aria-label="Back">‹</button>
+          <div>
+            <div class="codex-custom-instructions-title" data-i18n="codexOverleafSkillsTitle">Codex Overleaf skills</div>
+          </div>
+        </div>
+        <label class="codex-project-settings-row codex-project-settings-row--switch">
+          <span class="codex-project-settings-row-label" data-i18n="loadCodexOverleafSkills">Load Codex Overleaf skills</span>
+          <input type="checkbox" class="codex-switch" data-load-codex-overleaf-skills>
+        </label>
+        <div class="codex-skills-divider"></div>
+        <div class="codex-local-skill-list" data-local-skill-list></div>
       </section>
     `;
 
     container.querySelector('[data-settings-back]')?.addEventListener('click', () => instance.callbacks.onBack?.());
+    container.querySelector('[data-skills-back]')?.addEventListener('click', () => instance.callbacks.onSkillsBack?.());
+    container.querySelector('[data-skills-entry]')?.addEventListener('click', () => instance.callbacks.onSkillsOpen?.());
     // Personalization textarea: auto-save on change (the change event fires on blur — avoids per-keystroke saves).
     const customInstructionsInput = container.querySelector('[data-custom-instructions-input]');
     customInstructionsInput?.addEventListener('change', event => instance.callbacks.onInputChange?.(event));
@@ -81,6 +97,7 @@
       readState: () => readState(instance),
       setStatus: (text, status) => setStatus(instance, text, status),
       clearStatus: () => clearStatus(instance),
+      setSkillsSummary: text => setSkillsSummary(instance, text),
       destroy: () => destroy(instance),
       _instance: instance
     };
@@ -116,11 +133,13 @@
 
   function isVisible(target) {
     const instance = target?._instance || target;
-    // Visibility is governed by the panel root's data-view attribute.
+    // Visibility is governed by the panel root's data-view attribute. The
+    // settings surface counts as visible for both the settings screen and the
+    // skills sub-page, so the gear toggle can close either back to the session.
     const panelRoot = instance?.container?.closest?.('[data-view]') ||
       instance?.container?.ownerDocument?.querySelector?.('[data-view]');
     if (panelRoot) {
-      return panelRoot.dataset.view === 'settings';
+      return panelRoot.dataset.view === 'settings' || panelRoot.dataset.view === 'skills';
     }
     // Fallback: treat as not visible if we cannot read the view state.
     return false;
@@ -146,15 +165,21 @@
       setChecked(root, '[data-sensitive-confirm-allowed]', rules.sensitiveConfirmAllowed === true);
     }
     if (Object.prototype.hasOwnProperty.call(state, 'skillToggles')) {
+      // The local-skills switch lives on the settings screen; the Codex Overleaf
+      // master switch lives on the skills screen. Both are reachable from the
+      // shared container, so query that instead of a single screen root.
+      const scope = instance?.container || root;
       const toggles = state.skillToggles || {};
-      setChecked(root, '[data-load-codex-local-skills]', toggles.loadCodexLocalSkills !== false);
-      setChecked(root, '[data-load-codex-overleaf-skills]', toggles.loadCodexOverleafSkills !== false);
+      setChecked(scope, '[data-load-codex-local-skills]', toggles.loadCodexLocalSkills !== false);
+      setChecked(scope, '[data-load-codex-overleaf-skills]', toggles.loadCodexOverleafSkills !== false);
     }
   }
 
   function readState(target) {
     const instance = target?._instance || target;
     const root = getRoot(instance);
+    // Skill toggles span two screens, so read them from the shared container.
+    const scope = instance?.container || root;
     return {
       customInstructions: root?.querySelector('[data-custom-instructions-input]')?.value || '',
       governanceRules: {
@@ -164,8 +189,8 @@
         sensitiveConfirmAllowed: root?.querySelector('[data-sensitive-confirm-allowed]')?.checked === true
       },
       skillToggles: {
-        loadCodexLocalSkills: root?.querySelector('[data-load-codex-local-skills]')?.checked !== false,
-        loadCodexOverleafSkills: root?.querySelector('[data-load-codex-overleaf-skills]')?.checked !== false
+        loadCodexLocalSkills: scope?.querySelector('[data-load-codex-local-skills]')?.checked !== false,
+        loadCodexOverleafSkills: scope?.querySelector('[data-load-codex-overleaf-skills]')?.checked !== false
       }
     };
   }
@@ -188,6 +213,15 @@
     }
     element.textContent = '';
     delete element.dataset.status;
+  }
+
+  function setSkillsSummary(target, text) {
+    const instance = target?._instance || target;
+    const element = instance?.container?.querySelector('[data-skills-entry-summary]');
+    if (!element) {
+      return;
+    }
+    element.textContent = text || '';
   }
 
   function getRoot(instance) {
@@ -228,6 +262,7 @@
     hide,
     isVisible,
     setStatus,
-    clearStatus
+    clearStatus,
+    setSkillsSummary
   };
 })();
