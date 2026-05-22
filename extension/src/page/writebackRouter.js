@@ -457,7 +457,7 @@
       };
     }
 
-    for (const trackedChange of orderTrackedChangesForReject(trackedChanges)) {
+    for (const trackedChange of orderTrackedChangesForReviewAction(trackedChanges)) {
       if (trackedChange.path && getActiveFilePath() !== trackedChange.path) {
         const opened = await openFileByPath(trackedChange.path);
         if (!opened.ok) {
@@ -561,6 +561,99 @@
           result: completion
         });
       }
+    }
+
+    if (applied.length > 0) {
+      compileBridge.markSourceEdited();
+    }
+
+    return {
+      ok: skipped.length === 0,
+      applied,
+      skipped
+    };
+  }
+
+  async function acceptTrackedChanges(params = {}) {
+    const trackedChanges = normalizeTrackedChangeRefs(params.trackedChanges || []);
+    const applied = [];
+    const skipped = [];
+    const invalidTrackedChange = trackedChanges.find(trackedChange => trackedChange.invalidProjectPath);
+    if (invalidTrackedChange) {
+      return {
+        ok: false,
+        applied,
+        skipped: [{
+          trackedChange: invalidTrackedChange,
+          result: invalidProjectPathResult('tracked-change path')
+        }]
+      };
+    }
+
+    for (const trackedChange of orderTrackedChangesForReviewAction(trackedChanges)) {
+      if (trackedChange.path && getActiveFilePath() !== trackedChange.path) {
+        const opened = await openFileByPath(trackedChange.path);
+        if (!opened.ok) {
+          skipped.push({
+            trackedChange,
+            result: {
+              ok: false,
+              code: 'tracked_change_file_open_failed',
+              reason: `无法打开 ${trackedChange.path} 来查找这轮写入的留痕记录；Codex 没有接受这条留痕。`
+            }
+          });
+          continue;
+        }
+      }
+
+      const node = findTrackedChangeNode(trackedChange);
+      if (!node) {
+        skipped.push({
+          trackedChange,
+          result: {
+            ok: false,
+            code: 'tracked_change_not_found',
+            reason: '没有在 Overleaf 页面里找到这轮写入对应的留痕记录；Codex 没有接受这条留痕。'
+          }
+        });
+        continue;
+      }
+
+      const acceptControl = findAcceptControlForTrackedChangeNode(node);
+      if (!acceptControl) {
+        skipped.push({
+          trackedChange,
+          result: {
+            ok: false,
+            code: 'tracked_change_accept_control_not_found',
+            reason: '找到了这轮写入的留痕记录，但没有找到对应的 Accept/接受按钮；Codex 没有接受这条留痕。'
+          }
+        });
+        continue;
+      }
+
+      clickNode(acceptControl);
+      await delay(180);
+
+      if (findTrackedChangeNode(trackedChange)) {
+        skipped.push({
+          trackedChange,
+          result: {
+            ok: false,
+            code: 'tracked_change_accept_not_confirmed',
+            reason: 'Codex 点击了 Accept/接受，但 Overleaf 页面仍显示这条留痕记录；请在 Overleaf 审阅面板手动接受。'
+          }
+        });
+        continue;
+      }
+
+      applied.push({
+        trackedChange,
+        result: {
+          ok: true,
+          method: 'overleaf-review-accept'
+        }
+      });
     }
 
     if (applied.length > 0) {
@@ -1941,7 +2034,7 @@
     return normalized;
   }
 
-  function orderTrackedChangesForReject(refs = []) {
+  function orderTrackedChangesForReviewAction(refs = []) {
     return (refs || []).slice().reverse();
   }
 
@@ -2046,6 +2139,40 @@
     return /\b(?:reject|decline|discard|revert|拒绝|丢弃|还原)\b/i.test(signal);
   }
 
+  function findAcceptControlForTrackedChangeNode(node) {
+    const scopes = [];
+    let current = node;
+    for (let index = 0; current && index < 6; index += 1) {
+      scopes.push(current);
+      current = current.parentElement;
+    }
+
+    for (const scope of scopes) {
+      const candidates = typeof scope.querySelectorAll === 'function'
+        ? Array.from(scope.querySelectorAll('button,[role="button"],[aria-label],[title]'))
+        : [];
+      const accept = candidates.find(isAcceptTrackedChangeControl);
+      if (accept) {
+        return accept;
+      }
+    }
+    return isAcceptTrackedChangeControl(node) ? node : null;
+  }
+
+  function isAcceptTrackedChangeControl(node) {
+    if (!node || node.disabled) {
+      return false;
+    }
+    if (/^(true|disabled)$/i.test(node.getAttribute?.('aria-disabled') || '')) {
+      return false;
+    }
+    const signal = normalizeReviewingSignalText(readNodeSignalText(node));
+    if (/\b(?:reject|decline|discard|revert|拒绝|丢弃|还原)\b/i.test(signal)) {
+      return false;
+    }
+    return /\b(?:accept|approve|接受|批准)\b/i.test(signal);
+  }
+
 
     async function applyOperationsForBridge(operationsOrOptions, options = {}) {
       if (Array.isArray(operationsOrOptions)) {
@@ -2069,6 +2196,7 @@
     return {
       applyOperations: applyOperationsForBridge,
       rejectTrackedChanges,
+      acceptTrackedChanges,
       verifySaveState
     };
   }
