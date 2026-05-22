@@ -6,6 +6,7 @@ const {
   computeLineAnchoredChangeGroups,
   computeGroupMetrics,
   splitParagraphs,
+  splitSentences,
   hasOriginalMarkerLine,
   hasLaterRevisedMarkerLine,
   hasAnyAnnotatedMarker,
@@ -243,6 +244,81 @@ test('splitParagraphs reconstructs input with leading and trailing blank lines',
   for (const segment of segments) {
     assert.equal(text.slice(segment.start, segment.start + segment.text.length), segment.text);
   }
+});
+
+function assertSpansPartition(text, spans) {
+  assert.ok(Array.isArray(spans));
+  assert.ok(spans.length >= 1);
+  assert.equal(spans.map(span => span.text).join(''), text);
+  let cursor = 0;
+  for (const span of spans) {
+    assert.equal(span.start, cursor);
+    assert.equal(span.end, span.start + span.text.length);
+    assert.equal(span.text, text.slice(span.start, span.end));
+    cursor = span.end;
+  }
+  assert.equal(cursor, text.length);
+}
+
+test('splitSentences splits two plain sentences ending in a period and a bang', () => {
+  const text = 'First sentence. Second sentence!';
+  const spans = splitSentences(text);
+
+  assertSpansPartition(text, spans);
+  assert.equal(spans.length, 2);
+  assert.equal(spans[0].text, 'First sentence. ');
+  assert.equal(spans[1].text, 'Second sentence!');
+  assert.equal(spans[0].start, 0);
+  assert.equal(spans[0].end, 16);
+  assert.equal(spans[1].start, 16);
+  assert.equal(spans[1].end, 32);
+});
+
+test('splitSentences splits CJK sentences ending in fullwidth terminators', () => {
+  const text = '第一句话。第二个句子？';
+  const spans = splitSentences(text);
+
+  assertSpansPartition(text, spans);
+  assert.equal(spans.length, 2);
+  assert.equal(spans[0].text, '第一句话。');
+  assert.equal(spans[1].text, '第二个句子？');
+});
+
+test('splitSentences does not split inside a decimal number', () => {
+  const text = 'The value is 1.23 here.';
+  const spans = splitSentences(text);
+
+  assertSpansPartition(text, spans);
+  assert.equal(spans.length, 1);
+  assert.equal(spans[0].text, text);
+});
+
+test('splitSentences does not split inside a URL', () => {
+  const text = 'See https://a.b/c for details.';
+  const spans = splitSentences(text);
+
+  assertSpansPartition(text, spans);
+  assert.equal(spans.length, 1);
+  assert.equal(spans[0].text, text);
+});
+
+test('splitSentences treats a terminator before a LaTeX command as a boundary', () => {
+  const text = 'done.\\section{Next}';
+  const spans = splitSentences(text);
+
+  assertSpansPartition(text, spans);
+  assert.equal(spans.length, 2);
+  assert.equal(spans[0].text, 'done.');
+  assert.equal(spans[1].text, '\\section{Next}');
+});
+
+test('splitSentences returns one span when there is no confident boundary', () => {
+  const text = 'a rewrite fragment with no terminator at all';
+  const spans = splitSentences(text);
+
+  assertSpansPartition(text, spans);
+  assert.equal(spans.length, 1);
+  assert.equal(spans[0].text, text);
 });
 
 test('computeGroupMetrics reports counts and char spans for a group with token patches', () => {

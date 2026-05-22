@@ -371,6 +371,131 @@ function splitParagraphs(text) {
   return segments;
 }
 
+// Lowercase abbreviations whose trailing `.` is conservatively NOT a sentence
+// boundary. The word ending in the dot is matched case-insensitively, so this
+// also covers `Fig.`, `Eq.`, `No.`, etc.
+const NON_TERMINAL_ABBREVIATIONS = new Set([
+  'e.g', 'i.e', 'cf', 'vs', 'etc', 'al', 'fig', 'figs', 'eq', 'eqs', 'sec',
+  'secs', 'thm', 'lem', 'def', 'prop', 'cor', 'ref', 'no', 'vol', 'pp',
+  'ch', 'app', 'resp', 'approx', 'mr', 'ms', 'mrs', 'dr', 'prof', 'st'
+]);
+
+function isLatexCommandStart(text, index) {
+  return text[index] === '\\' && /[A-Za-z@]/.test(text[index + 1] || '');
+}
+
+// True when the contiguous non-whitespace run containing `index` looks like a
+// URL (has a scheme such as `https://`, or starts with `www.`). A `.` inside
+// such a run is never a confident sentence boundary.
+function isInsideUrl(text, index) {
+  let runStart = index;
+  while (runStart > 0 && !/\s/.test(text[runStart - 1])) {
+    runStart -= 1;
+  }
+  let runEnd = index;
+  while (runEnd < text.length && !/\s/.test(text[runEnd])) {
+    runEnd += 1;
+  }
+  const run = text.slice(runStart, runEnd);
+  return /:\/\//.test(run) || /^www\./i.test(run);
+}
+
+// True when the `.` at `index` completes a known abbreviation such as `e.g.`
+// or `Fig.` rather than ending a sentence.
+function completesAbbreviation(text, index) {
+  let wordStart = index;
+  while (wordStart > 0 && /[A-Za-z.]/.test(text[wordStart - 1])) {
+    wordStart -= 1;
+  }
+  const word = text.slice(wordStart, index).toLowerCase();
+  return word.length > 0 && NON_TERMINAL_ABBREVIATIONS.has(word);
+}
+
+// True when the ASCII terminator `.` `?` `!` at `index` is a confident
+// sentence boundary: it must be followed by whitespace, end-of-string, or a
+// LaTeX command boundary, and must not sit inside a decimal number, a URL, or
+// a known abbreviation.
+function isConfidentAsciiBoundary(text, index) {
+  const next = text[index + 1];
+  const followedByBoundary = next === undefined
+    || /\s/.test(next)
+    || isLatexCommandStart(text, index + 1);
+  if (!followedByBoundary) {
+    return false;
+  }
+  if (text[index] === '.') {
+    const prev = text[index - 1];
+    if (/[0-9]/.test(prev || '') && /[0-9]/.test(next || '')) {
+      // Decimal point inside a number such as `1.23`.
+      return false;
+    }
+    if (isInsideUrl(text, index)) {
+      return false;
+    }
+    if (completesAbbreviation(text, index)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Splits `text` into ordered sentence spans `[{text, start, end}]` that
+// partition the input exactly (concatenated they equal `text`). Each span
+// includes its trailing terminator and the whitespace up to the next
+// sentence. Conservative: when no confident boundary is found the whole input
+// is returned as a single span.
+function splitSentences(text) {
+  const value = String(text ?? '');
+  if (value.length === 0) {
+    return [{ text: '', start: 0, end: 0 }];
+  }
+
+  const spans = [];
+  let spanStart = 0;
+  let index = 0;
+
+  while (index < value.length) {
+    const char = value[index];
+    let isBoundary = false;
+
+    if (char === '。' || char === '？' || char === '！') {
+      // CJK terminators are unambiguous: they never appear in decimals, URLs,
+      // or LaTeX command names, so they always end a sentence.
+      isBoundary = true;
+    } else if (char === '.' || char === '?' || char === '!') {
+      isBoundary = isConfidentAsciiBoundary(value, index);
+    }
+
+    if (isBoundary) {
+      // Absorb trailing whitespace up to the next sentence into this span.
+      let spanEnd = index + 1;
+      while (spanEnd < value.length && /\s/.test(value[spanEnd])) {
+        spanEnd += 1;
+      }
+      if (spanEnd < value.length) {
+        spans.push({
+          text: value.slice(spanStart, spanEnd),
+          start: spanStart,
+          end: spanEnd
+        });
+        spanStart = spanEnd;
+        index = spanEnd;
+        continue;
+      }
+    }
+
+    index += 1;
+  }
+
+  spans.push({
+    text: value.slice(spanStart),
+    start: spanStart,
+    end: value.length
+  });
+
+  return spans;
+}
+
 function computeGroupMetrics(group, tokenPatches) {
   const oldNonEmptyLineCount = countNonEmptyLines(group.oldText);
   const newNonEmptyLineCount = countNonEmptyLines(group.newText);
@@ -396,6 +521,7 @@ module.exports = {
   computeLineAnchoredChangeGroups,
   computeGroupMetrics,
   splitParagraphs,
+  splitSentences,
   hasOriginalMarkerLine,
   hasLaterRevisedMarkerLine,
   hasAnyAnnotatedMarker,
