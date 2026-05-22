@@ -8598,6 +8598,14 @@
   // All only exists in the tracked-change lifecycle. Mirrors configureUndoButton's
   // clone-and-replace pattern, rendering from trackedChangeStatus.
   function configureAcceptButton(root, run) {
+    // A re-render can fire mid-confirm, while wireAcceptInlineConfirm's
+    // Confirm/Cancel pair is showing. Those are separate siblings, not the
+    // [data-run-accept] node this rebuilds, so drop any stale pair first to
+    // start every render from a clean state.
+    for (const stale of root.querySelectorAll('[data-run-accept-confirm], [data-run-accept-cancel]')) {
+      stale.remove();
+    }
+
     const existing = root.querySelector('[data-run-accept]');
     const button = existing.cloneNode(true);
     existing.replaceWith(button);
@@ -8934,6 +8942,9 @@
     const blockedRefs = skipped
       .filter(entry => entry?.result?.code !== 'tracked_change_not_found')
       .map(entry => entry?.trackedChange)
+      // Skips with trackedChange: null are reject-sweep failures, intentionally
+      // dropped here — the ledger tracks only this run's own refs, so this is
+      // not a classification bug.
       .filter(Boolean);
 
     if (blockedRefs.length) {

@@ -210,6 +210,190 @@ function findLineReferenceButtons(node) {
   return collectElements(node, item => item.className === 'codex-line-reference');
 }
 
+// A fake-DOM node rich enough to exercise the run-card control functions:
+// it supports clone-and-replace, parent links, sibling insertion, removal, and
+// attribute-selector queries over the subtree. createRunCardDocument() is the
+// document façade that mints these nodes.
+class RunCardNode {
+  constructor(tagName = 'div') {
+    this.tagName = String(tagName).toUpperCase();
+    this.children = [];
+    this.dataset = {};
+    this.listeners = {};
+    this.parentElement = null;
+    this.textContent = '';
+    this.title = '';
+    this.type = '';
+    this.hidden = false;
+    this.disabled = false;
+  }
+
+  append(...children) {
+    for (const child of children) {
+      child.parentElement = this;
+      this.children.push(child);
+    }
+  }
+
+  insertBefore(node, reference) {
+    node.parentElement = this;
+    const index = this.children.indexOf(reference);
+    if (index === -1) {
+      this.children.push(node);
+    } else {
+      this.children.splice(index, 0, node);
+    }
+    return node;
+  }
+
+  replaceWith(node) {
+    if (!this.parentElement) {
+      return;
+    }
+    const index = this.parentElement.children.indexOf(this);
+    if (index !== -1) {
+      node.parentElement = this.parentElement;
+      this.parentElement.children[index] = node;
+    }
+    this.parentElement = null;
+  }
+
+  remove() {
+    if (!this.parentElement) {
+      return;
+    }
+    const index = this.parentElement.children.indexOf(this);
+    if (index !== -1) {
+      this.parentElement.children.splice(index, 1);
+    }
+    this.parentElement = null;
+  }
+
+  cloneNode() {
+    const copy = new RunCardNode(this.tagName);
+    copy.dataset = { ...this.dataset };
+    copy.textContent = this.textContent;
+    copy.title = this.title;
+    copy.type = this.type;
+    copy.hidden = this.hidden;
+    copy.disabled = this.disabled;
+    return copy;
+  }
+
+  addEventListener(type, listener) {
+    this.listeners[type] = this.listeners[type] || [];
+    this.listeners[type].push(listener);
+  }
+
+  click() {
+    const event = { type: 'click', stopPropagation() {}, defaultPrevented: false };
+    for (const listener of this.listeners.click || []) {
+      listener(event);
+    }
+  }
+
+  matchesAttr(attr) {
+    return Object.prototype.hasOwnProperty.call(this.dataset, attrToDatasetKey(attr));
+  }
+
+  querySelectorAll(selector) {
+    const attrs = selector.split(',').map(part => part.trim().replace(/^\[|\]$/g, ''));
+    const matches = [];
+    const visit = node => {
+      if (attrs.some(attr => node.matchesAttr(attr))) {
+        matches.push(node);
+      }
+      for (const child of node.children) {
+        visit(child);
+      }
+    };
+    for (const child of this.children) {
+      visit(child);
+    }
+    return matches;
+  }
+
+  querySelector(selector) {
+    return this.querySelectorAll(selector)[0] || null;
+  }
+}
+
+function attrToDatasetKey(attr) {
+  // Mirror the DOM: a data-* attribute maps to a camelCased dataset key with
+  // the data- prefix stripped (data-run-accept -> runAccept).
+  return attr.replace(/^data-/, '').replace(/-([a-z])/g, (_, ch) => ch.toUpperCase());
+}
+
+function createRunCardDocument() {
+  return {
+    createElement(tagName) {
+      return new RunCardNode(tagName);
+    }
+  };
+}
+
+// Builds a run-card root with the [data-run-accept] / [data-run-undo] controls
+// inside a .run-turn-meta, mirroring renderRunCard's markup, so the control
+// functions can be driven directly against it.
+function buildRunCardRoot(runId) {
+  const root = new RunCardNode('div');
+  root.dataset.runId = runId;
+  const meta = new RunCardNode('div');
+  meta.dataset.runTurnMeta = '';
+  const accept = new RunCardNode('button');
+  accept.dataset.runAccept = '';
+  const undo = new RunCardNode('button');
+  undo.dataset.runUndo = '';
+  meta.append(accept, undo);
+  root.append(meta);
+  return root;
+}
+
+// Extracts the run-card control functions from contentRuntime.js and wires them
+// against fake runs, a fake panel DOM, and stubbed dependencies. configureUndo
+// is stubbed: applyTrackedChangeLedger -> refreshRunCardControls only needs the
+// Accept control rebuilt, and the undo machinery is out of scope here.
+function loadRunCardControlsHarness(options = {}) {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const document = createRunCardDocument();
+  const region = [
+    'const TERMINAL_TRACKED_CHANGE_STATUS = new Set([\'accepted\', \'rejected\', \'resolved_elsewhere\']);',
+    extractFunction(contentScript, 'isTrackedChangeLifecycleRun'),
+    extractFunction(contentScript, 'configureAcceptButton'),
+    extractFunction(contentScript, 'wireAcceptInlineConfirm'),
+    extractFunction(contentScript, 'applyTrackedChangeLedger'),
+    extractFunction(contentScript, 'refreshRunCardControls'),
+    extractFunction(contentScript, 'normalizeApplyTrackedChanges'),
+    extractFunction(contentScript, 'cssEscape')
+  ].join('\n');
+
+  return Function('document', 'state', 'panel', 'options', `
+    const window = {};
+    const trackedChangeInFlight = new Map(options.inFlight || []);
+    let saveStateSoonCalls = 0;
+    const acceptRunCalls = [];
+    function saveStateSoon() { saveStateSoonCalls++; }
+    function findRunRecord(runId) {
+      return (state.runs || []).find(run => run.id === runId) || null;
+    }
+    function acceptRun(runId) { acceptRunCalls.push(runId); }
+    function configureUndoButton() {}
+    function tr(key) { return key; }
+    ${region}
+    return {
+      configureAcceptButton,
+      applyTrackedChangeLedger,
+      refreshRunCardControls,
+      trackedChangeInFlight,
+      acceptRunCalls,
+      getSaveStateSoonCalls: () => saveStateSoonCalls
+    };
+  `)(document, options.state || { runs: [] }, options.panel || null, options);
+}
+
 function loadCreateDiffReviewElementForTest(options = {}) {
   delete require.cache[require.resolve(DIFF_REVIEW_PANEL_PATH)];
   const pageBridgeCalls = [];
@@ -2959,6 +3143,214 @@ test('acceptRun applies the closed-ledger result with gone vs blocked classifica
   assert.match(ledgerBody, /resolved_elsewhere/);
   // Terminal transitions empty undoTrackedChanges and undoExpectedFiles.
   assert.match(ledgerBody, /undoExpectedFiles/);
+});
+
+// Behavioral coverage for the run-card state machine: these drive the actual
+// extracted control functions against fake runs / fake DOM, complementing the
+// source-text assertions above.
+
+function trackedRefs() {
+  return [
+    { key: 'k1', id: 'i1', path: 'main.tex', label: 'change one' },
+    { key: 'k2', id: 'i2', path: 'main.tex', label: 'change two' }
+  ];
+}
+
+test('configureAcceptButton renders the Accept All control per trackedChangeStatus (behavioral)', () => {
+  const cases = [
+    { status: 'pending', refs: trackedRefs(), expect: { hidden: false, disabled: false, text: 'runAcceptTracked' } },
+    { status: 'partial_accept', refs: trackedRefs(), expect: { hidden: false, disabled: false, text: 'runAcceptTrackedRetry' } },
+    { status: 'accepted', refs: [], expect: { hidden: false, disabled: true, text: 'runAcceptTrackedDone' } },
+    { status: 'partial_reject', refs: trackedRefs(), expect: { hidden: true } },
+    { status: 'rejected', refs: [], expect: { hidden: true } },
+    { status: 'resolved_elsewhere', refs: [], expect: { hidden: false, disabled: true, text: 'runAcceptTrackedResolvedElsewhere' } }
+  ];
+
+  for (const testCase of cases) {
+    const run = { id: 'run-1', trackedChangeStatus: testCase.status, undoTrackedChanges: testCase.refs };
+    const harness = loadRunCardControlsHarness({ state: { runs: [run] } });
+    const root = buildRunCardRoot('run-1');
+
+    harness.configureAcceptButton(root, run);
+    const accept = root.querySelector('[data-run-accept]');
+
+    assert.equal(accept.hidden, testCase.expect.hidden, `${testCase.status}: hidden`);
+    if (!testCase.expect.hidden) {
+      assert.equal(accept.disabled, testCase.expect.disabled, `${testCase.status}: disabled`);
+      assert.equal(accept.textContent, testCase.expect.text, `${testCase.status}: label`);
+    }
+  }
+});
+
+test('configureAcceptButton hides the Accept All control entirely for legacy-undo runs (behavioral)', () => {
+  // No trackedChangeStatus and no tracked-change refs -> not a lifecycle run.
+  const run = { id: 'run-legacy', undoOperations: [{ type: 'edit', path: 'main.tex' }] };
+  const harness = loadRunCardControlsHarness({ state: { runs: [run] } });
+  const root = buildRunCardRoot('run-legacy');
+
+  harness.configureAcceptButton(root, run);
+
+  const accept = root.querySelector('[data-run-accept]');
+  assert.equal(accept.hidden, true);
+  // No inline-confirm pair was wired for a non-lifecycle run.
+  assert.equal(root.querySelectorAll('[data-run-accept-confirm]').length, 0);
+});
+
+test('configureAcceptButton drops orphaned inline-confirm buttons on mid-confirm re-render (behavioral)', () => {
+  const run = { id: 'run-1', trackedChangeStatus: 'pending', undoTrackedChanges: trackedRefs() };
+  const harness = loadRunCardControlsHarness({ state: { runs: [run] } });
+  const root = buildRunCardRoot('run-1');
+
+  harness.configureAcceptButton(root, run);
+  // Open the inline confirm flow: clicking Accept All appends a Confirm/Cancel pair.
+  root.querySelector('[data-run-accept]').click();
+  assert.equal(root.querySelectorAll('[data-run-accept-confirm]').length, 1);
+  assert.equal(root.querySelectorAll('[data-run-accept-cancel]').length, 1);
+
+  // A re-render now fires while the confirm pair is showing.
+  harness.configureAcceptButton(root, run);
+
+  assert.equal(
+    root.querySelectorAll('[data-run-accept-confirm]').length, 0,
+    'stale Confirm button must be removed on re-render'
+  );
+  assert.equal(
+    root.querySelectorAll('[data-run-accept-cancel]').length, 0,
+    'stale Cancel button must be removed on re-render'
+  );
+  // Exactly one Accept control remains, freshly rebuilt and visible.
+  const accepts = root.querySelectorAll('[data-run-accept]');
+  assert.equal(accepts.length, 1);
+  assert.equal(accepts[0].hidden, false);
+});
+
+test('applyTrackedChangeLedger: all applied -> accepted, refs emptied (behavioral)', () => {
+  const run = {
+    id: 'run-1',
+    trackedChangeStatus: 'pending',
+    undoTrackedChanges: trackedRefs(),
+    undoExpectedFiles: [{ path: 'main.tex', content: 'x' }]
+  };
+  const panel = new RunCardNode('div');
+  panel.append(buildRunCardRoot('run-1'));
+  const harness = loadRunCardControlsHarness({ state: { runs: [run] }, panel });
+
+  harness.applyTrackedChangeLedger('run-1', 'accept', {
+    ok: true,
+    applied: [{ trackedChange: run.undoTrackedChanges[0] }, { trackedChange: run.undoTrackedChanges[1] }],
+    skipped: []
+  });
+
+  assert.equal(run.trackedChangeStatus, 'accepted');
+  assert.deepEqual(run.undoTrackedChanges, []);
+  assert.deepEqual(run.undoExpectedFiles, []);
+});
+
+test('applyTrackedChangeLedger: blocked skips -> partial_accept, refs are exactly the blocked refs (behavioral)', () => {
+  const refs = trackedRefs();
+  const run = {
+    id: 'run-1',
+    trackedChangeStatus: 'pending',
+    undoTrackedChanges: refs,
+    undoExpectedFiles: [{ path: 'main.tex', content: 'x' }]
+  };
+  const panel = new RunCardNode('div');
+  panel.append(buildRunCardRoot('run-1'));
+  const harness = loadRunCardControlsHarness({ state: { runs: [run] }, panel });
+
+  harness.applyTrackedChangeLedger('run-1', 'accept', {
+    ok: true,
+    applied: [{ trackedChange: refs[0] }],
+    skipped: [{ trackedChange: refs[1], result: { code: 'tracked_change_accept_not_confirmed' } }]
+  });
+
+  assert.equal(run.trackedChangeStatus, 'partial_accept');
+  assert.equal(run.undoTrackedChanges.length, 1);
+  assert.equal(run.undoTrackedChanges[0].key, 'k2');
+  // Non-terminal: the heavy payload is retained for the retry.
+  assert.equal(run.undoExpectedFiles.length, 1);
+});
+
+test('applyTrackedChangeLedger: nothing applied, all gone -> resolved_elsewhere, refs emptied (behavioral)', () => {
+  const refs = trackedRefs();
+  const run = {
+    id: 'run-1',
+    trackedChangeStatus: 'pending',
+    undoTrackedChanges: refs,
+    undoExpectedFiles: [{ path: 'main.tex', content: 'x' }]
+  };
+  const panel = new RunCardNode('div');
+  panel.append(buildRunCardRoot('run-1'));
+  const harness = loadRunCardControlsHarness({ state: { runs: [run] }, panel });
+
+  harness.applyTrackedChangeLedger('run-1', 'accept', {
+    ok: true,
+    applied: [],
+    skipped: [
+      { trackedChange: refs[0], result: { code: 'tracked_change_not_found' } },
+      { trackedChange: refs[1], result: { code: 'tracked_change_not_found' } }
+    ]
+  });
+
+  assert.equal(run.trackedChangeStatus, 'resolved_elsewhere');
+  assert.deepEqual(run.undoTrackedChanges, []);
+  assert.deepEqual(run.undoExpectedFiles, []);
+});
+
+test('applyTrackedChangeLedger: reject kind reaches rejected / partial_reject symmetrically (behavioral)', () => {
+  // All applied -> terminal rejected.
+  const fullRefs = trackedRefs();
+  const rejectedRun = { id: 'run-r', trackedChangeStatus: 'pending', undoTrackedChanges: fullRefs, undoExpectedFiles: [{ path: 'main.tex', content: 'x' }] };
+  let panel = new RunCardNode('div');
+  panel.append(buildRunCardRoot('run-r'));
+  loadRunCardControlsHarness({ state: { runs: [rejectedRun] }, panel })
+    .applyTrackedChangeLedger('run-r', 'reject', {
+      ok: true,
+      applied: [{ trackedChange: fullRefs[0] }, { trackedChange: fullRefs[1] }],
+      skipped: []
+    });
+  assert.equal(rejectedRun.trackedChangeStatus, 'rejected');
+  assert.deepEqual(rejectedRun.undoTrackedChanges, []);
+  assert.deepEqual(rejectedRun.undoExpectedFiles, []);
+
+  // Blocked skip -> non-terminal partial_reject, refs replaced with the blocked ref.
+  const partialRefs = trackedRefs();
+  const partialRun = { id: 'run-p', trackedChangeStatus: 'pending', undoTrackedChanges: partialRefs, undoExpectedFiles: [{ path: 'main.tex', content: 'x' }] };
+  panel = new RunCardNode('div');
+  panel.append(buildRunCardRoot('run-p'));
+  loadRunCardControlsHarness({ state: { runs: [partialRun] }, panel })
+    .applyTrackedChangeLedger('run-p', 'reject', {
+      ok: true,
+      applied: [{ trackedChange: partialRefs[0] }],
+      skipped: [{ trackedChange: partialRefs[1], result: { code: 'tracked_change_reject_failed' } }]
+    });
+  assert.equal(partialRun.trackedChangeStatus, 'partial_reject');
+  assert.equal(partialRun.undoTrackedChanges.length, 1);
+  assert.equal(partialRun.undoTrackedChanges[0].key, 'k2');
+  assert.equal(partialRun.undoExpectedFiles.length, 1);
+});
+
+test('applyTrackedChangeLedger: trackedChange:null sweep skips are dropped, not classified as blocked (behavioral)', () => {
+  const refs = trackedRefs();
+  const run = {
+    id: 'run-1',
+    trackedChangeStatus: 'pending',
+    undoTrackedChanges: refs,
+    undoExpectedFiles: [{ path: 'main.tex', content: 'x' }]
+  };
+  const panel = new RunCardNode('div');
+  panel.append(buildRunCardRoot('run-1'));
+  const harness = loadRunCardControlsHarness({ state: { runs: [run] }, panel });
+
+  // A reject-sweep failure carries trackedChange: null; it must not block the run.
+  harness.applyTrackedChangeLedger('run-1', 'accept', {
+    ok: true,
+    applied: [{ trackedChange: refs[0] }, { trackedChange: refs[1] }],
+    skipped: [{ trackedChange: null, result: { code: 'tracked_change_reject_failed' } }]
+  });
+
+  assert.equal(run.trackedChangeStatus, 'accepted');
+  assert.deepEqual(run.undoTrackedChanges, []);
 });
 
 test('Undo for tracked-change-lifecycle runs dispatches from trackedChangeStatus', () => {
