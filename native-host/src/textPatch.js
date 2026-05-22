@@ -526,10 +526,18 @@ function computeGroupMetrics(group, tokenPatches) {
 //   patch's old range (relative to the group).
 // - `spanChars` / `spanTokenCount`: the char length / token count of that
 //   single span when `fitsOneSpan` is true; `0` otherwise (irrelevant then).
+// - `spanStart` / `spanEnd`: the group-relative `[start,end)` offsets of that
+//   single span when `fitsOneSpan` is true; `0` otherwise (irrelevant then).
 //
 // When `tokenPatches` is `null` or empty, `fitsOneSpan` is false.
 function resolveTokenPatchSentenceSpan(group, tokenPatches) {
-  const empty = { fitsOneSpan: false, spanChars: 0, spanTokenCount: 0 };
+  const empty = {
+    fitsOneSpan: false,
+    spanChars: 0,
+    spanTokenCount: 0,
+    spanStart: 0,
+    spanEnd: 0
+  };
   if (tokenPatches === null || tokenPatches.length === 0) {
     return empty;
   }
@@ -560,7 +568,9 @@ function resolveTokenPatchSentenceSpan(group, tokenPatches) {
   return {
     fitsOneSpan: true,
     spanChars: containingSpan.text.length,
-    spanTokenCount: splitTextTokens(containingSpan.text).length
+    spanTokenCount: splitTextTokens(containingSpan.text).length,
+    spanStart: containingSpan.start,
+    spanEnd: containingSpan.end
   };
 }
 
@@ -642,8 +652,253 @@ function classifyChangedGroup(group, tokenPatches, metrics) {
   return { type: 'fallback' };
 }
 
+// The single-patch fallback for a whole changed group (spec algorithm sketch).
+// Returns a one-element array so callers can treat every builder uniformly.
+// The patch's `from`/`to` are absolute offsets into the full original text:
+// `computeSingleTextPatch` adds `group.oldStart` to its segment-local offsets.
+function singleGroupPatch(group) {
+  return [computeSingleTextPatch(group.oldText, group.newText, group.oldStart)];
+}
+
+// Builds paragraph-level patches for a changed group (spec §4).
+//
+// Segments `group.oldText` and `group.newText` with `splitParagraphs`, which
+// yields alternating [content, separator, content, ...] segments. When both
+// sides share the SAME separator structure (same segment count and identical
+// separator segments) the content paragraphs are paired positionally and one
+// patch is emitted per changed pair, with `from`/`to` as absolute offsets
+// (`group.oldStart` + the old paragraph segment's start). A single-paragraph
+// group is the degenerate case of this rule: one pair, one patch.
+//
+// Returns `null` when pairing is ambiguous (separator counts differ or a
+// separator segment changed), so the caller can fall back to a group patch.
+function computeParagraphPatches(group) {
+  const oldSegments = splitParagraphs(group.oldText);
+  const newSegments = splitParagraphs(group.newText);
+
+  if (oldSegments.length !== newSegments.length) {
+    return null;
+  }
+  // splitParagraphs always yields an odd count: content at even indices,
+  // blank-line separators at odd indices. Every separator must be unchanged
+  // for positional pairing of the content paragraphs to be sound.
+  for (let index = 1; index < oldSegments.length; index += 2) {
+    if (oldSegments[index].text !== newSegments[index].text) {
+      return null;
+    }
+  }
+
+  const patches = [];
+  for (let index = 0; index < oldSegments.length; index += 2) {
+    const oldParagraph = oldSegments[index];
+    const newParagraph = newSegments[index];
+    if (oldParagraph.text === newParagraph.text) {
+      continue;
+    }
+    patches.push(computeSingleTextPatch(
+      oldParagraph.text,
+      newParagraph.text,
+      group.oldStart + oldParagraph.start
+    ));
+  }
+  return patches;
+}
+
+// Builds a single sentence-level patch for a `sentence_rewrite` group (spec
+// §5). Every token patch lies inside one confident sentence span `[a,b)` of
+// `group.oldText`. Because all token changes are inside that span, the regions
+// `group.oldText.slice(0,a)` and `group.oldText.slice(b)` are unchanged, so
+// `group.newText` is `prefix + <new sentence> + suffix` with the same prefix
+// and suffix; `<new sentence>` is derived by stripping them.
+//
+// Returns `[patch]` whose `from`/`to` cover only that old sentence span
+// (absolute offsets), or `null` when the single span cannot be identified or
+// the unchanged prefix/suffix do not actually match (defensive).
+function computeSentencePatches(group, tokenPatches) {
+  const span = resolveTokenPatchSentenceSpan(group, tokenPatches);
+  if (!span.fitsOneSpan) {
+    return null;
+  }
+
+  const { spanStart, spanEnd } = span;
+  const oldPrefix = group.oldText.slice(0, spanStart);
+  const oldSuffix = group.oldText.slice(spanEnd);
+  const oldSentence = group.oldText.slice(spanStart, spanEnd);
+
+  // The regions outside the sentence span must be byte-identical between old
+  // and new text; otherwise a change leaked outside the span and a single
+  // sentence patch would be wrong.
+  if (
+    !group.newText.startsWith(oldPrefix)
+    || !group.newText.endsWith(oldSuffix)
+    || group.newText.length < oldPrefix.length + oldSuffix.length
+  ) {
+    return null;
+  }
+
+  const newSentence = group.newText.slice(
+    oldPrefix.length,
+    group.newText.length - oldSuffix.length
+  );
+  return [computeSingleTextPatch(
+    oldSentence,
+    newSentence,
+    group.oldStart + spanStart
+  )];
+}
+
+// Short function words whose presence inside a coalescing gap does not block a
+// merge. Combined with pure punctuation and whitespace, these define a gap
+// that is "mostly" connective filler (spec §7).
+const COALESCE_FILLER_WORDS = new Set([
+  'a', 'an', 'the', 'and', 'or', 'but', 'nor', 'so', 'yet', 'of', 'to', 'in',
+  'on', 'at', 'by', 'as', 'is', 'are', 'was', 'were', 'be', 'for', 'with',
+  'that', 'this', 'it', 'its', 'we', 'our'
+]);
+
+// True when the gap text between two token patches is short connective filler:
+// only whitespace, punctuation, and short function words. An empty gap counts
+// as filler.
+function isCoalesceFillerGap(gap) {
+  if (gap.length > 40) {
+    return false;
+  }
+  for (const token of splitTextTokens(gap)) {
+    const text = token.text;
+    if (/^\s+$/.test(text)) {
+      continue;
+    }
+    if (!/[A-Za-z0-9]/.test(text)) {
+      // Pure punctuation / symbols.
+      continue;
+    }
+    if (COALESCE_FILLER_WORDS.has(text.toLowerCase())) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+// Conservative safety-net coalescing of token patches (spec §7). Adjacent
+// token patches are merged when they lie in the same sentence span of
+// `group.oldText`, the gap between them is at most 40 chars of whitespace /
+// punctuation / short function words, and that sentence span contains at
+// least 3 token patches. A merged patch spans `[firstFrom, lastTo)` with
+// `expected` the original slice and `insert` the merged inserts interleaved
+// with the unchanged gap text. When nothing qualifies the token patches are
+// returned unchanged. Absolute offsets are preserved throughout.
+function coalesceTokenPatches(group, tokenPatches) {
+  if (tokenPatches === null || tokenPatches.length < 3) {
+    return tokenPatches;
+  }
+
+  const spans = splitSentences(group.oldText);
+  // Index of the sentence span that fully contains a patch's group-relative
+  // range, or -1 when it is not cleanly inside any single span.
+  const spanOf = patch => {
+    const relativeFrom = patch.from - group.oldStart;
+    const relativeTo = patch.to - group.oldStart;
+    return spans.findIndex(span => (
+      relativeFrom >= span.start && relativeTo <= span.end
+    ));
+  };
+
+  // Count patches per sentence span so the ">= 3 in the span" gate can be
+  // checked before merging any run.
+  const patchesPerSpan = new Map();
+  for (const patch of tokenPatches) {
+    const spanIndex = spanOf(patch);
+    patchesPerSpan.set(spanIndex, (patchesPerSpan.get(spanIndex) || 0) + 1);
+  }
+
+  const result = [];
+  let run = [];
+  let runSpanIndex = -1;
+
+  const flushRun = () => {
+    if (run.length === 0) {
+      return;
+    }
+    if (run.length === 1) {
+      result.push(run[0]);
+    } else {
+      result.push(mergeTokenPatchRun(group, run));
+    }
+    run = [];
+  };
+
+  for (const patch of tokenPatches) {
+    const spanIndex = spanOf(patch);
+    const eligibleSpan = spanIndex !== -1 && patchesPerSpan.get(spanIndex) >= 3;
+
+    if (run.length === 0) {
+      run = eligibleSpan ? [patch] : [];
+      runSpanIndex = eligibleSpan ? spanIndex : -1;
+      if (!eligibleSpan) {
+        result.push(patch);
+      }
+      continue;
+    }
+
+    const prev = run[run.length - 1];
+    const gap = group.oldText.slice(
+      prev.to - group.oldStart,
+      patch.from - group.oldStart
+    );
+    const mergeable = eligibleSpan
+      && spanIndex === runSpanIndex
+      && isCoalesceFillerGap(gap);
+
+    if (mergeable) {
+      run.push(patch);
+      continue;
+    }
+
+    flushRun();
+    run = eligibleSpan ? [patch] : [];
+    runSpanIndex = eligibleSpan ? spanIndex : -1;
+    if (!eligibleSpan) {
+      result.push(patch);
+    }
+  }
+  flushRun();
+
+  return result;
+}
+
+// Merges a run of >= 2 adjacent token patches into one patch spanning
+// `[firstFrom, lastTo)`. `expected` is the original-text slice (the patches'
+// expecteds interleaved with the unchanged gap text); `insert` is the patches'
+// inserts interleaved with the same gap text.
+function mergeTokenPatchRun(group, run) {
+  const first = run[0];
+  const last = run[run.length - 1];
+  let expected = first.expected;
+  let insert = first.insert;
+
+  for (let index = 1; index < run.length; index += 1) {
+    const prev = run[index - 1];
+    const current = run[index];
+    const gap = group.oldText.slice(
+      prev.to - group.oldStart,
+      current.from - group.oldStart
+    );
+    expected += gap + current.expected;
+    insert += gap + current.insert;
+  }
+
+  return {
+    from: first.from,
+    to: last.to,
+    expected,
+    insert
+  };
+}
+
 module.exports = {
   computeTextPatches,
+  computeSingleTextPatch,
   computeLineAnchoredChangeGroups,
   computeTokenAnchoredPatches,
   computeGroupMetrics,
@@ -654,5 +909,9 @@ module.exports = {
   hasLaterRevisedMarkerLine,
   hasAnyAnnotatedMarker,
   countNonEmptyLines,
-  countSentenceTerminators
+  countSentenceTerminators,
+  singleGroupPatch,
+  computeParagraphPatches,
+  computeSentencePatches,
+  coalesceTokenPatches
 };

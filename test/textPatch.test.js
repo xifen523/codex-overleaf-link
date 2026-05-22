@@ -13,7 +13,12 @@ const {
   hasLaterRevisedMarkerLine,
   hasAnyAnnotatedMarker,
   countNonEmptyLines,
-  countSentenceTerminators
+  countSentenceTerminators,
+  computeSingleTextPatch,
+  singleGroupPatch,
+  computeParagraphPatches,
+  computeSentencePatches,
+  coalesceTokenPatches
 } = require('../native-host/src/textPatch');
 
 // Builds the `{group, tokenPatches, metrics}` triple the way the orchestration
@@ -550,6 +555,202 @@ test('classifyChangedGroup falls back when tokenPatches is null and the group is
   // Sanity check: no markers, < 3 lines, < 2 terminators per side.
   assert.ok(metrics.maxNonEmptyLineCount < 3);
   assert.deepEqual(classifyChangedGroup(group, null, metrics), { type: 'fallback' });
+});
+
+// Asserts the core builder contract for a `group` and the patches a builder
+// returned for it: every patch carries absolute file offsets, `expected`
+// equals the original-text slice `[from,to)` of the full text, and applying
+// the patches reproduces `group.newText`. The full original text is
+// reconstructed as a prefix/suffix sandwich around `group.oldText` so the
+// absolute offsets are exercised exactly as they would be in production.
+function assertGroupPatchInvariant(group, patches) {
+  assert.ok(Array.isArray(patches));
+  const prefix = 'X'.repeat(group.oldStart);
+  const suffix = '\nZ trailing unchanged text\n';
+  const fullOld = prefix + group.oldText + suffix;
+  for (const patch of patches) {
+    assert.ok(patch.from >= group.oldStart, `from ${patch.from} below group start`);
+    assert.ok(
+      patch.to <= group.oldStart + group.oldText.length,
+      `to ${patch.to} beyond group end`
+    );
+    assert.equal(
+      fullOld.slice(patch.from, patch.to),
+      patch.expected,
+      'expected must equal the original full-text slice'
+    );
+  }
+  const fullNew = applyPatches(fullOld, patches);
+  assert.equal(
+    fullNew,
+    prefix + group.newText + suffix,
+    'applying the patches must reproduce group.newText in place'
+  );
+}
+
+test('singleGroupPatch returns one patch satisfying the apply invariant', () => {
+  const group = {
+    oldStart: 17,
+    oldText: 'the quick brown fox jumps',
+    newText: 'the quick red fox leaps'
+  };
+
+  const patches = singleGroupPatch(group);
+
+  assert.equal(patches.length, 1);
+  assert.deepEqual(
+    patches[0],
+    computeSingleTextPatch(group.oldText, group.newText, group.oldStart)
+  );
+  assertGroupPatchInvariant(group, patches);
+});
+
+test('computeParagraphPatches returns one patch for a single-paragraph group', () => {
+  const group = {
+    oldStart: 9,
+    oldText: 'A single paragraph with one sentence here.',
+    newText: 'A single paragraph with a rewritten sentence here.'
+  };
+
+  const patches = computeParagraphPatches(group);
+
+  assert.ok(patches !== null);
+  assert.equal(patches.length, 1);
+  assertGroupPatchInvariant(group, patches);
+});
+
+test('computeParagraphPatches emits one patch per changed paragraph with an unchanged separator', () => {
+  const oldFirst = 'First paragraph original line.';
+  const secondPara = 'Second paragraph stays exactly the same.';
+  const separator = '\n\n';
+  const newFirst = 'First paragraph rewritten line entirely.';
+  const group = {
+    oldStart: 40,
+    oldText: oldFirst + separator + secondPara,
+    newText: newFirst + separator + secondPara
+  };
+
+  const patches = computeParagraphPatches(group);
+
+  assert.ok(patches !== null);
+  assert.equal(patches.length, 1, 'only the changed paragraph should produce a patch');
+  // The patch must stay entirely inside the first paragraph: at or after its
+  // absolute start, and not past its end into the separator or second
+  // paragraph. The unchanged second paragraph must not appear in the patch.
+  assert.ok(patches[0].from >= group.oldStart);
+  assert.ok(patches[0].to <= group.oldStart + oldFirst.length);
+  assert.ok(!patches[0].expected.includes(secondPara));
+  assert.ok(!patches[0].insert.includes(secondPara));
+  assertGroupPatchInvariant(group, patches);
+});
+
+test('computeParagraphPatches returns null when separator structure is mismatched', () => {
+  // Old text has one blank-line separator; new text has two. Pairing is
+  // ambiguous, so the builder must defer to the caller.
+  const group = {
+    oldStart: 0,
+    oldText: 'Para one.\n\nPara two.',
+    newText: 'Para one.\n\nPara two.\n\nPara three.'
+  };
+
+  assert.equal(computeParagraphPatches(group), null);
+});
+
+test('computeSentencePatches builds one patch spanning only the rewritten sentence', () => {
+  // Two sentences; only the second (>= 80 chars) is rewritten, with several
+  // token-level changes inside it. The first sentence must stay untouched.
+  const firstSentence =
+    'The unchanged opening sentence introduces the topic and stays exactly as written here. ';
+  const oldSecond =
+    'The proposed algorithm achieves sublinear regret and bounded constraint violation under mild assumptions.';
+  const newSecond =
+    'The proposed method achieves logarithmic regret and tight constraint violation under standard assumptions.';
+  const group = {
+    oldStart: 23,
+    oldText: firstSentence + oldSecond,
+    newText: firstSentence + newSecond
+  };
+  const tokenPatches = computeTokenAnchoredPatches(
+    group.oldText,
+    group.newText,
+    group.oldStart
+  );
+  assert.ok(tokenPatches !== null && tokenPatches.length >= 3);
+
+  const patches = computeSentencePatches(group, tokenPatches);
+
+  assert.ok(patches !== null);
+  assert.equal(patches.length, 1);
+  // The neighbouring (first) sentence must not leak into expected/insert.
+  assert.ok(!patches[0].expected.includes('unchanged opening sentence'));
+  assert.ok(!patches[0].insert.includes('unchanged opening sentence'));
+  // The patch must lie entirely within the second sentence: it starts at or
+  // after the second sentence's absolute boundary and never reaches back into
+  // the unchanged first sentence.
+  assert.ok(patches[0].from >= group.oldStart + firstSentence.length);
+  assertGroupPatchInvariant(group, patches);
+});
+
+test('computeSentencePatches returns null when token patches straddle two sentences', () => {
+  // One token change in each of two sentences: no single span contains all of
+  // them, so the builder cannot confidently pick one sentence.
+  const group = {
+    oldStart: 0,
+    oldText: 'First sentence has alpha word. Second sentence has beta word.',
+    newText: 'First sentence has gamma word. Second sentence has delta word.'
+  };
+  const tokenPatches = computeTokenAnchoredPatches(
+    group.oldText,
+    group.newText,
+    group.oldStart
+  );
+
+  assert.equal(computeSentencePatches(group, tokenPatches), null);
+});
+
+test('coalesceTokenPatches merges close token patches in one sentence with filler gaps', () => {
+  // Three token changes inside one sentence, separated by short
+  // function-word / whitespace gaps (each <= 40 chars). They must merge.
+  const oldText =
+    'We change alpha and the beta and a gamma inside this one long sentence here.';
+  const newText =
+    'We change ALPHA and the BETA and a GAMMA inside this one long sentence here.';
+  const group = { oldStart: 31, oldText, newText };
+  const tokenPatches = computeTokenAnchoredPatches(
+    group.oldText,
+    group.newText,
+    group.oldStart
+  );
+  assert.ok(tokenPatches !== null && tokenPatches.length >= 3);
+
+  const coalesced = coalesceTokenPatches(group, tokenPatches);
+
+  assert.ok(
+    coalesced.length < tokenPatches.length,
+    `expected fewer than ${tokenPatches.length} patches, got ${coalesced.length}`
+  );
+  assertGroupPatchInvariant(group, coalesced);
+});
+
+test('coalesceTokenPatches leaves far-apart token patches unchanged', () => {
+  // Two token changes separated by a long unchanged run (> 40 chars). They
+  // must not merge; the token patches are returned as-is.
+  const oldText =
+    'Replace alpha here, then a very long stretch of completely unchanged words follows before we replace omega there.';
+  const newText =
+    'Replace ALPHA here, then a very long stretch of completely unchanged words follows before we replace OMEGA there.';
+  const group = { oldStart: 4, oldText, newText };
+  const tokenPatches = computeTokenAnchoredPatches(
+    group.oldText,
+    group.newText,
+    group.oldStart
+  );
+  assert.ok(tokenPatches !== null);
+
+  const coalesced = coalesceTokenPatches(group, tokenPatches);
+
+  assert.deepEqual(coalesced, tokenPatches);
+  assertGroupPatchInvariant(group, coalesced);
 });
 
 function applyPatches(text, patches) {
