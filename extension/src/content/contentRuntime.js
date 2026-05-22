@@ -6313,7 +6313,7 @@
     if (method === 'triggerCompile' || method === 'getCompileLog') {
       return COMPILE_PAGE_BRIDGE_TIMEOUT_MS;
     }
-    if (method === 'rejectTrackedChanges') {
+    if (method === 'rejectTrackedChanges' || method === 'acceptTrackedChanges') {
       return 120000;
     }
     return 8000;
@@ -7642,6 +7642,7 @@
         <div class="run-attachments codex-attachment-preview-list" data-run-attachments hidden></div>
         <div class="run-prompt" data-run-task></div>
         <div class="run-turn-meta">
+          <button type="button" data-run-accept hidden title="Accept this run's tracked changes in Overleaf">Accept all</button>
           <button type="button" data-run-undo hidden title="Undo this run's writes to Overleaf">Undo</button>
         </div>
         <details class="run-process" data-run-process>
@@ -7675,6 +7676,7 @@
       }
     }
 
+    configureAcceptButton(root, run);
     configureUndoButton(root, run);
     return root;
   }
@@ -8514,10 +8516,37 @@
     return report;
   }
 
+  // The six stable trackedChangeStatus values and the terminal subset, kept in
+  // sync with sessionState.js. A run is in the tracked-change lifecycle when it
+  // carries one of these values or still holds tracked-change refs.
+  const TERMINAL_TRACKED_CHANGE_STATUS = new Set(['accepted', 'rejected', 'resolved_elsewhere']);
+
+  // A run belongs to the tracked-change lifecycle iff trackedChangeStatus is set
+  // or it still has tracked-change refs. Every other run is a legacy-undo run.
+  function isTrackedChangeLifecycleRun(run) {
+    if (!run) {
+      return false;
+    }
+    if (typeof run.trackedChangeStatus === 'string' && run.trackedChangeStatus) {
+      return true;
+    }
+    return Array.isArray(run.undoTrackedChanges) && run.undoTrackedChanges.length > 0;
+  }
+
+  // The UI-local in-flight lock for tracked-change accept/reject. Never written
+  // to trackedChangeStatus and never persisted — it lives only on the controller.
+  const trackedChangeInFlight = new Map();
+
   function configureUndoButton(root, run) {
     const existing = root.querySelector('[data-run-undo]');
     const button = existing.cloneNode(true);
     existing.replaceWith(button);
+
+    if (isTrackedChangeLifecycleRun(run)) {
+      configureLifecycleUndoButton(button, run);
+      return;
+    }
+
     const undoCount = getRunUndoCount(run);
     if (!undoCount && run.undoStatus !== 'applied') {
       button.hidden = true;
@@ -8535,6 +8564,118 @@
     button.addEventListener('click', event => {
       event.stopPropagation();
       undoRun(run.id);
+    });
+  }
+
+  // Renders the Undo button for a tracked-change-lifecycle run from
+  // trackedChangeStatus. Undo is shown for `pending` and `partial_reject`,
+  // a disabled "Undone" label for terminal `rejected`, and hidden otherwise.
+  function configureLifecycleUndoButton(button, run) {
+    const status = run.trackedChangeStatus || '';
+    if (status === 'rejected') {
+      button.hidden = false;
+      button.disabled = true;
+      button.textContent = tr('undoApplied');
+      button.title = tr('undoAppliedTitle');
+      return;
+    }
+    if (status !== 'pending' && status !== 'partial_reject') {
+      button.hidden = true;
+      return;
+    }
+    const inFlight = trackedChangeInFlight.get(run.id);
+    button.hidden = false;
+    button.disabled = inFlight === 'reject' || inFlight === 'accept';
+    button.textContent = status === 'partial_reject' ? tr('undoPartialRun') : tr('undoRun');
+    button.title = status === 'partial_reject' ? tr('undoPartialRunTitle') : tr('undoRunTitle');
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      undoRun(run.id);
+    });
+  }
+
+  // The blue Accept All control. For legacy-undo runs it stays hidden — Accept
+  // All only exists in the tracked-change lifecycle. Mirrors configureUndoButton's
+  // clone-and-replace pattern, rendering from trackedChangeStatus.
+  function configureAcceptButton(root, run) {
+    const existing = root.querySelector('[data-run-accept]');
+    const button = existing.cloneNode(true);
+    existing.replaceWith(button);
+
+    if (!isTrackedChangeLifecycleRun(run)) {
+      button.hidden = true;
+      return;
+    }
+
+    const status = run.trackedChangeStatus || '';
+    if (status === 'accepted') {
+      button.hidden = false;
+      button.disabled = true;
+      button.textContent = tr('runAcceptTrackedDone');
+      button.title = tr('runAcceptTrackedDoneTitle');
+      return;
+    }
+    if (status === 'resolved_elsewhere') {
+      button.hidden = false;
+      button.disabled = true;
+      button.textContent = tr('runAcceptTrackedResolvedElsewhere');
+      button.title = tr('runAcceptTrackedResolvedElsewhereTitle');
+      return;
+    }
+    if (status !== 'pending' && status !== 'partial_accept') {
+      // rejected / partial_reject — no Accept All for this run.
+      button.hidden = true;
+      return;
+    }
+
+    const inFlight = trackedChangeInFlight.get(run.id);
+    button.hidden = false;
+    button.disabled = inFlight === 'accept' || inFlight === 'reject';
+    if (inFlight === 'accept') {
+      button.textContent = tr('runAcceptTrackedConfirming');
+      button.title = tr('runAcceptTrackedConfirming');
+      return;
+    }
+    const retry = status === 'partial_accept';
+    button.textContent = retry ? tr('runAcceptTrackedRetry') : tr('runAcceptTracked');
+    button.title = retry ? tr('runAcceptTrackedRetryTitle') : tr('runAcceptTrackedTitle');
+    wireAcceptInlineConfirm(button, run.id);
+  }
+
+  // The inline confirm flow: the first click swaps Accept All for an inline
+  // "Confirm accept / Cancel" pair; the accept dispatches only on Confirm.
+  function wireAcceptInlineConfirm(button, runId) {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const meta = button.parentElement;
+      if (!meta) {
+        return;
+      }
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button';
+      confirmBtn.dataset.runAcceptConfirm = '';
+      confirmBtn.textContent = tr('runAcceptTrackedConfirm');
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.dataset.runAcceptCancel = '';
+      cancelBtn.textContent = tr('runAcceptTrackedCancel');
+
+      button.hidden = true;
+      meta.insertBefore(confirmBtn, button);
+      meta.insertBefore(cancelBtn, button);
+
+      cancelBtn.addEventListener('click', cancelEvent => {
+        cancelEvent.stopPropagation();
+        confirmBtn.remove();
+        cancelBtn.remove();
+        button.hidden = false;
+      });
+      confirmBtn.addEventListener('click', confirmEvent => {
+        confirmEvent.stopPropagation();
+        confirmBtn.disabled = true;
+        cancelBtn.disabled = true;
+        acceptRun(runId);
+      });
     });
   }
 
@@ -8670,18 +8811,34 @@
       return;
     }
 
-    setRunUndoStatus(runId, 'running');
+    // Tracked-change-lifecycle runs (those holding tracked-change refs) route
+    // their reject through the closed-ledger / trackedChangeStatus state machine.
+    // The UI-local in-flight lock disables the button; it is never persisted.
+    const lifecycleReject = trackedUndo && isTrackedChangeLifecycleRun(run);
+    if (lifecycleReject) {
+      trackedChangeInFlight.set(runId, 'reject');
+      refreshRunCardControls(runId);
+    } else {
+      setRunUndoStatus(runId, 'running');
+    }
     appendRunRecordEvent(runId, {
       title: trackedUndo ? tr('undoTrackedStarted') : tr('undoNativeStarted'),
       status: 'running',
       detail: { [tr('detailWillUndo')]: trackedUndo ? formatTrackedChangeFiles(run.undoTrackedChanges) : formatTrackedUndoFiles(run) }
     });
 
-    const result = await callPageBridge('rejectTrackedChanges', {
-      trackedChanges: run.undoTrackedChanges || [],
-      expectedFiles: run.undoExpectedFiles || [],
-      postFiles: buildTrackedUndoPostFiles(run)
-    });
+    let result;
+    try {
+      result = await callPageBridge('rejectTrackedChanges', {
+        trackedChanges: run.undoTrackedChanges || [],
+        expectedFiles: run.undoExpectedFiles || [],
+        postFiles: buildTrackedUndoPostFiles(run)
+      });
+    } finally {
+      if (lifecycleReject) {
+        trackedChangeInFlight.delete(runId);
+      }
+    }
     appendRunRecordEvent(runId, {
       title: trackedUndo
         ? tr('undoTrackedResult', { applied: result.applied?.length || 0, skipped: result.skipped?.length || 0 })
@@ -8699,7 +8856,101 @@
         }))
       }
     });
+    if (lifecycleReject) {
+      applyTrackedChangeLedger(runId, 'reject', result);
+      return;
+    }
     setRunUndoStatus(runId, result.skipped?.length ? 'partial' : 'applied');
+  }
+
+  async function acceptRun(runId) {
+    const run = findRunRecord(runId);
+    if (!run || !isTrackedChangeLifecycleRun(run)) {
+      return;
+    }
+    const status = run.trackedChangeStatus || '';
+    if (status !== 'pending' && status !== 'partial_accept') {
+      return;
+    }
+    if (!Array.isArray(run.undoTrackedChanges) || !run.undoTrackedChanges.length) {
+      return;
+    }
+    if (trackedChangeInFlight.get(runId)) {
+      return;
+    }
+
+    // UI-local in-flight lock: disables the acting button with progress. Never
+    // written to trackedChangeStatus, never persisted.
+    trackedChangeInFlight.set(runId, 'accept');
+    refreshRunCardControls(runId);
+    appendRunRecordEvent(runId, {
+      title: tr('runAcceptTrackedStarted'),
+      status: 'running',
+      detail: { [tr('detailAccepted')]: formatTrackedChangeFiles(run.undoTrackedChanges) }
+    });
+
+    let result;
+    try {
+      result = await callPageBridge('acceptTrackedChanges', {
+        trackedChanges: run.undoTrackedChanges || [],
+        expectedFiles: run.undoExpectedFiles || []
+      });
+    } finally {
+      trackedChangeInFlight.delete(runId);
+    }
+    appendRunRecordEvent(runId, {
+      title: tr('runAcceptTrackedResult', { applied: result.applied?.length || 0, skipped: result.skipped?.length || 0 }),
+      status: result.skipped?.length ? 'failed' : 'completed',
+      detail: {
+        [tr('detailAccepted')]: (result.applied || []).map(item => ({
+          [tr('detailFile')]: item.trackedChange?.path || tr('unknownFile'),
+          [tr('detailRecord')]: item.trackedChange?.label || item.trackedChange?.id || item.trackedChange?.key
+        })),
+        [tr('detailSkipped')]: (result.skipped || []).map(item => ({
+          [tr('detailFile')]: item.trackedChange?.path || tr('unknownFile'),
+          [tr('detailRecord')]: item.trackedChange?.label || item.trackedChange?.id || item.trackedChange?.key || '',
+          [tr('detailReason')]: formatBridgeResultReason(item.result, item.trackedChange?.path)
+        }))
+      }
+    });
+    applyTrackedChangeLedger(runId, 'accept', result);
+  }
+
+  // Applies the closed-ledger result of an accept/reject to a run. Each skipped
+  // entry is classified: code `tracked_change_not_found` is **gone** (settled,
+  // not retriable); every other code is **blocked** (retriable). The run's
+  // tracked-change ref set is replaced with the blocked refs only; `applied` and
+  // `gone` refs leave the ledger. Blocked refs remaining -> non-terminal
+  // partial_accept / partial_reject. None remaining + something applied ->
+  // terminal accepted / rejected. None remaining + nothing applied -> terminal
+  // resolved_elsewhere. Terminal transitions empty the heavy payload.
+  function applyTrackedChangeLedger(runId, kind, result) {
+    const run = findRunRecord(runId);
+    if (!run) {
+      return;
+    }
+    const applied = Array.isArray(result?.applied) ? result.applied : [];
+    const skipped = Array.isArray(result?.skipped) ? result.skipped : [];
+    const blockedRefs = skipped
+      .filter(entry => entry?.result?.code !== 'tracked_change_not_found')
+      .map(entry => entry?.trackedChange)
+      .filter(Boolean);
+
+    if (blockedRefs.length) {
+      run.undoTrackedChanges = normalizeApplyTrackedChanges(blockedRefs);
+      run.trackedChangeStatus = kind === 'accept' ? 'partial_accept' : 'partial_reject';
+    } else if (applied.length) {
+      run.trackedChangeStatus = kind === 'accept' ? 'accepted' : 'rejected';
+    } else {
+      run.trackedChangeStatus = 'resolved_elsewhere';
+    }
+
+    if (TERMINAL_TRACKED_CHANGE_STATUS.has(run.trackedChangeStatus)) {
+      run.undoTrackedChanges = [];
+      run.undoExpectedFiles = [];
+    }
+    saveStateSoon();
+    refreshRunCardControls(runId);
   }
 
   function getRunUndoCount(run) {
@@ -8815,6 +9066,12 @@
       record.undoExpectedFiles = selectExpectedFilesForTrackedUndo(project, combinedAppliedOperations, combinedTrackedChanges);
       record.undoStatus = '';
       record.partialWriteback = skippedEntries.length > 0;
+      // Recording tracked-change refs enters the run into the tracked-change
+      // lifecycle as `pending`. A run that records no refs stays a legacy-undo
+      // run (native editor undo / no identifiable tracked changes).
+      if (combinedTrackedChanges.length) {
+        record.trackedChangeStatus = 'pending';
+      }
       refreshRunCardControls(record.id);
       if (combinedTrackedChanges.length) {
         appendRunEvent({
@@ -9001,6 +9258,7 @@
     if (!run || !root) {
       return;
     }
+    configureAcceptButton(root, run);
     configureUndoButton(root, run);
   }
 
@@ -9500,6 +9758,14 @@
     }
     if (code === 'tracked_change_reject_not_confirmed') {
       return 'Codex clicked Reject, but Overleaf still shows this tracked change. Reject it manually in the Overleaf review panel.';
+    }
+    if (code === 'tracked_change_accept_control_not_found') {
+      return path
+        ? `Some tracked changes in ${path} remain, but the matching Accept button was not found. Accept them manually in Overleaf.`
+        : 'Some tracked changes remain, but the matching Accept button was not found. Accept them manually in Overleaf.';
+    }
+    if (code === 'tracked_change_accept_not_confirmed') {
+      return 'Codex clicked Accept, but Overleaf still shows this tracked change. Accept it manually in the Overleaf review panel.';
     }
     if (code === 'tracked_change_editor_undo_open_failed') {
       return path ? `Could not open ${path} for Overleaf native undo.` : 'Could not open the file for Overleaf native undo.';

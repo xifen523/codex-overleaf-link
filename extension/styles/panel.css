@@ -1115,8 +1115,51 @@
   font-size: 11px;
 }
 
-#codex-overleaf-panel .run-turn-meta [data-run-undo] {
+#codex-overleaf-panel .run-turn-meta [data-run-accept] {
   margin-left: auto;
+}
+
+/* When Accept All is hidden, the Undo button takes the right-aligned slot. */
+#codex-overleaf-panel .run-turn-meta [data-run-accept][hidden] + [data-run-undo] {
+  margin-left: auto;
+}
+
+#codex-overleaf-panel .run-turn-meta [data-run-accept],
+#codex-overleaf-panel .run-turn-meta [data-run-accept-confirm],
+#codex-overleaf-panel .run-turn-meta [data-run-accept-cancel] {
+  min-height: 30px;
+  border-radius: 4px;
+  padding: 3px 11px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+#codex-overleaf-panel .run-turn-meta [data-run-accept],
+#codex-overleaf-panel .run-turn-meta [data-run-accept-confirm] {
+  border: 1px solid #4c8fde;
+  background: #1f5fa8;
+  color: #ffffff;
+  box-shadow: 0 0 0 1px rgba(76, 143, 222, 0.34), 0 4px 12px rgba(0, 0, 0, 0.24);
+}
+
+#codex-overleaf-panel .run-turn-meta [data-run-accept]:hover,
+#codex-overleaf-panel .run-turn-meta [data-run-accept-confirm]:hover {
+  background: #2b73c4;
+}
+
+#codex-overleaf-panel .run-turn-meta [data-run-accept]:disabled,
+#codex-overleaf-panel .run-turn-meta [data-run-accept-confirm]:disabled {
+  opacity: 0.65;
+}
+
+#codex-overleaf-panel .run-turn-meta [data-run-accept-cancel] {
+  border: 1px solid #3a3a3a;
+  background: #2a2a2a;
+  color: #d4d4d4;
+}
+
+#codex-overleaf-panel .run-turn-meta [data-run-accept-cancel]:hover {
+  background: #383838;
 }
 
 #codex-overleaf-panel [data-run-undo] {

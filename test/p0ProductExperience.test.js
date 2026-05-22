@@ -2833,6 +2833,160 @@ test('reviewing write undo passes post-run content so Overleaf native undo can r
   assert.match(writebackRouter, /method:\s*'overleaf-editor-undo'/);
 });
 
+test('run card adds a blue Accept All button before the Undo button', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const css = fs.readFileSync(
+    path.join(__dirname, '../extension/styles/panel.css'),
+    'utf8'
+  );
+  const renderRunCardBody = contentScript.match(/function renderRunCard\(run\) \{[\s\S]*?\n  function getRunStatusText/)?.[0] || '';
+
+  // The Accept All button markup sits in .run-turn-meta before [data-run-undo].
+  const metaMarkup = renderRunCardBody.match(/<div class="run-turn-meta">[\s\S]*?<\/div>/)?.[0] || '';
+  assert.match(metaMarkup, /data-run-accept/);
+  assert.match(metaMarkup, /data-run-undo/);
+  assert.ok(
+    metaMarkup.indexOf('data-run-accept') < metaMarkup.indexOf('data-run-undo'),
+    'Accept All button must come before the Undo button'
+  );
+  assert.match(renderRunCardBody, /configureAcceptButton\(root, run\)/);
+  // Distinct from the diff panel's diffAcceptAll key.
+  assert.match(css, /#codex-overleaf-panel \.run-turn-meta \[data-run-accept\]/);
+});
+
+test('Accept All i18n keys are distinct from the diff panel keys in both locales', () => {
+  const i18n = fs.readFileSync(
+    path.join(__dirname, '../extension/src/shared/i18n.js'),
+    'utf8'
+  );
+
+  assert.match(i18n, /runAcceptTracked:\s*'Accept all/);
+  assert.match(i18n, /runAcceptTrackedConfirm:/);
+  assert.match(i18n, /runAcceptTrackedCancel:/);
+  assert.match(i18n, /runAcceptTrackedDone:\s*'Accepted'/);
+  assert.match(i18n, /runAcceptTrackedResolvedElsewhere:\s*'Resolved in Overleaf'/);
+  assert.match(i18n, /runAcceptTrackedResolvedElsewhere:\s*'已在 Overleaf 处理'/);
+  // Never reuse diffAcceptAll for the run-card control.
+  const acceptBody = i18n.match(/runAcceptTracked:[\s\S]*?runAcceptTrackedResolvedElsewhere:[^\n]*/g) || [];
+  assert.equal(acceptBody.length >= 1, true);
+});
+
+test('configureAcceptButton renders Accept All from trackedChangeStatus for tracked-change-lifecycle runs', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const acceptBody = contentScript.match(/function configureAcceptButton\(root, run\) \{[\s\S]*?\n  (?:async )?function /)?.[0] || '';
+
+  assert.match(contentScript, /function configureAcceptButton\(root, run\)/);
+  // Mirrors configureUndoButton's clone-and-replace pattern.
+  assert.match(acceptBody, /cloneNode\(true\)/);
+  assert.match(acceptBody, /replaceWith\(button\)/);
+  // Renders by trackedChangeStatus.
+  assert.match(acceptBody, /trackedChangeStatus/);
+  assert.match(acceptBody, /isTrackedChangeLifecycleRun\(run\)/);
+  // pending and partial_accept show the actionable button; partial label "retry".
+  assert.match(acceptBody, /'pending'/);
+  assert.match(acceptBody, /'partial_accept'/);
+  // accepted -> disabled "Accepted" label.
+  assert.match(acceptBody, /runAcceptTrackedDone/);
+  // resolved_elsewhere -> distinct label, not "Accepted"/"Undone".
+  assert.match(acceptBody, /runAcceptTrackedResolvedElsewhere/);
+  // The accept button is hidden for runs without an accept action.
+  assert.match(acceptBody, /button\.hidden = true/);
+});
+
+test('run worlds split: legacy-undo runs never show Accept All and keep the undoStatus path', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+
+  // A run is in the tracked-change lifecycle iff trackedChangeStatus is set OR
+  // undoTrackedChanges.length > 0.
+  assert.match(contentScript, /function isTrackedChangeLifecycleRun\(run\)/);
+  const worldBody = contentScript.match(/function isTrackedChangeLifecycleRun\(run\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  assert.match(worldBody, /trackedChangeStatus/);
+  assert.match(worldBody, /undoTrackedChanges/);
+
+  // configureUndoButton branches on the run world: lifecycle runs render from
+  // trackedChangeStatus, legacy-undo runs keep the existing undoStatus path.
+  const undoBody = contentScript.match(/function configureUndoButton\(root, run\) \{[\s\S]*?\n  function refreshRunCard/)?.[0] || '';
+  assert.match(undoBody, /isTrackedChangeLifecycleRun\(run\)/);
+  // Legacy path still uses undoStatus.
+  assert.match(undoBody, /run\.undoStatus/);
+});
+
+test('acceptRun uses an inline confirm flow before dispatching acceptTrackedChanges', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const acceptRunBody = contentScript.match(/async function acceptRun\(runId\) \{[\s\S]*?\n  (?:async )?function /)?.[0] || '';
+
+  assert.match(contentScript, /async function acceptRun\(runId\)/);
+  // Inline confirm: the accept only fires through the page bridge.
+  assert.match(acceptRunBody, /callPageBridge\('acceptTrackedChanges'/);
+  assert.match(acceptRunBody, /trackedChanges:\s*run\.undoTrackedChanges/);
+  // The accept button shows an inline Confirm / Cancel before firing.
+  const inlineConfirm = contentScript.match(/function wireAcceptInlineConfirm\(button, runId\) \{[\s\S]*?\n  (?:async )?function /)?.[0] || '';
+  assert.match(inlineConfirm, /runAcceptTrackedConfirm/);
+  assert.match(inlineConfirm, /runAcceptTrackedCancel/);
+  // The accept dispatches only on the Confirm click.
+  assert.match(inlineConfirm, /confirmBtn\.addEventListener\('click'[\s\S]*?acceptRun\(runId\)/);
+});
+
+test('acceptRun applies the closed-ledger result with gone vs blocked classification', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+
+  // Closed-ledger classifier: tracked_change_not_found -> gone; everything else -> blocked.
+  assert.match(contentScript, /function applyTrackedChangeLedger\(/);
+  const ledgerBody = contentScript.match(/function applyTrackedChangeLedger\([\s\S]*?\n  \}/)?.[0] || '';
+  assert.match(ledgerBody, /tracked_change_not_found/);
+  // The run's ref set is replaced with the blocked refs only.
+  assert.match(ledgerBody, /undoTrackedChanges/);
+  // blocked refs remain -> partial_*; none + applied -> terminal; none + nothing -> resolved_elsewhere.
+  assert.match(ledgerBody, /partial_accept/);
+  assert.match(ledgerBody, /partial_reject/);
+  assert.match(ledgerBody, /'accepted'/);
+  assert.match(ledgerBody, /'rejected'/);
+  assert.match(ledgerBody, /resolved_elsewhere/);
+  // Terminal transitions empty undoTrackedChanges and undoExpectedFiles.
+  assert.match(ledgerBody, /undoExpectedFiles/);
+});
+
+test('Undo for tracked-change-lifecycle runs dispatches from trackedChangeStatus', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const undoTrackedBody = contentScript.match(/async function undoRunTrackedChanges\(runId, run\) \{[\s\S]*?\n  function getRunUndoCount/)?.[0] || '';
+
+  // The tracked reject path applies the closed-ledger with the reject kind.
+  assert.match(undoTrackedBody, /applyTrackedChangeLedger\(/);
+  // Lifecycle runs route the reject result through partial_reject / rejected.
+  assert.match(contentScript, /TERMINAL_TRACKED_CHANGE_STATUS|'rejected'/);
+});
+
+test('recordUndoFromApply sets trackedChangeStatus pending when it records tracked-change refs', () => {
+  const contentScript = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    'utf8'
+  );
+  const recordUndoBody = contentScript.match(/function recordUndoFromApply\(project, applyResult\) \{[\s\S]*?\n  function normalizeApplyTrackedChanges/)?.[0] || '';
+
+  // When refs are recorded, the run enters the tracked-change lifecycle as pending.
+  assert.match(recordUndoBody, /trackedChangeStatus\s*=\s*'pending'/);
+  // A run that records no tracked-change refs stays a legacy-undo run.
+  assert.match(recordUndoBody, /combinedTrackedChanges\.length/);
+});
+
 test('change preview is grouped by file with edit evidence instead of raw operation counts', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
