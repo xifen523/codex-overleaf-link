@@ -38,6 +38,14 @@
     skipped: true,
     pending: true
   };
+  var VALID_TRACKED_CHANGE_STATUSES = {
+    pending: true,
+    accepted: true,
+    partial_accept: true,
+    rejected: true,
+    partial_reject: true,
+    resolved_elsewhere: true
+  };
   var SECRET_REDACTION_PATTERNS = [
     /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
     /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/gi,
@@ -542,7 +550,7 @@
   }
 
   function compactRunForStorage(run) {
-    return {
+    var compact = {
       id: run.id,
       task: normalizeDisplayTextForStorage(run.task || 'untitled task', SESSION_STORAGE_LIMITS.taskChars),
       mode: typeof run.mode === 'string' ? redactSecretLikeText(run.mode) : '',
@@ -562,6 +570,10 @@
       undoExpectedFiles: [],
       undoStatus: normalizeDisplayTextForStorage(run.undoStatus, SESSION_STORAGE_LIMITS.statusTextChars)
     };
+    if (VALID_TRACKED_CHANGE_STATUSES[run.trackedChangeStatus] === true) {
+      compact.trackedChangeStatus = run.trackedChangeStatus;
+    }
+    return compact;
   }
 
   function compactRunEventsForStorage(events) {

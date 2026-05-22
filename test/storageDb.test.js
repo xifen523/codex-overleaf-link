@@ -202,6 +202,36 @@ test('buildSessionRecord preserves reloadable session display text while strippi
   assert.equal(record.runs[0].undoOperations.length, 0);
 });
 
+test('buildSessionRecord keeps a valid trackedChangeStatus while still dropping the heavy tracked-change payload', () => {
+  const rawProjectText = 'STORAGE_DB_TRACKED_CHANGE_TEXT_SHOULD_NOT_PERSIST';
+  const record = buildSessionRecord({
+    id: 'ses_tracked_change',
+    projectId: 'proj_tracked_change',
+    runs: [{
+      id: 'run_tc_accepted',
+      task: 'accepted tracked change run',
+      status: 'completed',
+      trackedChangeStatus: 'accepted',
+      undoTrackedChanges: [{ key: 'tc-1', id: 'change-1', path: 'main.tex', label: 'Change 1' }],
+      undoExpectedFiles: [{ path: 'main.tex', content: rawProjectText }]
+    }, {
+      id: 'run_tc_invalid',
+      task: 'invalid tracked change run',
+      status: 'completed',
+      trackedChangeStatus: 'accepting'
+    }]
+  });
+
+  const accepted = record.runs.find(run => run.id === 'run_tc_accepted');
+  const invalid = record.runs.find(run => run.id === 'run_tc_invalid');
+
+  assert.equal(accepted.trackedChangeStatus, 'accepted');
+  assert.deepEqual(accepted.undoTrackedChanges, []);
+  assert.deepEqual(accepted.undoExpectedFiles, []);
+  assert.equal(JSON.stringify(record).includes(rawProjectText), false);
+  assert.equal('trackedChangeStatus' in invalid, false);
+});
+
 test('auto session titles are not persisted as raw prompt snippets while manual titles remain', () => {
   const rawPrompt = 'AUTO_TITLE_PROMPT_SHOULD_NOT_PERSIST rewrite the whole introduction';
   const compact = prepareStateForStorage({

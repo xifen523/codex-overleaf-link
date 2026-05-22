@@ -569,6 +569,16 @@
       status = undefined;
     }
 
+    // Step 1 — reload reconciliation. A non-terminal status with no refs is the
+    // post-reload state of an un-acted tracked-change run: the heavy refs are
+    // never persisted, so without them there is nothing to act on. Drop it so
+    // the run returns to the legacy-undo world. A terminal status with no refs
+    // is kept — step 3 already empties terminal payloads and the label stays
+    // meaningful.
+    if (!hasRefs && status !== undefined && !TERMINAL_TRACKED_CHANGE_STATUS.has(status)) {
+      status = undefined;
+    }
+
     // Step 2 — migration of pre-feature runs (no status after step 1).
     if (status === undefined && hasRefs) {
       status = run.undoStatus === 'applied' ? 'rejected' : 'pending';

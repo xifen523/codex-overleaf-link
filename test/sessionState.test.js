@@ -1356,6 +1356,80 @@ test('normalizeRun trackedChangeStatus normalization is idempotent', () => {
   }
 });
 
+const NON_TERMINAL_TRACKED_CHANGE_STATUSES = ['pending', 'partial_accept', 'partial_reject'];
+
+for (const status of NON_TERMINAL_TRACKED_CHANGE_STATUSES) {
+  test(`normalizeRun drops a non-terminal trackedChangeStatus "${status}" when the reloaded run has no tracked-change refs`, () => {
+    const run = normalizeRun({
+      id: 'run_reloaded',
+      task: 'reloaded tracked change run',
+      status: 'completed',
+      trackedChangeStatus: status,
+      undoTrackedChanges: [],
+      undoExpectedFiles: []
+    });
+
+    assert.equal('trackedChangeStatus' in run, false, `non-terminal "${status}" with no refs`);
+  });
+}
+
+for (const status of NON_TERMINAL_TRACKED_CHANGE_STATUSES) {
+  test(`normalizeRun keeps a non-terminal trackedChangeStatus "${status}" when tracked-change refs are present`, () => {
+    const run = normalizeRun({
+      id: 'run_live',
+      task: 'live tracked change run',
+      status: 'completed',
+      trackedChangeStatus: status,
+      undoTrackedChanges: trackedChangeRefs(),
+      undoExpectedFiles: [{ path: 'main.tex', content: 'after' }]
+    });
+
+    assert.equal(run.trackedChangeStatus, status, `non-terminal "${status}" with refs`);
+  });
+}
+
+for (const terminal of TERMINAL_TRACKED_CHANGE_STATUSES) {
+  test(`normalizeRun keeps a terminal trackedChangeStatus "${terminal}" when the reloaded run has no tracked-change refs`, () => {
+    const run = normalizeRun({
+      id: 'run_reloaded_terminal',
+      task: 'reloaded terminal run',
+      status: 'completed',
+      trackedChangeStatus: terminal,
+      undoTrackedChanges: [],
+      undoExpectedFiles: []
+    });
+
+    assert.equal(run.trackedChangeStatus, terminal, `terminal "${terminal}" with no refs`);
+  });
+}
+
+test('normalizeRun reload reconciliation is idempotent', () => {
+  const cases = [
+    ...NON_TERMINAL_TRACKED_CHANGE_STATUSES.map(status => ({
+      id: 'run_recon_idem',
+      task: 'reconciliation idempotence run',
+      status: 'completed',
+      trackedChangeStatus: status,
+      undoTrackedChanges: [],
+      undoExpectedFiles: []
+    })),
+    ...TERMINAL_TRACKED_CHANGE_STATUSES.map(terminal => ({
+      id: 'run_recon_idem',
+      task: 'reconciliation idempotence run',
+      status: 'completed',
+      trackedChangeStatus: terminal,
+      undoTrackedChanges: [],
+      undoExpectedFiles: []
+    }))
+  ];
+
+  for (const input of cases) {
+    const once = normalizeRun(input);
+    const twice = normalizeRun(once);
+    assert.deepEqual(twice, once);
+  }
+});
+
 test('trackedChangeStatus survives storage compaction as a lightweight field', () => {
   const state = normalizePanelState({
     activeSessionId: 'session_tc',
