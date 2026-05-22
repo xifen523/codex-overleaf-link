@@ -1278,6 +1278,50 @@ test('page bridge records and rejects Overleaf tracked changes for Reviewing wri
   assert.equal(bridge.getRejectClickCount(), 1);
 });
 
+test('page bridge routes acceptTrackedChanges to the writeback router for Reviewing writes', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+  assert.equal(write.trackedChanges.length, 1);
+  assert.equal(write.trackedChanges[0].path, 'main.tex');
+
+  const accept = await bridge.call('acceptTrackedChanges', {
+    trackedChanges: write.trackedChanges
+  });
+
+  assert.equal(accept.ok, true, accept.error || JSON.stringify(accept));
+  assert.equal(accept.applied.length, 1);
+  assert.equal(accept.skipped.length, 0);
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+  assert.equal(bridge.getTrackedChangeCount(), 0);
+  assert.equal(bridge.getAcceptClickCount(), 1);
+  assert.equal(bridge.getRejectClickCount(), 0);
+});
+
 test('page bridge rejects unsafe tracked-change paths before clicking reject controls', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -2155,10 +2199,12 @@ function createPageBridgeHarness({
   let reviewingActive = reviewingOk;
   let reviewingClickCount = 0;
   let rejectClickCount = 0;
+  let acceptClickCount = 0;
   let editorUndoClickCount = 0;
   const bridgeCapability = 'test-page-bridge-capability';
   let capabilityInitialized = false;
   const rejectedChangeIds = [];
+  const acceptedChangeIds = [];
   let modeMenuOpen = false;
   let modeOptionClickCount = 0;
   const documentEventListeners = [];
@@ -2348,11 +2394,17 @@ function createPageBridgeHarness({
     getRejectClickCount() {
       return rejectClickCount;
     },
+    getAcceptClickCount() {
+      return acceptClickCount;
+    },
     getEditorUndoClickCount() {
       return editorUndoClickCount;
     },
     getRejectedChangeIds() {
       return rejectedChangeIds.slice();
+    },
+    getAcceptedChangeIds() {
+      return acceptedChangeIds.slice();
     },
     getTrackedChangeCount() {
       return trackedChanges.length;
@@ -2692,12 +2744,52 @@ function createPageBridgeHarness({
       },
       querySelectorAll(selector) {
         if (/button|role|aria-label|title|\*/i.test(selector)) {
-          return [makeRejectTrackedChangeButton(change)];
+          return [
+            makeAcceptTrackedChangeButton(change),
+            makeRejectTrackedChangeButton(change)
+          ];
         }
         return [];
       },
       closest() {
         return null;
+      }
+    };
+  }
+
+  function makeAcceptTrackedChangeButton(change) {
+    return {
+      tagName: 'BUTTON',
+      textContent: 'Accept',
+      innerText: 'Accept',
+      id: `accept-${change.id}`,
+      className: 'review-accept-change',
+      disabled: false,
+      parentElement: null,
+      getAttribute(attribute) {
+        if (attribute === 'aria-label' || attribute === 'title') {
+          return `Accept change ${change.id}`;
+        }
+        if (attribute === 'role') {
+          return 'button';
+        }
+        if (attribute === 'aria-disabled') {
+          return 'false';
+        }
+        return '';
+      },
+      click() {
+        acceptClickCount += 1;
+        acceptedChangeIds.push(change.id);
+        fileMap.set(change.path, change.after);
+        const index = trackedChanges.indexOf(change);
+        if (index >= 0) {
+          trackedChanges.splice(index, 1);
+        }
+      },
+      dispatchEvent() {
+        this.click();
+        return true;
       }
     };
   }

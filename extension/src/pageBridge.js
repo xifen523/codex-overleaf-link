@@ -186,6 +186,9 @@
     if (method === 'rejectTrackedChanges') {
       return rejectTrackedChanges(params);
     }
+    if (method === 'acceptTrackedChanges') {
+      return acceptTrackedChanges(params);
+    }
     if (method === 'triggerCompile') {
       return compileBridge.triggerCompile(params);
     }
@@ -1364,6 +1367,10 @@
 
   async function rejectTrackedChanges(params = {}) {
     return writebackRouter.rejectTrackedChanges(params);
+  }
+
+  async function acceptTrackedChanges(params = {}) {
+    return writebackRouter.acceptTrackedChanges(params);
   }
 
   function normalizeTextPatches(patches, length) {
