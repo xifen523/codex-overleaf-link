@@ -1,7 +1,10 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { computeTextPatches } = require('../native-host/src/textPatch');
+const {
+  computeTextPatches,
+  computeLineAnchoredChangeGroups
+} = require('../native-host/src/textPatch');
 
 test('computes a small insertion patch instead of a full-file replacement', () => {
   const patches = computeTextPatches('hello world\n', 'hello brave world\n');
@@ -104,6 +107,56 @@ test('splits a rewritten wrapped paragraph into token-local patches', () => {
     patches.every(patch => Math.max(patch.to - patch.from, patch.insert.length) < 160),
     JSON.stringify(patches, null, 2)
   );
+});
+
+test('computeLineAnchoredChangeGroups returns no groups for identical content', () => {
+  assert.deepEqual(computeLineAnchoredChangeGroups('same\n', 'same\n'), []);
+});
+
+test('computeLineAnchoredChangeGroups returns one group for a single one-line change', () => {
+  const groups = computeLineAnchoredChangeGroups('old title\nbody\n', 'new title\nbody\n');
+
+  assert.deepEqual(groups, [
+    {
+      oldStart: 0,
+      oldText: 'old title\n',
+      newText: 'new title\n'
+    }
+  ]);
+});
+
+test('computeLineAnchoredChangeGroups returns separate groups for far-apart edits', () => {
+  const oldLines = Array.from({ length: 20 }, (_, index) => `line ${index}\n`);
+  const newLines = oldLines.slice();
+  newLines[0] = 'line 0 changed\n';
+  newLines[19] = 'line 19 changed\n';
+  const oldText = oldLines.join('');
+  const newText = newLines.join('');
+
+  const groups = computeLineAnchoredChangeGroups(oldText, newText);
+
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups[0], {
+    oldStart: 0,
+    oldText: 'line 0\n',
+    newText: 'line 0 changed\n'
+  });
+  const lastOldStart = oldText.length - 'line 19\n'.length;
+  assert.deepEqual(groups[1], {
+    oldStart: lastOldStart,
+    oldText: 'line 19\n',
+    newText: 'line 19 changed\n'
+  });
+});
+
+test('computeLineAnchoredChangeGroups returns no groups when line-level limits are exceeded', () => {
+  const oldLines = Array.from({ length: 6000 }, (_, index) => `line ${index}\n`);
+  const newLines = oldLines.slice();
+  newLines[10] = 'line 10 changed\n';
+  const oldText = oldLines.join('');
+  const newText = newLines.join('');
+
+  assert.deepEqual(computeLineAnchoredChangeGroups(oldText, newText), []);
 });
 
 function applyPatches(text, patches) {

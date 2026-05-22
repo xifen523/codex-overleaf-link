@@ -41,7 +41,7 @@ function computeSingleTextPatch(oldValue, newValue, offset = 0) {
   };
 }
 
-function computeLineAnchoredPatches(oldValue, newValue) {
+function computeLineAnchoredChangeGroups(oldValue, newValue) {
   const oldParts = splitTextParts(oldValue);
   const newParts = splitTextParts(newValue);
   const MAX_PARTS = 5000;
@@ -58,7 +58,7 @@ function computeLineAnchoredPatches(oldValue, newValue) {
   }
 
   const edits = computePartEdits(oldParts, newParts);
-  const patches = [];
+  const groups = [];
   let oldOffset = 0;
   let newOffset = 0;
   let group = null;
@@ -91,12 +91,22 @@ function computeLineAnchoredPatches(oldValue, newValue) {
   }
   flushGroup();
 
-  return patches;
+  return groups;
 
   function flushGroup() {
     if (!group) {
       return;
     }
+    groups.push(group);
+    group = null;
+  }
+}
+
+function computeLineAnchoredPatches(oldValue, newValue) {
+  const groups = computeLineAnchoredChangeGroups(oldValue, newValue);
+  const patches = [];
+
+  for (const group of groups) {
     if (group.oldText !== group.newText) {
       const tokenPatches = computeTokenAnchoredPatches(group.oldText, group.newText, group.oldStart);
       if (tokenPatches) {
@@ -105,8 +115,9 @@ function computeLineAnchoredPatches(oldValue, newValue) {
         patches.push(computeSingleTextPatch(group.oldText, group.newText, group.oldStart));
       }
     }
-    group = null;
   }
+
+  return patches;
 }
 
 function computeTokenAnchoredPatches(oldValue, newValue, offset = 0) {
@@ -283,5 +294,6 @@ function computePartEdits(oldParts, newParts) {
 }
 
 module.exports = {
-  computeTextPatches
+  computeTextPatches,
+  computeLineAnchoredChangeGroups
 };
