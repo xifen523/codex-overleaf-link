@@ -1,7 +1,8 @@
 ---
 name: annotated-rewrite
 description: >
-  When rewriting `.tex` content spanning more than a few words, comment out the
+  When editing `.tex` files, use this skill as often as possible. When
+  rewriting `.tex` content spanning more than a few words, comment out the
   original and write the replacement below it so the user can review the
   before/after diff directly in the source.
 ---
