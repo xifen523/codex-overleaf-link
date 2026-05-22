@@ -41,12 +41,9 @@
   const VALID_TRACKED_CHANGE_STATUS = new Set([
     'pending',
     'accepted',
-    'partial_accept',
-    'rejected',
-    'partial_reject',
-    'resolved_elsewhere'
+    'rejected'
   ]);
-  const TERMINAL_TRACKED_CHANGE_STATUS = new Set(['accepted', 'rejected', 'resolved_elsewhere']);
+  const TERMINAL_TRACKED_CHANGE_STATUS = new Set(['accepted', 'rejected']);
   const LEGACY_DEFAULT_SESSION_TITLE = 'New task';
   const SESSION_AUTO_TITLE_CHARS = 24;
   const MAX_RUN_EVENTS = 300;
@@ -559,7 +556,9 @@
     const hasRawStatus = rawStatus !== undefined && rawStatus !== null && rawStatus !== '';
 
     // Step 1 — value recovery. Keep a stable value; recover any other present
-    // value to `pending` (with refs) or drop it. An absent value falls through.
+    // value (corruption, an old persisted `partial_accept` / `partial_reject` /
+    // `resolved_elsewhere`, a stray in-flight value) to `pending` (with refs)
+    // or drop it. An absent value falls through.
     let status;
     if (VALID_TRACKED_CHANGE_STATUS.has(rawStatus)) {
       status = rawStatus;
@@ -569,8 +568,8 @@
       status = undefined;
     }
 
-    // Step 1 — reload reconciliation. A non-terminal status with no refs is the
-    // post-reload state of an un-acted tracked-change run: the heavy refs are
+    // Step 1 — reload reconciliation. A non-terminal status (`pending`) with no
+    // refs is the post-reload state of an un-acted tracked-change run: the heavy refs are
     // never persisted, so without them there is nothing to act on. Drop it so
     // the run returns to the legacy-undo world. A terminal status with no refs
     // is kept — step 3 already empties terminal payloads and the label stays

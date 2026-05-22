@@ -351,8 +351,8 @@ function buildRunCardRoot(runId) {
 
 // Extracts the run-card control functions from contentRuntime.js and wires them
 // against fake runs, a fake panel DOM, and stubbed dependencies. configureUndo
-// is stubbed: applyTrackedChangeLedger -> refreshRunCardControls only needs the
-// Accept control rebuilt, and the undo machinery is out of scope here.
+// is stubbed: applyTerminalTrackedChangeStatus -> refreshRunCardControls only
+// needs the Accept control rebuilt, and the undo machinery is out of scope here.
 function loadRunCardControlsHarness(options = {}) {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
@@ -360,13 +360,13 @@ function loadRunCardControlsHarness(options = {}) {
   );
   const document = createRunCardDocument();
   const region = [
-    'const TERMINAL_TRACKED_CHANGE_STATUS = new Set([\'accepted\', \'rejected\', \'resolved_elsewhere\']);',
+    'const TERMINAL_TRACKED_CHANGE_STATUS = new Set([\'accepted\', \'rejected\']);',
     extractFunction(contentScript, 'isTrackedChangeLifecycleRun'),
     extractFunction(contentScript, 'configureAcceptButton'),
+    extractFunction(contentScript, 'configureLifecycleUndoButton'),
     extractFunction(contentScript, 'wireAcceptInlineConfirm'),
-    extractFunction(contentScript, 'applyTrackedChangeLedger'),
+    extractFunction(contentScript, 'applyTerminalTrackedChangeStatus'),
     extractFunction(contentScript, 'refreshRunCardControls'),
-    extractFunction(contentScript, 'normalizeApplyTrackedChanges'),
     extractFunction(contentScript, 'cssEscape')
   ].join('\n');
 
@@ -375,20 +375,30 @@ function loadRunCardControlsHarness(options = {}) {
     const trackedChangeInFlight = new Map(options.inFlight || []);
     let saveStateSoonCalls = 0;
     const acceptRunCalls = [];
+    const undoRunCalls = [];
     function saveStateSoon() { saveStateSoonCalls++; }
     function findRunRecord(runId) {
       return (state.runs || []).find(run => run.id === runId) || null;
     }
     function acceptRun(runId) { acceptRunCalls.push(runId); }
-    function configureUndoButton() {}
+    function undoRun(runId) { undoRunCalls.push(runId); }
+    function getRunUndoCount() { return 0; }
     function tr(key) { return key; }
+    function configureUndoButton(root, run) {
+      const existing = root.querySelector('[data-run-undo]');
+      const button = existing.cloneNode(true);
+      existing.replaceWith(button);
+      configureLifecycleUndoButton(button, run);
+    }
     ${region}
     return {
       configureAcceptButton,
-      applyTrackedChangeLedger,
+      configureUndoButton,
+      applyTerminalTrackedChangeStatus,
       refreshRunCardControls,
       trackedChangeInFlight,
       acceptRunCalls,
+      undoRunCalls,
       getSaveStateSoonCalls: () => saveStateSoonCalls
     };
   `)(document, options.state || { runs: [] }, options.panel || null, options);
@@ -3051,11 +3061,9 @@ test('Accept All i18n keys are distinct from the diff panel keys in both locales
   assert.match(i18n, /runAcceptTrackedConfirm:/);
   assert.match(i18n, /runAcceptTrackedCancel:/);
   assert.match(i18n, /runAcceptTrackedDone:\s*'Accepted'/);
-  assert.match(i18n, /runAcceptTrackedResolvedElsewhere:\s*'Resolved in Overleaf'/);
-  assert.match(i18n, /runAcceptTrackedResolvedElsewhere:\s*'已在 Overleaf 处理'/);
-  // Never reuse diffAcceptAll for the run-card control.
-  const acceptBody = i18n.match(/runAcceptTracked:[\s\S]*?runAcceptTrackedResolvedElsewhere:[^\n]*/g) || [];
-  assert.equal(acceptBody.length >= 1, true);
+  // The superseded partial / closed-ledger keys are gone in both locales.
+  assert.doesNotMatch(i18n, /runAcceptTrackedRetry/);
+  assert.doesNotMatch(i18n, /runAcceptTrackedResolvedElsewhere/);
 });
 
 test('configureAcceptButton renders Accept All from trackedChangeStatus for tracked-change-lifecycle runs', () => {
@@ -3072,15 +3080,16 @@ test('configureAcceptButton renders Accept All from trackedChangeStatus for trac
   // Renders by trackedChangeStatus.
   assert.match(acceptBody, /trackedChangeStatus/);
   assert.match(acceptBody, /isTrackedChangeLifecycleRun\(run\)/);
-  // pending and partial_accept show the actionable button; partial label "retry".
+  // pending shows the actionable button.
   assert.match(acceptBody, /'pending'/);
-  assert.match(acceptBody, /'partial_accept'/);
   // accepted -> disabled "Accepted" label.
   assert.match(acceptBody, /runAcceptTrackedDone/);
-  // resolved_elsewhere -> distinct label, not "Accepted"/"Undone".
-  assert.match(acceptBody, /runAcceptTrackedResolvedElsewhere/);
-  // The accept button is hidden for runs without an accept action.
-  assert.match(acceptBody, /button\.hidden = true/);
+  // rejected -> the button stays present but greyed (both buttons greyed).
+  assert.match(acceptBody, /'rejected'/);
+  // No superseded partial / resolved-elsewhere model.
+  assert.doesNotMatch(acceptBody, /partial_accept/);
+  assert.doesNotMatch(acceptBody, /runAcceptTrackedRetry/);
+  assert.doesNotMatch(acceptBody, /resolved_elsewhere/);
 });
 
 test('run worlds split: legacy-undo runs never show Accept All and keep the undoStatus path', () => {
@@ -3123,26 +3132,27 @@ test('acceptRun uses an inline confirm flow before dispatching acceptTrackedChan
   assert.match(inlineConfirm, /confirmBtn\.addEventListener\('click'[\s\S]*?acceptRun\(runId\)/);
 });
 
-test('acceptRun applies the closed-ledger result with gone vs blocked classification', () => {
+test('acceptRun drives the run to a decisive terminal accepted, with no partial / closed-ledger model', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
 
-  // Closed-ledger classifier: tracked_change_not_found -> gone; everything else -> blocked.
-  assert.match(contentScript, /function applyTrackedChangeLedger\(/);
-  const ledgerBody = contentScript.match(/function applyTrackedChangeLedger\([\s\S]*?\n  \}/)?.[0] || '';
-  assert.match(ledgerBody, /tracked_change_not_found/);
-  // The run's ref set is replaced with the blocked refs only.
-  assert.match(ledgerBody, /undoTrackedChanges/);
-  // blocked refs remain -> partial_*; none + applied -> terminal; none + nothing -> resolved_elsewhere.
-  assert.match(ledgerBody, /partial_accept/);
-  assert.match(ledgerBody, /partial_reject/);
-  assert.match(ledgerBody, /'accepted'/);
-  assert.match(ledgerBody, /'rejected'/);
-  assert.match(ledgerBody, /resolved_elsewhere/);
-  // Terminal transitions empty undoTrackedChanges and undoExpectedFiles.
-  assert.match(ledgerBody, /undoExpectedFiles/);
+  // The closed-ledger classifier is gone; a single decisive terminal helper remains.
+  assert.doesNotMatch(contentScript, /function applyTrackedChangeLedger\(/);
+  assert.match(contentScript, /function applyTerminalTrackedChangeStatus\(/);
+  const terminalBody = contentScript.match(/function applyTerminalTrackedChangeStatus\([\s\S]*?\n  \}/)?.[0] || '';
+  // It sets the terminal status unconditionally and empties the heavy payload.
+  assert.match(terminalBody, /run\.trackedChangeStatus = status/);
+  assert.match(terminalBody, /run\.undoTrackedChanges = \[\]/);
+  assert.match(terminalBody, /run\.undoExpectedFiles = \[\]/);
+  // No partial / resolved-elsewhere branching.
+  assert.doesNotMatch(terminalBody, /partial_accept/);
+  assert.doesNotMatch(terminalBody, /resolved_elsewhere/);
+
+  // acceptRun reaches terminal 'accepted' once acceptTrackedChanges returns.
+  const acceptRunBody = contentScript.match(/async function acceptRun\(runId\) \{[\s\S]*?\n  (?:async )?function /)?.[0] || '';
+  assert.match(acceptRunBody, /applyTerminalTrackedChangeStatus\(runId, 'accepted'\)/);
 });
 
 // Behavioral coverage for the run-card state machine: these drive the actual
@@ -3158,12 +3168,12 @@ function trackedRefs() {
 
 test('configureAcceptButton renders the Accept All control per trackedChangeStatus (behavioral)', () => {
   const cases = [
+    // pending -> actionable.
     { status: 'pending', refs: trackedRefs(), expect: { hidden: false, disabled: false, text: 'runAcceptTracked' } },
-    { status: 'partial_accept', refs: trackedRefs(), expect: { hidden: false, disabled: false, text: 'runAcceptTrackedRetry' } },
+    // accepted -> disabled "Accepted" label.
     { status: 'accepted', refs: [], expect: { hidden: false, disabled: true, text: 'runAcceptTrackedDone' } },
-    { status: 'partial_reject', refs: trackedRefs(), expect: { hidden: true } },
-    { status: 'rejected', refs: [], expect: { hidden: true } },
-    { status: 'resolved_elsewhere', refs: [], expect: { hidden: false, disabled: true, text: 'runAcceptTrackedResolvedElsewhere' } }
+    // rejected -> Accept All stays present but greyed (both buttons greyed).
+    { status: 'rejected', refs: [], expect: { hidden: false, disabled: true, text: 'runAcceptTracked' } }
   ];
 
   for (const testCase of cases) {
@@ -3180,6 +3190,36 @@ test('configureAcceptButton renders the Accept All control per trackedChangeStat
       assert.equal(accept.textContent, testCase.expect.text, `${testCase.status}: label`);
     }
   }
+});
+
+test('terminal runs keep both Accept All and Undo visible but disabled (behavioral)', () => {
+  // accepted -> Accept All disabled "Accepted"; Undo present but disabled/greyed.
+  const acceptedRun = { id: 'run-a', trackedChangeStatus: 'accepted', undoTrackedChanges: [] };
+  let harness = loadRunCardControlsHarness({ state: { runs: [acceptedRun] } });
+  let root = buildRunCardRoot('run-a');
+  harness.configureAcceptButton(root, acceptedRun);
+  harness.configureUndoButton(root, acceptedRun);
+  let accept = root.querySelector('[data-run-accept]');
+  let undo = root.querySelector('[data-run-undo]');
+  assert.equal(accept.hidden, false, 'accepted: Accept All visible');
+  assert.equal(accept.disabled, true, 'accepted: Accept All disabled');
+  assert.equal(accept.textContent, 'runAcceptTrackedDone', 'accepted: Accept All label');
+  assert.equal(undo.hidden, false, 'accepted: Undo still visible');
+  assert.equal(undo.disabled, true, 'accepted: Undo disabled/greyed');
+
+  // rejected -> Undo disabled "Undone"; Accept All present but disabled/greyed.
+  const rejectedRun = { id: 'run-r', trackedChangeStatus: 'rejected', undoTrackedChanges: [] };
+  harness = loadRunCardControlsHarness({ state: { runs: [rejectedRun] } });
+  root = buildRunCardRoot('run-r');
+  harness.configureAcceptButton(root, rejectedRun);
+  harness.configureUndoButton(root, rejectedRun);
+  accept = root.querySelector('[data-run-accept]');
+  undo = root.querySelector('[data-run-undo]');
+  assert.equal(undo.hidden, false, 'rejected: Undo visible');
+  assert.equal(undo.disabled, true, 'rejected: Undo disabled');
+  assert.equal(undo.textContent, 'undoApplied', 'rejected: Undo label');
+  assert.equal(accept.hidden, false, 'rejected: Accept All still visible');
+  assert.equal(accept.disabled, true, 'rejected: Accept All disabled/greyed');
 });
 
 test('configureAcceptButton hides the Accept All control entirely for legacy-undo runs (behavioral)', () => {
@@ -3224,7 +3264,7 @@ test('configureAcceptButton drops orphaned inline-confirm buttons on mid-confirm
   assert.equal(accepts[0].hidden, false);
 });
 
-test('applyTrackedChangeLedger: all applied -> accepted, refs emptied (behavioral)', () => {
+test('applyTerminalTrackedChangeStatus: accept reaches terminal accepted, refs emptied (behavioral)', () => {
   const run = {
     id: 'run-1',
     trackedChangeStatus: 'pending',
@@ -3235,135 +3275,68 @@ test('applyTrackedChangeLedger: all applied -> accepted, refs emptied (behaviora
   panel.append(buildRunCardRoot('run-1'));
   const harness = loadRunCardControlsHarness({ state: { runs: [run] }, panel });
 
-  harness.applyTrackedChangeLedger('run-1', 'accept', {
-    ok: true,
-    applied: [{ trackedChange: run.undoTrackedChanges[0] }, { trackedChange: run.undoTrackedChanges[1] }],
-    skipped: []
-  });
+  harness.applyTerminalTrackedChangeStatus('run-1', 'accepted');
 
   assert.equal(run.trackedChangeStatus, 'accepted');
   assert.deepEqual(run.undoTrackedChanges, []);
   assert.deepEqual(run.undoExpectedFiles, []);
 });
 
-test('applyTrackedChangeLedger: blocked skips -> partial_accept, refs are exactly the blocked refs (behavioral)', () => {
-  const refs = trackedRefs();
+test('applyTerminalTrackedChangeStatus: reject reaches terminal rejected, refs emptied (behavioral)', () => {
   const run = {
-    id: 'run-1',
+    id: 'run-r',
     trackedChangeStatus: 'pending',
-    undoTrackedChanges: refs,
+    undoTrackedChanges: trackedRefs(),
     undoExpectedFiles: [{ path: 'main.tex', content: 'x' }]
   };
   const panel = new RunCardNode('div');
-  panel.append(buildRunCardRoot('run-1'));
-  const harness = loadRunCardControlsHarness({ state: { runs: [run] }, panel });
-
-  harness.applyTrackedChangeLedger('run-1', 'accept', {
-    ok: true,
-    applied: [{ trackedChange: refs[0] }],
-    skipped: [{ trackedChange: refs[1], result: { code: 'tracked_change_accept_not_confirmed' } }]
-  });
-
-  assert.equal(run.trackedChangeStatus, 'partial_accept');
-  assert.equal(run.undoTrackedChanges.length, 1);
-  assert.equal(run.undoTrackedChanges[0].key, 'k2');
-  // Non-terminal: the heavy payload is retained for the retry.
-  assert.equal(run.undoExpectedFiles.length, 1);
-});
-
-test('applyTrackedChangeLedger: nothing applied, all gone -> resolved_elsewhere, refs emptied (behavioral)', () => {
-  const refs = trackedRefs();
-  const run = {
-    id: 'run-1',
-    trackedChangeStatus: 'pending',
-    undoTrackedChanges: refs,
-    undoExpectedFiles: [{ path: 'main.tex', content: 'x' }]
-  };
-  const panel = new RunCardNode('div');
-  panel.append(buildRunCardRoot('run-1'));
-  const harness = loadRunCardControlsHarness({ state: { runs: [run] }, panel });
-
-  harness.applyTrackedChangeLedger('run-1', 'accept', {
-    ok: true,
-    applied: [],
-    skipped: [
-      { trackedChange: refs[0], result: { code: 'tracked_change_not_found' } },
-      { trackedChange: refs[1], result: { code: 'tracked_change_not_found' } }
-    ]
-  });
-
-  assert.equal(run.trackedChangeStatus, 'resolved_elsewhere');
-  assert.deepEqual(run.undoTrackedChanges, []);
-  assert.deepEqual(run.undoExpectedFiles, []);
-});
-
-test('applyTrackedChangeLedger: reject kind reaches rejected / partial_reject symmetrically (behavioral)', () => {
-  // All applied -> terminal rejected.
-  const fullRefs = trackedRefs();
-  const rejectedRun = { id: 'run-r', trackedChangeStatus: 'pending', undoTrackedChanges: fullRefs, undoExpectedFiles: [{ path: 'main.tex', content: 'x' }] };
-  let panel = new RunCardNode('div');
   panel.append(buildRunCardRoot('run-r'));
-  loadRunCardControlsHarness({ state: { runs: [rejectedRun] }, panel })
-    .applyTrackedChangeLedger('run-r', 'reject', {
-      ok: true,
-      applied: [{ trackedChange: fullRefs[0] }, { trackedChange: fullRefs[1] }],
-      skipped: []
-    });
-  assert.equal(rejectedRun.trackedChangeStatus, 'rejected');
-  assert.deepEqual(rejectedRun.undoTrackedChanges, []);
-  assert.deepEqual(rejectedRun.undoExpectedFiles, []);
+  const harness = loadRunCardControlsHarness({ state: { runs: [run] }, panel });
 
-  // Blocked skip -> non-terminal partial_reject, refs replaced with the blocked ref.
-  const partialRefs = trackedRefs();
-  const partialRun = { id: 'run-p', trackedChangeStatus: 'pending', undoTrackedChanges: partialRefs, undoExpectedFiles: [{ path: 'main.tex', content: 'x' }] };
-  panel = new RunCardNode('div');
-  panel.append(buildRunCardRoot('run-p'));
-  loadRunCardControlsHarness({ state: { runs: [partialRun] }, panel })
-    .applyTrackedChangeLedger('run-p', 'reject', {
-      ok: true,
-      applied: [{ trackedChange: partialRefs[0] }],
-      skipped: [{ trackedChange: partialRefs[1], result: { code: 'tracked_change_reject_failed' } }]
-    });
-  assert.equal(partialRun.trackedChangeStatus, 'partial_reject');
-  assert.equal(partialRun.undoTrackedChanges.length, 1);
-  assert.equal(partialRun.undoTrackedChanges[0].key, 'k2');
-  assert.equal(partialRun.undoExpectedFiles.length, 1);
+  harness.applyTerminalTrackedChangeStatus('run-r', 'rejected');
+
+  assert.equal(run.trackedChangeStatus, 'rejected');
+  assert.deepEqual(run.undoTrackedChanges, []);
+  assert.deepEqual(run.undoExpectedFiles, []);
 });
 
-test('applyTrackedChangeLedger: trackedChange:null sweep skips are dropped, not classified as blocked (behavioral)', () => {
-  const refs = trackedRefs();
+test('applyTerminalTrackedChangeStatus: terminal is unconditional and decisive — there is no partial state (behavioral)', () => {
+  // Even with refs still present (a best-effort accept that left some refs),
+  // the run reaches the terminal status and the payload is emptied — no retry.
   const run = {
     id: 'run-1',
     trackedChangeStatus: 'pending',
-    undoTrackedChanges: refs,
+    undoTrackedChanges: trackedRefs(),
     undoExpectedFiles: [{ path: 'main.tex', content: 'x' }]
   };
   const panel = new RunCardNode('div');
   panel.append(buildRunCardRoot('run-1'));
   const harness = loadRunCardControlsHarness({ state: { runs: [run] }, panel });
 
-  // A reject-sweep failure carries trackedChange: null; it must not block the run.
-  harness.applyTrackedChangeLedger('run-1', 'accept', {
-    ok: true,
-    applied: [{ trackedChange: refs[0] }, { trackedChange: refs[1] }],
-    skipped: [{ trackedChange: null, result: { code: 'tracked_change_reject_failed' } }]
-  });
+  harness.applyTerminalTrackedChangeStatus('run-1', 'accepted');
 
   assert.equal(run.trackedChangeStatus, 'accepted');
   assert.deepEqual(run.undoTrackedChanges, []);
+  assert.deepEqual(run.undoExpectedFiles, []);
+  // A non-terminal value is ignored — only terminal transitions are allowed.
+  const pendingRun = { id: 'run-2', trackedChangeStatus: 'pending', undoTrackedChanges: trackedRefs(), undoExpectedFiles: [] };
+  const harness2 = loadRunCardControlsHarness({ state: { runs: [pendingRun] }, panel: (() => { const p = new RunCardNode('div'); p.append(buildRunCardRoot('run-2')); return p; })() });
+  harness2.applyTerminalTrackedChangeStatus('run-2', 'pending');
+  assert.equal(pendingRun.trackedChangeStatus, 'pending');
+  assert.equal(pendingRun.undoTrackedChanges.length, 2);
 });
 
-test('Undo for tracked-change-lifecycle runs dispatches from trackedChangeStatus', () => {
+test('lifecycle Undo drives the run to a decisive terminal rejected', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
-  const undoTrackedBody = contentScript.match(/async function undoRunTrackedChanges\(runId, run\) \{[\s\S]*?\n  function getRunUndoCount/)?.[0] || '';
+  const undoTrackedBody = contentScript.match(/async function undoRunTrackedChanges\(runId, run\) \{[\s\S]*?\n  (?:async )?function /)?.[0] || '';
 
-  // The tracked reject path applies the closed-ledger with the reject kind.
-  assert.match(undoTrackedBody, /applyTrackedChangeLedger\(/);
-  // Lifecycle runs route the reject result through partial_reject / rejected.
-  assert.match(contentScript, /TERMINAL_TRACKED_CHANGE_STATUS|'rejected'/);
+  // The lifecycle reject path reaches terminal 'rejected' unconditionally.
+  assert.match(undoTrackedBody, /applyTerminalTrackedChangeStatus\(runId, 'rejected'\)/);
+  // No closed-ledger machinery survives.
+  assert.doesNotMatch(undoTrackedBody, /applyTrackedChangeLedger/);
 });
 
 test('recordUndoFromApply sets trackedChangeStatus pending when it records tracked-change refs', () => {

@@ -8516,10 +8516,11 @@
     return report;
   }
 
-  // The six stable trackedChangeStatus values and the terminal subset, kept in
-  // sync with sessionState.js. A run is in the tracked-change lifecycle when it
-  // carries one of these values or still holds tracked-change refs.
-  const TERMINAL_TRACKED_CHANGE_STATUS = new Set(['accepted', 'rejected', 'resolved_elsewhere']);
+  // The three stable trackedChangeStatus values are `pending`, `accepted`, and
+  // `rejected`; `accepted` and `rejected` are terminal. Kept in sync with
+  // sessionState.js. A run is in the tracked-change lifecycle when it carries
+  // one of these values or still holds tracked-change refs.
+  const TERMINAL_TRACKED_CHANGE_STATUS = new Set(['accepted', 'rejected']);
 
   // A run belongs to the tracked-change lifecycle iff trackedChangeStatus is set
   // or it still has tracked-change refs. Every other run is a legacy-undo run.
@@ -8568,8 +8569,9 @@
   }
 
   // Renders the Undo button for a tracked-change-lifecycle run from
-  // trackedChangeStatus. Undo is shown for `pending` and `partial_reject`,
-  // a disabled "Undone" label for terminal `rejected`, and hidden otherwise.
+  // trackedChangeStatus. At a terminal status both buttons stay visible but
+  // disabled: `rejected` shows the disabled "Undone" label, `accepted` keeps
+  // Undo present but greyed. `pending` is actionable.
   function configureLifecycleUndoButton(button, run) {
     const status = run.trackedChangeStatus || '';
     if (status === 'rejected') {
@@ -8579,15 +8581,24 @@
       button.title = tr('undoAppliedTitle');
       return;
     }
-    if (status !== 'pending' && status !== 'partial_reject') {
+    if (status === 'accepted') {
+      // The run was accepted — terminal. Undo stays visible but greyed so the
+      // card shows both controls disabled, never removed.
+      button.hidden = false;
+      button.disabled = true;
+      button.textContent = tr('undoRun');
+      button.title = tr('undoRunTitle');
+      return;
+    }
+    if (status !== 'pending') {
       button.hidden = true;
       return;
     }
     const inFlight = trackedChangeInFlight.get(run.id);
     button.hidden = false;
     button.disabled = inFlight === 'reject' || inFlight === 'accept';
-    button.textContent = status === 'partial_reject' ? tr('undoPartialRun') : tr('undoRun');
-    button.title = status === 'partial_reject' ? tr('undoPartialRunTitle') : tr('undoRunTitle');
+    button.textContent = tr('undoRun');
+    button.title = tr('undoRunTitle');
     button.addEventListener('click', event => {
       event.stopPropagation();
       undoRun(run.id);
@@ -8623,15 +8634,16 @@
       button.title = tr('runAcceptTrackedDoneTitle');
       return;
     }
-    if (status === 'resolved_elsewhere') {
+    if (status === 'rejected') {
+      // The run was rejected — terminal. Accept All stays visible but greyed so
+      // the card shows both controls disabled, never removed.
       button.hidden = false;
       button.disabled = true;
-      button.textContent = tr('runAcceptTrackedResolvedElsewhere');
-      button.title = tr('runAcceptTrackedResolvedElsewhereTitle');
+      button.textContent = tr('runAcceptTracked');
+      button.title = tr('runAcceptTrackedTitle');
       return;
     }
-    if (status !== 'pending' && status !== 'partial_accept') {
-      // rejected / partial_reject — no Accept All for this run.
+    if (status !== 'pending') {
       button.hidden = true;
       return;
     }
@@ -8644,9 +8656,8 @@
       button.title = tr('runAcceptTrackedConfirming');
       return;
     }
-    const retry = status === 'partial_accept';
-    button.textContent = retry ? tr('runAcceptTrackedRetry') : tr('runAcceptTracked');
-    button.title = retry ? tr('runAcceptTrackedRetryTitle') : tr('runAcceptTrackedTitle');
+    button.textContent = tr('runAcceptTracked');
+    button.title = tr('runAcceptTrackedTitle');
     wireAcceptInlineConfirm(button, run.id);
   }
 
@@ -8819,9 +8830,9 @@
       return;
     }
 
-    // Tracked-change-lifecycle runs (those holding tracked-change refs) route
-    // their reject through the closed-ledger / trackedChangeStatus state machine.
-    // The UI-local in-flight lock disables the button; it is never persisted.
+    // Tracked-change-lifecycle runs (those holding tracked-change refs) reach a
+    // decisive terminal `rejected` once the reject returns. The UI-local
+    // in-flight lock disables the button; it is never persisted.
     const lifecycleReject = trackedUndo && isTrackedChangeLifecycleRun(run);
     if (lifecycleReject) {
       trackedChangeInFlight.set(runId, 'reject');
@@ -8865,7 +8876,7 @@
       }
     });
     if (lifecycleReject) {
-      applyTrackedChangeLedger(runId, 'reject', result);
+      applyTerminalTrackedChangeStatus(runId, 'rejected');
       return;
     }
     setRunUndoStatus(runId, result.skipped?.length ? 'partial' : 'applied');
@@ -8877,7 +8888,7 @@
       return;
     }
     const status = run.trackedChangeStatus || '';
-    if (status !== 'pending' && status !== 'partial_accept') {
+    if (status !== 'pending') {
       return;
     }
     if (!Array.isArray(run.undoTrackedChanges) || !run.undoTrackedChanges.length) {
@@ -8921,45 +8932,24 @@
         }))
       }
     });
-    applyTrackedChangeLedger(runId, 'accept', result);
+    applyTerminalTrackedChangeStatus(runId, 'accepted');
   }
 
-  // Applies the closed-ledger result of an accept/reject to a run. Each skipped
-  // entry is classified: code `tracked_change_not_found` is **gone** (settled,
-  // not retriable); every other code is **blocked** (retriable). The run's
-  // tracked-change ref set is replaced with the blocked refs only; `applied` and
-  // `gone` refs leave the ledger. Blocked refs remaining -> non-terminal
-  // partial_accept / partial_reject. None remaining + something applied ->
-  // terminal accepted / rejected. None remaining + nothing applied -> terminal
-  // resolved_elsewhere. Terminal transitions empty the heavy payload.
-  function applyTrackedChangeLedger(runId, kind, result) {
+  // Drives a tracked-change-lifecycle run to a decisive terminal status.
+  // Accept All and the lifecycle Undo are best-effort, all-or-nothing: once the
+  // page-layer accept/reject returns — regardless of its applied/skipped split —
+  // the run reaches `accepted` / `rejected` and stays there. There is no
+  // partial state and no retry. The heavy payload is emptied so stale refs
+  // never re-enter retention. Any "some changes could not be settled" detail is
+  // already surfaced as the preceding run event.
+  function applyTerminalTrackedChangeStatus(runId, status) {
     const run = findRunRecord(runId);
-    if (!run) {
+    if (!run || !TERMINAL_TRACKED_CHANGE_STATUS.has(status)) {
       return;
     }
-    const applied = Array.isArray(result?.applied) ? result.applied : [];
-    const skipped = Array.isArray(result?.skipped) ? result.skipped : [];
-    const blockedRefs = skipped
-      .filter(entry => entry?.result?.code !== 'tracked_change_not_found')
-      .map(entry => entry?.trackedChange)
-      // Skips with trackedChange: null are reject-sweep failures, intentionally
-      // dropped here — the ledger tracks only this run's own refs, so this is
-      // not a classification bug.
-      .filter(Boolean);
-
-    if (blockedRefs.length) {
-      run.undoTrackedChanges = normalizeApplyTrackedChanges(blockedRefs);
-      run.trackedChangeStatus = kind === 'accept' ? 'partial_accept' : 'partial_reject';
-    } else if (applied.length) {
-      run.trackedChangeStatus = kind === 'accept' ? 'accepted' : 'rejected';
-    } else {
-      run.trackedChangeStatus = 'resolved_elsewhere';
-    }
-
-    if (TERMINAL_TRACKED_CHANGE_STATUS.has(run.trackedChangeStatus)) {
-      run.undoTrackedChanges = [];
-      run.undoExpectedFiles = [];
-    }
+    run.trackedChangeStatus = status;
+    run.undoTrackedChanges = [];
+    run.undoExpectedFiles = [];
     saveStateSoon();
     refreshRunCardControls(runId);
   }

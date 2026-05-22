@@ -1179,12 +1179,12 @@ test('createSession defaults codexThreadId to empty string', () => {
 const STABLE_TRACKED_CHANGE_STATUSES = [
   'pending',
   'accepted',
-  'partial_accept',
-  'rejected',
-  'partial_reject',
-  'resolved_elsewhere'
+  'rejected'
 ];
-const TERMINAL_TRACKED_CHANGE_STATUSES = ['accepted', 'rejected', 'resolved_elsewhere'];
+const TERMINAL_TRACKED_CHANGE_STATUSES = ['accepted', 'rejected'];
+// Values from the superseded partial / closed-ledger model. They must never be
+// kept as-is; normalization recovers them like any other non-stable value.
+const SUPERSEDED_TRACKED_CHANGE_STATUSES = ['partial_accept', 'partial_reject', 'resolved_elsewhere'];
 
 function trackedChangeRefs() {
   return [{ key: 'tc-1', id: 'change-1', path: 'main.tex', label: 'Change 1' }];
@@ -1281,6 +1281,36 @@ test('normalizeRun drops a stray trackedChangeStatus value when no tracked-chang
   }
 });
 
+test('normalizeRun recovers an old persisted partial_* / resolved_elsewhere value to pending when refs are present', () => {
+  for (const superseded of SUPERSEDED_TRACKED_CHANGE_STATUSES) {
+    const run = normalizeRun({
+      id: 'run_superseded',
+      task: 'superseded status run',
+      status: 'completed',
+      trackedChangeStatus: superseded,
+      undoTrackedChanges: trackedChangeRefs(),
+      undoExpectedFiles: [{ path: 'main.tex', content: 'after' }]
+    });
+
+    assert.equal(run.trackedChangeStatus, 'pending', `superseded "${superseded}" with refs`);
+  }
+});
+
+test('normalizeRun drops an old persisted partial_* / resolved_elsewhere value when no refs are present', () => {
+  for (const superseded of SUPERSEDED_TRACKED_CHANGE_STATUSES) {
+    const run = normalizeRun({
+      id: 'run_superseded',
+      task: 'superseded status run',
+      status: 'completed',
+      trackedChangeStatus: superseded,
+      undoTrackedChanges: [],
+      undoExpectedFiles: []
+    });
+
+    assert.equal('trackedChangeStatus' in run, false, `superseded "${superseded}" without refs`);
+  }
+});
+
 for (const terminal of TERMINAL_TRACKED_CHANGE_STATUSES) {
   test(`normalizeRun empties the payload for terminal trackedChangeStatus "${terminal}" but keeps the status`, () => {
     const run = normalizeRun({
@@ -1346,7 +1376,15 @@ test('normalizeRun trackedChangeStatus normalization is idempotent', () => {
       trackedChangeStatus: 'bogus',
       undoTrackedChanges: [],
       undoExpectedFiles: []
-    }
+    },
+    ...SUPERSEDED_TRACKED_CHANGE_STATUSES.map(superseded => ({
+      id: 'run_idem',
+      task: 'idempotence run',
+      status: 'completed',
+      trackedChangeStatus: superseded,
+      undoTrackedChanges: trackedChangeRefs(),
+      undoExpectedFiles: [{ path: 'main.tex', content: 'after' }]
+    }))
   ];
 
   for (const input of cases) {
@@ -1356,7 +1394,7 @@ test('normalizeRun trackedChangeStatus normalization is idempotent', () => {
   }
 });
 
-const NON_TERMINAL_TRACKED_CHANGE_STATUSES = ['pending', 'partial_accept', 'partial_reject'];
+const NON_TERMINAL_TRACKED_CHANGE_STATUSES = ['pending'];
 
 for (const status of NON_TERMINAL_TRACKED_CHANGE_STATUSES) {
   test(`normalizeRun drops a non-terminal trackedChangeStatus "${status}" when the reloaded run has no tracked-change refs`, () => {
