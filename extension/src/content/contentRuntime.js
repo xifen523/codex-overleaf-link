@@ -728,7 +728,7 @@
       ? normalizeCustomInstructionsByProject(state?.customInstructionsByProject)[normalizedProjectId] || ''
       : '';
     input.placeholder = tr('customInstructionsPlaceholder');
-    const editorIsOpen = panel?.dataset?.view === 'settings';
+    const editorIsOpen = panel?.dataset?.view === 'settings' || panel?.dataset?.view === 'skills';
     const editorIsDirty = normalizedProjectId
       && customInstructionsEditorProjectId === normalizedProjectId
       && input.value !== customInstructionsEditorValue;

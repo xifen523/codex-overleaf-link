@@ -362,7 +362,8 @@
   line-height: 1.4;
 }
 
-#codex-overleaf-panel .codex-custom-instructions-head [data-settings-back] {
+#codex-overleaf-panel .codex-custom-instructions-head [data-settings-back],
+#codex-overleaf-panel .codex-custom-instructions-head [data-skills-back] {
   flex: 0 0 auto;
   width: 24px;
   height: 24px;

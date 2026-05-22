@@ -1042,6 +1042,135 @@ test('settingsPanel exposes setSkillsSummary in its module API', () => {
   assert.match(settingsPanelSrc, /setSkillsSummary/);
 });
 
+// Returns the start..end (brace-balanced) source of a named function declaration
+// so the real contentRuntime helpers can be evaluated inside a synthetic scope.
+function extractRuntimeFunction(source, name) {
+  const markers = [`function ${name}(`, `async function ${name}(`];
+  const start = markers
+    .map(marker => source.indexOf(marker))
+    .filter(index => index !== -1)
+    .sort((a, b) => a - b)[0] ?? -1;
+  assert.notEqual(start, -1, `${name} should exist in contentRuntime.js`);
+  const openBrace = source.indexOf('{', start);
+  let depth = 0;
+  for (let index = openBrace; index < source.length; index++) {
+    if (source[index] === '{') depth++;
+    else if (source[index] === '}') {
+      depth--;
+      if (depth === 0) return source.slice(start, index + 1);
+    }
+  }
+  assert.fail(`${name} body should close`);
+}
+
+test('skills entry-row summary tracks the enabled-skill state through the real summary path', () => {
+  // This test wires the REAL settingsPanel, the REAL localSkillsPanel controller,
+  // and the REAL contentRuntime summary helpers (updateSkillsEntrySummary /
+  // countEnabledCodexOverleafSkills / renderLocalSkillList / per-skill enable
+  // state) together. Nothing in the summary-writing path is stubbed, so it
+  // genuinely verifies that the [data-skills-entry-summary] text stays in sync.
+  const { doc } = buildFakeDocument();
+  const container = doc.createElement('div');
+  doc.documentElement._children.push(container);
+
+  // Real settingsPanel: builds the skills entry row + [data-local-skill-list].
+  const fakeWin = {};
+  // eslint-disable-next-line no-new-func
+  new Function('window', 'document', read('extension/src/content/settingsPanel.js'))(fakeWin, doc);
+  const SettingsPanel = fakeWin.CodexOverleafSettingsPanel;
+  const settingsPanelInstance = SettingsPanel.create({ container });
+
+  // Real i18n so the summary text is produced by the production string table.
+  delete require.cache[require.resolve('../extension/src/shared/i18n')];
+  const I18n = require('../extension/src/shared/i18n');
+  const tr = (key, params) => I18n.t('en', key, params);
+
+  // Real localSkillsPanel controller.
+  delete require.cache[require.resolve('../extension/src/content/localSkillsPanel')];
+  const LocalSkillsPanel = require('../extension/src/content/localSkillsPanel');
+
+  const contentRuntimeSrc = read('extension/src/content/contentRuntime.js');
+  const harness = Function(
+    'SettingsPanel', 'LocalSkillsPanel', 'settingsPanelInstance', 'tr', 'panel',
+    `
+    let state = {
+      codexOverleafSkills: [
+        { id: 'skill-a', title: 'Skill A', removable: false },
+        { id: 'skill-b', title: 'Skill B', removable: false }
+      ],
+      codexOverleafSkillEnabled: {}
+    };
+    let skillLoadingSettings = { loadCodexOverleafSkills: true };
+    function getSkillLoadingSettings() { return skillLoadingSettings; }
+    function setMasterEnabled(value) { skillLoadingSettings = { loadCodexOverleafSkills: value }; }
+    function saveStateSoon() {}
+    // Real localSkillsPanel controller, fed the synthetic state.
+    const localSkillsPanel = LocalSkillsPanel.createLocalSkillsPanelController({
+      document: panel.ownerDocument,
+      getPanel: () => panel,
+      getState: () => state,
+      setState: next => { state = next; },
+      getSkillLoadingSettings,
+      isCodexOverleafSkillEnabled,
+      setCodexOverleafSkillEnabled,
+      tr,
+      tx: en => en
+    });
+    ${extractRuntimeFunction(contentRuntimeSrc, 'getCodexOverleafSkillEnabled')}
+    ${extractRuntimeFunction(contentRuntimeSrc, 'isCodexOverleafSkillEnabled')}
+    ${extractRuntimeFunction(contentRuntimeSrc, 'setCodexOverleafSkillEnabled')}
+    ${extractRuntimeFunction(contentRuntimeSrc, 'countEnabledCodexOverleafSkills')}
+    ${extractRuntimeFunction(contentRuntimeSrc, 'updateSkillsEntrySummary')}
+    ${extractRuntimeFunction(contentRuntimeSrc, 'renderLocalSkillList')}
+    return {
+      renderLocalSkillList,
+      setMasterEnabled,
+      getState: () => state
+    };
+    `
+  );
+
+  // The local-skill list lives inside the settingsPanel template.
+  const listEl = container.querySelector('[data-local-skill-list]');
+  assert.ok(listEl, 'settingsPanel must render the [data-local-skill-list]');
+  const panel = {
+    ownerDocument: doc,
+    querySelector: sel => (sel === '[data-local-skill-list]' ? listEl : container.querySelector(sel))
+  };
+
+  const runtime = harness(SettingsPanel, LocalSkillsPanel, settingsPanelInstance, tr, panel);
+
+  // Initial render: both skills enabled by default (absent => enabled).
+  runtime.renderLocalSkillList();
+  const summaryEl = container.querySelector('[data-skills-entry-summary]');
+  assert.equal(summaryEl.textContent, '2 enabled',
+    'summary should reflect 2 enabled skills after the initial render');
+
+  // Flip a per-skill toggle off via its real change handler -> setCodexOverleafSkillEnabled
+  // -> renderLocalSkillList -> updateSkillsEntrySummary.
+  const rows = listEl._children.filter(c => c.className && c.className.includes('codex-local-skill-row'));
+  assert.equal(rows.length, 2, 'two skill rows should render');
+  const firstToggle = rows[0]._children.find(c => c.tag === 'input' && c.type === 'checkbox');
+  assert.ok(firstToggle, 'per-skill toggle must exist');
+  firstToggle.checked = false;
+  firstToggle._fire('change', { target: firstToggle });
+
+  assert.equal(
+    container.querySelector('[data-skills-entry-summary]').textContent,
+    '1 enabled',
+    'summary should drop to "1 enabled" after a per-skill toggle is switched off'
+  );
+
+  // Master toggle off: summary should show the "Off" form.
+  runtime.setMasterEnabled(false);
+  runtime.renderLocalSkillList();
+  assert.equal(
+    container.querySelector('[data-skills-entry-summary]').textContent,
+    'Off',
+    'summary should show "Off" when the master toggle is disabled'
+  );
+});
+
 test('the "Load local Codex skills" control and skill toggles render as sliding switches', () => {
   const settingsPanelSrc = read('extension/src/content/settingsPanel.js');
   const localSkillsSrc = read('extension/src/content/localSkillsPanel.js');
