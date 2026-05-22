@@ -76,6 +76,7 @@
     getReviewingState,
     invalidProjectPathResult,
     isEditingConfirmedForNoTraceUndo,
+    isReviewingConfirmedForWrite,
     isInsideCodexPanel,
     normalizeReviewingSignalText,
     normalizeSafeProjectPath,

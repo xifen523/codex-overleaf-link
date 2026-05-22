@@ -8913,7 +8913,11 @@
       result = await callPageBridge('acceptTrackedChanges', {
         trackedChanges: run.undoTrackedChanges || [],
         expectedFiles: run.undoExpectedFiles || [],
-        postFiles: buildTrackedUndoPostFiles(run)
+        postFiles: buildTrackedUndoPostFiles(run),
+        // The run's own forward writeback operations. The Accept replay
+        // re-applies these exact patches so it writes only the changed
+        // fragments, never a whole-file overwrite.
+        appliedOperations: Array.isArray(run.appliedOperations) ? run.appliedOperations : []
       });
     } finally {
       trackedChangeInFlight.delete(runId);

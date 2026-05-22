@@ -3124,6 +3124,9 @@ test('acceptRun uses an inline confirm flow before dispatching acceptTrackedChan
   // Inline confirm: the accept only fires through the page bridge.
   assert.match(acceptRunBody, /callPageBridge\('acceptTrackedChanges'/);
   assert.match(acceptRunBody, /trackedChanges:\s*run\.undoTrackedChanges/);
+  // Accept All passes the run's own forward writeback operations so the page
+  // layer replays the exact targeted patches instead of a whole-file overwrite.
+  assert.match(acceptRunBody, /appliedOperations:\s*Array\.isArray\(run\.appliedOperations\)/);
   // The accept button shows an inline Confirm / Cancel before firing.
   const inlineConfirm = contentScript.match(/function wireAcceptInlineConfirm\(button, runId\) \{[\s\S]*?\n  (?:async )?function /)?.[0] || '';
   assert.match(inlineConfirm, /runAcceptTrackedConfirm/);

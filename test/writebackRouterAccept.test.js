@@ -38,6 +38,7 @@ function createAcceptHarness(spec = {}) {
     editingActivations: 0,
     reviewingRestores: 0,
     writes: [],
+    patchWrites: [],
     opened: []
   };
 
@@ -51,15 +52,11 @@ function createAcceptHarness(spec = {}) {
   };
 
   function ensureEditing() {
+    // The Accept replay no longer routes through ensureEditing — it forces the
+    // toggle via setReviewingEnabled(false) — but keep a faithful stub so any
+    // accidental call is still observable.
     if (!state.reviewing) {
       return Promise.resolve({ ok: true, activated: false });
-    }
-    if (spec.editingFails) {
-      return Promise.resolve({
-        ok: false,
-        code: 'editing_not_confirmed',
-        reason: 'Editing mode could not be confirmed.'
-      });
     }
     state.reviewing = false;
     state.editingActivations += 1;
@@ -74,9 +71,19 @@ function createAcceptHarness(spec = {}) {
         reason: 'Reviewing could not be restored.'
       });
     }
+    if (!enabled && spec.editingFails) {
+      // Models Overleaf failing to confirm Track Changes OFF.
+      return Promise.resolve({
+        ok: false,
+        code: 'editing_not_confirmed',
+        reason: 'Editing mode could not be confirmed.'
+      });
+    }
     state.reviewing = enabled;
     if (enabled) {
       state.reviewingRestores += 1;
+    } else {
+      state.editingActivations += 1;
     }
     return Promise.resolve({ ok: true, changed: true, enabled });
   }
@@ -88,6 +95,10 @@ function createAcceptHarness(spec = {}) {
     ensureReviewing: () => Promise.resolve({ ok: true, activated: false }),
     setReviewingEnabled,
     getReviewingState: () => ({ reviewing: { ok: state.reviewing }, signals: {} }),
+    // The page bridge wires these aria-aware detectors; the fake mirrors them
+    // faithfully off the harness's reviewing flag.
+    isReviewingConfirmedForWrite: reviewState => reviewState?.reviewing?.ok === true,
+    isEditingConfirmedForNoTraceUndo: reviewState => reviewState?.reviewing?.ok === false,
     collectElements(selector) {
       // The editor-undo control is the only DOM control the new mechanism uses.
       if (/button/i.test(selector || '')) {
@@ -109,7 +120,18 @@ function createAcceptHarness(spec = {}) {
     readActiveEditorText: () => state.editorText,
     replaceActiveEditorText(text) {
       state.editorText = String(text);
-      state.writes.push(String(text));
+      state.writes.push({ kind: 'replaceAll', text: String(text) });
+      return { ok: true };
+    },
+    replaceActiveEditorPatches(patches, nextContent) {
+      // Models Overleaf's patch-apply path: only the targeted ranges change.
+      state.editorText = String(nextContent);
+      state.patchWrites.push((patches || []).map(patch => ({
+        from: patch.from,
+        to: patch.to,
+        insert: patch.insert
+      })));
+      state.writes.push({ kind: 'patches', text: String(nextContent), patches: patches || [] });
       return { ok: true };
     },
     delay: () => Promise.resolve(),
@@ -129,10 +151,11 @@ function createAcceptHarness(spec = {}) {
 }
 
 test('acceptTrackedChanges editor-undoes to pre-write content then replays post-write content untracked', async () => {
-  const harness = createAcceptHarness({
-    preContent: 'before\n',
-    postContent: 'after the edit\n'
-  });
+  // The pre/post content shares a common prefix and suffix so the minimal-diff
+  // fallback has something meaningful to trim.
+  const preContent = 'Intro paragraph.\nThe quick fox.\nClosing line.\n';
+  const postContent = 'Intro paragraph.\nThe quick brown fox.\nClosing line.\n';
+  const harness = createAcceptHarness({ preContent, postContent });
 
   const result = await harness.router.acceptTrackedChanges({
     expectedFiles: [{ path: harness.path, content: harness.preContent }],
@@ -142,9 +165,26 @@ test('acceptTrackedChanges editor-undoes to pre-write content then replays post-
   assert.equal(result.ok, true, JSON.stringify(result));
   // The editor-undo ran (the writeback was reverted before the replay).
   assert.ok(harness.state.undoClicks >= 1, 'the run writeback was editor-undone');
-  // The post-write content was re-applied as a plain edit.
-  assert.deepEqual(harness.state.writes, ['after the edit\n']);
-  assert.equal(harness.state.editorText, 'after the edit\n');
+  // The post-write content was re-applied via a TARGETED patch — never a
+  // whole-file replaceAll.
+  assert.equal(harness.state.writes.length, 1);
+  assert.equal(harness.state.writes[0].kind, 'patches', 'replay must go through the patches path, not replaceAll');
+  assert.equal(harness.state.editorText, postContent);
+  // The targeted patch trims the common prefix AND suffix: it does NOT span the
+  // whole pre-write document.
+  const replayPatch = harness.state.patchWrites[0][0];
+  assert.ok(replayPatch.from > 0, 'patch starts after the trimmed common prefix');
+  assert.ok(replayPatch.to < harness.preContent.length, 'patch ends before the trimmed common suffix');
+  // The replayed span is strictly smaller than the whole file.
+  assert.ok(
+    (replayPatch.to - replayPatch.from) < harness.preContent.length,
+    'the replay patch is a targeted fragment, not the whole file'
+  );
+  // Sanity: applying the patch reproduces the post-write content.
+  assert.equal(
+    preContent.slice(0, replayPatch.from) + replayPatch.insert + preContent.slice(replayPatch.to),
+    postContent
+  );
   // applied carries the replay entry, not per-change DOM clicks.
   assert.ok(result.applied.length >= 1);
   assert.equal(result.applied.some(item => item.result.method === 'overleaf-accept-untracked-replay'), true);
@@ -249,7 +289,9 @@ test('acceptTrackedChanges surfaces a Reviewing-restore failure as a skipped ent
   // The replay still happened (the document content is correct); only the mode
   // restore failed, so it is reported as a skipped entry.
   assert.equal(result.ok, false);
-  assert.deepEqual(harness.state.writes, ['after\n']);
+  assert.equal(harness.state.writes.length, 1);
+  assert.equal(harness.state.writes[0].kind, 'patches', 'replay must go through the patches path');
+  assert.equal(harness.state.editorText, 'after\n');
   assert.equal(result.skipped.length, 1);
   assert.equal(result.skipped[0].result.code, 'reviewing_enable_failed');
 });
@@ -296,6 +338,8 @@ test('acceptTrackedChanges accepts a multi-file run, replaying each file untrack
     ensureReviewing: () => Promise.resolve({ ok: true, activated: false }),
     setReviewingEnabled: enabled => { state.reviewing = enabled; return Promise.resolve({ ok: true, changed: true, enabled }); },
     getReviewingState: () => ({ reviewing: { ok: state.reviewing }, signals: {} }),
+    isReviewingConfirmedForWrite: reviewState => reviewState?.reviewing?.ok === true,
+    isEditingConfirmedForNoTraceUndo: reviewState => reviewState?.reviewing?.ok === false,
     collectElements: selector => (/button/i.test(selector || '') ? [undoControl] : []),
     readNodeSignalText: () => 'Undo',
     isInsideCodexPanel: () => false,
@@ -312,7 +356,12 @@ test('acceptTrackedChanges accepts a multi-file run, replaying each file untrack
     readActiveEditorText: () => editors[state.activePath].text,
     replaceActiveEditorText(text) {
       editors[state.activePath].text = String(text);
-      state.writes.push({ path: state.activePath, text: String(text) });
+      state.writes.push({ path: state.activePath, kind: 'replaceAll', text: String(text) });
+      return { ok: true };
+    },
+    replaceActiveEditorPatches(patches, nextContent) {
+      editors[state.activePath].text = String(nextContent);
+      state.writes.push({ path: state.activePath, kind: 'patches', text: String(nextContent) });
       return { ok: true };
     },
     delay: () => Promise.resolve(),
@@ -337,8 +386,153 @@ test('acceptTrackedChanges accepts a multi-file run, replaying each file untrack
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(editors['main.tex'].text, 'main after\n');
   assert.equal(editors['intro.tex'].text, 'intro after\n');
-  // Each file was replayed as a plain edit.
+  // Each file was replayed via the targeted patches path — never replaceAll.
   assert.equal(state.writes.length, 2);
+  assert.equal(state.writes.every(write => write.kind === 'patches'), true,
+    'every file replay goes through the patches path, not replaceAll');
+});
+
+test('acceptTrackedChanges forces the Editing toggle even when isEditingConfirmedForNoTraceUndo false-positives "already Editing"', async () => {
+  // Bug B regression: the lenient isEditingConfirmedForNoTraceUndo reports
+  // "already Editing" while Track Changes is actually ON (reviewing.ok === true).
+  // The accept flow must NOT trust that short-circuit: it reads the reviewing
+  // state, sees Reviewing positively active, and forces setReviewingEnabled(false).
+  const harness = createAcceptHarness({
+    preContent: 'before\n',
+    postContent: 'after\n',
+    depOverrides: {
+      // The lenient detector lies: it claims Editing is confirmed.
+      isEditingConfirmedForNoTraceUndo: () => true
+    }
+  });
+  // The run wrote in Reviewing mode; getReviewingState() positively reports it.
+  // (createAcceptHarness defaults startReviewing to true.)
+
+  const result = await harness.router.acceptTrackedChanges({
+    expectedFiles: [{ path: harness.path, content: harness.preContent }],
+    postFiles: [{ path: harness.path, content: harness.postContent }]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  // Despite the lenient detector claiming "already Editing", the flow forced
+  // the toggle to OFF.
+  assert.equal(harness.state.editingActivations, 1, 'the Editing toggle was forced, not skipped');
+  // The replay landed and the prior Reviewing mode was restored afterwards.
+  assert.equal(harness.state.writes.length, 1);
+  assert.equal(harness.state.writes[0].kind, 'patches');
+  assert.equal(harness.state.reviewingRestores, 1);
+  assert.equal(harness.state.reviewing, true);
+});
+
+test('acceptTrackedChanges bails when Editing cannot be positively confirmed after the toggle', async () => {
+  // setReviewingEnabled reports ok, but the post-toggle reviewing state still
+  // says Reviewing is active. The flow must positively confirm Editing OFF and
+  // bail rather than replay while tracked.
+  const state = { reviewing: true };
+  const undoControl = {
+    tagName: 'BUTTON', disabled: false,
+    getAttribute: name => (name === 'aria-label' ? 'Undo' : null)
+  };
+  let editorText = 'after\n';
+  const writes = [];
+  const router = writebackRouter.create({
+    compileBridge: { markSourceEdited() {} },
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    ensureEditing: () => Promise.resolve({ ok: true, activated: true }),
+    ensureReviewing: () => Promise.resolve({ ok: true, activated: false }),
+    // The toggle "succeeds" but never actually leaves Reviewing.
+    setReviewingEnabled: enabled => Promise.resolve({ ok: true, changed: true, enabled }),
+    // ...so getReviewingState keeps reporting Reviewing as positively active.
+    getReviewingState: () => ({ reviewing: { ok: state.reviewing }, signals: {} }),
+    isReviewingConfirmedForWrite: reviewState => reviewState?.reviewing?.ok === true,
+    isEditingConfirmedForNoTraceUndo: reviewState => reviewState?.reviewing?.ok === false,
+    collectElements: selector => (/button/i.test(selector || '') ? [undoControl] : []),
+    readNodeSignalText: () => 'Undo',
+    isInsideCodexPanel: () => false,
+    clickNode(node) { if (node === undoControl) { editorText = 'before\n'; } },
+    readActiveEditorText: () => editorText,
+    replaceActiveEditorText(text) { editorText = String(text); writes.push(text); return { ok: true }; },
+    replaceActiveEditorPatches(_patches, nextContent) { editorText = String(nextContent); writes.push(nextContent); return { ok: true }; },
+    delay: () => Promise.resolve(),
+    treeOperations: {
+      getActiveFilePath: () => 'main.tex',
+      openFileByPath: () => Promise.resolve({ ok: true })
+    },
+    window: { setTimeout, clearTimeout }
+  });
+
+  const result = await router.acceptTrackedChanges({
+    expectedFiles: [{ path: 'main.tex', content: 'before\n' }],
+    postFiles: [{ path: 'main.tex', content: 'after\n' }]
+  });
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  // It must NOT replay while Reviewing is still active.
+  assert.deepEqual(writes, [], 'no replay while Track Changes could not be confirmed off');
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.code, 'accept_editing_not_confirmed');
+});
+
+test('acceptTrackedChanges re-applies the run\'s original forward patches verbatim when appliedOperations are provided', async () => {
+  // The run's forward writeback applied two separate targeted patches. After the
+  // editor-undo the document is back at the pre-write content, so those exact
+  // patches re-apply cleanly. Accept All must re-use them — not a whole-file
+  // replaceAll and not a re-derived diff.
+  const preContent = 'alpha\nbeta\ngamma\n';
+  // patch 1: 'alpha' -> 'ALPHA'  (from 0, to 5)
+  // patch 2: 'gamma' -> 'GAMMA'  (from 11, to 16)
+  const postContent = 'ALPHA\nbeta\nGAMMA\n';
+  const originalPatches = [
+    { from: 0, to: 5, expected: 'alpha', insert: 'ALPHA' },
+    { from: 11, to: 16, expected: 'gamma', insert: 'GAMMA' }
+  ];
+  const harness = createAcceptHarness({ preContent, postContent });
+
+  const result = await harness.router.acceptTrackedChanges({
+    expectedFiles: [{ path: harness.path, content: preContent }],
+    postFiles: [{ path: harness.path, content: postContent }],
+    appliedOperations: [
+      { type: 'edit', path: harness.path, patches: originalPatches }
+    ]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(harness.state.writes.length, 1);
+  assert.equal(harness.state.writes[0].kind, 'patches', 'replay went through the patches path');
+  assert.equal(harness.state.editorText, postContent);
+  // The run's original two patches were replayed verbatim — not collapsed into
+  // a single whole-span diff.
+  const replayed = harness.state.patchWrites[0];
+  assert.equal(replayed.length, 2, 'both original forward patches were re-applied');
+  assert.deepEqual(
+    replayed.map(patch => ({ from: patch.from, to: patch.to, insert: patch.insert })),
+    originalPatches.map(patch => ({ from: patch.from, to: patch.to, insert: patch.insert }))
+  );
+});
+
+test('acceptTrackedChanges falls back to a minimal diff when appliedOperations carry no usable patches', async () => {
+  // The run's recorded operation is a whole-file replaceAll (no patches). The
+  // replay must NOT reuse the replaceAll — it computes a minimal diff instead.
+  const preContent = 'shared head\nold middle\nshared tail\n';
+  const postContent = 'shared head\nnew middle\nshared tail\n';
+  const harness = createAcceptHarness({ preContent, postContent });
+
+  const result = await harness.router.acceptTrackedChanges({
+    expectedFiles: [{ path: harness.path, content: preContent }],
+    postFiles: [{ path: harness.path, content: postContent }],
+    appliedOperations: [
+      { type: 'edit', path: harness.path, replaceAll: postContent }
+    ]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(harness.state.writes.length, 1);
+  assert.equal(harness.state.writes[0].kind, 'patches', 'replay still goes through the patches path');
+  assert.equal(harness.state.editorText, postContent);
+  const replayPatch = harness.state.patchWrites[0][0];
+  assert.equal(harness.state.patchWrites[0].length, 1, 'a single targeted diff patch');
+  assert.ok(replayPatch.from > 0 && replayPatch.to < preContent.length,
+    'the diff patch is targeted, not a whole-file range');
 });
 
 // --- reject regression -----------------------------------------------------
