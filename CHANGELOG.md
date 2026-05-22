@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.3.5 - 2026-05-22
+
+Personalization isolation and settings experience release, with release metadata alignment for the v1.3.5 packaging, compatibility, and release tracking surfaces. This version stops the plugin Codex home from inheriting global Codex personalization, ships a new bundled annotated-rewrite skill, and reworks settings into a full-screen view with unified auto-save and per-skill enable toggles.
+
+### Added
+
+- Bundled the official `annotated-rewrite` Codex Overleaf skill: when rewriting `.tex` content it comments out the original under a `% [original]` marker and writes the replacement under a `% [revised]` marker so the before/after diff stays visible in the source.
+- Added a save-status indicator to the settings panel that reflects unified auto-save state.
+- Added per-skill enable/disable toggles so each Codex Overleaf skill can be turned on or off individually, honored at run time.
+
+### Changed
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, and release tracking metadata for the v1.3.5 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.3.5` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.3.5.zip`, `codex-overleaf-native-host-v1.3.5.tar.gz`, and `codex-overleaf-link-1.3.5.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.3.5 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.3.5 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.3.5 -- uninstall-native`.
+- The plugin Codex home no longer inherits the user's global Codex personalization: it no longer copies `~/.codex/AGENTS.md`, strips the top-level `personality` key from the copied `config.toml`, and no longer symlinks the `rules` and `memories` directories, with stale-state cleanup of those entries from previously prepared Codex homes.
+- Reworked the settings panel into a full-screen in-panel view with back navigation instead of a floating popup overlay.
+- Unified settings auto-save: every settings field now saves automatically and the explicit Save button was removed.
+- Moved Codex Overleaf skill management to a dedicated settings sub-page with sliding-switch controls, an inline remove-confirmation, and loading states.
+
+### Fixed
+
+- Stopped fullwidth CJK punctuation from being absorbed into file-path tokens when parsing clickable line references.
+
+### Notes
+
+- Native protocol stays `1`; this release changes packaging metadata, personalization isolation, and the settings experience, not the native messaging protocol.
+
 ## v1.3.0 - 2026-05-20
 
 Nested Overleaf file writeback stabilization release. This version focuses on making subdirectory file edits reliable after the user switches between files, and on aligning extension/native version surfaces for release diagnostics.
