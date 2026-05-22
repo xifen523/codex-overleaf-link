@@ -223,7 +223,15 @@
       if (typeof current !== 'string') {
         return;
       }
-      if (typeof operation.replaceAll === 'string') {
+      // The writeback already verified the editor content it produced. When
+      // that authoritative post-write content is available, trust it instead
+      // of re-deriving the result by re-applying patches: a wide patch's
+      // `expected` spans a whole paragraph, so it silently fails to re-apply
+      // against any base that drifted even slightly from the patch's base,
+      // and the result would otherwise collapse to the un-patched content.
+      if (typeof operation.verifiedContent === 'string') {
+        filesByPath.set(operation.path, operation.verifiedContent);
+      } else if (typeof operation.replaceAll === 'string') {
         filesByPath.set(operation.path, operation.replaceAll);
       } else if (Array.isArray(operation.patches) && operation.patches.length) {
         const patched = applyTextPatches(current, operation.patches);

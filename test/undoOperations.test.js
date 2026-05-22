@@ -211,3 +211,68 @@ test('builds full snapshot undo restores from legacy base files when original fi
     }
   ]);
 });
+
+// Regression: a "natural granularity" paragraph rewrite emits ONE wide patch
+// whose `expected` spans the whole old paragraph. The post-apply derivation
+// re-applies that patch against `undoExpectedFiles`, but that base is the
+// Overleaf project snapshot which can drift slightly from the patch's base
+// (the native mirror copy). A wide `expected` then fails to match, the patch
+// silently does not apply, and the derived post-write content collapses to the
+// un-patched paragraph. Reviewing-mode undo uses this content to decide
+// whether the editor is still at the post-write state; when it is wrong, undo
+// refuses its safe paths and the Codex-written paragraph is not reverted.
+// Narrow token patches hid the bug: their tiny `expected` windows still match
+// across the same drift. The writeback already verified the content it wrote,
+// so the operation carries `verifiedContent`; the post-apply derivation must
+// trust it instead of re-applying the wide patch.
+test('uses verified post-write content for a wide paragraph patch even when its expected drifted', () => {
+  const OLD_PARAGRAPH =
+    'The quick brown fox jumps over the lazy dog near the river bank every single morning.';
+  const NEW_PARAGRAPH =
+    'A swift auburn fox leaps above a sleepy hound beside the stream each and every dawn.';
+
+  // The Overleaf snapshot used for undoExpectedFiles drifted by one character
+  // ("morning." -> "morning ") relative to the patch's native-mirror base.
+  const DRIFTED_SNAPSHOT = OLD_PARAGRAPH.replace('morning.', 'morning ');
+
+  const widePatch = {
+    type: 'edit',
+    path: 'main.tex',
+    patches: [
+      {
+        from: 0,
+        to: OLD_PARAGRAPH.length,
+        expected: OLD_PARAGRAPH,
+        insert: NEW_PARAGRAPH
+      }
+    ],
+    // The writeback verified this exact content in the live editor.
+    verifiedContent: NEW_PARAGRAPH
+  };
+
+  const expected = buildExpectedFilesAfterOperations(
+    { files: [{ path: 'main.tex', content: DRIFTED_SNAPSHOT }] },
+    [widePatch]
+  );
+
+  // Without trusting verifiedContent the wide patch fails to re-apply against
+  // the drifted base and the result collapses back to DRIFTED_SNAPSHOT, which
+  // makes Reviewing-mode undo think the editor is not at the post-write state.
+  assert.equal(
+    expected.get('main.tex'),
+    NEW_PARAGRAPH,
+    'post-write content must be the verified paragraph, not the un-patched snapshot'
+  );
+
+  // The same operation without verifiedContent (legacy shape) still falls back
+  // to patch re-application, confirming the drift is what previously broke it.
+  const legacy = buildExpectedFilesAfterOperations(
+    { files: [{ path: 'main.tex', content: DRIFTED_SNAPSHOT }] },
+    [{ type: 'edit', path: 'main.tex', patches: widePatch.patches }]
+  );
+  assert.equal(
+    legacy.get('main.tex'),
+    DRIFTED_SNAPSHOT,
+    'legacy re-application collapses to the un-patched paragraph (the bug)'
+  );
+});

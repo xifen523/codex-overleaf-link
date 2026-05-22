@@ -8768,13 +8768,28 @@
     }) || null;
   }
 
+  // Carries the writeback's authoritative, verified post-write content onto an
+  // edit operation so later post-state derivations (e.g. tracked-undo
+  // postFiles) use it directly instead of re-applying patches against a
+  // possibly-divergent base. This keeps wide paragraph patches safe: their
+  // whole-paragraph `expected` would otherwise silently fail to re-apply.
+  function attachVerifiedContentToOperation(operation, result) {
+    if (!operation || typeof operation !== 'object') {
+      return operation;
+    }
+    if (operation.type === 'edit' && typeof result?.verifiedContent === 'string') {
+      return { ...operation, verifiedContent: result.verifiedContent };
+    }
+    return operation;
+  }
+
   function recordUndoFromApply(project, applyResult) {
     const appliedEntries = getAppliedEntries(applyResult);
     if (!currentRunView?.recordId || !appliedEntries.length) {
       return;
     }
     const appliedOperations = appliedEntries
-      .map(item => item.operation)
+      .map(item => attachVerifiedContentToOperation(item.operation, item.result))
       .filter(Boolean);
     const skippedEntries = getSkippedEntries(applyResult);
     const trackedChanges = normalizeApplyTrackedChanges(applyResult?.trackedChanges || []);
