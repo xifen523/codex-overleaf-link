@@ -594,6 +594,9 @@
       if (trackedChange.path && getActiveFilePath() !== trackedChange.path) {
         const opened = await openFileByPath(trackedChange.path);
         if (!opened.ok) {
+          if (trackedChange.path) {
+            continue;
+          }
           skipped.push({
             trackedChange,
             result: {
@@ -608,6 +611,9 @@
 
       const node = findTrackedChangeNode(trackedChange);
       if (!node) {
+        if (trackedChange.path) {
+          continue;
+        }
         skipped.push({
           trackedChange,
           result: {
@@ -621,6 +627,9 @@
 
       const acceptControl = findAcceptControlForTrackedChangeNode(node);
       if (!acceptControl) {
+        if (trackedChange.path) {
+          continue;
+        }
         skipped.push({
           trackedChange,
           result: {
@@ -636,6 +645,9 @@
       await delay(180);
 
       if (findTrackedChangeNode(trackedChange)) {
+        if (trackedChange.path) {
+          continue;
+        }
         skipped.push({
           trackedChange,
           result: {
@@ -653,6 +665,14 @@
           ok: true,
           method: 'overleaf-review-accept'
         }
+      });
+    }
+
+    const completion = await acceptRemainingTrackedChangesForTrackedPaths(trackedChanges, applied);
+    if (!completion.ok) {
+      skipped.push({
+        trackedChange: null,
+        result: completion
       });
     }
 
@@ -1026,6 +1046,84 @@
       ok: false,
       code: 'tracked_change_undo_max_iterations',
       reason: `${file.path} 仍有未完成的留痕记录；Codex 已停止以避免误拒绝其它改动。`
+    };
+  }
+
+  async function acceptRemainingTrackedChangesForTrackedPaths(trackedChanges, applied) {
+    const appliedBeforeSweep = applied.length;
+    const paths = Array.from(new Set((trackedChanges || [])
+      .map(change => normalizeSafeProjectPath(change?.path || ''))
+      .filter(Boolean)));
+    if (!paths.length) {
+      const activePath = normalizeSafeProjectPath(getActiveFilePath());
+      if (!activePath || !applied.length) {
+        return { ok: true };
+      }
+      paths.push(activePath);
+    }
+
+    for (const path of paths) {
+      const result = await acceptRemainingTrackedChangesForPath(path, applied, appliedBeforeSweep);
+      if (!result.ok) {
+        return result;
+      }
+    }
+    return { ok: true };
+  }
+
+  async function acceptRemainingTrackedChangesForPath(path, applied, appliedBeforeSweep) {
+    if (path && getActiveFilePath() !== path) {
+      const opened = await openFileByPath(path);
+      if (!opened.ok) {
+        return {
+          ok: false,
+          code: 'tracked_change_file_open_failed',
+          reason: `无法打开 ${path} 来继续接受这轮留痕记录；请在 Overleaf 审阅面板手动处理。`
+        };
+      }
+    }
+
+    const appliedCountBefore = applied.length;
+    const maxAttempts = 200;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const node = findLastTrackedChangeNodeForPath(path);
+      if (!node) {
+        if (applied.length > appliedCountBefore || appliedBeforeSweep > 0) {
+          return { ok: true };
+        }
+        return {
+          ok: false,
+          code: 'tracked_change_not_found',
+          reason: '没有在 Overleaf 页面里找到这轮写入对应的留痕记录；Codex 没有接受这条留痕。'
+        };
+      }
+
+      const acceptControl = findAcceptControlForTrackedChangeNode(node);
+      if (!acceptControl) {
+        return {
+          ok: false,
+          code: 'tracked_change_accept_control_not_found',
+          reason: `还有 ${path || '当前文件'} 的留痕记录未处理，但没有找到对应的 Accept/接受按钮；请在 Overleaf 审阅面板手动接受。`
+        };
+      }
+
+      const trackedChange = trackedChangeRefFromNode(node, path);
+      const beforeText = readActiveEditorText();
+      clickNode(acceptControl);
+      await waitForTrackedChangeRejectProgress(trackedChange, path, beforeText, 1200);
+      applied.push({
+        trackedChange,
+        result: {
+          ok: true,
+          method: 'overleaf-review-accept-sweep'
+        }
+      });
+    }
+
+    return {
+      ok: false,
+      code: 'tracked_change_undo_max_iterations',
+      reason: `${path || '当前文件'} 仍有未完成的留痕记录；Codex 已停止以避免误接受其它改动。`
     };
   }
 

@@ -45,7 +45,7 @@ function makeChangeNode(id, path, signal) {
 function buildReviewWorld(specs) {
   const rows = [];
   let live = [];
-  for (const spec of specs) {
+  function buildRow(spec) {
     const node = makeChangeNode(spec.id, spec.path, spec.signal);
     const controls = [];
     if (spec.accept !== false) controls.push(makeButton('Accept change'));
@@ -61,7 +61,10 @@ function buildReviewWorld(specs) {
     for (const control of controls) {
       control.parentElement = row;
     }
-    rows.push(row);
+    return row;
+  }
+  for (const spec of specs) {
+    rows.push(buildRow(spec));
   }
   live = rows.slice();
 
@@ -80,6 +83,12 @@ function buildReviewWorld(specs) {
     },
     resolveChange(id) {
       live = live.filter(row => row.node._id !== id);
+    },
+    appendChange(spec) {
+      const row = buildRow(spec);
+      rows.push(row);
+      live.push(row);
+      return row;
     },
     rowFor(id) {
       return rows.find(row => row.node._id === id) || null;
@@ -156,7 +165,11 @@ test('acceptTrackedChanges finds each ref, clicks Accept, verifies, returns appl
   assert.equal(marked, true);
 });
 
-test('acceptTrackedChanges skips a missing node with the node-not-found reason code', async () => {
+test('acceptTrackedChanges does not error on a missing path-bearing ref; the per-file sweep completes the run', async () => {
+  // Mirroring the reject path: a ref that names a file path but is not found in
+  // the DOM is silently skipped in the per-node loop (Overleaf may have already
+  // re-rendered or coalesced it). The per-file sweep then accepts whatever the
+  // run file actually still has, so the run completes without a spurious skip.
   const world = buildReviewWorld([
     { id: 'change-1', path: 'main.tex' }
   ]);
@@ -169,11 +182,12 @@ test('acceptTrackedChanges skips a missing node with the node-not-found reason c
     ]
   });
 
-  assert.equal(result.ok, false);
+  assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.applied.length, 1);
-  assert.equal(result.skipped.length, 1);
-  assert.equal(result.skipped[0].result.code, 'tracked_change_not_found');
-  assert.equal(result.skipped[0].trackedChange.key, 'id:change-missing');
+  assert.equal(result.applied[0].trackedChange.key, 'id:change-1');
+  assert.equal(result.skipped.length, 0, 'a missing path-bearing ref is skipped silently, not as an error');
+  const leftover = world.collectElements('*', 100).some(node => node._id);
+  assert.equal(leftover, false, 'nothing is left live in the run file');
 });
 
 test('acceptTrackedChanges skips a node with no accept control with the distinct control reason code', async () => {
@@ -196,17 +210,25 @@ test('acceptTrackedChanges skips a node with no accept control with the distinct
   assert.equal(clicks.length, 0);
 });
 
-test('acceptTrackedChanges skips when the change does not resolve after clicking Accept', async () => {
+test('acceptTrackedChanges stops with a max-iterations safety code when a change never resolves', async () => {
+  // Mirroring the reject sweep's bounded loop: if a tracked-change node keeps
+  // re-appearing after its Accept control is clicked (it never resolves), the
+  // per-file sweep must not spin forever — it stops at maxAttempts and reports
+  // a clear safety code rather than silently leaving the run half-applied.
+  let editorText = 0;
   const world = buildReviewWorld([
     { id: 'change-1', path: 'main.tex' }
   ]);
-  // Override clickNode so the click does not resolve the change.
-  const { router, clicks } = createRouter(world, {
+  const { router } = createRouter(world, {
     activePath: 'main.tex',
     depOverrides: {
-      clickNode(node) {
-        // Intentionally do nothing — the change stays live.
-        clicks.push?.(node);
+      // The click never removes the change from the live world, so the sweep
+      // keeps finding it. A fresh editor-text reading each call lets the
+      // progress wait return immediately, keeping the bounded loop fast.
+      clickNode() {},
+      readActiveEditorText() {
+        editorText += 1;
+        return `editor-${editorText}`;
       }
     }
   });
@@ -218,16 +240,19 @@ test('acceptTrackedChanges skips when the change does not resolve after clicking
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.applied.length, 0);
   assert.equal(result.skipped.length, 1);
-  assert.equal(result.skipped[0].result.code, 'tracked_change_accept_not_confirmed');
+  assert.equal(result.skipped[0].trackedChange, null, 'the sweep failure carries no single ref');
+  assert.equal(result.skipped[0].result.code, 'tracked_change_undo_max_iterations');
 });
 
-test('acceptTrackedChanges touches only the explicit refs and never sweeps other changes', async () => {
+test('acceptTrackedChanges sweeps remaining tracked changes in the run files after the per-node loop', async () => {
+  // change-3-extra lives in main.tex (a run file) but is NOT an explicit ref.
+  // Mirroring the reject sweep, the per-file sweep after the per-node loop must
+  // accept it too, so one click decisively accepts everything in the run files.
   const world = buildReviewWorld([
     { id: 'change-1', path: 'main.tex' },
     { id: 'change-2', path: 'main.tex' },
-    { id: 'change-3-other', path: 'main.tex' }
+    { id: 'change-3-extra', path: 'main.tex' }
   ]);
   const { router, clicks } = createRouter(world, { activePath: 'main.tex' });
 
@@ -239,13 +264,81 @@ test('acceptTrackedChanges touches only the explicit refs and never sweeps other
   });
 
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.applied.length, 2);
-  assert.equal(clicks.length, 2, 'only the two explicit refs are clicked');
-  // The unrelated change-3-other is still live (never accepted).
-  assert.ok(world.rowFor('change-3-other'));
+  // 2 explicit refs + 1 swept = 3 accepted, all clicks are Accept controls.
+  assert.equal(clicks.length, 3);
+  for (const click of clicks) {
+    assert.match(click._label, /accept/i);
+  }
+  assert.equal(result.applied.length, 3);
+  assert.equal(result.skipped.length, 0);
+  // No tracked-change node is left live in the run file.
+  const leftover = world.collectElements('*', 100).some(node => node._id);
+  assert.equal(leftover, false, 'the sweep accepts every remaining tracked change');
+  const sweptKeys = result.applied.map(entry => entry.trackedChange.key);
+  assert.ok(sweptKeys.includes('id:change-3-extra'), 'the non-ref change was swept');
+});
+
+test('acceptTrackedChanges only sweeps within the run files, not unrelated files', async () => {
+  const world = buildReviewWorld([
+    { id: 'change-1', path: 'main.tex' },
+    { id: 'change-2-other-file', path: 'appendix.tex' }
+  ]);
+  const { router, clicks } = createRouter(world, { activePath: 'main.tex' });
+
+  const result = await router.acceptTrackedChanges({
+    trackedChanges: [
+      { key: 'id:change-1', id: 'change-1', path: 'main.tex' }
+    ]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(clicks.length, 1, 'only main.tex is swept');
+  // The change in appendix.tex (not a run file) is untouched.
   const stillThere = world.collectElements('*', 100)
-    .some(node => node._id === 'change-3-other');
-  assert.equal(stillThere, true, 'a non-ref tracked change is left untouched');
+    .some(node => node._id === 'change-2-other-file');
+  assert.equal(stillThere, true, 'a tracked change in a non-run file is left untouched');
+});
+
+test('acceptTrackedChanges fully accepts a run whose nodes shift/re-render between clicks', async () => {
+  // Simulate Overleaf re-rendering the review panel: after the per-node loop
+  // resolves the explicit refs, a fresh tracked-change node appears in the run
+  // file (a node that re-rendered with a new id). The per-file sweep, which
+  // re-queries the DOM each iteration, must still accept it so nothing leaks.
+  const world = buildReviewWorld([
+    { id: 'change-1', path: 'main.tex' },
+    { id: 'change-2', path: 'main.tex' }
+  ]);
+  const { router, clicks } = createRouter(world, {
+    activePath: 'main.tex',
+    depOverrides: {
+      clickNode(node) {
+        clicks.push(node);
+        const row = node?.parentElement;
+        if (!row || !row.node) {
+          return;
+        }
+        const resolvedId = row.node._id;
+        world.resolveChange(resolvedId);
+        // After the last explicit ref resolves, the panel re-renders a leftover
+        // tracked change under a brand-new id the run never explicitly listed.
+        if (resolvedId === 'change-2') {
+          world.appendChange({ id: 'change-rerendered', path: 'main.tex' });
+        }
+      }
+    }
+  });
+
+  const result = await router.acceptTrackedChanges({
+    trackedChanges: [
+      { key: 'id:change-1', id: 'change-1', path: 'main.tex' },
+      { key: 'id:change-2', id: 'change-2', path: 'main.tex' }
+    ]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const leftover = world.collectElements('*', 100).some(node => node._id);
+  assert.equal(leftover, false, 'no tracked change leaks after a re-render');
+  assert.equal(clicks.length, 3, 'two refs plus the re-rendered node');
 });
 
 test('acceptTrackedChanges opens the ref file when it is not active', async () => {
@@ -265,7 +358,11 @@ test('acceptTrackedChanges opens the ref file when it is not active', async () =
   });
 
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.deepEqual(opened, ['other.tex']);
+  // The per-node loop opens the ref file; the per-file sweep (mirroring reject)
+  // re-opens it as well since the test's active path stays static. Either way,
+  // only the run's file is ever opened — never an unrelated file.
+  assert.ok(opened.length >= 1, 'the ref file is opened at least once');
+  assert.ok(opened.every(path => path === 'other.tex'), 'only the run file is opened');
 });
 
 test('acceptTrackedChanges rejects an invalid tracked-change path', async () => {
