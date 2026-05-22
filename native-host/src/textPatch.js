@@ -7,12 +7,53 @@ function computeTextPatches(oldText, newText) {
     return [];
   }
 
-  const linePatches = computeLineAnchoredPatches(oldValue, newValue);
-  if (linePatches.length) {
-    return linePatches;
+  const groups = computeLineAnchoredChangeGroups(oldValue, newValue);
+  if (!groups.length) {
+    return [computeSingleTextPatch(oldValue, newValue)];
   }
 
-  return [computeSingleTextPatch(oldValue, newValue)];
+  const patches = [];
+  for (const group of groups) {
+    patches.push(...computeNaturalGroupPatches(group));
+  }
+  return patches.length ? patches : [computeSingleTextPatch(oldValue, newValue)];
+}
+
+// Computes the natural-granularity patches for one changed group (spec
+// "Algorithm sketch"). Builds token patches and metrics, classifies the group,
+// then dispatches to the matching builder. `singleGroupPatch` already returns
+// a one-element array; `computeParagraphPatches` / `computeSentencePatches`
+// return an array or `null`, so a null/empty result falls back to a single
+// group patch. `coalesceTokenPatches` always returns a non-empty array when it
+// receives non-empty token patches.
+function computeNaturalGroupPatches(group) {
+  const tokenPatches = computeTokenAnchoredPatches(
+    group.oldText,
+    group.newText,
+    group.oldStart
+  );
+  const metrics = computeGroupMetrics(group, tokenPatches);
+  const { type } = classifyChangedGroup(group, tokenPatches, metrics);
+
+  if (type === 'annotated_block') {
+    return singleGroupPatch(group);
+  }
+  if (type === 'paragraph_rewrite') {
+    const paragraphPatches = computeParagraphPatches(group);
+    return (paragraphPatches && paragraphPatches.length)
+      ? paragraphPatches
+      : singleGroupPatch(group);
+  }
+  if (type === 'sentence_rewrite') {
+    const sentencePatches = computeSentencePatches(group, tokenPatches);
+    return (sentencePatches && sentencePatches.length)
+      ? sentencePatches
+      : singleGroupPatch(group);
+  }
+  if (type === 'small_edit' && tokenPatches && tokenPatches.length) {
+    return coalesceTokenPatches(group, tokenPatches);
+  }
+  return singleGroupPatch(group);
 }
 
 function computeSingleTextPatch(oldValue, newValue, offset = 0) {
@@ -100,24 +141,6 @@ function computeLineAnchoredChangeGroups(oldValue, newValue) {
     groups.push(group);
     group = null;
   }
-}
-
-function computeLineAnchoredPatches(oldValue, newValue) {
-  const groups = computeLineAnchoredChangeGroups(oldValue, newValue);
-  const patches = [];
-
-  for (const group of groups) {
-    if (group.oldText !== group.newText) {
-      const tokenPatches = computeTokenAnchoredPatches(group.oldText, group.newText, group.oldStart);
-      if (tokenPatches) {
-        patches.push(...tokenPatches);
-      } else {
-        patches.push(computeSingleTextPatch(group.oldText, group.newText, group.oldStart));
-      }
-    }
-  }
-
-  return patches;
 }
 
 function computeTokenAnchoredPatches(oldValue, newValue, offset = 0) {

@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
+const { applyPatches } = require('./helpers/patches');
 const {
   computeTextPatches,
   computeLineAnchoredChangeGroups,
@@ -99,42 +100,171 @@ test('keeps distant edits in long LaTeX files as separate patches', () => {
   assert.ok(patches.every(patch => patch.to - patch.from < 80));
 });
 
-test('splits a rewritten wrapped paragraph into token-local patches', () => {
+test('produces one paragraph patch for a rewritten wrapped paragraph', () => {
   const oldText = [
     'As generalized models of restless multi-armed bandits, weakly\n',
-    'coupled networked systems have garnered attention due to\n',
-    'applications such as fairness-aware multiple access and\n',
-    'sustainable distributed load balancing in data centers.\n',
+    'coupled networked systems have garnered notable attention due\n',
+    'to applications in fairness-aware multiple access schemes and\n',
+    'sustainable distributed load balancing across data centers.\n',
     'In these systems, agents are networked in the sense that their\n',
     'actions are constrained by global constraints, while they are\n',
     'weakly coupled since individual rewards and costs depend solely\n',
-    "on each agent's own states and actions.\n",
-    'We have proven that our algorithms achieve sublinear regrets and\n',
-    'constraint violations, regardless of the existence of a presumed\n',
-    'strictly feasible policy.\n'
+    "on each agent's own states and actions.\n"
   ].join('');
   const newText = [
-    'As a generalization of restless multi-armed bandits, weakly\n',
-    'coupled networked systems have garnered attention due to\n',
-    'applications such as fairness-aware multiple access and\n',
-    'sustainable distributed load balancing in data centers.\n',
-    'In these systems, agents are coupled through global\n',
-    'constraints, while they remain weakly coupled because\n',
-    "individual rewards and costs depend solely on each agent's\n",
-    'own state and action.\n',
-    'We prove that our algorithms achieve sublinear regrets and\n',
-    'constraint violations, regardless of whether a strictly\n',
-    'feasible policy exists.\n'
+    'As a broad generalization of restless multi-armed bandit\n',
+    'problems, weakly coupled networked systems have recently drawn\n',
+    'considerable interest in fairness-aware multiple access designs\n',
+    'and in sustainable distributed load balancing for data centers.\n',
+    'Within such systems, the agents are networked because their\n',
+    'available actions are bound together by shared global limits,\n',
+    'and they are only weakly coupled because each reward and cost\n',
+    "depends purely on a single agent's own state and chosen action.\n"
   ].join('');
 
   const patches = computeTextPatches(oldText, newText);
 
+  assert.equal(patches.length, 1);
   assert.equal(applyPatches(oldText, patches), newText);
-  assert.ok(patches.length > 3, `expected token-local patches, got ${patches.length}`);
-  assert.ok(
-    patches.every(patch => Math.max(patch.to - patch.from, patch.insert.length) < 160),
-    JSON.stringify(patches, null, 2)
-  );
+  assert.ok(patches[0].expected.length > 160);
+  assert.ok(patches[0].insert.length > 160);
+});
+
+test('computeTextPatches keeps a small word fix as one small token patch', () => {
+  const oldText = 'The system runs fast in practice.\n';
+  const newText = 'The system runs faster in practice.\n';
+
+  const patches = computeTextPatches(oldText, newText);
+
+  assert.equal(patches.length, 1);
+  assert.equal(applyPatches(oldText, patches), newText);
+  assert.deepEqual(patches, [
+    { from: 16, to: 20, expected: 'fast', insert: 'faster' }
+  ]);
+});
+
+test('computeTextPatches keeps a short phrase replacement token-local', () => {
+  const oldText = 'It achieves sublinear regret under mild assumptions.\n';
+  const newText = 'It achieves logarithmic regret under mild assumptions.\n';
+
+  const patches = computeTextPatches(oldText, newText);
+
+  assert.equal(applyPatches(oldText, patches), newText);
+  assert.equal(patches.length, 1);
+  assert.ok(Math.max(patches[0].to - patches[0].from, patches[0].insert.length) < 40);
+});
+
+test('computeTextPatches keeps distant local edits as separate patches', () => {
+  const oldLines = Array.from({ length: 40 }, (_, index) => `line ${index}\n`);
+  const newLines = oldLines.slice();
+  newLines[2] = 'line 2 with a local fix\n';
+  newLines[34] = 'line 34 with a local fix\n';
+  const oldText = oldLines.join('');
+  const newText = newLines.join('');
+
+  const patches = computeTextPatches(oldText, newText);
+
+  assert.ok(patches.length >= 2, `expected separate patches, got ${patches.length}`);
+  assert.equal(applyPatches(oldText, patches), newText);
+});
+
+test('computeTextPatches produces one block patch for an annotated rewrite', () => {
+  const oldText = [
+    'The proposed scheme is fast. The proposed scheme is also robust.\n'
+  ].join('');
+  const newText = [
+    '% [original]\n',
+    '% The proposed scheme is fast. The proposed scheme is also robust.\n',
+    '\n',
+    '% [revised]\n',
+    'The proposed scheme is efficient. The proposed scheme is also resilient.\n'
+  ].join('');
+
+  const patches = computeTextPatches(oldText, newText);
+
+  assert.equal(patches.length, 1);
+  assert.equal(applyPatches(oldText, patches), newText);
+  assert.ok(patches[0].insert.includes('% [original]'));
+  assert.ok(patches[0].insert.includes('% [revised]'));
+});
+
+test('computeTextPatches produces one sentence patch for a single sentence rewrite', () => {
+  const firstSentence =
+    'The unchanged opening sentence introduces the topic and stays exactly as written here. ';
+  const oldSecond =
+    'The proposed algorithm achieves sublinear regret and bounded constraint violation under mild assumptions.';
+  const newSecond =
+    'The proposed method achieves logarithmic regret and tight constraint violation under standard assumptions.';
+  const oldText = firstSentence + oldSecond + '\n';
+  const newText = firstSentence + newSecond + '\n';
+
+  const patches = computeTextPatches(oldText, newText);
+
+  assert.equal(patches.length, 1);
+  assert.equal(applyPatches(oldText, patches), newText);
+  // The patch covers only the rewritten second sentence; the unchanged first
+  // sentence must stay outside both expected and insert.
+  assert.ok(!patches[0].expected.includes('unchanged opening sentence'));
+  assert.ok(!patches[0].insert.includes('unchanged opening sentence'));
+  assert.ok(patches[0].from >= firstSentence.length);
+});
+
+test('computeTextPatches emits one patch per changed paragraph across a blank-line boundary', () => {
+  const firstPara = [
+    'The first paragraph describes the model setup in detail.\n',
+    'It spans two lines so the changed group is multi-line.\n'
+  ].join('');
+  const secondPara = [
+    'The second paragraph describes the experiments in detail.\n',
+    'It also spans two lines so each paragraph is its own group unit.\n'
+  ].join('');
+  const newFirstPara = [
+    'The first paragraph now describes the revised model setup clearly.\n',
+    'It still spans two lines so the changed group remains multi-line.\n'
+  ].join('');
+  const oldText = firstPara + '\n' + secondPara;
+  const newText = newFirstPara + '\n' + secondPara;
+
+  const patches = computeTextPatches(oldText, newText);
+
+  assert.equal(patches.length, 1, 'only the changed paragraph should produce a patch');
+  assert.equal(applyPatches(oldText, patches), newText);
+  assert.ok(!patches[0].expected.includes('second paragraph'));
+  assert.ok(!patches[0].insert.includes('second paragraph'));
+});
+
+test('computeTextPatches falls back to one group patch for an ambiguous multi-paragraph rewrite', () => {
+  // No line is shared between old and new (every line, including blank-line
+  // structure, differs), so line anchoring keeps the whole rewrite as one
+  // contiguous changed group. Inside that group the old side is a single
+  // paragraph while the new side has two, so paragraph pairing is ambiguous
+  // and the builder must fall back to one group patch.
+  const oldText = [
+    'Original opening prose covering the model assumptions here.\n',
+    'Original middle prose covering the convergence guarantee here.\n',
+    'Original closing prose covering the experimental outcomes here.\n'
+  ].join('');
+  const newText = [
+    'Revised opening prose now covering the relaxed assumptions.\n',
+    '\n',
+    'Revised closing prose now covering the experimental outcomes.\n'
+  ].join('');
+
+  const patches = computeTextPatches(oldText, newText);
+
+  assert.equal(patches.length, 1);
+  assert.equal(applyPatches(oldText, patches), newText);
+});
+
+test('computeTextPatches keeps a LaTeX command/reference phrase edit small', () => {
+  const oldText = 'As shown in \\cref{thm:main}, the bound is tight.\n';
+  const newText = 'As shown in \\cref{thm:primary}, the bound is tight.\n';
+
+  const patches = computeTextPatches(oldText, newText);
+
+  assert.equal(applyPatches(oldText, patches), newText);
+  assert.equal(patches.length, 1);
+  assert.ok(Math.max(patches[0].to - patches[0].from, patches[0].insert.length) < 40);
 });
 
 test('computeLineAnchoredChangeGroups returns no groups for identical content', () => {
@@ -752,10 +882,3 @@ test('coalesceTokenPatches leaves far-apart token patches unchanged', () => {
   assert.deepEqual(coalesced, tokenPatches);
   assertGroupPatchInvariant(group, coalesced);
 });
-
-function applyPatches(text, patches) {
-  return patches.slice().sort((left, right) => right.from - left.from).reduce((next, patch) => {
-    assert.equal(next.slice(patch.from, patch.to), patch.expected);
-    return next.slice(0, patch.from) + patch.insert + next.slice(patch.to);
-  }, text);
-}

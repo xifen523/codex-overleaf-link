@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { runCodexSession } = require('../native-host/src/codexSessionRunner');
+const { applyPatches } = require('./helpers/patches');
 
 test('attaches line diffs to sync changes in codex.run result', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-diff-'));
@@ -35,6 +36,45 @@ test('attaches line diffs to sync changes in codex.run result', async () => {
     ]);
     assert.ok(change.diff[0].lines.some(l => l.type === 'remove' && l.text === 'old title'));
     assert.ok(change.diff[0].lines.some(l => l.type === 'add' && l.text === 'new title'));
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('attaches one paragraph-level patch for a codex.run paragraph rewrite', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-diff-'));
+  try {
+    const oldContent = [
+      'The proposed algorithm achieves sublinear regret and bounded\n',
+      'constraint violation under mild assumptions on the problem.\n',
+      'It remains practical because the per-step cost stays low.\n'
+    ].join('');
+    const newContent = [
+      'The proposed method attains logarithmic regret and tight\n',
+      'constraint violation under standard assumptions on the model.\n',
+      'It stays practical because the per-iteration cost remains low.\n'
+    ].join('');
+
+    const result = await runCodexSession({
+      params: {
+        projectId: 'diff-paragraph-test',
+        task: 'rewrite the paragraph',
+        mode: 'auto',
+        project: { files: [{ path: 'main.tex', content: oldContent }] }
+      },
+      rootDir,
+      emit: () => {},
+      executeCodex: async ({ workspacePath }) => {
+        fs.writeFileSync(path.join(workspacePath, 'main.tex'), newContent, 'utf8');
+      }
+    });
+
+    assert.equal(result.syncChanges.length, 1);
+    const change = result.syncChanges[0];
+    assert.equal(change.path, 'main.tex');
+    assert.ok(Array.isArray(change.patches));
+    assert.equal(change.patches.length, 1);
+    assert.equal(applyPatches(oldContent, change.patches), newContent);
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

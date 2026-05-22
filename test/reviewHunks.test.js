@@ -22,6 +22,30 @@ test('buildReviewModel creates one review hunk per text patch', () => {
   assert.deepEqual(model.files[0].hunks[1].patchIndexes, [1]);
 });
 
+test('a paragraph-level patch yields exactly one review hunk', () => {
+  const model = ReviewHunks.buildReviewModel([
+    {
+      type: 'write',
+      path: 'main.tex',
+      diff: [{ startA: 1, startB: 3, lines: [] }],
+      patches: [
+        {
+          from: 0,
+          to: 184,
+          expected:
+            'The proposed algorithm achieves sublinear regret and bounded constraint violation under mild assumptions on the problem. It remains practical because the per-step cost stays low.',
+          insert:
+            'The proposed method attains logarithmic regret and tight constraint violation under standard assumptions on the model. It stays practical because the per-iteration cost remains low.'
+        }
+      ]
+    }
+  ]);
+
+  assert.equal(model.files[0].hunks.length, 1);
+  assert.equal(model.files[0].hunks[0].id, 'main.tex:hunk:0');
+  assert.deepEqual(model.files[0].hunks[0].patchIndexes, [0]);
+});
+
 test('buildAcceptedSyncChanges filters accepted hunk patch indexes without replaceAll', () => {
   const syncChanges = [
     {
