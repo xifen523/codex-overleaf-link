@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.3.7 - 2026-05-23
+
+Accept changes release. This version adds a per-run **Accept changes** control on the run card so a Codex run's Overleaf tracked changes can be accepted in one click — the accept counterpart of the existing Undo — along with release metadata alignment for the v1.3.7 packaging, compatibility, and release tracking surfaces.
+
+### Added
+
+- Per-run **Accept changes** control on the run card (positioned before Undo) that accepts all of the current run's Overleaf tracked changes in one click and drives the run to a terminal accepted state. The mechanism first reverts the run's tracked writeback via the same editor-undo path the existing Undo relies on, then replays the run's own original forward patches as a non-tracked edit so the run's content lands as plain permanent text. The replay waits for Overleaf's Editing mode to remain stable before each per-op write, watches for fresh tracked changes during the write, and rolls back via editor-undo if Overleaf reintroduces tracked changes — leaving the run pending and the document unchanged rather than silently double-tracking.
+- New `trackedChangeStatus` per-run lifecycle field with three stable values (`pending` / `accepted` / `rejected`); Accept changes and Undo are mutually exclusive terminal actions and both buttons stay visible but disabled at terminal so the run card always shows the lifecycle clearly.
+
+### Changed
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, and release tracking metadata for the v1.3.7 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.3.7` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.3.7.zip`, `codex-overleaf-native-host-v1.3.7.tar.gz`, and `codex-overleaf-link-1.3.7.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.3.7 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.3.7 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.3.7 -- uninstall-native`.
+
+### Notes
+
+- Native protocol stays `1`; this release adds the Accept changes UI and lifecycle, not the native messaging protocol.
+- Accept changes leaves Overleaf in Editing mode after a successful replay (Track Changes is not auto-re-enabled) to avoid Overleaf re-tracking the just-replayed text; turn Reviewing / Track Changes back on manually once Overleaf has saved the accepted text.
+
 ## v1.3.6 - 2026-05-22
 
 Writeback patch granularity release, with release metadata alignment for the v1.3.6 packaging, compatibility, and release tracking surfaces. This version makes Overleaf writeback patches match editing intent so reviewed changes land as coherent units, and fixes Reviewing-mode undo and a hardcoded-Chinese restored-run message.
