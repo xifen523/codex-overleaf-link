@@ -603,6 +603,13 @@
     const postFiles = Array.isArray(params.postFiles) ? params.postFiles : [];
     const applied = [];
     const skipped = [];
+    // diagnostics: a per-step trace returned to the caller so the run card can
+    // surface exactly what happened on each Accept All step. Each entry is
+    // `{ step, info }`; the content runtime translates `step` via i18n.
+    const diagnostics = [];
+    const pushDiagnostic = (step, info) => {
+      diagnostics.push({ step, info: info || {} });
+    };
 
     const expectedByPath = new Map(expectedFiles
       .filter(file => file?.path && typeof file.content === 'string')
@@ -624,14 +631,23 @@
             code: 'accept_missing_run_content',
             reason: '这轮写入没有可识别的写入前/写入后内容；Codex 没有把留痕改动接受为永久文本。'
           }
-        }]
+        }],
+        diagnostics
       };
     }
 
     // Step 1: editor-undo the run's tracked writeback back to its pre-write
     // content, removing every tracked change. This reuses the exact mechanism
     // the reject path relies on (its primary path).
+    const appliedBeforeUndo = applied.length;
     const editorUndo = await rejectTrackedChangesViaEditorUndo(expectedFiles, postFiles, applied);
+    pushDiagnostic('editorUndo', {
+      ok: editorUndo.ok === true,
+      attempted: editorUndo.attempted === true,
+      code: editorUndo.code || '',
+      reason: editorUndo.reason || '',
+      pathsProcessed: applied.length - appliedBeforeUndo
+    });
     if (!editorUndo.ok) {
       // Drift bail: the editor-undo could not reach the pre-write state. Do NOT
       // re-write — that would only make the document worse. Return not-ok so the
@@ -648,7 +664,8 @@
               code: 'accept_editor_undo_unavailable',
               reason: '没有可执行的 Overleaf 原生撤销来清掉本轮留痕；Codex 没有接受这轮改动。'
             }
-        }]
+        }],
+        diagnostics
       };
     }
 
@@ -666,7 +683,15 @@
     // explicitly, and if Reviewing/Track Changes is on — or Editing is not
     // positively confirmed OFF — force the toggle via setReviewingEnabled(false)
     // rather than ensureEditing's lenient path.
+    const modeBefore = getReviewingState({});
+    pushDiagnostic('modeBefore', summarizeReviewingStateForDiagnostics(modeBefore));
     const editingSwitch = await forceEditingForAcceptReplay();
+    pushDiagnostic('forceEditing', {
+      ok: editingSwitch.ok === true,
+      activated: editingSwitch.activated === true,
+      code: editingSwitch.code || '',
+      reason: editingSwitch.reason || ''
+    });
     if (!editingSwitch.ok) {
       // The undo already reverted the writeback; without a *confirmed* Editing
       // mode the replay would itself be tracked. Bail rather than re-introduce
@@ -681,10 +706,14 @@
             code: editingSwitch.code || 'accept_editing_not_confirmed',
             reason: editingSwitch.reason || '无法确认 Overleaf 已切换到 Editing 模式；Codex 没有把本轮改动重写为永久文本。'
           }
-        }]
+        }],
+        diagnostics
       };
     }
-    const editingActivated = editingSwitch.activated === true;
+    // Tracks whether THIS flow toggled Reviewing off (either initially via
+    // forceEditingForAcceptReplay, or later inside the per-op re-confirm loop).
+    // The final restore only fires if this flow owned the toggle.
+    let weToggledOff = editingSwitch.activated === true;
 
     // Step 3: re-apply each file's changed fragments as a plain edit. With
     // tracking off these land as permanent, untracked text. The replay must
@@ -694,7 +723,7 @@
     // about the mode switch were imperfect.
     const operationsResult = buildAcceptReplayOperations(paths, expectedByPath, postByPath, params.appliedOperations);
     if (!operationsResult.ok) {
-      if (editingActivated) {
+      if (weToggledOff) {
         await setReviewingEnabled(true, { waitMs: 1800 });
       }
       return {
@@ -703,47 +732,141 @@
         skipped: [{
           trackedChange: null,
           result: operationsResult
-        }]
+        }],
+        diagnostics
       };
     }
     const operations = operationsResult.operations;
-    const replay = await applyOperationsCore(operations, {
-      baseFiles: paths.map(path => ({
-        path,
-        content: expectedByPath.get(path)
-      }))
-    });
-    for (const item of replay.applied || []) {
-      applied.push({
-        trackedChange: {
-          key: `accept-replay:${item.operation?.path || ''}`,
-          id: '',
-          path: item.operation?.path || '',
-          label: 'Accept All (untracked replay)'
-        },
-        result: {
-          ...item.result,
-          method: 'overleaf-accept-untracked-replay'
+    // Per-op replay loop with sticky-Editing re-confirm.
+    //
+    // Bug C: even after forceEditingForAcceptReplay confirmed Editing once,
+    // Overleaf has been observed flipping back to Reviewing between the
+    // confirm and the next CodeMirror write (Overleaf-side override, per-user
+    // "Track Changes for me" setting, or a positive-confirm false-positive
+    // window). The fix: re-verify Editing immediately BEFORE every single
+    // operation, and if Reviewing has slipped back on, force the toggle off
+    // again and positively re-confirm before writing. If Editing still cannot
+    // be positively confirmed after the re-toggle, bail the rest of the loop
+    // so we never land a tracked write.
+    let bailedReason = null;
+    for (const operation of operations) {
+      const opPath = operation?.path || '';
+      const preState = getReviewingState({});
+      const reviewingOnBefore = isReviewingConfirmedForWrite(preState);
+      const editingConfirmedBefore = isEditingPositivelyConfirmed(preState);
+      let reToggled = false;
+      let reToggleResult = null;
+
+      if (reviewingOnBefore || !editingConfirmedBefore) {
+        reToggled = true;
+        reToggleResult = await setReviewingEnabled(false, { waitMs: 1800 });
+        if (reToggleResult.ok) {
+          weToggledOff = true;
         }
+      }
+
+      const postToggleState = reToggled ? getReviewingState({}) : preState;
+      const editingConfirmedAfter = reToggled
+        ? isEditingPositivelyConfirmed(postToggleState)
+        : editingConfirmedBefore;
+
+      pushDiagnostic('replayStart', {
+        path: opPath,
+        isReviewingPositivelyOn: reviewingOnBefore,
+        isEditingPositivelyConfirmed: editingConfirmedBefore,
+        reToggled,
+        reToggleOk: reToggleResult ? reToggleResult.ok === true : null,
+        reToggleCode: reToggleResult?.code || '',
+        editingConfirmedAfterReToggle: editingConfirmedAfter
       });
-    }
-    for (const item of replay.skipped || []) {
-      skipped.push({
-        trackedChange: {
-          key: `accept-replay:${item.operation?.path || ''}`,
-          id: '',
-          path: item.operation?.path || '',
-          label: 'Accept All (untracked replay)'
-        },
-        result: item.result
+
+      if (!editingConfirmedAfter) {
+        // Bail the rest of the loop with the existing bail semantics — never
+        // land a tracked write because Editing slipped.
+        const bailResult = {
+          ok: false,
+          code: reToggleResult?.code || 'accept_editing_not_confirmed',
+          reason: reToggleResult?.reason
+            || '本次操作前未能确认 Overleaf 处于 Editing 模式；为避免重写又留下留痕，Codex 没有继续重放本轮剩余改动。'
+        };
+        skipped.push({
+          trackedChange: {
+            key: `accept-replay:${opPath}`,
+            id: '',
+            path: opPath,
+            label: 'Accept All (untracked replay)'
+          },
+          result: bailResult
+        });
+        pushDiagnostic('replayDone', {
+          path: opPath,
+          ok: false,
+          bailed: true,
+          code: bailResult.code,
+          reason: bailResult.reason
+        });
+        bailedReason = bailResult;
+        break;
+      }
+
+      const opReplay = await applyOperationsCore([operation], {
+        baseFiles: [{
+          path: opPath,
+          content: expectedByPath.get(normalizeSafeProjectPath(opPath))
+        }]
+      });
+      for (const item of opReplay.applied || []) {
+        applied.push({
+          trackedChange: {
+            key: `accept-replay:${item.operation?.path || ''}`,
+            id: '',
+            path: item.operation?.path || '',
+            label: 'Accept All (untracked replay)'
+          },
+          result: {
+            ...item.result,
+            method: 'overleaf-accept-untracked-replay'
+          }
+        });
+      }
+      for (const item of opReplay.skipped || []) {
+        skipped.push({
+          trackedChange: {
+            key: `accept-replay:${item.operation?.path || ''}`,
+            id: '',
+            path: item.operation?.path || '',
+            label: 'Accept All (untracked replay)'
+          },
+          result: item.result
+        });
+      }
+      const opAppliedEntry = (opReplay.applied || [])[0];
+      const opSkippedEntry = (opReplay.skipped || [])[0];
+      const opResult = opAppliedEntry?.result || opSkippedEntry?.result || {};
+      pushDiagnostic('replayDone', {
+        path: opPath,
+        ok: opAppliedEntry ? true : false,
+        verified: opResult.verified === true,
+        verifiedContentLength: typeof opResult.verifiedContent === 'string'
+          ? opResult.verifiedContent.length
+          : null,
+        code: opResult.code || '',
+        reason: opResult.reason || ''
       });
     }
 
-    // Step 4: restore the prior Reviewing mode. A tracked-change run was written
-    // in Reviewing mode; re-enable it so the document is left as the user had it.
-    // Only restore if this call switched the mode itself.
-    if (editingActivated) {
+    // Step 4: restore the prior Reviewing mode. A tracked-change run was
+    // written in Reviewing mode; re-enable it so the document is left as the
+    // user had it. Only restore if this flow toggled it off.
+    if (weToggledOff) {
       const restored = await setReviewingEnabled(true, { waitMs: 1800 });
+      pushDiagnostic('restoreReviewing', {
+        ok: restored.ok === true,
+        changed: restored.changed === true,
+        enabled: restored.enabled === true,
+        code: restored.code || '',
+        reason: restored.reason || ''
+      });
       if (!restored.ok) {
         skipped.push({
           trackedChange: null,
@@ -761,9 +884,41 @@
     }
 
     return {
-      ok: skipped.length === 0,
+      ok: skipped.length === 0 && !bailedReason,
       applied,
-      skipped
+      skipped,
+      diagnostics
+    };
+  }
+
+  // Summarizes a reviewing state for the per-step diagnostics. Surfaces
+  // exactly the bits the user needs to diagnose a sticky-Editing slip: the
+  // reviewing detector's verdict (ok/status/source), a compact controls
+  // summary, and the two strict gates (isReviewingPositivelyOn /
+  // isEditingPositivelyConfirmed). Self-contained — the run card can render
+  // this verbatim without re-reading any page state.
+  function summarizeReviewingStateForDiagnostics(state = {}) {
+    const reviewing = state.reviewing || {};
+    const controls = (state.signals?.controls || []).slice(0, 6).map(control => {
+      const text = [control?.text, control?.innerText, control?.ariaLabel, control?.title]
+        .map(value => String(value || '').replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .join(' | ');
+      return {
+        text: text.length > 80 ? text.slice(0, 77) + '...' : text,
+        ariaPressed: control?.ariaPressed || '',
+        ariaSelected: control?.ariaSelected || '',
+        ariaCurrent: control?.ariaCurrent || ''
+      };
+    });
+    return {
+      reviewingOk: reviewing.ok === true,
+      reviewingStatus: reviewing.status || '',
+      reviewingSource: reviewing.source || '',
+      controlsCount: (state.signals?.controls || []).length,
+      controls,
+      isReviewingPositivelyOn: isReviewingConfirmedForWrite(state),
+      isEditingPositivelyConfirmed: isEditingPositivelyConfirmed(state)
     };
   }
 

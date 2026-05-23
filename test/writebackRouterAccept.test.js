@@ -535,6 +535,291 @@ test('acceptTrackedChanges falls back to a minimal diff when appliedOperations c
     'the diff patch is targeted, not a whole-file range');
 });
 
+test('acceptTrackedChanges returns a diagnostics trace covering every step (editorUndo, modeBefore, forceEditing, replayStart, replayDone, restoreReviewing)', async () => {
+  const harness = createAcceptHarness({
+    preContent: 'before\n',
+    postContent: 'after\n'
+  });
+
+  const result = await harness.router.acceptTrackedChanges({
+    expectedFiles: [{ path: harness.path, content: harness.preContent }],
+    postFiles: [{ path: harness.path, content: harness.postContent }]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.ok(Array.isArray(result.diagnostics), 'diagnostics is an array');
+  const steps = result.diagnostics.map(entry => entry.step);
+  // Order: 1 editor-undo → 2 modeBefore → 3 forceEditing → 4 replayStart →
+  //        5 replayDone → 6 restoreReviewing.
+  assert.deepEqual(steps, [
+    'editorUndo',
+    'modeBefore',
+    'forceEditing',
+    'replayStart',
+    'replayDone',
+    'restoreReviewing'
+  ]);
+  // editorUndo carries ok/attempted/code/reason/pathsProcessed.
+  const editorUndo = result.diagnostics[0].info;
+  assert.equal(editorUndo.ok, true);
+  assert.equal(editorUndo.attempted, true);
+  assert.equal(editorUndo.pathsProcessed, 1);
+  // modeBefore carries the strict gate booleans.
+  const modeBefore = result.diagnostics[1].info;
+  assert.equal(modeBefore.isReviewingPositivelyOn, true, 'run wrote in Reviewing');
+  assert.equal(modeBefore.isEditingPositivelyConfirmed, false);
+  // forceEditing carries ok/activated.
+  const forceEditing = result.diagnostics[2].info;
+  assert.equal(forceEditing.ok, true);
+  assert.equal(forceEditing.activated, true);
+  // replayStart: per-op re-check, no re-toggle needed (force already worked).
+  const replayStart = result.diagnostics[3].info;
+  assert.equal(replayStart.path, harness.path);
+  assert.equal(replayStart.isReviewingPositivelyOn, false);
+  assert.equal(replayStart.isEditingPositivelyConfirmed, true);
+  assert.equal(replayStart.reToggled, false, 'no per-op re-toggle needed');
+  // replayDone: ok, with verified length.
+  const replayDone = result.diagnostics[4].info;
+  assert.equal(replayDone.path, harness.path);
+  assert.equal(replayDone.ok, true);
+  assert.equal(replayDone.verified, true);
+  assert.equal(replayDone.verifiedContentLength, harness.postContent.length);
+  // restoreReviewing: ok/enabled true.
+  const restore = result.diagnostics[5].info;
+  assert.equal(restore.ok, true);
+  assert.equal(restore.enabled, true);
+});
+
+test('acceptTrackedChanges re-toggles Editing before the next op when Reviewing slips back mid-replay', async () => {
+  // Models the stubborn browser bug: Overleaf flips back to Reviewing AFTER
+  // the initial forceEditing confirm, between the per-op writes. The per-op
+  // loop must re-verify Editing immediately before EACH op and force the
+  // toggle off again before the next write — never silently land a tracked
+  // write because the mode slipped.
+  const editors = {
+    'main.tex': { text: 'main after\n' },
+    'intro.tex': { text: 'intro after\n' }
+  };
+  const preByPath = { 'main.tex': 'main before\n', 'intro.tex': 'intro before\n' };
+  const state = {
+    activePath: 'main.tex',
+    reviewing: true,
+    writes: [],
+    toggleCalls: []
+  };
+  const undoControl = {
+    tagName: 'BUTTON', disabled: false,
+    getAttribute: name => (name === 'aria-label' ? 'Undo' : null)
+  };
+  // After the initial force toggle confirms Editing, Overleaf flips Reviewing
+  // back ON exactly once — right BEFORE the second per-op write. The per-op
+  // re-confirm must catch this and force the toggle again.
+  let slippedBackOnce = false;
+  function setReviewingEnabled(enabled) {
+    state.toggleCalls.push({ enabled });
+    state.reviewing = enabled;
+    return Promise.resolve({ ok: true, changed: true, enabled });
+  }
+  const router = writebackRouter.create({
+    compileBridge: { markSourceEdited() {} },
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    writebackOpenSettleMs: 0,
+    ensureEditing: () => Promise.resolve({ ok: true, activated: true }),
+    ensureReviewing: () => Promise.resolve({ ok: true, activated: false }),
+    setReviewingEnabled,
+    getReviewingState: () => ({ reviewing: { ok: state.reviewing }, signals: {} }),
+    isReviewingConfirmedForWrite: reviewState => reviewState?.reviewing?.ok === true,
+    isEditingConfirmedForNoTraceUndo: reviewState => reviewState?.reviewing?.ok === false,
+    collectElements: selector => (/button/i.test(selector || '') ? [undoControl] : []),
+    readNodeSignalText: () => 'Undo',
+    isInsideCodexPanel: () => false,
+    getActiveEditorIdentity: () => ({ path: state.activePath }),
+    activeEditorIdentityChanged: previous => previous?.path !== state.activePath,
+    clickNode(node) {
+      if (node === undoControl) {
+        editors[state.activePath].text = preByPath[state.activePath];
+      }
+    },
+    readActiveEditorText: () => editors[state.activePath].text,
+    replaceActiveEditorText(text) {
+      editors[state.activePath].text = String(text);
+      state.writes.push({ path: state.activePath, kind: 'replaceAll', reviewing: state.reviewing });
+      maybeSlipBack();
+      return { ok: true };
+    },
+    replaceActiveEditorPatches(_patches, nextContent) {
+      editors[state.activePath].text = String(nextContent);
+      state.writes.push({ path: state.activePath, kind: 'patches', reviewing: state.reviewing });
+      maybeSlipBack();
+      return { ok: true };
+    },
+    delay: () => Promise.resolve(),
+    treeOperations: {
+      getActiveFilePath: () => state.activePath,
+      openFileByPath(target) {
+        state.activePath = target;
+        return Promise.resolve({ ok: true });
+      }
+    },
+    window: { setTimeout, clearTimeout }
+  });
+
+  // Simulates the real-browser sticky-Editing slip: AFTER the first per-op
+  // write lands (mode was confirmed off just before it), Overleaf flips
+  // Reviewing back ON exactly once. The per-op loop's pre-write re-check
+  // must catch this and force the toggle again before the next write.
+  function maybeSlipBack() {
+    if (!slippedBackOnce) {
+      slippedBackOnce = true;
+      state.reviewing = true;
+    }
+  }
+
+  const result = await router.acceptTrackedChanges({
+    expectedFiles: [
+      { path: 'main.tex', content: 'main before\n' },
+      { path: 'intro.tex', content: 'intro before\n' }
+    ],
+    postFiles: [
+      { path: 'main.tex', content: 'main after\n' },
+      { path: 'intro.tex', content: 'intro after\n' }
+    ]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  // Every write landed while Reviewing was OFF — no tracked writes.
+  assert.equal(state.writes.length, 2);
+  for (const write of state.writes) {
+    assert.equal(write.reviewing, false, 'every per-op write landed while Reviewing was OFF');
+    assert.equal(write.kind, 'patches', 'replay uses the patches path');
+  }
+  // Two toggle-off calls: the initial force + the per-op re-toggle on the slip.
+  const offCalls = state.toggleCalls.filter(call => call.enabled === false);
+  assert.equal(offCalls.length, 2, 'force-off was re-asserted by the per-op loop');
+  // Diagnostics carry per-op replayStart entries; the second one shows the
+  // re-toggle fired.
+  const replayStarts = result.diagnostics.filter(entry => entry.step === 'replayStart');
+  assert.equal(replayStarts.length, 2);
+  assert.equal(replayStarts[0].info.reToggled, false, 'first op has no slip');
+  assert.equal(replayStarts[1].info.reToggled, true, 'second op caught the slip and re-toggled');
+  assert.equal(replayStarts[1].info.editingConfirmedAfterReToggle, true);
+  // And the prior Reviewing mode was restored after the replay completed.
+  assert.equal(state.reviewing, true);
+});
+
+test('acceptTrackedChanges bails the per-op loop when Editing cannot be re-confirmed for the next op', async () => {
+  // The initial force succeeds, the first op writes, then Reviewing slips
+  // back ON and the per-op re-toggle cannot bring Editing back. The loop
+  // must bail rather than land the second write as a tracked change.
+  const editors = {
+    'main.tex': { text: 'main after\n' },
+    'intro.tex': { text: 'intro after\n' }
+  };
+  const preByPath = { 'main.tex': 'main before\n', 'intro.tex': 'intro before\n' };
+  const state = {
+    activePath: 'main.tex',
+    reviewing: true,
+    writes: [],
+    toggleCalls: []
+  };
+  const undoControl = {
+    tagName: 'BUTTON', disabled: false,
+    getAttribute: name => (name === 'aria-label' ? 'Undo' : null)
+  };
+  let firstOpDone = false;
+  let stickyReviewing = false;
+  function setReviewingEnabled(enabled) {
+    state.toggleCalls.push({ enabled, sticky: stickyReviewing });
+    if (stickyReviewing && enabled === false) {
+      // Toggle reports ok, but the state stays stuck on Reviewing — modelling
+      // a worst-case Overleaf-side override the re-toggle cannot defeat.
+      return Promise.resolve({ ok: true, changed: true, enabled });
+    }
+    state.reviewing = enabled;
+    return Promise.resolve({ ok: true, changed: true, enabled });
+  }
+  const router = writebackRouter.create({
+    compileBridge: { markSourceEdited() {} },
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    writebackOpenSettleMs: 0,
+    ensureEditing: () => Promise.resolve({ ok: true, activated: true }),
+    ensureReviewing: () => Promise.resolve({ ok: true, activated: false }),
+    setReviewingEnabled,
+    getReviewingState: () => ({ reviewing: { ok: state.reviewing }, signals: {} }),
+    isReviewingConfirmedForWrite: reviewState => reviewState?.reviewing?.ok === true,
+    isEditingConfirmedForNoTraceUndo: reviewState => reviewState?.reviewing?.ok === false,
+    collectElements: selector => (/button/i.test(selector || '') ? [undoControl] : []),
+    readNodeSignalText: () => 'Undo',
+    isInsideCodexPanel: () => false,
+    getActiveEditorIdentity: () => ({ path: state.activePath }),
+    activeEditorIdentityChanged: previous => previous?.path !== state.activePath,
+    clickNode(node) {
+      if (node === undoControl) {
+        editors[state.activePath].text = preByPath[state.activePath];
+      }
+    },
+    readActiveEditorText: () => editors[state.activePath].text,
+    replaceActiveEditorText(text) {
+      editors[state.activePath].text = String(text);
+      state.writes.push({ path: state.activePath, kind: 'replaceAll' });
+      // After the first op lands, simulate Overleaf wedging Reviewing ON for
+      // the rest of the flow — the re-toggle cannot defeat the override.
+      if (!firstOpDone) {
+        firstOpDone = true;
+        state.reviewing = true;
+        stickyReviewing = true;
+      }
+      return { ok: true };
+    },
+    replaceActiveEditorPatches(_patches, nextContent) {
+      editors[state.activePath].text = String(nextContent);
+      state.writes.push({ path: state.activePath, kind: 'patches' });
+      if (!firstOpDone) {
+        firstOpDone = true;
+        state.reviewing = true;
+        stickyReviewing = true;
+      }
+      return { ok: true };
+    },
+    delay: () => Promise.resolve(),
+    treeOperations: {
+      getActiveFilePath: () => state.activePath,
+      openFileByPath(target) { state.activePath = target; return Promise.resolve({ ok: true }); }
+    },
+    window: { setTimeout, clearTimeout }
+  });
+
+  const result = await router.acceptTrackedChanges({
+    expectedFiles: [
+      { path: 'main.tex', content: 'main before\n' },
+      { path: 'intro.tex', content: 'intro before\n' }
+    ],
+    postFiles: [
+      { path: 'main.tex', content: 'main after\n' },
+      { path: 'intro.tex', content: 'intro after\n' }
+    ]
+  });
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  // Only the first op wrote — the second was bailed because Editing could
+  // not be re-confirmed after the slip.
+  assert.equal(state.writes.length, 1, 'second op never wrote — bail prevented a tracked write');
+  assert.equal(state.writes[0].path, 'main.tex');
+  // The bail surfaces in the skipped list with the editing-not-confirmed code.
+  const bailEntry = result.skipped.find(item => item.result?.code === 'accept_editing_not_confirmed');
+  assert.ok(bailEntry, 'bail surfaces as a skipped entry with accept_editing_not_confirmed');
+  // Diagnostics show the per-op re-toggle attempt for the second op.
+  const replayStarts = result.diagnostics.filter(entry => entry.step === 'replayStart');
+  assert.equal(replayStarts.length, 2);
+  assert.equal(replayStarts[1].info.reToggled, true);
+  assert.equal(replayStarts[1].info.editingConfirmedAfterReToggle, false);
+  // The bailed op carries a replayDone with bailed:true.
+  const bailedReplayDone = result.diagnostics.find(
+    entry => entry.step === 'replayDone' && entry.info?.bailed === true
+  );
+  assert.ok(bailedReplayDone, 'a replayDone entry marks the bail');
+});
+
 // --- reject regression -----------------------------------------------------
 //
 // The reject path still uses orderTrackedChangesForReviewAction (kept) and the

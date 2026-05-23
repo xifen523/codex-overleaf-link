@@ -8922,6 +8922,13 @@
     } finally {
       trackedChangeInFlight.delete(runId);
     }
+    // Surface every page-layer step as its own run-card event row so the user
+    // can copy-paste the full Accept trace if the sticky-Editing reconfirm
+    // ever still cannot keep the replay untracked. Each entry is
+    // self-contained — the diagnostic info inline carries the reviewing
+    // detector verdict, the strict gate booleans, and per-op
+    // re-toggle/verify outcomes so no extra page-state query is needed.
+    appendAcceptDiagnosticEvents(runId, Array.isArray(result.diagnostics) ? result.diagnostics : []);
     appendRunRecordEvent(runId, {
       title: tr('runAcceptTrackedResult', { applied: result.applied?.length || 0, skipped: result.skipped?.length || 0 }),
       status: result.skipped?.length ? 'failed' : 'completed',
@@ -8953,6 +8960,57 @@
       return;
     }
     applyTerminalTrackedChangeStatus(runId, 'accepted');
+  }
+
+  // Translates the page bridge's Accept All `diagnostics` array into one
+  // run-card event row per step. Each entry is `{ step, info }`; the step
+  // names map 1:1 to the runAcceptTrackedStep* i18n keys. We render `info`
+  // as the event detail so the user can copy-paste the full trace without
+  // any extra page-state query.
+  function appendAcceptDiagnosticEvents(runId, diagnostics) {
+    for (const entry of diagnostics || []) {
+      const step = entry && entry.step;
+      const info = (entry && entry.info) || {};
+      const titleKey = ACCEPT_DIAGNOSTIC_TITLE_KEYS[step];
+      if (!titleKey) {
+        continue;
+      }
+      const title = titleKey === 'runAcceptTrackedStepReplayStart' || titleKey === 'runAcceptTrackedStepReplayDone'
+        ? tr(titleKey, { path: info.path || tr('unknownFile') })
+        : tr(titleKey);
+      const status = acceptDiagnosticStatus(step, info);
+      appendRunRecordEvent(runId, {
+        title,
+        kind: 'activity',
+        status,
+        detail: info
+      });
+    }
+  }
+
+  // Maps each diagnostic step name to its i18n title key. Kept out of the
+  // function body so any future step rename surfaces as a missing entry.
+  const ACCEPT_DIAGNOSTIC_TITLE_KEYS = {
+    editorUndo: 'runAcceptTrackedStepEditorUndo',
+    modeBefore: 'runAcceptTrackedStepModeBefore',
+    forceEditing: 'runAcceptTrackedStepForceEditing',
+    replayStart: 'runAcceptTrackedStepReplayStart',
+    replayDone: 'runAcceptTrackedStepReplayDone',
+    restoreReviewing: 'runAcceptTrackedStepRestoreReviewing'
+  };
+
+  function acceptDiagnosticStatus(step, info) {
+    if (step === 'modeBefore' || step === 'replayStart') {
+      // Pre-state reads: never a failure, only context.
+      return 'info';
+    }
+    if (step === 'editorUndo' || step === 'forceEditing' || step === 'restoreReviewing') {
+      return info && info.ok === true ? 'info' : 'failed';
+    }
+    if (step === 'replayDone') {
+      return info && info.ok === true ? 'info' : 'failed';
+    }
+    return 'info';
   }
 
   // Drives a tracked-change-lifecycle run to a decisive terminal status.
