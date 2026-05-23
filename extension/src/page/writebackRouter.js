@@ -714,6 +714,21 @@
     // forceEditingForAcceptReplay, or later inside the per-op re-confirm loop).
     // The final restore only fires if this flow owned the toggle.
     let weToggledOff = editingSwitch.activated === true;
+    const stableAfterSwitch = await waitForStableEditingForAcceptReplay({
+      waitMs: 2400,
+      intervalMs: 160
+    });
+    if (!stableAfterSwitch.ok) {
+      return {
+        ok: false,
+        applied: [],
+        skipped: [{
+          trackedChange: null,
+          result: stableAfterSwitch
+        }],
+        diagnostics
+      };
+    }
 
     // Step 3: re-apply each file's changed fragments as a plain edit. With
     // tracking off these land as permanent, untracked text. The replay must
@@ -737,7 +752,8 @@
       };
     }
     const operations = operationsResult.operations;
-    // Per-op replay loop with sticky-Editing re-confirm.
+    // Per-op replay loop with sticky-Editing re-confirm and a short stable
+    // window before every actual CodeMirror write.
     //
     // Bug C: even after forceEditingForAcceptReplay confirmed Editing once,
     // Overleaf has been observed flipping back to Reviewing between the
@@ -809,11 +825,37 @@
         break;
       }
 
+      const stableBeforeReplay = await waitForStableEditingForAcceptReplay({
+        waitMs: reToggled ? 2400 : 1400,
+        intervalMs: 160
+      });
+      if (!stableBeforeReplay.ok) {
+        skipped.push({
+          trackedChange: {
+            key: `accept-replay:${opPath}`,
+            id: '',
+            path: opPath,
+            label: 'Accept All (untracked replay)'
+          },
+          result: stableBeforeReplay
+        });
+        pushDiagnostic('replayDone', {
+          path: opPath,
+          ok: false,
+          bailed: true,
+          code: stableBeforeReplay.code,
+          reason: stableBeforeReplay.reason
+        });
+        bailedReason = stableBeforeReplay;
+        break;
+      }
+
       const opReplay = await applyOperationsCore([operation], {
         baseFiles: [{
           path: opPath,
           content: expectedByPath.get(normalizeSafeProjectPath(opPath))
-        }]
+        }],
+        forbidTrackedChanges: true
       });
       for (const item of opReplay.applied || []) {
         applied.push({
@@ -843,6 +885,9 @@
       const opAppliedEntry = (opReplay.applied || [])[0];
       const opSkippedEntry = (opReplay.skipped || [])[0];
       const opResult = opAppliedEntry?.result || opSkippedEntry?.result || {};
+      if (opResult.code === 'accept_replay_created_tracked_changes') {
+        opResult.rollback = await rollbackAcceptReplayTrackedWrite(opPath, expectedByPath, postByPath);
+      }
       pushDiagnostic('replayDone', {
         path: opPath,
         ok: opAppliedEntry ? true : false,
@@ -850,33 +895,30 @@
         verifiedContentLength: typeof opResult.verifiedContent === 'string'
           ? opResult.verifiedContent.length
           : null,
+        trackedChangesDetected: Array.isArray(opResult.trackedChanges) ? opResult.trackedChanges.length : 0,
+        rollbackOk: opResult.rollback ? opResult.rollback.ok === true : null,
         code: opResult.code || '',
         reason: opResult.reason || ''
       });
+      if (!opReplay.ok) {
+        bailedReason = opResult;
+        break;
+      }
     }
 
-    // Step 4: restore the prior Reviewing mode. A tracked-change run was
-    // written in Reviewing mode; re-enable it so the document is left as the
-    // user had it. Only restore if this flow toggled it off.
+    // Step 4 intentionally does NOT restore Reviewing. Accept replay is a
+    // no-trace write transaction: restoring Track Changes immediately after the
+    // CodeMirror dispatch can race with Overleaf's collaboration/reviewing
+    // settlement and cause the replay itself to land as fresh tracked changes.
+    // Leave the editor in Editing after a successful replay; the user can turn
+    // Reviewing back on manually after Overleaf has saved the accepted text.
     if (weToggledOff) {
-      const restored = await setReviewingEnabled(true, { waitMs: 1800 });
       pushDiagnostic('restoreReviewing', {
-        ok: restored.ok === true,
-        changed: restored.changed === true,
-        enabled: restored.enabled === true,
-        code: restored.code || '',
-        reason: restored.reason || ''
+        ok: true,
+        skipped: true,
+        enabled: false,
+        reason: 'Accept All left Overleaf in Editing mode to avoid re-tracking the accepted replay.'
       });
-      if (!restored.ok) {
-        skipped.push({
-          trackedChange: null,
-          result: {
-            ok: false,
-            code: restored.code || 'accept_reviewing_restore_failed',
-            reason: restored.reason || '接受改动后未能确认 Overleaf Reviewing/Track Changes 已恢复；请在 Overleaf 手动恢复审阅模式。'
-          }
-        });
-      }
     }
 
     if (applied.length > 0) {
@@ -928,6 +970,60 @@
   // anything short of a positive "Editing on / Reviewing off" is rejected.
   function isEditingPositivelyConfirmed(state = {}) {
     return isEditingConfirmedForNoTraceUndo(state) && !isReviewingConfirmedForWrite(state);
+  }
+
+  async function waitForStableEditingForAcceptReplay(options = {}) {
+    const waitMs = Number.isFinite(Number(options.waitMs)) ? Number(options.waitMs) : 2000;
+    const intervalMs = Number.isFinite(Number(options.intervalMs)) ? Number(options.intervalMs) : 160;
+    const deadline = Date.now() + Math.max(0, waitMs);
+    let samples = 0;
+    let lastState = getReviewingState({});
+    while (Date.now() <= deadline) {
+      lastState = getReviewingState({});
+      samples += 1;
+      if (!isEditingPositivelyConfirmed(lastState)) {
+        return {
+          ok: false,
+          code: 'accept_editing_not_stable',
+          reason: 'Overleaf Editing mode did not remain stable long enough for an untracked Accept All replay; Codex did not replay this write.',
+          samples,
+          waitMs,
+          reviewing: summarizeReviewingStateForDiagnostics(lastState)
+        };
+      }
+      await delay(intervalMs);
+    }
+    return {
+      ok: true,
+      samples,
+      waitMs
+    };
+  }
+
+  async function rollbackAcceptReplayTrackedWrite(path, expectedByPath, postByPath) {
+    const normalizedPath = normalizeSafeProjectPath(path);
+    const expectedContent = expectedByPath.get(normalizedPath);
+    const postContent = postByPath.get(normalizedPath);
+    if (!normalizedPath || typeof expectedContent !== 'string' || typeof postContent !== 'string') {
+      return {
+        ok: false,
+        code: 'accept_replay_rollback_missing_content',
+        reason: 'Accept All detected fresh tracked changes, but could not roll back because the pre/post content was unavailable.'
+      };
+    }
+    const rollbackApplied = [];
+    const rollback = await rejectTrackedChangesViaEditorUndo(
+      [{ path: normalizedPath, content: expectedContent }],
+      [{ path: normalizedPath, content: postContent }],
+      rollbackApplied
+    );
+    return {
+      ok: rollback.ok === true,
+      attempted: rollback.attempted === true,
+      code: rollback.code || '',
+      reason: rollback.reason || '',
+      applied: rollbackApplied.length
+    };
   }
 
   // Robustly switch Overleaf to Editing (Track Changes OFF) for the Accept
@@ -1542,8 +1638,11 @@
     }
 
     const trackReviewingChanges = options.trackReviewingChanges === true;
-    const trackedBefore = trackReviewingChanges
-      ? collectTrackedChangeRefsForPaths(collectOperationPaths([operation]))
+    const forbidTrackedChanges = options.forbidTrackedChanges === true;
+    const observeTrackedChanges = trackReviewingChanges || forbidTrackedChanges;
+    const operationPaths = collectOperationPaths([operation]);
+    const trackedBefore = observeTrackedChanges
+      ? collectTrackedChangeRefsForPaths(operationPaths)
       : [];
     let current = editorReady.text;
     let freshness = window.CodexOverleafStaleGuard?.checkOperationFreshness(
@@ -1606,10 +1705,30 @@
       });
     }
     const trackedChanges = [];
-    if (trackReviewingChanges) {
-      await delay(120);
-      const trackedAfter = collectTrackedChangeRefsForPaths(collectOperationPaths([operation]));
-      trackedChanges.push(...diffTrackedChangeRefs(trackedBefore, trackedAfter));
+    if (observeTrackedChanges) {
+      const trackedDiff = forbidTrackedChanges
+        ? await waitForTrackedChangeDiff(trackedBefore, operationPaths, {
+          waitMs: 3600,
+          intervalMs: 180
+        })
+        : (() => null)();
+      if (trackedDiff) {
+        trackedChanges.push(...trackedDiff.trackedChanges);
+      } else {
+        await delay(120);
+        const trackedAfter = collectTrackedChangeRefsForPaths(operationPaths);
+        trackedChanges.push(...diffTrackedChangeRefs(trackedBefore, trackedAfter));
+      }
+      if (forbidTrackedChanges && trackedChanges.length > 0) {
+        return {
+          ok: false,
+          code: 'accept_replay_created_tracked_changes',
+          reason: 'Accept All replay wrote the expected text, but Overleaf created fresh tracked changes during the replay. Codex tried to roll back this replay and left the run pending instead of marking it accepted.',
+          verified: true,
+          verifiedContent: nextContent,
+          trackedChanges: mergeTrackedChangeRefs(trackedChanges)
+        };
+      }
     }
     window.CodexOverleafStaleGuard?.updateExpectedFileContent(
       options.baseFileLookup,
@@ -1621,6 +1740,30 @@
       verified: true,
       verifiedContent: nextContent,
       trackedChanges: mergeTrackedChangeRefs(trackedChanges)
+    };
+  }
+
+  async function waitForTrackedChangeDiff(trackedBefore, paths, options = {}) {
+    const waitMs = Number.isFinite(Number(options.waitMs)) ? Number(options.waitMs) : 3000;
+    const intervalMs = Number.isFinite(Number(options.intervalMs)) ? Number(options.intervalMs) : 180;
+    const deadline = Date.now() + Math.max(0, waitMs);
+    let latest = [];
+    while (Date.now() <= deadline) {
+      const trackedAfter = collectTrackedChangeRefsForPaths(paths);
+      latest = diffTrackedChangeRefs(trackedBefore, trackedAfter);
+      if (latest.length > 0) {
+        return {
+          ok: true,
+          trackedChanges: latest,
+          waitMs
+        };
+      }
+      await delay(intervalMs);
+    }
+    return {
+      ok: true,
+      trackedChanges: latest,
+      waitMs
     };
   }
 

@@ -7642,7 +7642,7 @@
         <div class="run-attachments codex-attachment-preview-list" data-run-attachments hidden></div>
         <div class="run-prompt" data-run-task></div>
         <div class="run-turn-meta">
-          <button type="button" data-run-accept hidden title="Accept this run's tracked changes in Overleaf">Accept all</button>
+          <button type="button" data-run-accept hidden title="Accept this run's tracked changes in Overleaf">Accept changes</button>
           <button type="button" data-run-undo hidden title="Undo this run's writes to Overleaf">Undo</button>
         </div>
         <details class="run-process" data-run-process>

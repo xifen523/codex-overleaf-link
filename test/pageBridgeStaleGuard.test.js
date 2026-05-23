@@ -1339,8 +1339,9 @@ test('page bridge routes acceptTrackedChanges to the writeback router: editor-un
   // No per-change Accept / Reject control hunting.
   assert.equal(bridge.getAcceptClickCount(), 0);
   assert.equal(bridge.getRejectClickCount(), 0);
-  // The prior Reviewing mode is restored.
-  assert.equal(bridge.isReviewingActive(), true);
+  // Accept All intentionally leaves Overleaf in Editing after the replay to
+  // avoid re-tracking races; the prior Reviewing mode is NOT auto-restored.
+  assert.equal(bridge.isReviewingActive(), false);
 });
 
 test('page bridge acceptTrackedChanges bails without re-writing when editor content has drifted', async () => {

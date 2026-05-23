@@ -206,9 +206,12 @@ test('acceptTrackedChanges switches to Editing mode before the replay and restor
   assert.equal(result.ok, true, JSON.stringify(result));
   // Editing mode was activated for the untracked replay.
   assert.equal(harness.state.editingActivations, 1);
-  // The prior Reviewing mode was restored afterwards.
-  assert.equal(harness.state.reviewingRestores, 1);
-  assert.equal(harness.state.reviewing, true, 'the run is left in Reviewing mode');
+  // Accept All intentionally leaves Overleaf in Editing after the replay to
+  // avoid re-tracking races (Overleaf has been observed flipping Track Changes
+  // back on right after a setReviewingEnabled(true)); the prior Reviewing mode
+  // is NOT auto-restored.
+  assert.equal(harness.state.reviewingRestores, 0);
+  assert.equal(harness.state.reviewing, false, 'the run is left in Editing mode');
 });
 
 test('acceptTrackedChanges bails without re-writing when the editor-undo cannot reach pre-write content', async () => {
@@ -272,28 +275,6 @@ test('acceptTrackedChanges bails without re-writing when Editing mode cannot be 
   assert.deepEqual(harness.state.writes, []);
   assert.equal(result.skipped.length, 1);
   assert.equal(result.skipped[0].result.code, 'editing_not_confirmed');
-});
-
-test('acceptTrackedChanges surfaces a Reviewing-restore failure as a skipped entry', async () => {
-  const harness = createAcceptHarness({
-    preContent: 'before\n',
-    postContent: 'after\n',
-    reviewingRestoreFails: true
-  });
-
-  const result = await harness.router.acceptTrackedChanges({
-    expectedFiles: [{ path: harness.path, content: harness.preContent }],
-    postFiles: [{ path: harness.path, content: harness.postContent }]
-  });
-
-  // The replay still happened (the document content is correct); only the mode
-  // restore failed, so it is reported as a skipped entry.
-  assert.equal(result.ok, false);
-  assert.equal(harness.state.writes.length, 1);
-  assert.equal(harness.state.writes[0].kind, 'patches', 'replay must go through the patches path');
-  assert.equal(harness.state.editorText, 'after\n');
-  assert.equal(result.skipped.length, 1);
-  assert.equal(result.skipped[0].result.code, 'reviewing_enable_failed');
 });
 
 test('acceptTrackedChanges returns not-ok when the run has no pre-write/post-write content', async () => {
@@ -417,11 +398,12 @@ test('acceptTrackedChanges forces the Editing toggle even when isEditingConfirme
   // Despite the lenient detector claiming "already Editing", the flow forced
   // the toggle to OFF.
   assert.equal(harness.state.editingActivations, 1, 'the Editing toggle was forced, not skipped');
-  // The replay landed and the prior Reviewing mode was restored afterwards.
+  // The replay landed and Overleaf is left in Editing (no auto-restore of
+  // Reviewing, by design — see the first happy-path test).
   assert.equal(harness.state.writes.length, 1);
   assert.equal(harness.state.writes[0].kind, 'patches');
-  assert.equal(harness.state.reviewingRestores, 1);
-  assert.equal(harness.state.reviewing, true);
+  assert.equal(harness.state.reviewingRestores, 0);
+  assert.equal(harness.state.reviewing, false);
 });
 
 test('acceptTrackedChanges bails when Editing cannot be positively confirmed after the toggle', async () => {
@@ -584,10 +566,11 @@ test('acceptTrackedChanges returns a diagnostics trace covering every step (edit
   assert.equal(replayDone.ok, true);
   assert.equal(replayDone.verified, true);
   assert.equal(replayDone.verifiedContentLength, harness.postContent.length);
-  // restoreReviewing: ok/enabled true.
+  // restoreReviewing: intentionally skipped to avoid re-tracking the replay.
   const restore = result.diagnostics[5].info;
   assert.equal(restore.ok, true);
-  assert.equal(restore.enabled, true);
+  assert.equal(restore.skipped, true);
+  assert.equal(restore.enabled, false);
 });
 
 test('acceptTrackedChanges re-toggles Editing before the next op when Reviewing slips back mid-replay', async () => {
@@ -703,8 +686,10 @@ test('acceptTrackedChanges re-toggles Editing before the next op when Reviewing 
   assert.equal(replayStarts[0].info.reToggled, false, 'first op has no slip');
   assert.equal(replayStarts[1].info.reToggled, true, 'second op caught the slip and re-toggled');
   assert.equal(replayStarts[1].info.editingConfirmedAfterReToggle, true);
-  // And the prior Reviewing mode was restored after the replay completed.
-  assert.equal(state.reviewing, true);
+  // Accept All intentionally leaves Overleaf in Editing after the replay
+  // (Reviewing is NOT auto-restored — see the first happy-path test). The
+  // sticky per-op slip catch left the toggle off, and that is where we stay.
+  assert.equal(state.reviewing, false);
 });
 
 test('acceptTrackedChanges bails the per-op loop when Editing cannot be re-confirmed for the next op', async () => {

@@ -3027,7 +3027,7 @@ test('reviewing write undo passes post-run content so Overleaf native undo can r
   assert.match(writebackRouter, /method:\s*'overleaf-editor-undo'/);
 });
 
-test('run card adds a blue Accept All button before the Undo button', () => {
+test('run card adds a blue Accept changes button before the Undo button', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
@@ -3038,26 +3038,26 @@ test('run card adds a blue Accept All button before the Undo button', () => {
   );
   const renderRunCardBody = contentScript.match(/function renderRunCard\(run\) \{[\s\S]*?\n  function getRunStatusText/)?.[0] || '';
 
-  // The Accept All button markup sits in .run-turn-meta before [data-run-undo].
+  // The Accept changes button markup sits in .run-turn-meta before [data-run-undo].
   const metaMarkup = renderRunCardBody.match(/<div class="run-turn-meta">[\s\S]*?<\/div>/)?.[0] || '';
   assert.match(metaMarkup, /data-run-accept/);
   assert.match(metaMarkup, /data-run-undo/);
   assert.ok(
     metaMarkup.indexOf('data-run-accept') < metaMarkup.indexOf('data-run-undo'),
-    'Accept All button must come before the Undo button'
+    'Accept changes button must come before the Undo button'
   );
   assert.match(renderRunCardBody, /configureAcceptButton\(root, run\)/);
   // Distinct from the diff panel's diffAcceptAll key.
   assert.match(css, /#codex-overleaf-panel \.run-turn-meta \[data-run-accept\]/);
 });
 
-test('Accept All i18n keys are distinct from the diff panel keys in both locales', () => {
+test('Accept changes i18n keys are distinct from the diff panel keys in both locales', () => {
   const i18n = fs.readFileSync(
     path.join(__dirname, '../extension/src/shared/i18n.js'),
     'utf8'
   );
 
-  assert.match(i18n, /runAcceptTracked:\s*'Accept all/);
+  assert.match(i18n, /runAcceptTracked:\s*'Accept changes'/);
   assert.match(i18n, /runAcceptTrackedConfirm:/);
   assert.match(i18n, /runAcceptTrackedCancel:/);
   assert.match(i18n, /runAcceptTrackedDone:\s*'Accepted'/);
