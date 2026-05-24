@@ -4849,3 +4849,119 @@ test('selectPrimaryFailure: navigation blocked beats navigation error', () => {
   ];
   assert.equal(selectPrimaryFailure(failures).code, 'navB');
 });
+
+// ---------------------------------------------------------------------------
+// Welcome-panel + write-guard v1.3.8 add-on (Task 4): SPA route lifecycle,
+// account scope derivation, post-navigation run settlement. Source-grep +
+// behavioral pattern consistent with the existing tests above. See
+// docs/superpowers/specs/2026-05-24-project-list-welcome-panel-design.md
+// §5.1, §5.2, §5.7.
+// ---------------------------------------------------------------------------
+
+test('isProjectEditorRoute returns true only for /project/<24-hex>(/anything)?', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  // Pattern check: the predicate matches `/project/<id>(/anything)?` and
+  // restricts the captured id to 24-hex (Overleaf ObjectId shape).
+  assert.match(src, /\/\^\\\/project\\\/\(\[\^\/\?#\]\+\)\(\?:\\\/\.\*\)\?\$\//);
+  assert.match(src, /\^\[a-f0-9\]\{24\}\$/);
+  assert.match(src, /PROJECT_EDITOR_RESERVED_IDS/);
+  // Behavioral test: extract the function body and evaluate inside a sandbox.
+  const body = extractFunction(src, 'isProjectEditorRoute');
+  const sandbox = { result: null };
+  vm.createContext(sandbox);
+  vm.runInContext(
+    "const PROJECT_EDITOR_RESERVED_IDS = new Set(['new','upload','import']);" + body
+      + ";result = {" +
+        "good: isProjectEditorRoute({ pathname: '/project/' + 'a'.repeat(24) })," +
+        "goodSub: isProjectEditorRoute({ pathname: '/project/' + 'b'.repeat(24) + '/detacher' })," +
+        "tooShort: isProjectEditorRoute({ pathname: '/project/abc' })," +
+        "uppercase: isProjectEditorRoute({ pathname: '/project/' + 'A'.repeat(24) })," +
+        "reservedNew: isProjectEditorRoute({ pathname: '/project/new' })," +
+        "reservedUpload: isProjectEditorRoute({ pathname: '/project/upload' })," +
+        "reservedImport: isProjectEditorRoute({ pathname: '/project/import' })," +
+        "root: isProjectEditorRoute({ pathname: '/' })," +
+        "missing: isProjectEditorRoute(null)" +
+      "};",
+    sandbox
+  );
+  assert.equal(sandbox.result.good, true, '24-hex id should match');
+  assert.equal(sandbox.result.goodSub, true, '24-hex id with sub-path should match');
+  assert.equal(sandbox.result.tooShort, false, 'short id should not match');
+  assert.equal(sandbox.result.uppercase, false, 'uppercase hex should not match');
+  assert.equal(sandbox.result.reservedNew, false, 'reserved /project/new should not match');
+  assert.equal(sandbox.result.reservedUpload, false, 'reserved /project/upload should not match');
+  assert.equal(sandbox.result.reservedImport, false, 'reserved /project/import should not match');
+  assert.equal(sandbox.result.root, false, 'root url should not match');
+  assert.equal(sandbox.result.missing, false, 'null url should not match');
+});
+
+test('deriveAccountScopeId returns null when no stable identifier is observable (fail-closed, no display-name fallback)', () => {
+  // Spec §5.2: stable identifiers only. Display name is NEVER a fallback —
+  // display names are not unique and would silently leak across accounts.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  assert.match(src, /deriveAccountScopeId/);
+  assert.match(src, /display name is not a fallback|display name is never used as a fallback/i);
+  // The selector chain probes meta + data attributes; the fallback branch
+  // returns null without ever consulting a display-name selector.
+  assert.match(src, /ol-user-email|user-email/);
+  assert.match(src, /data-user-email|data-account-email/);
+  assert.match(src, /cachedAccountScopeId/);
+  assert.match(src, /codexOverleafDeriveAccountScopeId/);
+});
+
+test('leaveActiveProject cancels pending writebacks, pauses observers, and resets activeProjectId on non-project navigation', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  assert.match(src, /function leaveActiveProject/);
+  // The function reassigns activeProjectId; the non-project navigation path
+  // hands in `null`, so the source must contain that exact branch.
+  assert.match(src, /activeProjectId\s*=\s*newId|activeProjectId\s*=\s*null/);
+  assert.match(src, /cancelPendingWritebacks/);
+  assert.match(src, /pauseProjectObservers/);
+  assert.match(src, /disableComposer/);
+});
+
+test('enterProject re-binds observers and reloads project run history', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  assert.match(src, /function enterProject/);
+  assert.match(src, /bindProjectObservers/);
+  assert.match(src, /reloadProjectRunHistory/);
+  assert.match(src, /enableComposer/);
+});
+
+test('settleRunAfterNavigation picks background_completed / needs_review_after_navigation / abandoned_after_navigation per spec §5.7.1', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  assert.match(src, /function settleRunAfterNavigation/);
+  assert.match(src, /background_completed/);
+  assert.match(src, /needs_review_after_navigation/);
+  assert.match(src, /abandoned_after_navigation/);
+  // The settlement compares against run.runProjectId (the immutable captured
+  // id from T2), NOT activeProjectId. This is the entire point of the
+  // T2 immutability contract.
+  assert.match(src, /run\.runProjectId/);
+  // Behavioral test: extract the function and exercise the three branches.
+  const body = extractFunction(src, 'settleRunAfterNavigation');
+  const sandbox = { result: null };
+  vm.createContext(sandbox);
+  vm.runInContext(
+    "let activeProjectId = 'OTHER';" + body + ";"
+      + "result = {"
+      + "sameProject: (function(){ activeProjectId = 'SAME'; return settleRunAfterNavigation({ runProjectId: 'SAME' }, { skipped: [] }); })(),"
+      + "guard: (function(){ activeProjectId = 'X'; return settleRunAfterNavigation({ runProjectId: 'Y' }, { skipped: [ { result: { code: 'aborted_project_changed' } } ] }); })(),"
+      + "guardEditor: (function(){ activeProjectId = 'X'; return settleRunAfterNavigation({ runProjectId: 'Y' }, { skipped: [ { result: { code: 'editor_project_id_unavailable' } } ] }); })(),"
+      + "needsReviewTracked: (function(){ activeProjectId = 'X'; return settleRunAfterNavigation({ runProjectId: 'Y' }, { skipped: [ { result: { code: 'tracked_changes_remain' } } ] }); })(),"
+      + "needsReviewAccept: (function(){ activeProjectId = 'X'; return settleRunAfterNavigation({ runProjectId: 'Y' }, { skipped: [ { result: { code: 'accept_not_verified' } } ] }); })(),"
+      + "needsReviewUndo: (function(){ activeProjectId = 'X'; return settleRunAfterNavigation({ runProjectId: 'Y' }, { skipped: [ { result: { code: 'undo_not_verified' } } ] }); })(),"
+      + "needsReviewMismatch: (function(){ activeProjectId = 'X'; return settleRunAfterNavigation({ runProjectId: 'Y' }, { skipped: [ { result: { code: 'write_observed_mismatch' } } ] }); })(),"
+      + "background: (function(){ activeProjectId = 'X'; return settleRunAfterNavigation({ runProjectId: 'Y' }, { skipped: [] }); })()"
+      + "};",
+    sandbox
+  );
+  assert.equal(sandbox.result.sameProject, null, 'same project returns null (normal settlement path)');
+  assert.equal(sandbox.result.guard, 'abandoned_after_navigation', 'aborted_project_changed classifies as abandoned');
+  assert.equal(sandbox.result.guardEditor, 'abandoned_after_navigation', 'editor_project_id_unavailable classifies as abandoned');
+  assert.equal(sandbox.result.needsReviewTracked, 'needs_review_after_navigation', 'tracked_changes_remain classifies as needs_review');
+  assert.equal(sandbox.result.needsReviewAccept, 'needs_review_after_navigation', 'accept_not_verified classifies as needs_review');
+  assert.equal(sandbox.result.needsReviewUndo, 'needs_review_after_navigation', 'undo_not_verified classifies as needs_review');
+  assert.equal(sandbox.result.needsReviewMismatch, 'needs_review_after_navigation', 'write_observed_mismatch classifies as needs_review');
+  assert.equal(sandbox.result.background, 'background_completed', 'clean run after navigation classifies as background_completed');
+});

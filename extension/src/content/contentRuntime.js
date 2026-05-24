@@ -278,6 +278,17 @@
     state = normalizePanelState(await loadStoredState(), { restoreRunningRuns: true });
     ensurePanelOpen();
     applyStateToPanel();
+    // Welcome-panel + write-guard v1.3.8 (Task 4): seed the lifecycle
+    // module-locals from the current URL, install the SPA route hook so
+    // future Overleaf navigations swap variants, and warm the account-scope
+    // cache so the very first saveState sees a non-null scope when the
+    // account chrome is already present.
+    if (isProjectEditorRoute(window.location)) {
+      activeProjectId = window.location.pathname.match(/^\/project\/([^/?#]+)/)[1];
+    }
+    lastSpaPathname = window.location.pathname;
+    installSpaRouteHook();
+    refreshAccountScopeId().catch(() => { /* fail-closed inside */ });
     loadModelOptions().catch(error => {
       applyFallbackModelOptions(resolveSelectedModel(), error);
     });
@@ -2331,6 +2342,40 @@
         syncOutcome.hasSkippedOperations ? tx('Sync completed with skipped items', '同步完成但有跳过项') : tx('Sync completed', '同步完成'),
         syncOutcome.hasSkippedOperations ? 'failed' : 'completed'
       );
+      // Welcome-panel + write-guard v1.3.8 (Task 4 / spec §5.7.1):
+      // post-navigation run settlement. If the user navigated away from
+      // run.runProjectId before this run finished, override the run.status
+      // with one of background_completed / needs_review_after_navigation /
+      // abandoned_after_navigation and persist to the ORIGINAL project's
+      // session record (NOT activeProjectId). The completed record is found
+      // by the runProjectId-captured `currentRunView.recordId` /
+      // `currentRunView.sessionId` pair.
+      try {
+        // After navigation, the in-memory state may have been rebound to
+        // the new project's storage key (via `reloadProjectRunHistory`), so
+        // `findRunRecord` can return null. Fall back to a minimal
+        // descriptor built from `currentRunView` — `settleRunAfterNavigation`
+        // only reads `run.runProjectId` for classification, and
+        // `persistPostNavigationRunStatus` re-fetches the canonical record
+        // by `currentRunView.sessionId` through StorageDb on the
+        // navigation-divergent path.
+        const finishedRunRecord = currentRunView
+          ? (findRunRecord(currentRunView.recordId, currentRunView.sessionId) || {
+            id: currentRunView.recordId,
+            runProjectId: currentRunView.runProjectId
+          })
+          : null;
+        if (finishedRunRecord) {
+          const postNavigationStatus = settleRunAfterNavigation(finishedRunRecord, {
+            skipped: collectRunResultSkipped(syncOutcome)
+          });
+          if (postNavigationStatus) {
+            persistPostNavigationRunStatus(finishedRunRecord, postNavigationStatus);
+          }
+        }
+      } catch (_settlementError) {
+        // Settlement failures must never crash the run-completion path.
+      }
       try {
         const runSessionForHistory = findSessionById(runSessionId) || getActiveSession(state);
         const rawAssistantMessage = assistantMessage;
@@ -3746,6 +3791,12 @@
     return {
       summaryLine,
       hasSkippedOperations: writebackIncomplete || hasSkippedApplyOperations([applied]),
+      // Welcome-panel + write-guard v1.3.8 (Task 4): expose the raw applied
+      // result so the post-navigation settlement (spec §5.7.1) can classify
+      // the run by inspecting the `applied.skipped` entries' failure codes.
+      // Existing call sites that only read `summaryLine` / `hasSkippedOperations`
+      // / `audit` are unaffected.
+      applied,
       audit: buildAuditSummaryFromApply({
         operations,
         applyResults: [applied],
@@ -4319,6 +4370,431 @@
   function getCurrentProjectId() {
     return window.location.pathname.match(/\/project\/([^/?#]+)/)?.[1] || window.location.href;
   }
+
+  // -------------------------------------------------------------------------
+  // Welcome-panel + write-guard v1.3.8 add-on (Task 4): SPA route lifecycle,
+  // account scope derivation, post-navigation run settlement. See
+  // docs/superpowers/specs/2026-05-24-project-list-welcome-panel-design.md
+  // §5.1 (trigger), §5.2 (account scope, fail-closed), §5.7 (lifecycle).
+  // -------------------------------------------------------------------------
+
+  // Reserved sub-routes under /project that are NOT project editor URLs.
+  // The 24-hex regex already excludes them, but this is a belt-and-suspenders
+  // guard in case Overleaf ever introduces non-ObjectId sub-routes that bypass
+  // the regex.
+  const PROJECT_EDITOR_RESERVED_IDS = new Set(['new', 'upload', 'import']);
+
+  // Spec §5.1. URL predicate is the only signal that selects the variant —
+  // no short-timeout DOM downgrade.
+  function isProjectEditorRoute(url) {
+    const pathname = (url && typeof url.pathname === 'string') ? url.pathname : '';
+    const match = pathname.match(/^\/project\/([^/?#]+)(?:\/.*)?$/);
+    if (!match) {
+      return false;
+    }
+    const id = match[1];
+    if (PROJECT_EDITOR_RESERVED_IDS.has(id)) {
+      return false;
+    }
+    return /^[a-f0-9]{24}$/.test(id);
+  }
+
+  // Spec §5.2. Stable, unique identifiers ONLY. The display name is NEVER
+  // used as a fallback — display names are not unique, and using one would
+  // silently leak across accounts that share a display name. The fallback
+  // path returns null and the panel renders the degraded variant.
+  //
+  // NOTE: display name is not a fallback. (privacy floor; do not weaken)
+  async function deriveAccountScopeId() {
+    try {
+      const metaEmail = document.querySelector('meta[name="ol-user-email"], meta[name="user-email"]');
+      const email = metaEmail && metaEmail.getAttribute('content');
+      if (typeof email === 'string' && email.includes('@')) {
+        return await hashScope(email.toLowerCase());
+      }
+    } catch (_metaError) {
+      // Selector may throw if document is partially constructed; fall through.
+    }
+    try {
+      const menuEmail = document.querySelector('[data-user-email], [data-account-email]');
+      const value = menuEmail && (
+        menuEmail.getAttribute('data-user-email')
+        || menuEmail.getAttribute('data-account-email')
+      );
+      if (typeof value === 'string' && value.includes('@')) {
+        return await hashScope(value.toLowerCase());
+      }
+    } catch (_menuError) {
+      // Same defensive swallow as above.
+    }
+    // No stable identifier observable → fail-closed. Display name is never
+    // used as a fallback.
+    return null;
+  }
+
+  async function hashScope(input) {
+    // SHA-256, first 16 hex chars. crypto.subtle is available in content
+    // scripts on https://www.overleaf.com (secure context).
+    const enc = new TextEncoder().encode(input);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    const bytes = new Uint8Array(buf);
+    let hex = '';
+    for (let i = 0; i < 8; i++) {
+      hex += bytes[i].toString(16).padStart(2, '0');
+    }
+    return hex;
+  }
+
+  // Module-local cache for the synchronous shim consumed by T3's
+  // storageDb.resolveAccountScopeId. Recomputed on initial mount and on
+  // every SPA route change.
+  let cachedAccountScopeId = null;
+  async function refreshAccountScopeId() {
+    try {
+      cachedAccountScopeId = await deriveAccountScopeId();
+    } catch (_error) {
+      cachedAccountScopeId = null;
+    }
+    return cachedAccountScopeId;
+  }
+  // T3 injection point: storageDb reads through this getter on every
+  // saveState. Returning null puts the record in degraded mode and excludes
+  // it from cross-project queries (spec §5.2 storage rules).
+  window.codexOverleafDeriveAccountScopeId = () => cachedAccountScopeId;
+
+  // -----------------------------------------------------------------------
+  // SPA route change lifecycle (spec §5.7).
+  // -----------------------------------------------------------------------
+
+  // `activeProjectId` is the module-local mutable variable for the editor the
+  // user is *currently looking at*. It is NOT a substitute for the immutable
+  // per-run `runProjectId` (spec §5.0) — writeback / accept / undo dispatches
+  // still attach the run's captured id, not this one. The whole point of
+  // `runProjectId` is that it survives navigation; `activeProjectId` does not.
+  let activeProjectId = null;
+  let lastSpaPathname = '';
+
+  function cancelPendingWritebacks(prevProjectId) {
+    // The codebase does not maintain a separate pending-writeback queue;
+    // writebacks dispatch synchronously inside `runCodexTask`. The equivalent
+    // "cancel" surface is therefore (a) request cancellation of any active
+    // Codex run associated with the previous project so its in-flight
+    // writeback loop exits early and (b) clear the inflight tracked-change
+    // accept/undo map so a navigation-time race can't leave a button stuck.
+    // Page-side dispatches that are already in flight when the user leaves
+    // are governed by the §5.0 fail-closed guard — they emit
+    // aborted_project_changed or editor_project_id_unavailable, which feeds
+    // `settleRunAfterNavigation`.
+    if (currentRunView && currentRunView.runProjectId === prevProjectId) {
+      // Mark cancellation requested; do NOT await the codex.cancel native
+      // round-trip here — the lifecycle hook must return promptly. The
+      // background completion path eventually settles the run via
+      // `settleRunAfterNavigation` regardless of whether the cancel reached
+      // the native host.
+      cancelActiveRun().catch(() => { /* swallow; settlement handles it */ });
+    }
+    if (trackedChangeInFlight instanceof Map) {
+      trackedChangeInFlight.clear();
+    }
+  }
+
+  function pauseProjectObservers(prevProjectId) {
+    // Stop the OT warm-mirror poll/flush timers that are bound to the
+    // previous project id. The mirror prefetch timer is a `setTimeout`
+    // handle on `mirrorPrefetchState.timer`; clear it.
+    try {
+      clearOtEventPolling({ clearPatchQueue: true });
+    } catch (_error) { /* swallow */ }
+    try {
+      if (mirrorPrefetchState && mirrorPrefetchState.timer) {
+        window.clearTimeout(mirrorPrefetchState.timer);
+        mirrorPrefetchState.timer = null;
+      }
+    } catch (_error) { /* swallow */ }
+    // Reset the OT warm-mirror project binding so a stale projectId can't
+    // trick the `canPollOtWarmMirror` check after navigation.
+    if (otWarmMirrorProjectId === prevProjectId) {
+      otWarmMirrorProjectId = '';
+    }
+    if (otWarmMirrorState && otWarmMirrorState.projectId === prevProjectId) {
+      otWarmMirrorState.projectId = '';
+    }
+  }
+
+  function bindProjectObservers(newProjectId) {
+    // Re-bind project-specific observers fresh against the new id. The
+    // existing OT warm-mirror controller already initialises itself on
+    // panel mount via `syncOtWarmMirrorController`; calling it here gives
+    // the new project a clean start.
+    syncOtWarmMirrorController().catch(_error => {
+      // Mirror init failures are non-fatal — the badge surfaces the
+      // unavailable state and the user can retry from diagnostics.
+    });
+  }
+
+  async function reloadProjectRunHistory(newProjectId) {
+    // Rebind the storage key to the new project and reload the panel state
+    // from chrome.storage.local so the per-project session list reflects
+    // the project the user just navigated into.
+    try {
+      storageKey = getProjectStorageKey(LEGACY_STORAGE_KEY, window.location.href);
+      const reloaded = await loadStoredState();
+      state = normalizePanelState(reloaded, { restoreRunningRuns: true });
+      applyStateToPanel();
+    } catch (_error) {
+      // Reload failures fall back to the in-memory state; the next saveState
+      // surfaces a structured failure via the existing quota / storage path.
+    }
+  }
+
+  function disableComposer() {
+    // JS-level guard against run dispatch in the no-project window. The
+    // visible swap is T5's responsibility; here we just flip the disabled
+    // attribute so the keyboard / submit path no-ops.
+    if (!panel) {
+      return;
+    }
+    const submit = panel.querySelector('[data-composer-submit]');
+    if (submit) {
+      submit.disabled = true;
+    }
+    const textarea = panel.querySelector('[data-composer-input]');
+    if (textarea) {
+      textarea.disabled = true;
+    }
+    panel.dataset.composerDisabled = 'true';
+  }
+
+  function enableComposer() {
+    if (!panel) {
+      return;
+    }
+    const submit = panel.querySelector('[data-composer-submit]');
+    if (submit) {
+      submit.disabled = false;
+    }
+    const textarea = panel.querySelector('[data-composer-input]');
+    if (textarea) {
+      textarea.disabled = false;
+    }
+    panel.dataset.composerDisabled = 'false';
+  }
+
+  // T5 implements the no-project view; T4 stubs the entry points so the
+  // SPA hook compiles and can call them without crashing.
+  function renderRecentProjectsVariant() {
+    // T5 will replace this body with the welcome-panel renderer (header +
+    // recent-projects list + settings entry per §5.3 / §5.4 / §5.5).
+  }
+  function renderPerProjectVariant() {
+    // The per-project panel already renders via the existing
+    // `applyStateToPanel` path; this stub exists so the SPA hook can call
+    // it symmetrically. T5 may flesh it out for variant-swap CSS hooks.
+  }
+
+  function leaveActiveProject(newId) {
+    const prevId = activeProjectId;
+    activeProjectId = newId; // null for non-project URLs (spec §5.7.1)
+    if (!prevId || prevId === newId) {
+      return;
+    }
+    cancelPendingWritebacks(prevId);
+    pauseProjectObservers(prevId);
+    disableComposer();
+  }
+
+  function enterProject(id) {
+    activeProjectId = id;
+    bindProjectObservers(id);
+    // reloadProjectRunHistory is async but the lifecycle hook does not
+    // await it — subsequent renders pick up the rebound state.
+    reloadProjectRunHistory(id).catch(() => { /* swallow */ });
+    enableComposer();
+  }
+
+  function onSpaRouteChange() {
+    const url = window.location;
+    // Recompute the account scope on every route change (spec §5.2 per-
+    // project derivation: account menu is global chrome and should be
+    // readable on per-project URLs too).
+    refreshAccountScopeId().catch(() => { /* fail-closed handled inside */ });
+    if (isProjectEditorRoute(url)) {
+      const newId = url.pathname.match(/^\/project\/([^/?#]+)/)[1];
+      if (newId !== activeProjectId) {
+        leaveActiveProject(newId);
+        enterProject(newId);
+      }
+      renderPerProjectVariant();
+    } else {
+      leaveActiveProject(null);
+      renderRecentProjectsVariant();
+    }
+  }
+
+  // Hook the existing SPA navigation surface. Overleaf is a SPA: it mutates
+  // window.location via History API calls without firing `popstate` for
+  // pushState. To catch both back/forward and in-app navigation, monkey-
+  // patch history.pushState / replaceState in addition to listening for
+  // `popstate`. The patched wrappers are idempotent under the runtime's
+  // install flag.
+  function installSpaRouteHook() {
+    if (root.__codexOverleafSpaRouteHookInstalled) {
+      return;
+    }
+    root.__codexOverleafSpaRouteHookInstalled = true;
+    const fire = () => {
+      const next = window.location.pathname;
+      if (next === lastSpaPathname) {
+        return;
+      }
+      lastSpaPathname = next;
+      try {
+        onSpaRouteChange();
+      } catch (_error) {
+        // Route-hook failures must never crash the page.
+      }
+    };
+    const wrap = name => {
+      const original = window.history[name];
+      if (!(original instanceof Function)) {
+        return;
+      }
+      window.history[name] = function patched() {
+        const result = original.apply(this, arguments);
+        // Defer the route-change dispatch so the DOM has settled.
+        window.setTimeout(fire, 0);
+        return result;
+      };
+    };
+    wrap('pushState');
+    wrap('replaceState');
+    window.addEventListener('popstate', () => window.setTimeout(fire, 0));
+    lastSpaPathname = window.location.pathname;
+  }
+
+  // -----------------------------------------------------------------------
+  // Post-navigation run settlement (spec §5.7.1 + plan Step 6).
+  // -----------------------------------------------------------------------
+  //
+  // When a Codex run completes after the user navigated away from
+  // run.runProjectId, classify the outcome and persist the run on the
+  // ORIGINAL project's record (NOT activeProjectId — that's the whole
+  // point of the T2 immutability contract).
+  function settleRunAfterNavigation(run, runResult) {
+    if (activeProjectId === run.runProjectId) {
+      // User is still on the project — normal settlement path; the caller
+      // continues unchanged.
+      return null;
+    }
+    const skipped = (runResult && Array.isArray(runResult.skipped)) ? runResult.skipped : [];
+    const wasGuardAborted = skipped.some(entry => {
+      const code = entry && entry.result && entry.result.code;
+      return code === 'aborted_project_changed' || code === 'editor_project_id_unavailable';
+    });
+    if (wasGuardAborted) {
+      return 'abandoned_after_navigation';
+    }
+    const hasUnverified = skipped.some(entry => {
+      const code = entry && entry.result && entry.result.code;
+      return code === 'write_observed_mismatch'
+        || code === 'tracked_changes_remain'
+        || code === 'accept_not_verified'
+        || code === 'undo_not_verified';
+    });
+    if (hasUnverified) {
+      return 'needs_review_after_navigation';
+    }
+    // All dispatched writes were clean with post-write verification.
+    return 'background_completed';
+  }
+
+  // Flatten the `applied.skipped` arrays from a syncOutcome into the
+  // shape `settleRunAfterNavigation` expects: `{ skipped: [{ result: { code } }] }`.
+  // syncOutcome already exposes its `applied` object (see the new field in
+  // `applySyncChangesToOverleaf`).
+  function collectRunResultSkipped(syncOutcome) {
+    if (!syncOutcome) {
+      return [];
+    }
+    const skipped = [];
+    const applied = syncOutcome.applied;
+    if (applied && Array.isArray(applied.skipped)) {
+      for (const entry of applied.skipped) {
+        if (entry) {
+          skipped.push(entry);
+        }
+      }
+    }
+    return skipped;
+  }
+
+  // Persist the post-navigation status to the run's original
+  // runProjectId's session record. Used by run-completion callers.
+  //
+  // Two paths:
+  //   1. Same project (or activeProjectId aligned): the in-memory
+  //      `state.sessions` still contains the run record; mutate the field
+  //      and let `saveStateSoon()` persist on the normal path.
+  //   2. Different project: the in-memory state may already have been
+  //      rebound to the new project's storage key (via
+  //      `reloadProjectRunHistory`), so the in-memory mutation would not
+  //      reach the right record. Go directly through StorageDb to update
+  //      the original project's session record by id.
+  async function persistPostNavigationRunStatus(run, postNavigationStatus) {
+    if (!run || !postNavigationStatus) {
+      return;
+    }
+    run.status = postNavigationStatus;
+    run.finishedAt = run.finishedAt || new Date().toISOString();
+    if (currentRunView && currentRunView.runProjectId === activeProjectId) {
+      // Same project still active — the run record is reachable through the
+      // normal state and the regular save path will persist it.
+      saveStateSoon();
+      return;
+    }
+    // Different project. Update the original session's run record directly.
+    try {
+      const StorageDb = window.CodexOverleafStorageDb;
+      if (!StorageDb) {
+        return;
+      }
+      const sessionId = currentRunView ? currentRunView.sessionId : '';
+      if (!sessionId) {
+        return;
+      }
+      const record = await StorageDb.getRecord('sessions', sessionId);
+      if (!record) {
+        return;
+      }
+      const runs = Array.isArray(record.runs) ? record.runs : [];
+      const targetRun = runs.find(item => item && item.id === run.id);
+      if (!targetRun) {
+        return;
+      }
+      targetRun.status = postNavigationStatus;
+      targetRun.finishedAt = run.finishedAt;
+      record.lastActivityAt = new Date().toISOString();
+      record.updatedAt = record.lastActivityAt;
+      await StorageDb.putRecord('sessions', record);
+    } catch (_error) {
+      // Settlement persistence is best-effort. The original project's
+      // existing record still holds the run; the worst-case is that the
+      // dashboard badge does not show the post-navigation reclassification
+      // for this one run.
+    }
+  }
+
+  // Expose internals for testing surfaces (panel smoke helper + future T5).
+  // No production callers rely on this object yet; it exists so tests can
+  // reach the helpers without having to bootstrap the entire runtime.
+  root.__codexOverleafLifecycle = {
+    isProjectEditorRoute,
+    deriveAccountScopeId,
+    refreshAccountScopeId,
+    settleRunAfterNavigation,
+    getActiveProjectId: () => activeProjectId,
+    getCachedAccountScopeId: () => cachedAccountScopeId
+  };
 
   function isExperimentalOtEnabled() {
     const projectId = getCurrentProjectId();
