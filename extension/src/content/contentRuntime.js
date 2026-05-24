@@ -2379,9 +2379,10 @@
           })
           : null;
         if (finishedRunRecord) {
-          const postNavigationStatus = settleRunAfterNavigation(finishedRunRecord, {
-            skipped: collectRunResultSkipped(syncOutcome)
-          });
+          // Fix B (spec §5.7.1): pass the full syncOutcome — including
+          // hasSkippedOperations and the raw `applied` — so the settlement
+          // can catch early-return branches and unrecognized skip codes.
+          const postNavigationStatus = settleRunAfterNavigation(finishedRunRecord, syncOutcome);
           if (postNavigationStatus) {
             persistPostNavigationRunStatus(finishedRunRecord, postNavigationStatus);
           }
@@ -5156,7 +5157,32 @@
       // continues unchanged.
       return null;
     }
-    const skipped = (runResult && Array.isArray(runResult.skipped)) ? runResult.skipped : [];
+    // Welcome-panel + write-guard v1.3.8 add-on (Fix B / spec §5.7.1):
+    // accept the full `syncOutcome` (not just a pre-flattened skipped list).
+    // The previous shape — only `{ skipped: [...] }` from
+    // `collectRunResultSkipped` — silently classified runs as
+    // `background_completed` when (a) the skipped entries' codes were
+    // outside a small allow-list (e.g. delete_confirmation_rejected,
+    // governance_blocked, binary_confirmation_rejected) or (b) the
+    // syncOutcome was an early-return branch with
+    // `hasSkippedOperations === true` but no `applied` (which flattens to
+    // an empty skipped list).
+    //
+    // Spec §5.7.1 classification:
+    //   1. Any skipped entry with failure.code IN
+    //      { 'aborted_project_changed', 'editor_project_id_unavailable' }
+    //         → 'abandoned_after_navigation'.
+    //   2. Else if syncOutcome.hasSkippedOperations === true OR any skipped
+    //      entry exists (code-bearing or not)
+    //         → 'needs_review_after_navigation'.
+    //      (Spec defense-in-depth: when in doubt, claim needs_review rather
+    //      than background_completed.)
+    //   3. Else if at least one applied write AND no skipped/needs_review/
+    //      failed entries AND post-write verification was clean
+    //         → 'background_completed'.
+    //   4. Else (no skipped, no applied) — true no-op run (e.g. Ask-mode
+    //      where there was nothing to write) → 'background_completed'.
+    const skipped = collectRunResultSkipped(runResult);
     const wasGuardAborted = skipped.some(entry => {
       const code = entry && entry.result && entry.result.code;
       return code === 'aborted_project_changed' || code === 'editor_project_id_unavailable';
@@ -5164,24 +5190,35 @@
     if (wasGuardAborted) {
       return 'abandoned_after_navigation';
     }
-    const hasUnverified = skipped.some(entry => {
-      const code = entry && entry.result && entry.result.code;
-      return code === 'write_observed_mismatch'
-        || code === 'tracked_changes_remain'
-        || code === 'accept_not_verified'
-        || code === 'undo_not_verified';
-    });
-    if (hasUnverified) {
+    const hasSkippedOperations = runResult && runResult.hasSkippedOperations === true;
+    if (hasSkippedOperations || skipped.length > 0) {
+      // Rule 2: ANY skipped entry — code-bearing or not — and/or the
+      // outcome flag — yields needs_review_after_navigation. This is the
+      // defense-in-depth net for skip codes outside the recognized list
+      // (delete_confirmation_rejected, governance_blocked,
+      // binary_confirmation_rejected, etc.) and for early-return branches
+      // where `applied` is absent but `hasSkippedOperations` is true.
       return 'needs_review_after_navigation';
     }
-    // All dispatched writes were clean with post-write verification.
+    // Rule 3 / 4: no skipped, no failed. Either at least one clean applied
+    // write (post-write verification implicitly clean because rule 2
+    // already caught write_observed_mismatch / accept_not_verified /
+    // undo_not_verified / tracked_changes_remain via their skipped-entry
+    // form), OR a true no-op run with nothing to write. Both classify as
+    // background_completed per spec §5.7.1 rule 4.
     return 'background_completed';
   }
 
   // Flatten the `applied.skipped` arrays from a syncOutcome into the
   // shape `settleRunAfterNavigation` expects: `{ skipped: [{ result: { code } }] }`.
-  // syncOutcome already exposes its `applied` object (see the new field in
-  // `applySyncChangesToOverleaf`).
+  // Accepts both shapes:
+  //   1. The full syncOutcome from `applySyncChangesToOverleaf` — reads
+  //      `syncOutcome.applied.skipped`.
+  //   2. A pre-flattened shape `{ skipped: [...] }` — used by tests and by
+  //      historical call sites.
+  // Fix B (spec §5.7.1): settleRunAfterNavigation now consumes the full
+  // syncOutcome directly, but this helper remains useful for the
+  // applied-array path AND keeps the legacy test surface intact.
   function collectRunResultSkipped(syncOutcome) {
     if (!syncOutcome) {
       return [];
@@ -5190,6 +5227,13 @@
     const applied = syncOutcome.applied;
     if (applied && Array.isArray(applied.skipped)) {
       for (const entry of applied.skipped) {
+        if (entry) {
+          skipped.push(entry);
+        }
+      }
+    }
+    if (Array.isArray(syncOutcome.skipped)) {
+      for (const entry of syncOutcome.skipped) {
         if (entry) {
           skipped.push(entry);
         }
@@ -7541,11 +7585,58 @@
     }
   }
 
-  async function saveState() {
+  // Welcome-panel + write-guard v1.3.8 add-on (Fix A): defensive accessor.
+  // Some legacy test harnesses inline `saveState` without re-declaring the
+  // module-local `currentRunView`. ReferenceError would otherwise crash the
+  // function before its try/catch could run. Production callers always have
+  // `currentRunView` in scope (declared near the top of contentRuntime), so
+  // this is a no-op there.
+  function readLiveRunViewForSaveStateGuard() {
+    try {
+      return currentRunView;
+    } catch (_referenceError) {
+      return null;
+    }
+  }
+
+  async function saveState(options) {
     try {
       const StorageDb = window.CodexOverleafStorageDb;
       const Migration = window.CodexOverleafStorageMigration;
-      const projectId = getCurrentProjectId();
+      // Welcome-panel + write-guard v1.3.8 add-on (Fix A / spec §5.7.1):
+      // post-navigation persistence gate. The normal URL-derived projectId
+      // belongs to the route the user is *currently looking at*. When a run
+      // is in flight on a different project (mid-run SPA navigation), saving
+      // under that URL-derived id would pollute another project's Recent-
+      // projects entry and surface bogus disabled rows. Two safety lanes:
+      //   1. `options.projectIdOverride` lets a caller that legitimately
+      //      needs to persist to a non-active project supply the projectId
+      //      explicitly (the only such caller today is the post-navigation
+      //      settlement path in `persistPostNavigationRunStatus`, which goes
+      //      directly through StorageDb — but the override is in place so
+      //      future callers do not have to monkey-patch around saveState).
+      //   2. When no override is set AND a navigation-divergent run is in
+      //      flight (currentRunView.runProjectId !== URL-derived id), log a
+      //      warning and skip persistence. The settlement path owns that
+      //      run's persistence; routing through saveState would write to the
+      //      WRONG projectId record.
+      const projectIdOverride = options && typeof options.projectIdOverride === 'string'
+        ? options.projectIdOverride
+        : '';
+      const urlProjectId = getCurrentProjectId();
+      const projectId = projectIdOverride || urlProjectId;
+      // Read currentRunView through a defensive accessor so historical test
+      // harnesses that inline `saveState` without re-declaring the module-
+      // local `currentRunView` still execute the happy path unchanged.
+      const liveRunView = readLiveRunViewForSaveStateGuard();
+      if (!projectIdOverride && liveRunView && liveRunView.runProjectId
+        && liveRunView.runProjectId !== urlProjectId) {
+        appendPlainLog(tx(
+          'Skipped saveState: run is in flight on a different project than the current URL; settlement owns persistence.',
+          '已跳过 saveState：本次运行所属项目与当前 URL 不一致，写回由 settlement 负责。'
+        ));
+        return;
+      }
       const compactState = prepareStateForStorage(state);
       compactState.autoRecompile = state.autoRecompile;
       compactState.loadCodexLocalSkills = state.loadCodexLocalSkills !== false;
@@ -8443,7 +8534,19 @@
       record.status = status;
       record.statusText = statusText;
       record.finishedAt = new Date().toISOString();
-      saveStateSoon();
+      // Welcome-panel + write-guard v1.3.8 add-on (Fix A / spec §5.7.1):
+      // when the user navigated away mid-run, the URL-derived projectId now
+      // belongs to a different project (or /project). Routing this finish
+      // through `saveStateSoon` -> `saveState` would persist the original
+      // project's in-memory sessions to the WRONG projectId key. The
+      // post-navigation `persistPostNavigationRunStatus` path (T4) is the
+      // only allowed persistence path here; it writes directly to the
+      // original project's IDB record by sessionId.
+      const navigationDivergent = currentRunView.runProjectId
+        && activeProjectId !== currentRunView.runProjectId;
+      if (!navigationDivergent) {
+        saveStateSoon();
+      }
       renderSessionList();
     }
     const visibleView = getCurrentRunViewForRender();

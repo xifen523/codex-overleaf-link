@@ -196,7 +196,9 @@ test('storage notice is not appended repeatedly during autosave', () => {
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
-  const saveStateBody = contentScript.match(/async function saveState\(\) \{[\s\S]*?\n  function saveStateSoon/)?.[0] || '';
+  // saveState was widened in Fix A to accept an `options` argument with
+  // projectIdOverride; tolerate either signature.
+  const saveStateBody = contentScript.match(/async function saveState\([^)]*\) \{[\s\S]*?\n  function saveStateSoon/)?.[0] || '';
   const appendStorageNoticeBody = contentScript.match(/function appendStorageNoticeOnce\(key, text\) \{[\s\S]*?\n  function saveStateSoon/)?.[0] || '';
   const appendPlainLogBody = contentScript.match(/function appendPlainLog\(text\) \{[\s\S]*?\n  function updateProbeNotice/)?.[0] || '';
   const showPluginToastBody = contentScript.match(/function showPluginToast\(text, options = \{\}\) \{[\s\S]*?\n  function updateProbeNotice/)?.[0] || '';

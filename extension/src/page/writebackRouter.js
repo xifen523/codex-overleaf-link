@@ -3036,6 +3036,15 @@
 
     async function applyOperationsForBridge(operationsOrOptions, options = {}) {
       if (Array.isArray(operationsOrOptions)) {
+        // Welcome-panel + write-guard v1.3.8 add-on (Fix D): defense-in-depth
+        // also runs on the array-shaped entry. T2 only guarded the
+        // payload-object branch; if any future caller goes straight to the
+        // array entry without `options.runProjectId`, the router would have
+        // silently dispatched. Mirror the same `editor_project_id_unavailable`
+        // failure shape the payload branch and the page-side guard already
+        // emit.
+        const writeGuardBlock = checkWritebackRunProjectId(options);
+        if (writeGuardBlock) return writeGuardBlock;
         return applyOperations(operationsOrOptions, options);
       }
       const payload = operationsOrOptions || {};

@@ -4244,7 +4244,9 @@ test('stored project custom instructions are rehydrated before lightweight prefs
     'utf8'
   );
   const loadBody = contentScript.match(/async function loadStoredState\(\) \{[\s\S]*?\n  async function saveState/)?.[0] || '';
-  const saveBody = contentScript.match(/async function saveState\(\) \{[\s\S]*?\n  function appendStorageNoticeOnce/)?.[0] || '';
+  // saveState was widened in Fix A to accept an `options` argument with
+  // projectIdOverride; the regex now tolerates either signature.
+  const saveBody = contentScript.match(/async function saveState\([^)]*\) \{[\s\S]*?\n  function appendStorageNoticeOnce/)?.[0] || '';
 
   assert.match(loadBody, /experimentalOtByProject:\s*prefs\.experimentalOtByProject \|\| \{\}/);
   assert.match(loadBody, /customInstructionsByProject:\s*prefs\.customInstructionsByProject \|\| \{\}/);
@@ -4374,6 +4376,14 @@ test('saveState merges latest lightweight prefs before saving project-scoped set
     }
     ${extractFunction(contentScript, 'normalizeExperimentalOtByProject')}
     ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
+    // Fix A inlined helpers: saveState now reads currentRunView through a
+    // defensive accessor and the projectIdOverride / divergent-skip branch
+    // logs via appendPlainLog(tx(...)). Provide minimal stubs so the
+    // happy-path test still drives saveState end-to-end.
+    let currentRunView = null;
+    function appendPlainLog() {}
+    function tx(en) { return en; }
+    ${extractFunction(contentScript, 'readLiveRunViewForSaveStateGuard')}
     ${extractFunction(contentScript, 'saveState')}
     return {
       saveState,
@@ -4939,11 +4949,16 @@ test('settleRunAfterNavigation picks background_completed / needs_review_after_n
   // T2 immutability contract.
   assert.match(src, /run\.runProjectId/);
   // Behavioral test: extract the function and exercise the three branches.
+  // Fix B: settleRunAfterNavigation now calls collectRunResultSkipped to
+  // accept both the full syncOutcome (with `applied.skipped`) AND the
+  // pre-flattened `{ skipped: [...] }` shape; include the helper so the
+  // legacy assertions still work against the new implementation.
   const body = extractFunction(src, 'settleRunAfterNavigation');
+  const collectBody = extractFunction(src, 'collectRunResultSkipped');
   const sandbox = { result: null };
   vm.createContext(sandbox);
   vm.runInContext(
-    "let activeProjectId = 'OTHER';" + body + ";"
+    "let activeProjectId = 'OTHER';" + collectBody + ";" + body + ";"
       + "result = {"
       + "sameProject: (function(){ activeProjectId = 'SAME'; return settleRunAfterNavigation({ runProjectId: 'SAME' }, { skipped: [] }); })(),"
       + "guard: (function(){ activeProjectId = 'X'; return settleRunAfterNavigation({ runProjectId: 'Y' }, { skipped: [ { result: { code: 'aborted_project_changed' } } ] }); })(),"
@@ -5110,4 +5125,264 @@ test('Recent-projects CSS variant + badge styles reuse panel palette tokens for 
   ]) {
     assert.ok(css.indexOf(cls) !== -1, 'panel.css must style .' + cls);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Welcome-panel + write-guard v1.3.8 add-on FX1 (Fix A / spec §5.7.1):
+// post-navigation `saveState` gate. The URL-derived projectId in `saveState`
+// belongs to the route the user is currently looking at; when a run is in
+// flight on a DIFFERENT project (mid-run SPA navigation), routing the
+// completion through `saveStateSoon` -> `saveState` would persist the
+// original project's in-memory sessions under the WRONG projectId key.
+// ---------------------------------------------------------------------------
+
+test('Fix A: finishRunView gates saveStateSoon on navigation divergence (currentRunView.runProjectId !== activeProjectId)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  const body = extractFunction(src, 'finishRunView');
+  // The body must read activeProjectId / runProjectId divergence and skip
+  // saveStateSoon on the divergent branch. The exact identifier names are
+  // load-bearing because tests downstream search for them.
+  assert.match(body, /navigationDivergent/);
+  assert.match(body, /activeProjectId !== currentRunView\.runProjectId/);
+  // The saveStateSoon call inside finishRunView must be gated, not bare.
+  // Look for the if (!navigationDivergent) shape.
+  assert.match(body, /if\s*\(\s*!\s*navigationDivergent\s*\)\s*\{\s*\n[\s\S]*?saveStateSoon\(\)/);
+});
+
+test('Fix A: finishRunView still calls saveStateSoon on the happy path (no navigation, currentRunView aligned)', () => {
+  // Behavioral check via extracted function + a minimal driver harness. The
+  // harness simulates the finishRunView body's prerequisites and asserts the
+  // saveStateSoon counter ticks when navigationDivergent is false.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  const body = extractFunction(src, 'finishRunView');
+  const sandbox = {
+    result: { divergent: null, aligned: null },
+    saveCount: 0
+  };
+  vm.createContext(sandbox);
+  vm.runInContext(
+    "let activeProjectId = 'P_aligned';"
+    + "let currentRunView = { recordId: 'r1', sessionId: 's1', runProjectId: 'P_aligned', startedAt: 0 };"
+    + "const state = { sessions: [{ id: 's1', runs: [{ id: 'r1', status: 'running' }] }] };"
+    + "function sanitizeAssistantVisibleText(x){ return x; }"
+    + "function findRunRecord(){ return state.sessions[0].runs[0]; }"
+    + "function flushPendingStreamRenders(){}"
+    + "function formatProcessedSummary(){ return ''; }"
+    + "function saveStateSoon(){ saveCount++; }"
+    + "function renderSessionList(){}"
+    + "function getCurrentRunViewForRender(){ return null; }"
+    + body
+    + ";"
+    + "saveCount = 0; finishRunView('done', 'completed'); result.aligned = saveCount;"
+    + "activeProjectId = 'P_other'; currentRunView = { recordId: 'r2', sessionId: 's2', runProjectId: 'P_original', startedAt: 0 };"
+    + "state.sessions.push({ id: 's2', runs: [{ id: 'r2', status: 'running' }] });"
+    + "saveCount = 0; finishRunView('done', 'completed'); result.divergent = saveCount;",
+    sandbox
+  );
+  assert.equal(sandbox.result.aligned, 1, 'happy path: saveStateSoon is called when runProjectId === activeProjectId');
+  assert.equal(sandbox.result.divergent, 0, 'navigation-divergent: saveStateSoon is NOT called (settlement owns persistence)');
+});
+
+test('Fix A: saveState honors options.projectIdOverride instead of getCurrentProjectId()', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  const body = extractFunction(src, 'saveState');
+  // Defense-in-depth surface: a `projectIdOverride` option is accepted and,
+  // when set, used in place of getCurrentProjectId(). When the override is
+  // absent AND a navigation-divergent run is in flight, saveState skips
+  // (warns + returns) rather than persist to the wrong projectId.
+  assert.match(body, /projectIdOverride/);
+  assert.match(body, /options\s*&&\s*typeof\s+options\.projectIdOverride\s*===\s*['"]string['"]/);
+  assert.match(body, /projectIdOverride\s*\|\|\s*urlProjectId/);
+  // The navigation-divergent skip path must log and return early. The
+  // accessor reads the live currentRunView through a defensive helper
+  // (readLiveRunViewForSaveStateGuard) so test harnesses that inline
+  // `saveState` without re-declaring `currentRunView` still work.
+  assert.match(body, /readLiveRunViewForSaveStateGuard\(\)/);
+  assert.match(body, /liveRunView\.runProjectId\s*!==\s*urlProjectId/);
+  assert.match(body, /appendPlainLog\(/);
+  assert.match(body, /return;/);
+});
+
+test('Fix A: saveState skips persistence when run is navigation-divergent and no override is set', () => {
+  // Behavioral: drive the override + divergent branches by inlining the body.
+  // The harness records which projectId the StorageDb wrapper sees so we can
+  // assert (a) the override wins, (b) absence + divergence triggers an early
+  // return with NO writes to StorageDb.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  const body = extractFunction(src, 'saveState');
+  const guardAccessor = extractFunction(src, 'readLiveRunViewForSaveStateGuard');
+  const sandbox = {
+    result: { withOverride: null, divergent: null, happy: null },
+    storageWrites: []
+  };
+  vm.createContext(sandbox);
+  // Patched async runner: drive a stub StorageDb / Migration with a tiny
+  // surface so the body completes without exploding. We only care about
+  // (a) which projectId is computed and (b) whether the early-return fired.
+  vm.runInContext(
+    "const window = {"
+    + "  CodexOverleafStorageDb: {"
+    + "    extractLightweightPrefs: (s, pid) => ({ _pid: pid }),"
+    + "    buildActiveSessionByProject: () => ({}),"
+    + "    buildSessionRecord: rec => rec,"
+    + "    putRecords: (store, rec) => { storageWrites.push({ store, pid: rec[0] && rec[0].projectId }); return Promise.resolve(); },"
+    + "    getAllByIndex: () => Promise.resolve([]),"
+    + "    deleteRecord: () => Promise.resolve()"
+    + "  },"
+    + "  CodexOverleafStorageMigration: {"
+    + "    loadPrefs: () => Promise.resolve({}),"
+    + "    savePrefs: () => Promise.resolve()"
+    + "  },"
+    + "  location: { pathname: '/project/p_url', href: 'http://x/project/p_url' }"
+    + "};"
+    + "let currentRunView = null;"
+    + "const state = { sessions: [{ id: 's1', task: 't' }], autoRecompile: true, loadCodexLocalSkills: true, loadCodexOverleafSkills: true, experimentalOtByProject: {}, customInstructionsByProject: {}, governanceRulesByProject: {}, activeSessionId: 's1' };"
+    + "function prepareStateForStorage(s){ return { ...s, sessions: s.sessions }; }"
+    + "function normalizeExperimentalOtByProject(v){ return v || {}; }"
+    + "function normalizeGovernanceRulesByProject(v){ return v || {}; }"
+    + "function normalizeCustomInstructionsByProject(v){ return v || {}; }"
+    + "function getCodexOverleafSkillEnabled(){ return {}; }"
+    + "function isStorageQuotaError(){ return false; }"
+    + "function appendStorageNoticeOnce(){}"
+    + "function appendPlainLog(){ window.__skipLogged = true; }"
+    + "function tx(en, _zh){ return en; }"
+    + "function getCurrentProjectId(){ return window.location.pathname.match(/\\/project\\/([^/?#]+)/)[1]; }"
+    + "let chrome = { storage: { local: { set: () => Promise.resolve() } } };"
+    + guardAccessor + ";"
+    + body
+    + ";"
+    + "(async () => {"
+    + "  storageWrites = []; window.__skipLogged = false;"
+    + "  await saveState({ projectIdOverride: 'p_override' });"
+    + "  result.withOverride = storageWrites.map(w => w.pid);"
+    + "  storageWrites = []; window.__skipLogged = false;"
+    + "  currentRunView = { runProjectId: 'p_original' };"
+    + "  await saveState();"
+    + "  result.divergent = { writes: storageWrites.length, logged: window.__skipLogged === true };"
+    + "  storageWrites = []; window.__skipLogged = false;"
+    + "  currentRunView = { runProjectId: 'p_url' };"
+    + "  await saveState();"
+    + "  result.happy = storageWrites.map(w => w.pid);"
+    + "})().then(() => { result.done = true; });",
+    sandbox
+  );
+  // Wait for the inlined async chain to settle. The promise above is
+  // microtask-resolved, but vm.runInContext returns synchronously, so we
+  // poll the done flag through a setTimeout.
+  return new Promise(resolve => setTimeout(() => {
+    assert.equal(sandbox.result.done, true, 'inline saveState driver completed');
+    // The sandbox arrays/objects have a different prototype chain than the
+    // outer test process (vm.createContext gives them the context's own
+    // Array.prototype), so strict deepEqual rejects them even though the
+    // values match. Compare via JSON to sidestep that.
+    assert.equal(JSON.stringify(sandbox.result.withOverride), JSON.stringify(['p_override']),
+      'override wins over URL projectId');
+    assert.equal(JSON.stringify(sandbox.result.divergent), JSON.stringify({ writes: 0, logged: true }),
+      'navigation-divergent saveState skips writes and emits a warning log');
+    assert.equal(JSON.stringify(sandbox.result.happy), JSON.stringify(['p_url']),
+      'happy path uses URL projectId (no override, no divergence)');
+    resolve();
+  }, 40));
+});
+
+// ---------------------------------------------------------------------------
+// Welcome-panel + write-guard v1.3.8 add-on FX1 (Fix B / spec §5.7.1):
+// `settleRunAfterNavigation` accepts the full `syncOutcome` (not just a
+// pre-flattened skipped list). Skip codes outside the recognized list
+// (delete_confirmation_rejected, governance_blocked,
+// binary_confirmation_rejected, ...) and early-return branches with
+// hasSkippedOperations=true but no `applied` must now classify as
+// `needs_review_after_navigation`, not `background_completed`.
+// ---------------------------------------------------------------------------
+
+test('Fix B: settleRunAfterNavigation classifies hasSkippedOperations=true (no applied) as needs_review_after_navigation', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  const settleBody = extractFunction(src, 'settleRunAfterNavigation');
+  const collectBody = extractFunction(src, 'collectRunResultSkipped');
+  const sandbox = { result: null };
+  vm.createContext(sandbox);
+  vm.runInContext(
+    "let activeProjectId = 'X';"
+    + collectBody + ";" + settleBody + ";"
+    + "result = {"
+    // Early-return branch: outcome has hasSkippedOperations=true but no
+    // `applied` field at all (matches the §3534 / §3613 / §3678 branches of
+    // applySyncChangesToOverleaf).
+    + "  earlyReturn: settleRunAfterNavigation({ runProjectId: 'Y' }, { hasSkippedOperations: true }),"
+    // Skip codes outside the previous allow-list — all three from the user's
+    // example list. These previously fell through to background_completed.
+    + "  deleteConfirmRejected: settleRunAfterNavigation({ runProjectId: 'Y' }, {"
+    + "    applied: { skipped: [ { result: { code: 'delete_confirmation_rejected' } } ] }"
+    + "  }),"
+    + "  governanceBlocked: settleRunAfterNavigation({ runProjectId: 'Y' }, {"
+    + "    applied: { skipped: [ { result: { code: 'governance_blocked' } } ] }"
+    + "  }),"
+    + "  binaryConfirmRejected: settleRunAfterNavigation({ runProjectId: 'Y' }, {"
+    + "    applied: { skipped: [ { result: { code: 'binary_confirmation_rejected' } } ] }"
+    + "  })"
+    + "};",
+    sandbox
+  );
+  assert.equal(sandbox.result.earlyReturn, 'needs_review_after_navigation',
+    'hasSkippedOperations=true (no applied) classifies as needs_review_after_navigation, not background_completed');
+  assert.equal(sandbox.result.deleteConfirmRejected, 'needs_review_after_navigation',
+    'delete_confirmation_rejected classifies as needs_review_after_navigation');
+  assert.equal(sandbox.result.governanceBlocked, 'needs_review_after_navigation',
+    'governance_blocked classifies as needs_review_after_navigation');
+  assert.equal(sandbox.result.binaryConfirmRejected, 'needs_review_after_navigation',
+    'binary_confirmation_rejected classifies as needs_review_after_navigation');
+});
+
+test('Fix B: settleRunAfterNavigation still classifies guard codes as abandoned and clean outcomes as background_completed', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  const settleBody = extractFunction(src, 'settleRunAfterNavigation');
+  const collectBody = extractFunction(src, 'collectRunResultSkipped');
+  const sandbox = { result: null };
+  vm.createContext(sandbox);
+  vm.runInContext(
+    "let activeProjectId = 'X';"
+    + collectBody + ";" + settleBody + ";"
+    + "result = {"
+    // Guard codes — abandoned remains the strongest signal.
+    + "  guardAborted: settleRunAfterNavigation({ runProjectId: 'Y' }, {"
+    + "    applied: { skipped: [ { result: { code: 'aborted_project_changed' } } ] },"
+    + "    hasSkippedOperations: true"
+    + "  }),"
+    + "  guardEditor: settleRunAfterNavigation({ runProjectId: 'Y' }, {"
+    + "    applied: { skipped: [ { result: { code: 'editor_project_id_unavailable' } } ] },"
+    + "    hasSkippedOperations: true"
+    + "  }),"
+    // Clean run — no skipped, no hasSkippedOperations, but at least one
+    // applied entry. Classifies as background_completed per rule 3.
+    + "  clean: settleRunAfterNavigation({ runProjectId: 'Y' }, {"
+    + "    applied: { ok: true, applied: [ { path: 'main.tex' } ], skipped: [] },"
+    + "    hasSkippedOperations: false"
+    + "  }),"
+    // True no-op (e.g. Ask mode) — empty syncOutcome shape. Rule 4: still
+    // background_completed.
+    + "  noop: settleRunAfterNavigation({ runProjectId: 'Y' }, {"
+    + "    hasSkippedOperations: false"
+    + "  })"
+    + "};",
+    sandbox
+  );
+  assert.equal(sandbox.result.guardAborted, 'abandoned_after_navigation');
+  assert.equal(sandbox.result.guardEditor, 'abandoned_after_navigation');
+  assert.equal(sandbox.result.clean, 'background_completed');
+  assert.equal(sandbox.result.noop, 'background_completed');
+});
+
+test('Fix B: runCodexTask passes the full syncOutcome to settleRunAfterNavigation (not a pre-flattened skipped list)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  // The call site must pass `syncOutcome` directly, not `{ skipped:
+  // collectRunResultSkipped(syncOutcome) }`. That's the entire point of
+  // Fix B — settleRunAfterNavigation sees `hasSkippedOperations` and the
+  // raw `applied` so it can catch unrecognized skip codes and early-return
+  // branches.
+  assert.match(src, /settleRunAfterNavigation\(finishedRunRecord,\s*syncOutcome\)/);
+  // Defense-in-depth: the old `{ skipped: collectRunResultSkipped(syncOutcome) }`
+  // shape must NOT remain at the call site. (collectRunResultSkipped itself
+  // stays — it's still useful for the applied-array shape and legacy tests.)
+  assert.ok(!/settleRunAfterNavigation\([^,]+,\s*\{\s*skipped:\s*collectRunResultSkipped/.test(src),
+    'old pre-flattened call shape must be removed');
 });

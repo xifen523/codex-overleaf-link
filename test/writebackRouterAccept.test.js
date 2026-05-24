@@ -1226,3 +1226,91 @@ test('writebackRouter editor-not-ready timeout emits target_file_not_active when
   assert.equal(skip.result.failure.changedDocument, false);
   assert.equal(failureReasonsModule.validateFailureReason(skip.result.failure).ok, true);
 });
+
+// ---------------------------------------------------------------------------
+// Welcome-panel + write-guard v1.3.8 add-on FX1 (Fix D / spec §5.0):
+// The writebackRouter's defense-in-depth runProjectId guard previously only
+// ran on the payload-shaped `applyOperationsForBridge` entry. The array-
+// shaped entry (`applyOperations(arr, options)`) returned through without
+// the guard, so any future caller that went straight to the array entry
+// without `options.runProjectId` would silently dispatch. Fix D mirrors the
+// guard on the array branch — same `editor_project_id_unavailable` shape.
+//
+// These tests use the RAW module (not the wrapped writebackRouter that
+// auto-injects runProjectId) so the missing-runProjectId branch actually
+// fires.
+// ---------------------------------------------------------------------------
+
+test('Fix D: writebackRouter array-shaped applyOperations blocks when options.runProjectId is absent', async () => {
+  const rawRouter = writebackRouterModule.create({
+    compileBridge: { markSourceEdited() {} },
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    readActiveEditorText: () => '',
+    replaceActiveEditorPatches: () => ({ ok: true }),
+    replaceActiveEditorText: () => ({ ok: true }),
+    delay: () => Promise.resolve(),
+    getActiveEditorIdentity: () => null,
+    activeEditorIdentityChanged: () => false,
+    treeOperations: {
+      getActiveFilePath: () => 'main.tex',
+      projectPathExists: () => true,
+      openFileByPath: () => Promise.resolve({ ok: true, method: 'dom-click' })
+    },
+    window: { setTimeout, clearTimeout }
+  });
+
+  // Array-shape entry with NO options at all — guard must fire.
+  const resultNoOptions = await rawRouter.applyOperations([
+    { type: 'edit', path: 'main.tex', replaceAll: 'hello' }
+  ]);
+  assert.equal(resultNoOptions.ok, false, 'array-entry without runProjectId must block');
+  assert.equal(resultNoOptions.applied.length, 0);
+  assert.equal(resultNoOptions.skipped.length, 1);
+  const skipNoOptions = resultNoOptions.skipped[0];
+  assert.equal(skipNoOptions.result.code, 'editor_project_id_unavailable');
+  assert.equal(skipNoOptions.result.failure.code, 'editor_project_id_unavailable');
+  assert.equal(skipNoOptions.result.failure.stage, 'write');
+  assert.equal(skipNoOptions.result.failure.severity, 'blocked');
+  assert.equal(skipNoOptions.result.failure.terminalState, 'blocked');
+  assert.equal(skipNoOptions.result.failure.changedDocument, false);
+
+  // Array-shape entry with options that don't include runProjectId — same.
+  const resultEmptyRunPid = await rawRouter.applyOperations(
+    [{ type: 'edit', path: 'main.tex', replaceAll: 'hello' }],
+    { runProjectId: '' }
+  );
+  assert.equal(resultEmptyRunPid.ok, false, 'empty runProjectId must block too');
+  assert.equal(resultEmptyRunPid.skipped[0].result.code, 'editor_project_id_unavailable');
+});
+
+test('Fix D: writebackRouter array-shaped applyOperations passes through when options.runProjectId is set', async () => {
+  // The happy path must still dispatch. We don't care about the actual
+  // editing here — we only assert the request did NOT short-circuit to the
+  // `editor_project_id_unavailable` failure shape.
+  const rawRouter = writebackRouterModule.create({
+    compileBridge: { markSourceEdited() {} },
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    readActiveEditorText: () => '',
+    replaceActiveEditorPatches: () => ({ ok: true }),
+    replaceActiveEditorText: () => ({ ok: true, method: 'codemirror-view' }),
+    delay: () => Promise.resolve(),
+    getActiveEditorIdentity: () => null,
+    activeEditorIdentityChanged: () => false,
+    treeOperations: {
+      getActiveFilePath: () => 'main.tex',
+      projectPathExists: () => true,
+      openFileByPath: () => Promise.resolve({ ok: true, method: 'dom-click' })
+    },
+    window: { setTimeout, clearTimeout }
+  });
+  const result = await rawRouter.applyOperations(
+    [{ type: 'edit', path: 'main.tex', replaceAll: 'hello' }],
+    { runProjectId: 'test-project' }
+  );
+  // The result may or may not be ok depending on harness completeness, but
+  // it MUST NOT be an editor_project_id_unavailable failure. That's the only
+  // thing Fix D is asserting.
+  const skipCodes = (result.skipped || []).map(s => s && s.result && s.result.code);
+  assert.ok(!skipCodes.includes('editor_project_id_unavailable'),
+    'array-entry with runProjectId must NOT trip the guard (got skipped codes: ' + JSON.stringify(skipCodes) + ')');
+});

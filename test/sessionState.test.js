@@ -1622,6 +1622,62 @@ test('computeSafeTaskSummary truncates with … when over 80 chars', () => {
   assert.ok(out.endsWith('…'));
 });
 
+// ---------------------------------------------------------------------------
+// Welcome-panel + write-guard v1.3.8 add-on FX1 (Fix C / spec §5.6.2):
+// `computeSafeTaskSummary` must redact the broad family of absolute local
+// path shapes — not just the four hand-rolled patterns the original T3
+// shipped with. The fix extracts a shared `pathRedaction` helper used by
+// BOTH this summary path AND the storage-side audit redactor so the regex
+// set stays in sync and adding a new shape is a one-line change.
+// ---------------------------------------------------------------------------
+
+// Fix C: parameterized per-path-shape tests. Each shape is a distinct test
+// so failures pinpoint exactly which path family regressed. The original
+// substring must be gone from the output; the placeholder token itself is
+// not load-bearing (the spec accepts either '<local-path>' or '[local
+// path]').
+const FIX_C_PATH_CASES = [
+  { name: '/Users/alice',         input: 'see /Users/alice/foo for ref' },
+  { name: '/home/bob',            input: 'see /home/bob/foo for ref' },
+  { name: '/private/var',         input: 'see /private/var/foo for ref' },
+  { name: '/tmp',                 input: 'see /tmp/foo for ref' },
+  { name: '/var/folders',         input: 'see /var/folders/abc/foo for ref' },
+  { name: '/Volumes/USB',         input: 'see /Volumes/USB/foo for ref' },
+  { name: 'file:///Users/alice',  input: 'see file:///Users/alice/foo for ref' },
+  { name: 'C:\\Users\\bob',       input: 'see C:\\Users\\bob\\foo for ref' },
+  { name: 'C:/Users/bob',         input: 'see C:/Users/bob/foo for ref' },
+  { name: '\\\\server\\share',    input: 'see \\\\server\\share\\foo for ref' }
+];
+for (const c of FIX_C_PATH_CASES) {
+  test(`Fix C: computeSafeTaskSummary redacts ${c.name}`, () => {
+    const out = computeSafeTaskSummary(c.input);
+    assert.ok(!out.includes(c.name), `${c.name} must be redacted out (got: ${JSON.stringify(out)})`);
+  });
+}
+
+test('Fix C: computeSafeTaskSummary redacts the local Codex workspace path under any prefix', () => {
+  // The audit redactor already catches `.codex-overleaf/projects/...` paths;
+  // the shared helper must keep that coverage so the dashboard summary
+  // never surfaces a per-project local workspace path.
+  const out = computeSafeTaskSummary('relative ./.codex-overleaf/projects/proj_abc/main.tex here');
+  assert.ok(!out.includes('proj_abc'), '.codex-overleaf workspace path must be redacted: ' + out);
+});
+
+test('Fix C: shared pathRedaction helper exists and covers the spec\'s path families', () => {
+  // Source-level sanity: the extracted helper is the spec\'s recommended
+  // shape. Tests above already cover the behavior; this asserts the helper
+  // is in place so future implementers find it instead of duplicating the
+  // pattern set inside another sanitizer.
+  const PathRedaction = require('../extension/src/shared/pathRedaction');
+  assert.ok(PathRedaction.redactLocalPaths instanceof Function,
+    'pathRedaction.redactLocalPaths must be exported');
+  assert.ok(PathRedaction.mightContainLocalPath instanceof Function,
+    'pathRedaction.mightContainLocalPath must be exported');
+  // Spot-check a known-positive and a known-negative.
+  assert.equal(PathRedaction.redactLocalPaths('/Users/alice/foo'), '<local-path>');
+  assert.equal(PathRedaction.redactLocalPaths('plain text with no paths'), 'plain text with no paths');
+});
+
 test('saveState round-trip writes lastActivityAt, accountScopeId, safeTaskSummary on the active session record', () => {
   // We exercise the storage round-trip end-to-end: build a session record via
   // the inner record builder and assert the four Recent-projects fields are

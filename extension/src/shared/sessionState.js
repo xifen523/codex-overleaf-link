@@ -99,6 +99,7 @@
     /\b(?:api[_-]?key|token|password|passwd|secret)\b\s*[:=]\s*["']?[^"'\s,;]+["']?/gi
   ];
   const LineReferences = loadLineReferences();
+  const PathRedaction = loadPathRedaction();
 
   function normalizePanelState(input = {}, options = {}) {
     const state = {
@@ -1144,9 +1145,23 @@
   function computeSafeTaskSummary(task) {
     if (typeof task !== 'string' || !task) return '';
     let s = task;
-    // Strip absolute local paths (Unix + Windows).
-    s = s.replace(/(?:\/Users\/[^\s]+|\/home\/[^\s]+|\/private\/var\/[^\s]+)/g, '<local-path>');
-    s = s.replace(/[A-Z]:\\[^\s]+/g, '<local-path>');
+    // Strip absolute local paths via the canonical shared helper
+    // (spec §5.6.2 / Fix C). The helper covers Unix (/Users, /home,
+    // /private/var, /tmp, /var/folders, /Volumes, /etc, /opt, /usr, ...),
+    // Windows drive letters with both `\\` and `/`, UNC `\\server\share`,
+    // and `file:///` URLs. Adding a new path shape is a one-line change
+    // in `pathRedaction.js` and benefits both this summary and the
+    // storage-side audit redaction in lockstep.
+    if (PathRedaction && PathRedaction.redactLocalPaths instanceof Function) {
+      s = PathRedaction.redactLocalPaths(s, '<local-path>');
+    } else {
+      // Defensive fallback for hosts where the shared helper failed to
+      // load. The narrower legacy patterns ship a baseline (better than
+      // nothing) and the test suite asserts the broad coverage path
+      // succeeds, so this branch should never run in production.
+      s = s.replace(/(?:\/Users\/[^\s]+|\/home\/[^\s]+|\/private\/var\/[^\s]+|\/tmp\/[^\s]+|\/Volumes\/[^\s]+)/g, '<local-path>');
+      s = s.replace(/[A-Za-z]:[\\/][^\s]+/g, '<local-path>');
+    }
     // INTENTIONALLY OVER-REDACT @<token>: spec §5.6.2 — do not narrow to
     // attachment tokens, that would re-expose user info / paths / handles.
     s = s.replace(/@[\w./-]+/g, '@…');
@@ -1231,6 +1246,20 @@
     if (typeof require === 'function') {
       try {
         return require('./lineReferences');
+      } catch (_error) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  function loadPathRedaction() {
+    if (typeof globalThis !== 'undefined' && globalThis.CodexOverleafPathRedaction) {
+      return globalThis.CodexOverleafPathRedaction;
+    }
+    if (typeof require === 'function') {
+      try {
+        return require('./pathRedaction');
       } catch (_error) {
         return null;
       }
