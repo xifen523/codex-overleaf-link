@@ -238,6 +238,27 @@
   function buildSessionRecord(input) {
     var now = new Date().toISOString();
     var titleSource = input.titleSource === 'manual' ? 'manual' : 'auto';
+    var updatedAt = typeof input.updatedAt === 'string' ? input.updatedAt : now;
+    // Welcome-panel + write-guard v1.3.8 add-on (Task 3): persist the four
+    // Recent-projects fields on every session record so the cross-project
+    // query (`listRecentProjectsAcrossAccount`) can filter / sort / render
+    // without touching the raw `task` text.
+    //
+    // `accountScopeId` is derived via the page-side injection point — T4
+    // installs the real implementation on `window.codexOverleafDeriveAccountScopeId`.
+    // For T3 the fallback is `() => null`; records persisted with a null scope
+    // surface `accountScopeUnavailable: true` and are filtered out of the
+    // cross-project query (spec §5.2 degraded mode).
+    var safeTaskSummary = typeof input.safeTaskSummary === 'string'
+      ? input.safeTaskSummary
+      : deriveSafeTaskSummaryFromInput(input);
+    var accountScopeId = resolveAccountScopeId(input);
+    var accountScopeUnavailable = typeof input.accountScopeUnavailable === 'boolean'
+      ? input.accountScopeUnavailable
+      : !accountScopeId;
+    var lastActivityAt = typeof input.lastActivityAt === 'string' && input.lastActivityAt
+      ? input.lastActivityAt
+      : updatedAt;
     return {
       id: input.id || generateId('ses'),
       projectId: input.projectId || '',
@@ -255,8 +276,75 @@
       speedTier: typeof input.speedTier === 'string' ? input.speedTier : '',
       requireReviewing: input.requireReviewing !== false,
       createdAt: typeof input.createdAt === 'string' ? input.createdAt : now,
-      updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : now
+      updatedAt: updatedAt,
+      lastActivityAt: lastActivityAt,
+      accountScopeId: accountScopeId,
+      accountScopeUnavailable: accountScopeUnavailable,
+      safeTaskSummary: safeTaskSummary
     };
+  }
+
+  function resolveAccountScopeId(input) {
+    if (input && typeof input.accountScopeId === 'string' && input.accountScopeId) {
+      return input.accountScopeId;
+    }
+    var globalScope = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : null);
+    var derive = globalScope && globalScope.window && globalScope.window.codexOverleafDeriveAccountScopeId;
+    if (!(derive instanceof Function)) {
+      // No injection installed (T3 fallback): tests + early page-load reads
+      // both land here. Returning `null` puts the session in degraded mode
+      // and excludes it from the cross-project query.
+      return null;
+    }
+    try {
+      var value = derive();
+      return typeof value === 'string' && value ? value : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function deriveSafeTaskSummaryFromInput(input) {
+    var SessionState = loadSessionState();
+    if (!SessionState || !(SessionState.computeSafeTaskSummary instanceof Function)) {
+      return '';
+    }
+    var task = typeof input.task === 'string' && input.task ? input.task : '';
+    if (!task && Array.isArray(input.runs) && input.runs.length) {
+      var firstRun = input.runs[0];
+      if (firstRun && typeof firstRun.task === 'string') {
+        task = firstRun.task;
+      }
+    }
+    return SessionState.computeSafeTaskSummary(task);
+  }
+
+  // Module-local lazy require of the sibling sessionState module. CommonJS
+  // resolves once; subsequent calls hit the require cache. We avoid an import
+  // at the top of the file so the module surface remains friendly to the
+  // page-side IIFE wrapper (no `require` available in that context — the page
+  // build uses the global `CodexOverleafSessionState` via the IIFE branch).
+  var _sessionStateCache = null;
+  function loadSessionState() {
+    if (_sessionStateCache !== null) {
+      return _sessionStateCache || null;
+    }
+    var globalScope = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : null);
+    if (globalScope && globalScope.CodexOverleafSessionState) {
+      _sessionStateCache = globalScope.CodexOverleafSessionState;
+      return _sessionStateCache;
+    }
+    if (typeof require === 'function') {
+      try {
+        _sessionStateCache = require('./sessionState');
+        return _sessionStateCache;
+      } catch (_error) {
+        _sessionStateCache = false;
+        return null;
+      }
+    }
+    _sessionStateCache = false;
+    return null;
   }
 
   function buildTurnRecord(input) {
@@ -756,7 +844,19 @@
   }
 
   function normalizeRunStatus(status) {
-    return ['running', 'completed', 'failed'].indexOf(status) !== -1 ? status : 'completed';
+    // Welcome-panel + write-guard v1.3.8 add-on (Task 2/3): the run-status
+    // enum gained three post-navigation values. The storage normalizer must
+    // accept them so a settled run round-trips intact through `buildSessionRecord`.
+    // Unknown legacy values fall through to `completed` (the historical default).
+    return [
+      'pending',
+      'running',
+      'completed',
+      'failed',
+      'background_completed',
+      'needs_review_after_navigation',
+      'abandoned_after_navigation'
+    ].indexOf(status) !== -1 ? status : 'completed';
   }
 
   function normalizeEventStatus(status) {
@@ -964,6 +1064,113 @@
     return result;
   }
 
+  // Welcome-panel + write-guard v1.3.8 add-on (Task 3): the Recent-projects
+  // dashboard variant calls `listRecentProjectsAcrossAccount` to get the
+  // sorted, deduped, capped list of projects in the current account scope.
+  //
+  // Contract (spec §5.6.1):
+  //   Input:  { accountScopeId: string, limit?: number = 10 }
+  //   Output: Array<{ projectId, lastActivityAt, safeTaskSummary, primaryStatusBadge }>
+  //
+  // Fail-closed: if `accountScopeId` is falsy, returns `[]`. This is the
+  // privacy floor — degraded mode must never leak across accounts.
+  //
+  // Implementation: full scan of the sessions store, group by `projectId`,
+  // keep the row with the largest `lastActivityAt`, sort desc, cap at
+  // `limit`. Full scan is acceptable for v1 given the small session count
+  // (max ~12 per project × small number of projects). A future index on
+  // `accountScopeId + lastActivityAt` is possible without a contract change.
+  function listRecentProjectsAcrossAccount(options) {
+    var accountScopeId = options && options.accountScopeId;
+    var limit = options && Number.isFinite(options.limit) ? options.limit : 10;
+    if (!accountScopeId) {
+      return Promise.resolve([]);
+    }
+    return getAllSessions().then(function (all) {
+      return filterRecentProjectsAcrossAccount(all, { accountScopeId: accountScopeId, limit: limit });
+    });
+  }
+
+  // Pure helper extracted from `listRecentProjectsAcrossAccount` so the
+  // filtering / dedupe / sort / cap behavior can be tested without an
+  // IndexedDB stub. Same contract as the async wrapper; takes the raw session
+  // records as an array instead of opening the database.
+  function filterRecentProjectsAcrossAccount(sessions, options) {
+    var accountScopeId = options && options.accountScopeId;
+    var limit = options && Number.isFinite(options.limit) ? options.limit : 10;
+    if (!accountScopeId) {
+      return [];
+    }
+    var byProject = {}; // projectId → session
+    var all = Array.isArray(sessions) ? sessions : [];
+    for (var i = 0; i < all.length; i++) {
+      var s = all[i];
+      if (!s) continue;
+      if (s.accountScopeId !== accountScopeId) continue;
+      if (typeof s.lastActivityAt !== 'string' || !s.lastActivityAt) continue;
+      if (typeof s.projectId !== 'string' || !s.projectId) continue;
+      var prev = byProject[s.projectId];
+      if (!prev || prev.lastActivityAt < s.lastActivityAt) {
+        byProject[s.projectId] = s;
+      }
+    }
+    var survivors = [];
+    var keys = Object.keys(byProject);
+    for (var j = 0; j < keys.length; j++) {
+      survivors.push(byProject[keys[j]]);
+    }
+    survivors.sort(function (a, b) {
+      return b.lastActivityAt.localeCompare(a.lastActivityAt);
+    });
+    var rows = [];
+    for (var k = 0; k < survivors.length && k < limit; k++) {
+      var session = survivors[k];
+      rows.push({
+        projectId: session.projectId,
+        lastActivityAt: session.lastActivityAt,
+        safeTaskSummary: typeof session.safeTaskSummary === 'string' ? session.safeTaskSummary : '',
+        primaryStatusBadge: derivePrimaryStatusBadge(session)
+      });
+    }
+    return rows;
+  }
+
+  // Per spec §5.10:
+  //   1. trackedChangeStatus if set (pending/accepted/rejected/needs_review)
+  //   2. else run status (running/completed/failed/background_completed/
+  //                       needs_review_after_navigation/abandoned_after_navigation)
+  //   3. fallback `pending`.
+  function derivePrimaryStatusBadge(session) {
+    var runs = session && Array.isArray(session.runs) ? session.runs : [];
+    if (!runs.length) return 'pending';
+    var latestRun = runs[runs.length - 1];
+    if (!latestRun) return 'pending';
+    if (typeof latestRun.trackedChangeStatus === 'string' && latestRun.trackedChangeStatus) {
+      return latestRun.trackedChangeStatus;
+    }
+    if (typeof latestRun.status === 'string' && latestRun.status) {
+      return latestRun.status;
+    }
+    return 'pending';
+  }
+
+  // Full scan of the sessions store, used by the cross-project query above.
+  // We deliberately do not go through `getAllByIndex` because the existing
+  // session indexes are keyed by `projectId` / `updatedAt` — neither matches
+  // the account-scope filter. A direct `getAll` over the whole store is the
+  // simplest correct read.
+  function getAllSessions() {
+    return openDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction('sessions', 'readonly');
+        var store = tx.objectStore('sessions');
+        var request = store.getAll();
+        request.onsuccess = function (event) { resolve(event.target.result || []); };
+        request.onerror = function (event) { reject(event.target.error); };
+      });
+    });
+  }
+
   function buildActiveSessionByProject(existing, projectId, sessionId) {
     var result = {};
     if (existing && typeof existing === 'object') {
@@ -1069,6 +1276,10 @@
     buildAuditLogRecord: buildAuditLogRecord,
     extractLightweightPrefs: extractLightweightPrefs,
     buildActiveSessionByProject: buildActiveSessionByProject,
-    createEventBuffer: createEventBuffer
+    createEventBuffer: createEventBuffer,
+    listRecentProjectsAcrossAccount: listRecentProjectsAcrossAccount,
+    filterRecentProjectsAcrossAccount: filterRecentProjectsAcrossAccount,
+    derivePrimaryStatusBadge: derivePrimaryStatusBadge,
+    getAllSessions: getAllSessions
   };
 });

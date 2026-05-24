@@ -11,7 +11,9 @@ const {
   buildArtifactRecord,
   buildAuditLogRecord,
   extractLightweightPrefs,
-  buildActiveSessionByProject
+  buildActiveSessionByProject,
+  filterRecentProjectsAcrossAccount,
+  derivePrimaryStatusBadge
 } = require('../extension/src/shared/storageDb');
 const { prepareStateForStorage } = require('../extension/src/shared/sessionState');
 
@@ -813,4 +815,271 @@ test('buildActiveSessionByProject skips empty projectId', () => {
   const existing = { proj_1: 'ses_1' };
   const result = buildActiveSessionByProject(existing, '', 'ses_new');
   assert.deepEqual(result, { proj_1: 'ses_1' });
+});
+
+// ---------------------------------------------------------------------------
+// listRecentProjectsAcrossAccount (welcome-panel + write-guard v1.3.8 add-on,
+// Task 3). The async wrapper opens IndexedDB and calls the pure helper
+// `filterRecentProjectsAcrossAccount` — the tests exercise the helper directly
+// so they do not need a fake IDB. The IDB wrapper is a thin shim: open + getAll
+// + delegate; the contract (filter + dedupe + sort + cap + row shape) lives in
+// the pure helper.
+// ---------------------------------------------------------------------------
+function seedSession(overrides) {
+  return Object.assign({
+    id: overrides.id || 'ses_seed',
+    projectId: overrides.projectId || 'proj_default',
+    accountScopeId: overrides.accountScopeId || null,
+    lastActivityAt: overrides.lastActivityAt || '',
+    safeTaskSummary: overrides.safeTaskSummary || '',
+    runs: overrides.runs || []
+  }, overrides);
+}
+
+test('listRecentProjectsAcrossAccount: filters by accountScopeId only', () => {
+  const sessions = [
+    seedSession({ id: 's1', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-25T10:00:00Z' }),
+    seedSession({ id: 's2', projectId: 'p2', accountScopeId: 'B', lastActivityAt: '2026-05-25T11:00:00Z' }),
+    seedSession({ id: 's3', projectId: 'p3', accountScopeId: 'A', lastActivityAt: '2026-05-25T12:00:00Z' })
+  ];
+  const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
+  assert.equal(rows.length, 2);
+  const ids = rows.map(r => r.projectId).sort();
+  assert.deepEqual(ids, ['p1', 'p3']);
+});
+
+test('listRecentProjectsAcrossAccount: dedupes by projectId, keeping the largest lastActivityAt', () => {
+  const sessions = [
+    seedSession({ id: 's1', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-20T09:00:00Z', safeTaskSummary: 'old' }),
+    seedSession({ id: 's2', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-25T15:00:00Z', safeTaskSummary: 'new' }),
+    seedSession({ id: 's3', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-22T11:00:00Z', safeTaskSummary: 'mid' })
+  ];
+  const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].projectId, 'p1');
+  assert.equal(rows[0].lastActivityAt, '2026-05-25T15:00:00Z');
+  assert.equal(rows[0].safeTaskSummary, 'new');
+});
+
+test('listRecentProjectsAcrossAccount: sorts desc by lastActivityAt', () => {
+  const sessions = [
+    seedSession({ id: 's1', projectId: 'p_a', accountScopeId: 'A', lastActivityAt: '2026-05-25T09:00:00Z' }),
+    seedSession({ id: 's2', projectId: 'p_b', accountScopeId: 'A', lastActivityAt: '2026-05-25T13:00:00Z' }),
+    seedSession({ id: 's3', projectId: 'p_c', accountScopeId: 'A', lastActivityAt: '2026-05-25T11:00:00Z' })
+  ];
+  const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
+  assert.deepEqual(rows.map(r => r.projectId), ['p_b', 'p_c', 'p_a']);
+});
+
+test('listRecentProjectsAcrossAccount: caps at the given limit', () => {
+  const sessions = [];
+  for (let i = 0; i < 15; i++) {
+    sessions.push(seedSession({
+      id: 's' + i,
+      projectId: 'p' + i,
+      accountScopeId: 'A',
+      lastActivityAt: '2026-05-25T' + String(i).padStart(2, '0') + ':00:00Z'
+    }));
+  }
+  const rowsDefault = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
+  assert.equal(rowsDefault.length, 10, 'default limit is 10');
+  const rowsCustom = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A', limit: 3 });
+  assert.equal(rowsCustom.length, 3);
+});
+
+test('listRecentProjectsAcrossAccount: returns [] when accountScopeId is falsy (fail-closed)', () => {
+  const sessions = [
+    seedSession({ id: 's1', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-25T09:00:00Z' })
+  ];
+  assert.deepEqual(filterRecentProjectsAcrossAccount(sessions, { accountScopeId: null }), []);
+  assert.deepEqual(filterRecentProjectsAcrossAccount(sessions, { accountScopeId: '' }), []);
+  assert.deepEqual(filterRecentProjectsAcrossAccount(sessions, {}), []);
+});
+
+test('listRecentProjectsAcrossAccount: excludes legacy records lacking accountScopeId or lastActivityAt', () => {
+  const sessions = [
+    seedSession({ id: 's1', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-25T09:00:00Z' }),
+    seedSession({ id: 's2', projectId: 'p2', accountScopeId: null, lastActivityAt: '2026-05-25T10:00:00Z' }),
+    seedSession({ id: 's3', projectId: 'p3', accountScopeId: 'A', lastActivityAt: '' }),
+    // legacy record: no fields at all
+    { id: 's4', projectId: 'p4', runs: [] }
+  ];
+  const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].projectId, 'p1');
+});
+
+test('listRecentProjectsAcrossAccount: excludes records lacking projectId', () => {
+  const sessions = [
+    seedSession({ id: 's1', projectId: '', accountScopeId: 'A', lastActivityAt: '2026-05-25T09:00:00Z' }),
+    seedSession({ id: 's2', projectId: 'p2', accountScopeId: 'A', lastActivityAt: '2026-05-25T10:00:00Z' })
+  ];
+  const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].projectId, 'p2');
+});
+
+test('listRecentProjectsAcrossAccount: row contract has the four v1 fields and does not expose latestSessionId', () => {
+  const sessions = [
+    seedSession({
+      id: 's_internal_id',
+      projectId: 'p1',
+      accountScopeId: 'A',
+      lastActivityAt: '2026-05-25T09:00:00Z',
+      safeTaskSummary: 'rewrite section',
+      runs: [{ id: 'r1', status: 'completed' }]
+    })
+  ];
+  const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.deepEqual(Object.keys(row).sort(), ['lastActivityAt', 'primaryStatusBadge', 'projectId', 'safeTaskSummary']);
+  assert.equal(row.projectId, 'p1');
+  assert.equal(row.lastActivityAt, '2026-05-25T09:00:00Z');
+  assert.equal(row.safeTaskSummary, 'rewrite section');
+  assert.equal(row.primaryStatusBadge, 'completed');
+  // latestSessionId is internal (see spec §5.6.1) and must NOT leak into the row contract.
+  assert.ok(!('latestSessionId' in row), 'latestSessionId must not be exposed in v1 row contract');
+  assert.ok(!('id' in row), 'internal session id must not be exposed');
+});
+
+test('listRecentProjectsAcrossAccount: empty source returns []', () => {
+  assert.deepEqual(filterRecentProjectsAcrossAccount([], { accountScopeId: 'A' }), []);
+  assert.deepEqual(filterRecentProjectsAcrossAccount(null, { accountScopeId: 'A' }), []);
+  assert.deepEqual(filterRecentProjectsAcrossAccount(undefined, { accountScopeId: 'A' }), []);
+});
+
+// ---------------------------------------------------------------------------
+// derivePrimaryStatusBadge (spec §5.10): prefer the latest run's
+// trackedChangeStatus → fall back to runStatus → fall back to 'pending'.
+// ---------------------------------------------------------------------------
+test('derivePrimaryStatusBadge prefers trackedChangeStatus on the latest run', () => {
+  const session = {
+    runs: [
+      { id: 'r1', status: 'completed', trackedChangeStatus: 'rejected' },
+      { id: 'r2', status: 'completed', trackedChangeStatus: 'pending' }
+    ]
+  };
+  assert.equal(derivePrimaryStatusBadge(session), 'pending');
+});
+
+test('derivePrimaryStatusBadge falls back to runStatus when trackedChangeStatus is absent', () => {
+  const session = {
+    runs: [
+      { id: 'r1', status: 'completed' },
+      { id: 'r2', status: 'background_completed' }
+    ]
+  };
+  assert.equal(derivePrimaryStatusBadge(session), 'background_completed');
+});
+
+test('derivePrimaryStatusBadge surfaces post-navigation runStatus values', () => {
+  assert.equal(derivePrimaryStatusBadge({ runs: [{ id: 'r', status: 'needs_review_after_navigation' }] }),
+    'needs_review_after_navigation');
+  assert.equal(derivePrimaryStatusBadge({ runs: [{ id: 'r', status: 'abandoned_after_navigation' }] }),
+    'abandoned_after_navigation');
+});
+
+test('derivePrimaryStatusBadge falls back to pending when no runs present', () => {
+  assert.equal(derivePrimaryStatusBadge({}), 'pending');
+  assert.equal(derivePrimaryStatusBadge({ runs: [] }), 'pending');
+  assert.equal(derivePrimaryStatusBadge({ runs: [{}] }), 'pending');
+});
+
+// ---------------------------------------------------------------------------
+// runStatus storage round-trip (welcome-panel + write-guard v1.3.8 add-on,
+// Task 3 verification): a session record carrying one of the three new
+// post-navigation `runStatus` values must survive `buildSessionRecord` /
+// `compactRunForStorage` round-trip — the storage-side normalizer must NOT
+// downgrade them to `completed`.
+// ---------------------------------------------------------------------------
+test('storage round-trip preserves background_completed runStatus', () => {
+  const record = buildSessionRecord({
+    id: 'ses_bg',
+    projectId: 'p1',
+    runs: [{ id: 'r1', task: 'background run', status: 'background_completed' }]
+  });
+  assert.equal(record.runs[0].status, 'background_completed');
+});
+
+test('storage round-trip preserves needs_review_after_navigation runStatus', () => {
+  const record = buildSessionRecord({
+    id: 'ses_nra',
+    projectId: 'p2',
+    runs: [{ id: 'r1', task: 'review', status: 'needs_review_after_navigation' }]
+  });
+  assert.equal(record.runs[0].status, 'needs_review_after_navigation');
+});
+
+test('storage round-trip preserves abandoned_after_navigation runStatus', () => {
+  const record = buildSessionRecord({
+    id: 'ses_aan',
+    projectId: 'p3',
+    runs: [{ id: 'r1', task: 'abandoned', status: 'abandoned_after_navigation' }]
+  });
+  assert.equal(record.runs[0].status, 'abandoned_after_navigation');
+});
+
+// ---------------------------------------------------------------------------
+// buildSessionRecord: the four new Recent-projects fields (Task 3).
+// ---------------------------------------------------------------------------
+test('buildSessionRecord populates lastActivityAt from updatedAt when no explicit value', () => {
+  const record = buildSessionRecord({
+    id: 'ses_la',
+    projectId: 'p1',
+    updatedAt: '2026-05-25T15:00:00.000Z'
+  });
+  assert.equal(record.lastActivityAt, '2026-05-25T15:00:00.000Z');
+});
+
+test('buildSessionRecord preserves explicit lastActivityAt from input', () => {
+  const record = buildSessionRecord({
+    id: 'ses_la2',
+    projectId: 'p1',
+    updatedAt: '2026-05-25T15:00:00.000Z',
+    lastActivityAt: '2026-05-25T16:30:00.000Z'
+  });
+  assert.equal(record.lastActivityAt, '2026-05-25T16:30:00.000Z');
+});
+
+test('buildSessionRecord uses input.accountScopeId when provided', () => {
+  const record = buildSessionRecord({
+    id: 'ses_scope',
+    projectId: 'p1',
+    accountScopeId: 'acct_explicit'
+  });
+  assert.equal(record.accountScopeId, 'acct_explicit');
+  assert.equal(record.accountScopeUnavailable, false);
+});
+
+test('buildSessionRecord computes safeTaskSummary from the task text when none provided', () => {
+  const record = buildSessionRecord({
+    id: 'ses_sum',
+    projectId: 'p1',
+    task: 'rewrite intro per /Users/alice/notes.md'
+  });
+  assert.ok(!record.safeTaskSummary.includes('/Users/alice'));
+  assert.ok(record.safeTaskSummary.includes('<local-path>'));
+});
+
+test('buildSessionRecord preserves explicit safeTaskSummary from input', () => {
+  const record = buildSessionRecord({
+    id: 'ses_sum2',
+    projectId: 'p1',
+    task: 'whatever',
+    safeTaskSummary: 'precomputed value'
+  });
+  assert.equal(record.safeTaskSummary, 'precomputed value');
+});
+
+test('buildSessionRecord sets accountScopeUnavailable=true and accountScopeId=null with no injection', () => {
+  const prior = global.window;
+  global.window = {}; // no derive fn
+  try {
+    const record = buildSessionRecord({ id: 'ses_no_inject', projectId: 'p1' });
+    assert.equal(record.accountScopeId, null);
+    assert.equal(record.accountScopeUnavailable, true);
+  } finally {
+    global.window = prior;
+  }
 });

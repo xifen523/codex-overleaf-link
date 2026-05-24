@@ -14,7 +14,8 @@ const {
   recordSessionResult,
   selectVisibleSessionsForList,
   setActiveSession,
-  updateActiveSession
+  updateActiveSession,
+  computeSafeTaskSummary
 } = require('../extension/src/shared/sessionState');
 
 const SECRET = ['sk', 'v0test_DO_NOT_LEAK_1234567890abcdef'].join('-');
@@ -1567,4 +1568,134 @@ test('runStatus normalizer accepts abandoned_after_navigation', () => {
 test('runStatus normalizer recovers unknown legacy value to pending', () => {
   const out = normalizeRuns([{ id: 'r', task: 't', mode: 'auto', status: 'totally_unknown_value' }]);
   assert.equal(out[0].status, 'pending', JSON.stringify(out[0]));
+});
+
+// ---------------------------------------------------------------------------
+// computeSafeTaskSummary + saveState field writes (welcome-panel + write-guard
+// v1.3.8 add-on, Task 3). The Recent-projects dashboard variant renders one
+// sanitized line per project, never the raw `task`. `computeSafeTaskSummary`
+// is the privacy floor. Spec §5.6.2 says the `@` regex must be left broad —
+// future implementers must NOT narrow it to "only attachment tokens".
+// ---------------------------------------------------------------------------
+test('computeSafeTaskSummary strips absolute paths and @-attachments and caps at 80 chars', () => {
+  const raw = 'Rewrite section 2 with @section and use the bib at /Users/alice/work/refs.bib\n\nthen also see C:\\Users\\bob\\appendix.tex which is long enough to exceed eighty chars combined';
+  const out = computeSafeTaskSummary(raw);
+  assert.ok(out.length <= 80, 'summary capped at 80 chars: got length ' + out.length);
+  assert.ok(!out.includes('/Users/alice'), 'unix path removed');
+  assert.ok(!out.includes('C:\\Users'), 'windows path removed');
+  assert.ok(!out.includes('@section'), '@-attachment over-redacted by design');
+  assert.ok(!out.includes('\n'), 'newlines collapsed');
+});
+
+test('computeSafeTaskSummary returns empty string for non-string / empty input', () => {
+  assert.equal(computeSafeTaskSummary(null), '');
+  assert.equal(computeSafeTaskSummary(undefined), '');
+  assert.equal(computeSafeTaskSummary(''), '');
+  assert.equal(computeSafeTaskSummary(42), '');
+});
+
+test('computeSafeTaskSummary collapses runs of whitespace to a single space', () => {
+  const out = computeSafeTaskSummary('a\t\t  b\n\n  c   d');
+  assert.equal(out, 'a b c d');
+});
+
+test('computeSafeTaskSummary over-redacts plain @ tokens (emails, handles) by design — spec §5.6.2', () => {
+  // Intentional: do NOT narrow this regex. Plain emails / handles are stripped
+  // because narrowing the pattern to "only attachment tokens" would re-expose
+  // user info / paths / handles in task text.
+  const out = computeSafeTaskSummary('please email alice@example.com and ping @bob');
+  assert.ok(!out.includes('alice@example.com'), 'plain email over-redacted: ' + out);
+  assert.ok(!out.includes('@bob'), 'social handle over-redacted: ' + out);
+  assert.ok(out.includes('@…'), 'redaction marker present: ' + out);
+});
+
+test('computeSafeTaskSummary strips /home/... and /private/var/... absolute paths', () => {
+  const out = computeSafeTaskSummary('see /home/charlie/refs.bib and /private/var/tmp/log.txt');
+  assert.ok(!out.includes('/home/charlie'));
+  assert.ok(!out.includes('/private/var/tmp'));
+  assert.ok(out.includes('<local-path>'));
+});
+
+test('computeSafeTaskSummary truncates with … when over 80 chars', () => {
+  const out = computeSafeTaskSummary('x'.repeat(200));
+  assert.equal(out.length, 80);
+  assert.ok(out.endsWith('…'));
+});
+
+test('saveState round-trip writes lastActivityAt, accountScopeId, safeTaskSummary on the active session record', () => {
+  // We exercise the storage round-trip end-to-end: build a session record via
+  // the inner record builder and assert the four Recent-projects fields are
+  // populated. T3 stores the four fields on every persisted session record so
+  // the cross-project query can filter them; T4 hooks up the real derive fn.
+  const StorageDb = require('../extension/src/shared/storageDb');
+  const prior = global.window;
+  global.window = { codexOverleafDeriveAccountScopeId: () => 'acct_test_scope_001' };
+  try {
+    const record = StorageDb.buildSessionRecord({
+      id: 'ses_active',
+      projectId: 'proj_a',
+      task: 'rewrite section 2 with bib refs',
+      updatedAt: '2026-05-25T10:00:00.000Z'
+    });
+    assert.equal(record.lastActivityAt, '2026-05-25T10:00:00.000Z', 'lastActivityAt mirrors updatedAt');
+    assert.equal(record.accountScopeId, 'acct_test_scope_001');
+    assert.equal(record.accountScopeUnavailable, false);
+    assert.equal(record.safeTaskSummary, 'rewrite section 2 with bib refs');
+  } finally {
+    global.window = prior;
+  }
+});
+
+test('saveState round-trip sets accountScopeUnavailable=true when the derive fn returns null', () => {
+  const StorageDb = require('../extension/src/shared/storageDb');
+  const prior = global.window;
+  global.window = { codexOverleafDeriveAccountScopeId: () => null };
+  try {
+    const record = StorageDb.buildSessionRecord({
+      id: 'ses_no_scope',
+      projectId: 'proj_b',
+      task: 'short task'
+    });
+    assert.equal(record.accountScopeId, null);
+    assert.equal(record.accountScopeUnavailable, true);
+    assert.equal(record.safeTaskSummary, 'short task');
+    assert.ok(typeof record.lastActivityAt === 'string' && record.lastActivityAt.length > 0,
+      'lastActivityAt is present even in degraded mode');
+  } finally {
+    global.window = prior;
+  }
+});
+
+test('saveState round-trip falls back to () => null when no derive fn is injected', () => {
+  const StorageDb = require('../extension/src/shared/storageDb');
+  const prior = global.window;
+  global.window = {}; // no injection point installed
+  try {
+    const record = StorageDb.buildSessionRecord({
+      id: 'ses_no_inject',
+      projectId: 'proj_c',
+      task: 'task body'
+    });
+    assert.equal(record.accountScopeId, null);
+    assert.equal(record.accountScopeUnavailable, true);
+  } finally {
+    global.window = prior;
+  }
+});
+
+test('saveState round-trip derives safeTaskSummary from runs[0].task when session.task is empty', () => {
+  const StorageDb = require('../extension/src/shared/storageDb');
+  const prior = global.window;
+  global.window = { codexOverleafDeriveAccountScopeId: () => 'acct_x' };
+  try {
+    const record = StorageDb.buildSessionRecord({
+      id: 'ses_runs_only',
+      projectId: 'proj_d',
+      task: '',
+      runs: [{ id: 'run_1', task: 'fallback task from runs', mode: 'auto' }]
+    });
+    assert.equal(record.safeTaskSummary, 'fallback task from runs');
+  } finally {
+    global.window = prior;
+  }
 });

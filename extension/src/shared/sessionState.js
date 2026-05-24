@@ -888,7 +888,7 @@
   function compactSessionForStorage(session, fallbackState, limits) {
     const runs = compactRunsForStorage(session.runs, limits);
     const titleSource = VALID_TITLE_SOURCES.has(session.titleSource) ? session.titleSource : 'auto';
-    return {
+    const compact = {
       id: session.id,
       title: compactSessionTitleForStorage(session, titleSource, limits),
       titleSource,
@@ -904,6 +904,24 @@
       requireReviewing: session.requireReviewing !== false,
       focusFiles: normalizeFocusFiles(session.focusFiles)
     };
+    // Welcome-panel + write-guard v1.3.8 add-on (Task 3): preserve the four
+    // Recent-projects fields through compaction so they round-trip when state
+    // is reloaded from chrome.storage.local. The active record builder in
+    // `buildSessionRecord` is the canonical writer; this branch preserves an
+    // existing value so it survives.
+    if (typeof session.lastActivityAt === 'string' && session.lastActivityAt) {
+      compact.lastActivityAt = session.lastActivityAt;
+    }
+    if (typeof session.accountScopeId === 'string' && session.accountScopeId) {
+      compact.accountScopeId = session.accountScopeId;
+    }
+    if (typeof session.accountScopeUnavailable === 'boolean') {
+      compact.accountScopeUnavailable = session.accountScopeUnavailable;
+    }
+    if (typeof session.safeTaskSummary === 'string' && session.safeTaskSummary) {
+      compact.safeTaskSummary = session.safeTaskSummary;
+    }
+    return compact;
   }
 
   function compactSessionTitleForStorage(session, titleSource, limits) {
@@ -1108,6 +1126,37 @@
     return Math.round(Math.min(760, Math.max(340, width)));
   }
 
+  // Welcome-panel + write-guard v1.3.8 add-on (Task 3): the Recent-projects
+  // dashboard variant renders one sanitized line per project. `computeSafeTaskSummary`
+  // is the privacy floor for that line. It is written on every `saveState` and
+  // stored on the session record (`session.safeTaskSummary`), so the dashboard
+  // never has to touch the raw `task` text on render.
+  //
+  // The `@` regex is intentionally broad — see spec §5.6.2:
+  //   > Replace `@<token>` references with `@…` (regex `/@[\w./-]+/g` → `'@…'`).
+  //   > This intentionally over-redacts: it will also strip plain email
+  //   > addresses, social handles, and any `@foo` mention in the task body.
+  //   > That is the conservative-privacy choice and is by design — future
+  //   > implementers must not narrow the pattern to "only known attachment
+  //   > tokens" because doing so would re-expose paths, citation keys,
+  //   > reviewer names, etc. that users frequently combine with `@` in task
+  //   > text.
+  function computeSafeTaskSummary(task) {
+    if (typeof task !== 'string' || !task) return '';
+    let s = task;
+    // Strip absolute local paths (Unix + Windows).
+    s = s.replace(/(?:\/Users\/[^\s]+|\/home\/[^\s]+|\/private\/var\/[^\s]+)/g, '<local-path>');
+    s = s.replace(/[A-Z]:\\[^\s]+/g, '<local-path>');
+    // INTENTIONALLY OVER-REDACT @<token>: spec §5.6.2 — do not narrow to
+    // attachment tokens, that would re-expose user info / paths / handles.
+    s = s.replace(/@[\w./-]+/g, '@…');
+    // Collapse whitespace runs to single space; trim.
+    s = s.replace(/\s+/g, ' ').trim();
+    // Hard cap 80 visible chars.
+    if (s.length > 80) s = s.slice(0, 79) + '…';
+    return s;
+  }
+
   function normalizeTextField(value, maxChars) {
     const text = sanitizeAssistantVisibleText(value);
     if (!Number.isFinite(maxChars) || maxChars <= 0 || text.length <= maxChars) {
@@ -1291,6 +1340,7 @@
     updateActiveSession,
     normalizeRuns,
     prepareStateForStorage,
-    estimateJsonBytes
+    estimateJsonBytes,
+    computeSafeTaskSummary
   };
 });
