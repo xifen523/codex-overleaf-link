@@ -4704,3 +4704,32 @@ test('user-facing task failures do not render raw stack traces', () => {
   assert.doesNotMatch(runTaskBody, /stack:\s*error\.stack/);
   assert.doesNotMatch(runTaskBody, /stack:\s*persistenceError\.stack/);
 });
+
+test('selectPrimaryFailure honors severity then stage tie-breaker (native blocked beats navigation blocked)', () => {
+  const { selectPrimaryFailure } = require('../extension/src/shared/failureReasons');
+  const failures = [
+    { code: 'a', stage: 'codex', severity: 'warning', userMessage: 'm', retryable: false },
+    { code: 'b', stage: 'navigation', severity: 'blocked', userMessage: 'm', retryable: false },
+    { code: 'c', stage: 'native', severity: 'blocked', userMessage: 'm', retryable: false }
+  ];
+  const primary = selectPrimaryFailure(failures);
+  assert.equal(primary.code, 'c', 'native blocked beats navigation blocked by tie-breaker');
+});
+
+test('selectPrimaryFailure: navigation blocked beats preflight blocked', () => {
+  const { selectPrimaryFailure } = require('../extension/src/shared/failureReasons');
+  const failures = [
+    { code: 'p', stage: 'preflight', severity: 'blocked', userMessage: 'm', retryable: false },
+    { code: 'n', stage: 'navigation', severity: 'blocked', userMessage: 'm', retryable: false }
+  ];
+  assert.equal(selectPrimaryFailure(failures).code, 'n');
+});
+
+test('selectPrimaryFailure: navigation blocked beats navigation error', () => {
+  const { selectPrimaryFailure } = require('../extension/src/shared/failureReasons');
+  const failures = [
+    { code: 'navE', stage: 'navigation', severity: 'error', userMessage: 'm', retryable: false },
+    { code: 'navB', stage: 'navigation', severity: 'blocked', userMessage: 'm', retryable: false }
+  ];
+  assert.equal(selectPrimaryFailure(failures).code, 'navB');
+});

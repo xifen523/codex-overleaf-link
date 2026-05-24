@@ -29,6 +29,7 @@
       ],
       "js": [
         "src/shared/summary.js",
+        "src/shared/failureReasons.js",
         "src/shared/agentTranscript.js",
         "src/shared/reviewing.js",
         "src/shared/projectFiles.js",

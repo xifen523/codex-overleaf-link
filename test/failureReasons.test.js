@@ -145,3 +145,125 @@ test('normalizeFailureReason preserves operation type and file when available', 
   assert.equal(reason.operationType, 'edit');
   assert.equal(reason.file, 'main.tex');
 });
+
+const {
+  STAGE_TIE_BREAKER_ORDER,
+  SEVERITY_ORDER,
+  selectPrimaryFailure,
+  localizeFailureReason
+} = failureReasons;
+
+test('STAGE_TIE_BREAKER_ORDER lists all 12 stages in design-spec order', () => {
+  assert.deepEqual(STAGE_TIE_BREAKER_ORDER, [
+    'native', 'navigation', 'preflight', 'write', 'verify',
+    'reviewing', 'accept', 'undo', 'storage', 'codex', 'context', 'unknown'
+  ]);
+});
+
+test('SEVERITY_ORDER ranks blocked < error < warning < info', () => {
+  assert.ok(SEVERITY_ORDER.blocked < SEVERITY_ORDER.error);
+  assert.ok(SEVERITY_ORDER.error < SEVERITY_ORDER.warning);
+  assert.ok(SEVERITY_ORDER.warning < SEVERITY_ORDER.info);
+});
+
+test('selectPrimaryFailure returns null for empty or non-array input', () => {
+  assert.equal(selectPrimaryFailure([]), null);
+  assert.equal(selectPrimaryFailure(null), null);
+  assert.equal(selectPrimaryFailure(undefined), null);
+});
+
+test('selectPrimaryFailure prefers blocked over error over warning over info', () => {
+  const failures = [
+    { code: 'a', stage: 'codex', severity: 'info', userMessage: 'm', retryable: false },
+    { code: 'b', stage: 'codex', severity: 'warning', userMessage: 'm', retryable: false },
+    { code: 'c', stage: 'codex', severity: 'blocked', userMessage: 'm', retryable: false },
+    { code: 'd', stage: 'codex', severity: 'error', userMessage: 'm', retryable: false }
+  ];
+  assert.equal(selectPrimaryFailure(failures).code, 'c');
+});
+
+test('selectPrimaryFailure tie-breaks by stage order: native blocked beats navigation blocked', () => {
+  const failures = [
+    { code: 'nav', stage: 'navigation', severity: 'blocked', userMessage: 'm', retryable: false },
+    { code: 'nat', stage: 'native', severity: 'blocked', userMessage: 'm', retryable: false }
+  ];
+  assert.equal(selectPrimaryFailure(failures).code, 'nat');
+});
+
+test('selectPrimaryFailure tie-breaks navigation blocked over preflight blocked', () => {
+  const failures = [
+    { code: 'pre', stage: 'preflight', severity: 'blocked', userMessage: 'm', retryable: false },
+    { code: 'nav', stage: 'navigation', severity: 'blocked', userMessage: 'm', retryable: false }
+  ];
+  assert.equal(selectPrimaryFailure(failures).code, 'nav');
+});
+
+test('selectPrimaryFailure prefers blocked navigation over error navigation', () => {
+  const failures = [
+    { code: 'navE', stage: 'navigation', severity: 'error', userMessage: 'm', retryable: false },
+    { code: 'navB', stage: 'navigation', severity: 'blocked', userMessage: 'm', retryable: false }
+  ];
+  assert.equal(selectPrimaryFailure(failures).code, 'navB');
+});
+
+test('localizeFailureReason returns localized template when i18n lookup succeeds', () => {
+  const lookup = key => ({
+    failureReason_target_file_not_active_user: 'Cannot write {file}; active is {activeFile}.',
+    failureReason_target_file_not_active_next: 'Open {file} and retry.'
+  })[key];
+  const localized = localizeFailureReason({
+    code: 'target_file_not_active',
+    stage: 'navigation',
+    severity: 'blocked',
+    userMessage: 'fallback msg',
+    nextAction: 'fallback next',
+    retryable: true,
+    file: 'a.tex',
+    activeFile: 'b.tex'
+  }, 'en', lookup);
+  assert.equal(localized.userMessage, 'Cannot write a.tex; active is b.tex.');
+  assert.equal(localized.nextAction, 'Open a.tex and retry.');
+});
+
+test('localizeFailureReason falls back to failure.userMessage/nextAction when i18n misses', () => {
+  const lookup = () => undefined;
+  const localized = localizeFailureReason({
+    code: 'unknown_code',
+    stage: 'unknown',
+    severity: 'error',
+    userMessage: 'catalog fallback',
+    nextAction: 'catalog next',
+    retryable: false
+  }, 'en', lookup);
+  assert.equal(localized.userMessage, 'catalog fallback');
+  assert.equal(localized.nextAction, 'catalog next');
+});
+
+test('localizeFailureReason interpolates {file}, {activeFile}, {operationType}', () => {
+  const lookup = key => ({
+    failureReason_x_user: 'op={operationType} file={file} active={activeFile}'
+  })[key];
+  const localized = localizeFailureReason({
+    code: 'x',
+    stage: 'navigation',
+    severity: 'blocked',
+    userMessage: 'fb',
+    retryable: false,
+    file: 'main.tex',
+    activeFile: 'other.tex',
+    operationType: 'edit'
+  }, 'en', lookup);
+  assert.equal(localized.userMessage, 'op=edit file=main.tex active=other.tex');
+});
+
+test('localizeFailureReason interpolates missing fields as empty strings', () => {
+  const lookup = key => key === 'failureReason_x_user' ? 'file={file}' : undefined;
+  const localized = localizeFailureReason({
+    code: 'x',
+    stage: 'navigation',
+    severity: 'blocked',
+    userMessage: 'fb',
+    retryable: false
+  }, 'en', lookup);
+  assert.equal(localized.userMessage, 'file=');
+});

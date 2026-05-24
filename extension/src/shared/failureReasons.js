@@ -466,6 +466,84 @@
     }, op || {});
   }
 
+  /**
+   * Severity ranking used by `selectPrimaryFailure`. Lower index = higher priority.
+   * Source: design spec §12.
+   */
+  const SEVERITY_ORDER = { blocked: 0, error: 1, warning: 2, info: 3 };
+
+  /**
+   * Stage tie-breaker order used by `selectPrimaryFailure` when two failures
+   * share severity. Source: design spec §12 — infrastructure first, then
+   * user-controlled blockers, then pipeline order, then auxiliary stages.
+   * @type {string[]}
+   */
+  const STAGE_TIE_BREAKER_ORDER = [
+    'native', 'navigation', 'preflight', 'write', 'verify',
+    'reviewing', 'accept', 'undo', 'storage', 'codex', 'context', 'unknown'
+  ];
+
+  /**
+   * Pick the run-level primary failure from a list of per-operation FailureReason
+   * records. Orders first by severity (`blocked > error > warning > info`),
+   * then by stage tie-breaker per §12.
+   * @param {Array<{ stage?: string, severity?: string }>} failures
+   * @returns {object | null}
+   */
+  function selectPrimaryFailure(failures) {
+    if (!Array.isArray(failures) || failures.length === 0) {
+      return null;
+    }
+    const ranked = failures.slice().sort(function compareFailures(a, b) {
+      const sevA = SEVERITY_ORDER[a && a.severity] !== undefined ? SEVERITY_ORDER[a.severity] : 99;
+      const sevB = SEVERITY_ORDER[b && b.severity] !== undefined ? SEVERITY_ORDER[b.severity] : 99;
+      if (sevA !== sevB) return sevA - sevB;
+      const stageA = STAGE_TIE_BREAKER_ORDER.indexOf((a && a.stage) || '');
+      const stageB = STAGE_TIE_BREAKER_ORDER.indexOf((b && b.stage) || '');
+      const normalizedA = stageA < 0 ? STAGE_TIE_BREAKER_ORDER.length : stageA;
+      const normalizedB = stageB < 0 ? STAGE_TIE_BREAKER_ORDER.length : stageB;
+      return normalizedA - normalizedB;
+    });
+    return ranked[0];
+  }
+
+  /**
+   * Render the localized user message + next action for a FailureReason. Looks up
+   * `failureReason_<code>_user` and `failureReason_<code>_next` through the supplied
+   * `i18nLookup(key)` accessor; falls back to the failure's own `userMessage` /
+   * `nextAction` (which already come from the §9 catalog) when the lookup misses.
+   * Interpolates `{file}`, `{activeFile}`, `{operationType}` from the failure record.
+   *
+   * @param {{ code: string, userMessage?: string, nextAction?: string, file?: string, activeFile?: string, operationType?: string }} failure
+   * @param {string} locale - Caller passes the active locale; reserved for future locale-aware fallback logic.
+   * @param {(key: string) => (string | undefined)} i18nLookup
+   * @returns {{ userMessage: string, nextAction: string | undefined }}
+   */
+  function localizeFailureReason(failure, locale, i18nLookup) {
+    void locale;
+    const lookup = i18nLookup instanceof Function ? i18nLookup : function noopLookup() { return undefined; };
+    const code = failure && typeof failure.code === 'string' ? failure.code : '';
+    const userTemplate = code ? lookup('failureReason_' + code + '_user') : undefined;
+    const nextTemplate = code ? lookup('failureReason_' + code + '_next') : undefined;
+    const userMessage = userTemplate
+      ? interpolateFailureTemplate(userTemplate, failure)
+      : (failure && failure.userMessage) || '';
+    const nextAction = nextTemplate
+      ? interpolateFailureTemplate(nextTemplate, failure)
+      : (failure && failure.nextAction) || undefined;
+    return { userMessage, nextAction };
+  }
+
+  function interpolateFailureTemplate(template, failure) {
+    const file = failure && failure.file ? String(failure.file) : '';
+    const activeFile = failure && failure.activeFile ? String(failure.activeFile) : '';
+    const operationType = failure && failure.operationType ? String(failure.operationType) : '';
+    return String(template)
+      .replace(/\{file\}/g, file)
+      .replace(/\{activeFile\}/g, activeFile)
+      .replace(/\{operationType\}/g, operationType);
+  }
+
   return {
     FAILURE_STAGES,
     FAILURE_SEVERITIES,
@@ -473,7 +551,11 @@
     ALLOWED_SEVERITY_PER_TERMINAL,
     FAILURE_CODE_CATALOG,
     LEGACY_CODE_MAP,
+    SEVERITY_ORDER,
+    STAGE_TIE_BREAKER_ORDER,
     validateFailureReason,
-    normalizeFailureReason
+    normalizeFailureReason,
+    selectPrimaryFailure,
+    localizeFailureReason
   };
 });

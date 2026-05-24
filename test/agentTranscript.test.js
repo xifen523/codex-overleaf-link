@@ -452,9 +452,12 @@ test('fallback final reports include skipped write reasons directly', () => {
 
   assert.match(report.text, /计划修改：\n- draft\.tex：编辑/);
   assert.match(report.text, /写入结果：已写入 0 项，跳过 1 项/);
-  assert.match(report.text, /跳过原因：\n- draft\.tex：编辑没有写入（Overleaf Reviewing\/Track Changes was not confirmed before writing\.）/);
+  assert.match(report.text, /- draft\.tex：编辑没有写入/);
+  // Structured Reason/Stage/Code/Next block surfaces the canonical code mapping.
+  assert.match(report.text, /代码: reviewing_state_unknown/);
+  assert.match(report.text, /阶段: reviewing/);
   assert.match(report.text, /可撤销：本轮没有可撤销的写入/);
-  assert.doesNotMatch(report.text, /"type"|"code"|"result"/);
+  assert.doesNotMatch(report.text, /"type"|"code":\s|"result"/);
 });
 
 test('fallback final reports localize stale skipped reasons in English', () => {
@@ -485,8 +488,136 @@ test('fallback final reports localize stale skipped reasons in English', () => {
     includeWriteResult: true
   });
 
-  assert.match(report.text, /Skipped:\n- draft\.tex: edit was not written \(draft\.tex changed while Codex was working/);
+  assert.match(report.text, /Skipped:\n- draft\.tex: edit was not written/);
+  // Legacy stale_snapshot is normalized to canonical stale_source_changed via normalizeFailureReason.
+  assert.match(report.text, /Code: stale_source_changed/);
+  assert.match(report.text, /Stage: preflight/);
+  assert.match(report.text, /Reason: draft\.tex changed while Codex was working/);
+  assert.match(report.text, /Next: Review the current file/);
   assert.doesNotMatch(report.text, /任务执行期间|没有覆盖|跳过原因/);
+});
+
+test('fallback final reports render structured FailureReason as a four-line block (English)', () => {
+  const report = buildHumanCompletionReport({
+    locale: 'en',
+    status: 'failed',
+    notes: '',
+    operations: [{ type: 'edit', path: 'example/test2.tex' }],
+    applyResults: [
+      {
+        applied: [],
+        skipped: [
+          {
+            operation: { type: 'edit', path: 'example/test2.tex' },
+            result: {
+              ok: false,
+              failure: {
+                code: 'target_file_not_active',
+                stage: 'navigation',
+                severity: 'blocked',
+                userMessage: 'Codex could not write example/test2.tex because Overleaf was still focused on main.tex.',
+                nextAction: 'Open example/test2.tex in Overleaf, then retry this run.',
+                retryable: true,
+                file: 'example/test2.tex',
+                activeFile: 'main.tex',
+                changedDocument: false
+              }
+            }
+          }
+        ]
+      }
+    ],
+    undoCount: 0,
+    includeWriteResult: true
+  });
+
+  assert.match(report.text, /- example\/test2\.tex: edit was not written/);
+  assert.match(report.text, /Reason: Codex could not write example\/test2\.tex/);
+  assert.match(report.text, /Stage: navigation/);
+  assert.match(report.text, /Code: target_file_not_active/);
+  assert.match(report.text, /Next: Open example\/test2\.tex in Overleaf/);
+});
+
+test('fallback final reports localize structured failures in Chinese', () => {
+  const report = buildHumanCompletionReport({
+    locale: 'zh',
+    status: 'failed',
+    notes: '',
+    operations: [{ type: 'edit', path: 'example/test2.tex' }],
+    applyResults: [
+      {
+        applied: [],
+        skipped: [
+          {
+            operation: { type: 'edit', path: 'example/test2.tex' },
+            result: { ok: false, code: 'stale_snapshot', reason: 'changed' }
+          }
+        ]
+      }
+    ],
+    undoCount: 0,
+    includeWriteResult: true
+  });
+
+  assert.match(report.text, /阶段: preflight/);
+  assert.match(report.text, /代码: stale_source_changed/);
+  assert.match(report.text, /原因: /);
+  assert.match(report.text, /下一步: /);
+});
+
+test('fallback final report falls back to normalizeFailureReason for legacy-only results', () => {
+  const report = buildHumanCompletionReport({
+    locale: 'en',
+    status: 'failed',
+    operations: [{ type: 'edit', path: 'a.tex' }],
+    applyResults: [
+      {
+        applied: [],
+        skipped: [
+          {
+            operation: { type: 'edit', path: 'a.tex' },
+            result: { ok: false, code: 'path_not_found', reason: 'no such file' }
+          }
+        ]
+      }
+    ],
+    undoCount: 0,
+    includeWriteResult: true
+  });
+
+  assert.match(report.text, /Code: target_file_not_found/);
+  assert.match(report.text, /Stage: navigation/);
+});
+
+test('formatFallbackFinalReport exposes structured skipped formatting', () => {
+  const transcript = require('../extension/src/shared/agentTranscript');
+  const text = transcript.formatFallbackFinalReport({
+    apply: {
+      applied: [],
+      skipped: [{
+        operation: { type: 'edit', path: 'example/test2.tex' },
+        result: {
+          ok: false,
+          failure: {
+            code: 'target_file_not_active',
+            stage: 'navigation',
+            severity: 'blocked',
+            userMessage: 'Codex could not write example/test2.tex because Overleaf was still focused on main.tex.',
+            nextAction: 'Open example/test2.tex in Overleaf, then retry this run.',
+            retryable: true,
+            file: 'example/test2.tex',
+            activeFile: 'main.tex',
+            changedDocument: false
+          }
+        }
+      }]
+    },
+    locale: 'en'
+  });
+  assert.match(text, /Reason: Codex could not write example\/test2\.tex/);
+  assert.match(text, /Stage: navigation/);
+  assert.match(text, /Code: target_file_not_active/);
+  assert.match(text, /Next: Open example\/test2\.tex in Overleaf/);
 });
 
 test('English unchanged reasons translate unsupported local change summaries', () => {

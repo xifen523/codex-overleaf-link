@@ -108,6 +108,7 @@
   const GovernanceRules = window.CodexOverleafGovernanceRules;
   const SensitiveScan = window.CodexOverleafSensitiveScan;
   const AuditRecords = window.CodexOverleafAuditRecords;
+  const FailureReasons = window.CodexOverleafFailureReasons;
   const MAX_COMPOSER_ATTACHMENT_BYTES = 12 * 1024 * 1024;
   const MAX_COMPOSER_ATTACHMENT_TOTAL_BYTES = 32 * 1024 * 1024;
   const MAX_COMPOSER_ATTACHMENTS = 8;
@@ -9519,6 +9520,8 @@
 
   function formatCompletionNextStep(input, skippedCount) {
     if (skippedCount) {
+      const primaryNext = derivePrimaryFailureNextStep(input);
+      if (primaryNext) return primaryNext;
       return tx('Expand the write result, review the skipped reasons, then retry after fixing them.', '请展开写入结果查看跳过原因，处理后可以重试。');
     }
     if (input.status === 'rejected') {
@@ -9528,6 +9531,30 @@
       return tx('Fix the reason above, then retry.', '请处理上面的原因后重试。');
     }
     return tx('Continue the conversation or run the next task.', '可以继续追问，或运行下一项任务。');
+  }
+
+  /**
+   * Walk the input apply results, collect FailureReason records, and return
+   * the localized nextAction of the primary (severity + tie-breaker) failure.
+   * Returns '' when no usable structured failure is available — the caller
+   * then falls back to the generic next-step copy.
+   */
+  function derivePrimaryFailureNextStep(input) {
+    if (!FailureReasons || !FailureReasons.selectPrimaryFailure || !FailureReasons.normalizeFailureReason) return '';
+    const applyResults = Array.isArray(input?.applyResults) ? input.applyResults : [];
+    const failures = [];
+    for (const result of applyResults) {
+      for (const item of getSkippedEntries(result)) {
+        const failure = FailureReasons.normalizeFailureReason(item?.result, item?.operation || {}, { locale: getLocale() });
+        if (failure && failure.code) failures.push(failure);
+      }
+    }
+    const primary = FailureReasons.selectPrimaryFailure(failures);
+    if (!primary) return '';
+    const localized = FailureReasons.localizeFailureReason
+      ? FailureReasons.localizeFailureReason(primary, getLocale(), failureReasonI18nLookup)
+      : { nextAction: primary.nextAction };
+    return localized.nextAction || primary.nextAction || '';
   }
 
   function collectAffectedFiles(operations = [], summary, applyResults = []) {
@@ -9686,22 +9713,99 @@
     const skippedEntries = getSkippedEntries(result);
     const applied = appliedEntries.length;
     const skipped = skippedEntries.length;
+    const skippedFailures = skippedEntries
+      .map(item => normalizeSkippedFailure(item))
+      .filter(Boolean);
+    const primaryFailure = pickPrimarySkippedFailure(skippedFailures);
+    const detail = {
+      [tx('Written', '已写入')]: appliedEntries.map(item => ({
+        [tr('detailAction')]: formatOperationType(item.operation?.type),
+        [tr('detailFile')]: item.operation?.path,
+        [tx('Status', '状态')]: item.result?.status
+      })),
+      [tr('detailSkipped')]: skippedEntries.map(item => buildSkippedDetail(item))
+    };
+    if (primaryFailure && primaryFailure.nextAction) {
+      detail[tr('detailNext')] = primaryFailure.nextAction;
+    }
     appendRunEvent({
       title: tx(`Write result: wrote ${applied} item(s), skipped ${skipped}`, `写入结果：已写入 ${applied} 项，跳过 ${skipped} 项`),
       status: skipped ? 'failed' : 'completed',
-      detail: {
-        [tx('Written', '已写入')]: appliedEntries.map(item => ({
-          [tr('detailAction')]: formatOperationType(item.operation?.type),
-          [tr('detailFile')]: item.operation?.path,
-          [tx('Status', '状态')]: item.result?.status
-        })),
-        [tr('detailSkipped')]: skippedEntries.map(item => ({
-          [tr('detailAction')]: formatOperationType(item.operation?.type),
-          [tr('detailFile')]: item.operation?.path,
-          [tr('detailReason')]: formatApplyResultReason(item)
-        }))
-      }
+      detail
     });
+  }
+
+  /**
+   * Build the per-skipped-entry detail block surfaced in the run-card expand
+   * view. Includes the canonical FailureReason fields (Reason/Stage/Code/Next)
+   * when the normalizer can produce a usable record, falling back to the
+   * legacy parenthesized reason otherwise.
+   */
+  function buildSkippedDetail(item) {
+    const operation = item?.operation || {};
+    const base = {
+      [tr('detailAction')]: formatOperationType(operation.type),
+      [tr('detailFile')]: operation.path,
+      [tr('detailReason')]: formatApplyResultReason(item)
+    };
+    const failure = normalizeSkippedFailure(item);
+    if (failure) {
+      base[tx('Stage', '阶段')] = failure.stage;
+      base[tx('Code', '代码')] = failure.code;
+      if (failure.nextAction) {
+        base[tr('detailNext')] = failure.nextAction;
+      }
+    }
+    return base;
+  }
+
+  /**
+   * Normalize a skipped writeback item into a localized FailureReason. Returns
+   * null when the FailureReasons module is unavailable so callers fall back to
+   * legacy rendering.
+   */
+  function normalizeSkippedFailure(item) {
+    if (!FailureReasons || !FailureReasons.normalizeFailureReason) return null;
+    const failure = FailureReasons.normalizeFailureReason(item?.result, item?.operation || {}, { locale: getLocale() });
+    if (!failure || !failure.code) return null;
+    const localized = FailureReasons.localizeFailureReason
+      ? FailureReasons.localizeFailureReason(failure, getLocale(), failureReasonI18nLookup)
+      : { userMessage: failure.userMessage, nextAction: failure.nextAction };
+    return Object.assign({}, failure, {
+      userMessage: localized.userMessage || failure.userMessage,
+      nextAction: localized.nextAction || failure.nextAction
+    });
+  }
+
+  function pickPrimarySkippedFailure(failures) {
+    if (!FailureReasons || !FailureReasons.selectPrimaryFailure) return null;
+    return FailureReasons.selectPrimaryFailure(failures);
+  }
+
+  function failureReasonI18nLookup(key) {
+    if (!i18n || !i18n.t) return undefined;
+    const localized = i18n.t(getLocale(), key);
+    // i18n.t returns the key itself on miss; treat that as a miss so the
+    // catalog fallback wins for codes without bespoke localization.
+    return localized && localized !== key ? localized : undefined;
+  }
+
+  /**
+   * Compact one-liner for toasts, collapsed run-card rows, and single-line
+   * debug logs: `<code>: <userMessage truncated to one line>`. Returns ''
+   * when the failure or its userMessage is missing.
+   * @param {{ code?: string, userMessage?: string } | null} failure
+   * @param {number} [maxLength=140]
+   * @returns {string}
+   */
+  function formatFailureReasonOneLiner(failure, maxLength) {
+    if (!failure || !failure.code || !failure.userMessage) return '';
+    const limit = Number.isFinite(maxLength) ? Math.max(40, Math.floor(maxLength)) : 140;
+    const flat = String(failure.userMessage).replace(/\s+/g, ' ').trim();
+    const codePrefix = `${failure.code}: `;
+    const remaining = Math.max(20, limit - codePrefix.length);
+    const truncated = flat.length > remaining ? `${flat.slice(0, remaining - 1).trimEnd()}…` : flat;
+    return `${codePrefix}${truncated}`;
   }
 
   function formatApplyResultReason(item = {}) {

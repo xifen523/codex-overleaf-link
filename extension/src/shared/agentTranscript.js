@@ -1,11 +1,26 @@
 (function initAgentTranscript(root, factory) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = factory();
+    module.exports = factory({
+      getFailureReasons: function getFailureReasonsCjs() { return require('./failureReasons.js'); },
+      getI18n: function getI18nCjs() { return require('./i18n.js'); }
+    });
   } else {
-    root.CodexOverleafAgentTranscript = factory();
+    // Browser script-tag load order is determined by manifest.json content_scripts;
+    // resolve dependencies lazily so this module can be listed before its deps.
+    root.CodexOverleafAgentTranscript = factory({
+      getFailureReasons: function getFailureReasonsWindow() { return root.CodexOverleafFailureReasons || null; },
+      getI18n: function getI18nWindow() { return root.CodexOverleafI18n || null; }
+    });
   }
-})(typeof globalThis !== 'undefined' ? globalThis : window, function agentTranscriptFactory() {
+})(typeof globalThis !== 'undefined' ? globalThis : window, function agentTranscriptFactory(deps) {
   'use strict';
+
+  const getFailureReasonsModule = (deps && deps.getFailureReasons) instanceof Function
+    ? deps.getFailureReasons
+    : function noFailureReasons() { return null; };
+  const getI18nModule = (deps && deps.getI18n) instanceof Function
+    ? deps.getI18n
+    : function noI18n() { return null; };
 
   const TECHNICAL_EVENT_PATTERNS = [
     /^agent\.command\./,
@@ -586,6 +601,27 @@
     };
   }
 
+  /**
+   * Thin wrapper that renders just the fallback final-report text for a
+   * writeback `apply` payload. Used by tests and by callers that only need the
+   * skipped-block formatting without the full completion-report envelope.
+   * @param {{ apply: { applied?: any[], skipped?: any[] }, locale?: string, includeWriteResult?: boolean, status?: string }} input
+   * @returns {string}
+   */
+  function formatFallbackFinalReport(input = {}) {
+    const locale = normalizeLocale(input);
+    const apply = (input && input.apply) || {};
+    const report = buildHumanCompletionReport({
+      locale,
+      status: input.status || 'failed',
+      operations: [],
+      applyResults: [apply],
+      includeWriteResult: input.includeWriteResult !== false,
+      undoCount: 0
+    });
+    return report.text;
+  }
+
   function formatHumanReport(report = {}, locale = 'zh') {
     const sections = [];
     const conclusion = cleanVisibleMarkdownText(report.conclusion || '');
@@ -604,7 +640,7 @@
     if (writeResult) {
       sections.push(textFor(locale, `写入结果：${writeResult}`, `Write result: ${writeResult}`));
     }
-    addListSection(sections, textFor(locale, '跳过原因', 'Skipped'), report.skippedChanges, locale);
+    addStructuredListSection(sections, textFor(locale, '跳过原因', 'Skipped'), report.skippedChanges, locale);
     const undo = cleanVisibleText(report.undo || '');
     if (undo) {
       sections.push(textFor(locale, `可撤销：${undo}`, `Undo: ${undo}`));
@@ -640,8 +676,34 @@
         ? formatWriteResult(counts.appliedCount, counts.skippedCount, locale)
         : ''),
       undo: input.undo,
-      nextStep: input.nextStep || counts.translatedError?.nextStep || formatFallbackNextStep(input, counts.skippedCount, affectedFiles, locale)
+      nextStep: input.nextStep
+        || counts.translatedError?.nextStep
+        || formatPrimaryFailureNextStep(input.applyResults, locale)
+        || formatFallbackNextStep(input, counts.skippedCount, affectedFiles, locale)
     };
+  }
+
+  /**
+   * Derive the run-level next-step from the highest-priority skipped failure
+   * via `selectPrimaryFailure`. Returns '' when no usable primary failure
+   * exists, so callers can fall through to the generic copy.
+   */
+  function formatPrimaryFailureNextStep(applyResults, locale) {
+    const failureReasons = getFailureReasonsModule();
+    if (!failureReasons || !failureReasons.selectPrimaryFailure || !failureReasons.normalizeFailureReason) {
+      return '';
+    }
+    const skipped = collectSkippedOperations(applyResults);
+    if (!skipped.length) {
+      return '';
+    }
+    const failures = skipped.map(item =>
+      failureReasons.normalizeFailureReason(item.result, item.operation || {}, { locale })
+    ).filter(Boolean);
+    const primary = failureReasons.selectPrimaryFailure(failures);
+    if (!primary) return '';
+    const localized = failureReasons.localizeFailureReason(primary, locale, failureI18nLookup(locale));
+    return localized.nextAction || primary.nextAction || '';
   }
 
   function formatWriteResult(appliedCount, skippedCount, locale = 'zh') {
@@ -919,6 +981,27 @@
     sections.push(`${label}${locale === 'en' ? ':' : '：'}\n${items.map(item => `- ${item}`).join('\n')}`);
   }
 
+  /**
+   * Same as `addListSection` but preserves item-internal newlines so that
+   * structured FailureReason blocks (Reason/Stage/Code/Next) survive into the
+   * rendered report. Per-item first line gets the `- ` bullet; subsequent
+   * lines pass through verbatim (the formatter already indents them).
+   */
+  function addStructuredListSection(sections, label, values, locale = 'zh') {
+    const items = normalizeMultilineStringList(values);
+    if (!items.length) {
+      return;
+    }
+    sections.push(`${label}${locale === 'en' ? ':' : '：'}\n${items.map(item => `- ${item}`).join('\n')}`);
+  }
+
+  function normalizeMultilineStringList(value) {
+    const values = Array.isArray(value) ? value : (value ? [value] : []);
+    return values
+      .map(item => cleanVisibleMarkdownText(item))
+      .filter(Boolean);
+  }
+
   function normalizeStringList(value) {
     const values = Array.isArray(value) ? value : (value ? [value] : []);
     return values
@@ -1036,10 +1119,101 @@
     const label = labels[operation.type] || operation.type || textFor(locale, '处理', 'process');
     const filePath = operation.path || operation.from || operation.to || textFor(locale, '未知文件', 'unknown file');
     const result = item?.result || {};
-    const reason = formatSkippedReason(result, operation, locale);
+    const headerLine = locale === 'en'
+      ? `${filePath}: ${label} was not written`
+      : `${filePath}：${label}没有写入`;
+    const block = formatFailureBlockForResult(result, operation, locale);
+    if (block) {
+      return `${headerLine}\n${block}`;
+    }
+    // Last-resort fallback: legacy parenthesized form, only when neither
+    // a structured failure nor the normalizer surfaces a usable record.
+    const legacyReason = formatSkippedReason(result, operation, locale);
     return locale === 'en'
-      ? `${filePath}: ${label} was not written (${reason})`
-      : `${filePath}：${label}没有写入（${reason}）`;
+      ? `${headerLine} (${legacyReason})`
+      : `${headerLine}（${legacyReason}）`;
+  }
+
+  /**
+   * Render a `FailureReason` (already localized) as a four-line indented block:
+   *   <indent>Reason: <userMessage>
+   *   <indent>Stage: <stage>
+   *   <indent>Code: <code>
+   *   <indent>Next: <nextAction>   (only when present)
+   * The `Next` line is omitted when the failure has no `nextAction`.
+   * @param {{ userMessage: string, stage: string, code: string, nextAction?: string }} failure
+   * @param {string} locale - 'en' or 'zh'.
+   * @param {string} [indent='  '] - String prefix applied to every line.
+   * @returns {string}
+   */
+  function formatFailureBlock(failure, locale, indent) {
+    const pad = indent === undefined ? '  ' : indent;
+    const i18nModule = getI18nModule();
+    const headingKey = label => (
+      i18nModule && i18nModule.t ? i18nModule.t(locale, label) : null
+    ) || defaultSectionHeading(label, locale);
+    const sectionHeading = headingKey('failureReason_section_heading');
+    const sectionStage = headingKey('failureReason_section_stage');
+    const sectionCode = headingKey('failureReason_section_code');
+    const sectionNext = headingKey('failureReason_section_next');
+    const lines = [];
+    lines.push(`${pad}${sectionHeading}: ${failure.userMessage || ''}`);
+    lines.push(`${pad}${sectionStage}: ${failure.stage || ''}`);
+    lines.push(`${pad}${sectionCode}: ${failure.code || ''}`);
+    if (failure.nextAction) {
+      lines.push(`${pad}${sectionNext}: ${failure.nextAction}`);
+    }
+    return lines.join('\n');
+  }
+
+  function defaultSectionHeading(key, locale) {
+    const en = {
+      failureReason_section_heading: 'Reason',
+      failureReason_section_stage: 'Stage',
+      failureReason_section_code: 'Code',
+      failureReason_section_next: 'Next'
+    };
+    const zh = {
+      failureReason_section_heading: '原因',
+      failureReason_section_stage: '阶段',
+      failureReason_section_code: '代码',
+      failureReason_section_next: '下一步'
+    };
+    const dict = locale === 'zh' ? zh : en;
+    return dict[key] || key;
+  }
+
+  /**
+   * Build the localized FailureReason block for a skipped writeback item.
+   * Returns '' when the failureReasons module is unavailable, which makes
+   * callers fall back to the legacy parenthesized form.
+   */
+  function formatFailureBlockForResult(result, operation, locale) {
+    const failureReasons = getFailureReasonsModule();
+    if (!failureReasons || !failureReasons.normalizeFailureReason) {
+      return '';
+    }
+    const failure = failureReasons.normalizeFailureReason(result, operation || {}, { locale });
+    if (!failure || !failure.code) {
+      return '';
+    }
+    const localized = failureReasons.localizeFailureReason(failure, locale, failureI18nLookup(locale));
+    const rendered = Object.assign({}, failure, {
+      userMessage: localized.userMessage || failure.userMessage,
+      nextAction: localized.nextAction || failure.nextAction
+    });
+    return formatFailureBlock(rendered, locale, '  ');
+  }
+
+  function failureI18nLookup(locale) {
+    return function lookup(key) {
+      const i18nModule = getI18nModule();
+      if (!i18nModule || !i18nModule.t) return undefined;
+      const localized = i18nModule.t(locale, key);
+      // i18n.t returns the key itself on miss; treat that as miss so the
+      // catalog fallback wins for codes without bespoke localization.
+      return localized && localized !== key ? localized : undefined;
+    };
   }
 
   function formatSkippedReason(result = {}, operation = {}, locale = 'zh') {
@@ -1204,6 +1378,8 @@
 
   return {
     buildHumanCompletionReport,
+    formatFallbackFinalReport,
+    formatFailureBlock,
     formatHumanReport,
     mapAgentEventToActivity,
     translateRawError
