@@ -1995,12 +1995,25 @@
         for (const warning of snapshotWarnings.blocking) {
           appendLog(tx(`Cannot continue: ${formatProjectSnapshotWarning(warning)}`, `无法继续：${formatProjectSnapshotWarning(warning)}`));
         }
+        // Structured FailureReason §9.0: the initial project snapshot fetch
+        // produced a payload that failed every usable-source check. Emit the
+        // canonical `project_snapshot_unavailable` so downstream renderers
+        // (run-card + final-report) get the same data the page-side emitters
+        // produce for navigation/preflight codes.
+        const snapshotFailure = buildContentFailure('project_snapshot_unavailable', null, {
+          evidence: {
+            fetchFailed: true,
+            blocking: snapshotWarnings.blocking.slice(0, 8),
+            fileCount: (project?.files || []).length
+          }
+        });
         appendCompletionReport({
           conclusion: tx('This run did not continue: the full Overleaf project was not read.', '这轮没有继续：没有读到完整的 Overleaf 项目内容。'),
           status: 'blocked',
           operations: [],
           applyResults: [],
-          nextStep: tx('Reload the Overleaf project or reopen the .tex file you want to process, then retry.', '请刷新 Overleaf 项目或重新打开要处理的 .tex 文件后再试。')
+          nextStep: tx('Reload the Overleaf project or reopen the .tex file you want to process, then retry.', '请刷新 Overleaf 项目或重新打开要处理的 .tex 文件后再试。'),
+          failure: snapshotFailure
         });
         await finalizeAuditRecord(runAuditDraft, {
           resultStatus: 'blocked',
@@ -2060,7 +2073,22 @@
             status: 'completed'
           });
         } else {
-          appendRunEvent({ title: tx(`Compile log unavailable: ${compileLogContext.reason}`, `编译日志不可用：${compileLogContext.reason}`), status: 'failed' });
+          // Structured FailureReason §9.0: `@compile-log` was named in the
+          // task but the page-side resolver could not produce it. Surface a
+          // `selected_context_unresolved` failure (warning, retryable) so the
+          // primary-failure selector can describe what was missing without
+          // blocking the rest of the run.
+          const contextFailure = buildContentFailure('selected_context_unresolved', null, {
+            evidence: {
+              contextTarget: '@compile-log',
+              reason: compileLogContext.reason || ''
+            }
+          });
+          appendRunEvent({
+            title: tx(`Compile log unavailable: ${compileLogContext.reason}`, `编译日志不可用：${compileLogContext.reason}`),
+            status: 'failed',
+            failure: contextFailure
+          });
         }
       }
 
@@ -2193,10 +2221,32 @@
           return;
         }
         const translated = translateRawError(response.error.message, { mode: submittedMode, locale: getLocale() });
+        // Structured FailureReason (§9.7): split bridge-availability from
+        // Codex-side errors. `native_connection_failed` / `native_unavailable`
+        // / `native_update_required` indicate the bridge itself is missing,
+        // so emit `native_bridge_unavailable` (blocked, retryable). All other
+        // native errors are treated as a Codex-side surface error and emit
+        // `codex_no_usable_result` (error, retryable).
+        const codexRunFailure = isNativeBridgeUnavailableError(response.error)
+          ? buildContentFailure('native_bridge_unavailable', { path: 'codex.run' }, {
+            technicalMessage: response.error?.message || '',
+            evidence: {
+              handshakeFailed: true,
+              errorCode: response.error?.code || ''
+            }
+          })
+          : buildContentFailure('codex_no_usable_result', { path: 'codex.run' }, {
+            technicalMessage: response.error?.message || '',
+            evidence: {
+              hasFinalReport: false,
+              errorCode: response.error?.code || ''
+            }
+          });
         appendRunEvent({
           title: translated.conclusion,
           status: 'failed',
-          technicalDetail: response.error
+          technicalDetail: response.error,
+          failure: codexRunFailure
         });
         appendTechnicalEvent({
           type: 'native.error',
@@ -2211,7 +2261,8 @@
           applyResults: [],
           nextStep: translated.nextStep,
           errorMessage: response.error.message,
-          mode: submittedMode
+          mode: submittedMode,
+          failure: codexRunFailure
         });
         await finalizeAuditRecord(runAuditDraft, {
           resultStatus: 'failed',
@@ -2225,6 +2276,42 @@
       throwIfRunCancellationRequested();
       const assistantMessage = response.result.assistantMessage || getAssistantAnswerForCurrentRun();
       const syncChanges = response.result.syncChanges || [];
+      // Structured FailureReason §9.7: the bridge returned ok, but the Codex
+      // payload is empty of both visible content and any actionable sync
+      // operation. Emit `codex_no_usable_result` (error, retryable) so the
+      // run-card / final-report renderers can surface a canonical reason.
+      if (!hasUsableCodexResult({ assistantMessage, syncChanges, result: response.result })) {
+        const emptyFailure = buildContentFailure('codex_no_usable_result', { path: 'codex.run' }, {
+          evidence: {
+            hasFinalReport: Boolean(assistantMessage),
+            syncChangeCount: Array.isArray(syncChanges) ? syncChanges.length : 0,
+            hadUnsupportedChanges: Array.isArray(response.result?.unsupportedChanges)
+              ? response.result.unsupportedChanges.length > 0
+              : false
+          }
+        });
+        appendRunEvent({
+          title: tx('Codex finished but did not return a usable result.', 'Codex 已结束，但没有返回可用结果。'),
+          status: 'failed',
+          failure: emptyFailure
+        });
+        appendCompletionReport({
+          conclusion: tx('Codex finished but did not return a usable result.', 'Codex 已结束，但没有返回可用结果。'),
+          status: 'failed',
+          operations: [],
+          applyResults: [],
+          nextStep: tx('Open Technical Details to inspect the local Codex output, then retry.', '请打开 Technical Details 查看本地 Codex 输出后再重试。'),
+          mode: submittedMode,
+          failure: emptyFailure
+        });
+        await finalizeAuditRecord(runAuditDraft, {
+          resultStatus: 'failed',
+          sensitiveFindings: sensitiveFindings.findings,
+          blockedFiles: [{ path: 'codex.run', reason: 'codex_no_usable_result' }]
+        });
+        finishRunView(tx('Local Codex returned nothing usable', '本地 Codex 没有返回可用结果'), 'failed');
+        return;
+      }
       const writebackProject = useExistingMirror
         ? mergeProjectWithSyncChangeBaseFiles(project, syncChanges)
         : project;
@@ -2607,6 +2694,40 @@
 
   function isRunCancellationError(error = {}) {
     return error.code === 'codex_cancelled' || /cancelled by the user|was cancelled/i.test(error.message || '');
+  }
+
+  // Detects the bridge-availability subset of native errors (§9.7
+  // `native_bridge_unavailable`). The canonical codes are stable; we also
+  // pattern-match a final "host disconnected" text-shape because the
+  // background bridge wraps Chrome's lastError verbatim.
+  function isNativeBridgeUnavailableError(error) {
+    if (!error || typeof error !== 'object') return false;
+    const code = typeof error.code === 'string' ? error.code : '';
+    if (code === 'native_connection_failed') return true;
+    if (code === 'native_unavailable') return true;
+    if (code === 'native_update_required') return true;
+    if (code === 'native_missing') return true;
+    if (code === 'native_execution_interrupted') return true;
+    const message = typeof error.message === 'string' ? error.message : '';
+    return /native host disconnected|specified native messaging host not found|not registered/i.test(message);
+  }
+
+  // Detects whether the Codex run result is "usable" in the §9.7
+  // `codex_no_usable_result` sense: there must be at least one of
+  // (assistantMessage with text, sync changes the runtime can apply, or an
+  // explicit unsupportedChanges payload describing what Codex tried to do).
+  function hasUsableCodexResult({ assistantMessage, syncChanges, result }) {
+    if (typeof assistantMessage === 'string' && assistantMessage.trim().length > 0) {
+      return true;
+    }
+    if (Array.isArray(syncChanges) && syncChanges.length > 0) {
+      return true;
+    }
+    const unsupported = result && Array.isArray(result.unsupportedChanges) ? result.unsupportedChanges : [];
+    if (unsupported.length > 0) {
+      return true;
+    }
+    return false;
   }
 
   async function showThreadResumeFailedPrompt() {
@@ -6539,12 +6660,58 @@
       try {
         await chrome.storage.local.set({ [storageKey]: prepareStateForStorage(state) });
       } catch (fallbackError) {
+        // Structured FailureReason §9.8: persistence raised a quota error.
+        // Surface a `storage_quota_exceeded` failure (warning, retryable)
+        // alongside the legacy toast notice so downstream renderers and tests
+        // can detect the quota-specific class. The structured emit fires for
+        // both the original `error` (primary IndexedDB write) and the
+        // `fallbackError` (chrome.storage.local fallback).
+        const quotaHit = isStorageQuotaError(error) || isStorageQuotaError(fallbackError);
+        if (quotaHit) {
+          emitStorageQuotaFailure(error, fallbackError);
+        }
         if (typeof appendStorageNoticeOnce === 'function') {
           appendStorageNoticeOnce('save-failed', tx(`Failed to save session state: ${error.message}`, `保存会话状态失败：${error.message}`));
         } else {
           throw fallbackError;
         }
       }
+    }
+  }
+
+  // Tracks whether we have already emitted a `storage_quota_exceeded` failure
+  // for the current page session. The toast layer already de-dupes via
+  // `storageNoticeKeys`; mirror that so the structured failure is emitted
+  // once per session rather than once per `saveState` failure.
+  let storageQuotaFailureEmitted = false;
+
+  // Emit a structured `storage_quota_exceeded` failure for the current run
+  // view (if any). Falls back to a plain-log line when no run view exists so
+  // the failure does not vanish during background timer-driven saves.
+  function emitStorageQuotaFailure(primaryError, fallbackError) {
+    if (storageQuotaFailureEmitted) {
+      return;
+    }
+    storageQuotaFailureEmitted = true;
+    const failure = buildContentFailure('storage_quota_exceeded', null, {
+      technicalMessage: (primaryError && primaryError.message) || String(primaryError || ''),
+      evidence: {
+        quotaExceeded: true,
+        primaryErrorCode: primaryError && primaryError.name,
+        fallbackErrorCode: fallbackError && fallbackError.name
+      }
+    });
+    if (currentRunView?.events) {
+      appendRunEvent({
+        title: tx('Local session history is too large; some state could not be saved.', '本地会话记录过大，部分状态未能保存。'),
+        status: 'failed',
+        failure
+      });
+    } else {
+      appendPlainLog(tx(
+        `Storage quota exceeded: ${primaryError?.message || ''}`,
+        `存储配额超限：${primaryError?.message || ''}`
+      ));
     }
   }
 
@@ -6563,6 +6730,13 @@
     saveStateTimer = setTimeout(() => {
       saveStateTimer = null;
       saveState().catch(error => {
+        if (isStorageQuotaError(error)) {
+          // Structured FailureReason §9.8: timer-driven saveState raised a
+          // quota error. saveState's own catch path already covers the
+          // primary failure; this branch fires when the rethrow surfaces
+          // here (e.g. fallback chrome.storage.local.set rethrew).
+          emitStorageQuotaFailure(error, null);
+        }
         appendPlainLog(tx(`Failed to save session state: ${formatStateSaveError(error)}`, `保存会话状态失败：${formatStateSaveError(error)}`));
       });
     }, delayMs);
@@ -7390,7 +7564,12 @@
       streamKey: sanitizeAssistantVisibleText(input.streamKey),
       streamRole: sanitizeAssistantVisibleText(input.streamRole),
       appendText: typeof input.appendText === 'string' ? sanitizeAssistantVisibleText(input.appendText) : input.appendText,
-      replaceText: input.replaceText
+      replaceText: input.replaceText,
+      // Structured FailureReason (§7) attached to the event when the caller
+      // emits a content-side failure. Sanitized like other user-visible
+      // payloads so it stays JSON-safe through the run-record persistence
+      // path. Downstream renderers (and tests) can read `event.failure`.
+      failure: input.failure ? sanitizeAssistantVisibleValue(input.failure) : undefined
     };
     const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
     let renderedEvent = event;
@@ -8912,6 +9091,13 @@
       }
     });
     if (lifecycleReject) {
+      // Structured FailureReason §9.5: post-undo proof step. If the page op
+      // reported ok-ish (no skipped items) but the per-path verifiedContent
+      // does not match this run's expected pre-write content, synthesize an
+      // `undo_not_verified` failure (warning, retryable, needs_review,
+      // changedDocument:true) and attach it to the result so the §7
+      // settlement matrix routes the run to `needs_review`.
+      attachUndoNotVerifiedFailure(run, result);
       // §7 settlement matrix: only land in terminal `rejected` when post-action
       // proof is sufficient. If any per-op failure marks `needs_review` (or
       // matches a known unverified code), settle as `needs_review` so both
@@ -8920,6 +9106,76 @@
       return;
     }
     setRunUndoStatus(runId, result.skipped?.length ? 'partial' : 'applied');
+  }
+
+  // Post-undo proof step (§9.5). Called only on lifecycle reject paths after
+  // the page bridge has returned. We only synthesize an `undo_not_verified`
+  // failure when:
+  //   - The page op did not already emit a needs_review-class failure (the
+  //     settlement matrix would have caught it).
+  //   - The reject result has no skipped items (otherwise the existing
+  //     skipped failures drive settlement).
+  //   - At least one expected pre-run path has no matching `applied` entry
+  //     whose `verifiedContent` equals the expected content. (Note: we do
+  //     NOT delegate to `isUndoResultEffectivelyApplied` because that helper
+  //     short-circuits to true on `skipped.length === 0` — the §9.5 contract
+  //     requires real per-path verifiedContent proof.)
+  // The synthesized failure is appended to `result.skipped` as a synthetic
+  // proof entry so `collectFailuresFromResult` picks it up.
+  function attachUndoNotVerifiedFailure(run, result) {
+    if (!result || typeof result !== 'object') return;
+    if (result.ok === false) return;
+    if (Array.isArray(result.skipped) && result.skipped.length > 0) return;
+    const expectedFiles = Array.isArray(run?.undoExpectedFiles) ? run.undoExpectedFiles : [];
+    if (!expectedFiles.length) return;
+    if (isUndoVerifiedContentMatching(run, result)) return;
+    const firstPath = expectedFiles.find(entry => entry && typeof entry.path === 'string')?.path || '';
+    const failure = buildContentFailure('undo_not_verified', { path: firstPath, type: 'undo' }, {
+      changedDocument: true,
+      terminalState: 'needs_review',
+      evidence: {
+        undoApplied: true,
+        verified: false,
+        expectedFileCount: expectedFiles.length
+      }
+    });
+    const synthetic = {
+      operation: { path: firstPath, type: 'undo' },
+      result: {
+        ok: false,
+        code: 'undo_not_verified',
+        reason: failure.userMessage,
+        failure
+      }
+    };
+    if (!Array.isArray(result.skipped)) {
+      result.skipped = [];
+    }
+    result.skipped.push(synthetic);
+    result.ok = false;
+  }
+
+  // Per-path verifiedContent match for the §9.5 proof step. Returns true
+  // only when every expected pre-run path has a matching `applied` entry
+  // whose `result.verifiedContent` equals the expected content. Empty
+  // expected files map → true (nothing to prove).
+  function isUndoVerifiedContentMatching(run, result) {
+    const expectedByPath = new Map((run?.undoExpectedFiles || [])
+      .filter(file => file && typeof file.path === 'string' && typeof file.content === 'string')
+      .map(file => [file.path, file.content]));
+    if (!expectedByPath.size) return true;
+    const applied = Array.isArray(result.applied) ? result.applied : [];
+    for (const [path, expected] of expectedByPath.entries()) {
+      const matched = applied.some(entry => {
+        if (!entry || !entry.operation) return false;
+        if (entry.operation.path !== path) return false;
+        if (entry.operation.type !== 'edit') return false;
+        if (entry.result && entry.result.ok === false) return false;
+        return entry.result && entry.result.verifiedContent === expected;
+      });
+      if (!matched) return false;
+    }
+    return true;
   }
 
   async function acceptRun(runId) {
@@ -9002,11 +9258,100 @@
       refreshRunCardControls(runId);
       return;
     }
+    // Structured FailureReason §9.6: post-accept proof step. If the page op
+    // returned ok but cannot prove a clean post-accept state (no skipped
+    // items, no remaining tracked-change refs proven, and the post-files
+    // content of at least one path is missing or mismatched), synthesize an
+    // `accept_not_verified` failure (warning, retryable, needs_review,
+    // changedDocument:true) and attach it so the §7 settlement matrix routes
+    // the run to `needs_review` rather than terminal `accepted`.
+    attachAcceptNotVerifiedFailure(run, result);
     // §7 settlement matrix: only land in terminal `accepted` when post-action
     // proof is sufficient. If any per-op failure marks `needs_review` (or
     // matches a known unverified code), settle as `needs_review` so both
     // Accept and Undo stay actionable and the user can reconcile.
     applyAcceptSettlement(runId, result);
+  }
+
+  // Post-accept proof step (§9.6). Called only on lifecycle accept paths
+  // after the page bridge has returned. We only synthesize an
+  // `accept_not_verified` failure when:
+  //   - The page op did not already emit a needs_review-class failure (the
+  //     settlement matrix would have caught it).
+  //   - The accept result has no skipped items (otherwise the existing
+  //     skipped failures drive settlement).
+  //   - The page bridge did not confirm clean post-accept state — either no
+  //     `verified` flag, or the per-path applied items do not show the
+  //     trackedChange was confirmed cleared.
+  // The synthesized failure is appended to `result.skipped` as a synthetic
+  // proof entry so `collectFailuresFromResult` picks it up.
+  function attachAcceptNotVerifiedFailure(run, result) {
+    if (!result || typeof result !== 'object') return;
+    if (result.ok === false) return;
+    if (Array.isArray(result.skipped) && result.skipped.length > 0) return;
+    if (isAcceptResultEffectivelyVerified(run, result)) return;
+    const expectedFiles = Array.isArray(run?.undoExpectedFiles) ? run.undoExpectedFiles : [];
+    const firstPath = expectedFiles.find(entry => entry && typeof entry.path === 'string')?.path
+      || (run?.undoTrackedChanges || []).find(change => change && typeof change.path === 'string')?.path
+      || '';
+    const failure = buildContentFailure('accept_not_verified', { path: firstPath, type: 'accept' }, {
+      changedDocument: true,
+      terminalState: 'needs_review',
+      evidence: {
+        acceptApplied: true,
+        verified: false,
+        expectedFileCount: expectedFiles.length,
+        trackedChangeCount: Array.isArray(run?.undoTrackedChanges) ? run.undoTrackedChanges.length : 0
+      }
+    });
+    const synthetic = {
+      operation: { path: firstPath, type: 'accept' },
+      result: {
+        ok: false,
+        code: 'accept_not_verified',
+        reason: failure.userMessage,
+        failure
+      }
+    };
+    if (!Array.isArray(result.skipped)) {
+      result.skipped = [];
+    }
+    result.skipped.push(synthetic);
+    result.ok = false;
+  }
+
+  // Mirrors `isUndoResultEffectivelyApplied` for the accept side. Returns
+  // true when the page-bridge result carries proof that the run's tracked
+  // changes are gone: each tracked-change ref has a matching `applied` entry
+  // whose `result.verifiedContent` equals the run's known post-write content
+  // for that path. Returns false when proof is missing or contradicted —
+  // §9.6 `accept_not_verified`. Falls back to true when there are no
+  // expected files (defensive: the page bridge already returned ok, and
+  // there is nothing to verify against).
+  function isAcceptResultEffectivelyVerified(run, result) {
+    if (!result || typeof result !== 'object') return true;
+    const expectedFiles = Array.isArray(run?.undoExpectedFiles) ? run.undoExpectedFiles : [];
+    if (!expectedFiles.length) return true;
+    if (result.verified === true) return true;
+    const trackedChanges = Array.isArray(run?.undoTrackedChanges) ? run.undoTrackedChanges : [];
+    if (!trackedChanges.length) return true;
+    const applied = Array.isArray(result.applied) ? result.applied : [];
+    if (!applied.length) return false;
+    // Every tracked-change ref must show up in `applied` with a result
+    // carrying ok:true. If any tracked change does not appear as applied,
+    // proof is missing.
+    return trackedChanges.every(change => {
+      const key = change && (change.key || change.id || change.label);
+      if (!key) return false;
+      return applied.some(entry => {
+        const ref = entry && entry.trackedChange;
+        if (!ref) return false;
+        const refKey = ref.key || ref.id || ref.label;
+        if (refKey !== key) return false;
+        if (entry.result && entry.result.ok === false) return false;
+        return true;
+      });
+    });
   }
 
   // Translates the page bridge's Accept All `diagnostics` array into one
@@ -9077,6 +9422,82 @@
     run.undoExpectedFiles = [];
     saveStateSoon();
     refreshRunCardControls(runId);
+  }
+
+  // Inline mirror of the content-side subset of the FailureReason §9 catalog
+  // used by T5 emit sites. Mirrors the page-side `PAGE_FAILURE_CATALOG` in
+  // `extension/src/page/writebackRouter.js` so neither runtime has to depend on
+  // load order with `shared/failureReasons.js`. Each entry mirrors stage /
+  // severity / defaultRetryable / fallbackUserMessage / fallbackNextAction
+  // from `FAILURE_CODE_CATALOG`; keep in sync when adding codes.
+  const CONTENT_FAILURE_CATALOG = {
+    project_snapshot_unavailable: {
+      stage: 'context', severity: 'error', defaultRetryable: true,
+      fallbackUserMessage: 'Codex could not read the Overleaf project snapshot.',
+      fallbackNextAction: 'Refresh Overleaf, then rerun the task.'
+    },
+    selected_context_unresolved: {
+      stage: 'context', severity: 'warning', defaultRetryable: true,
+      fallbackUserMessage: 'Codex could not resolve the requested selection or context.',
+      fallbackNextAction: 'Select the target again or specify the file/section explicitly.'
+    },
+    codex_no_usable_result: {
+      stage: 'codex', severity: 'error', defaultRetryable: true,
+      fallbackUserMessage: 'Local Codex returned no usable final report or operations.',
+      fallbackNextAction: 'Open Technical Details and resolve the local Codex error.'
+    },
+    storage_quota_exceeded: {
+      stage: 'storage', severity: 'warning', defaultRetryable: true,
+      fallbackUserMessage: 'Browser storage quota was exceeded.',
+      fallbackNextAction: 'Clear old run history or reduce attachments.'
+    },
+    native_bridge_unavailable: {
+      stage: 'native', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Extension cannot connect to the Codex native host.',
+      fallbackNextAction: 'Run install-native or reload the extension.'
+    },
+    undo_not_verified: {
+      stage: 'undo', severity: 'warning', defaultRetryable: true,
+      fallbackUserMessage: 'Undo ran, but Codex could not prove the file returned to pre-run content.',
+      fallbackNextAction: 'Inspect the file manually before continuing.'
+    },
+    accept_not_verified: {
+      stage: 'accept', severity: 'warning', defaultRetryable: true,
+      fallbackUserMessage: 'Accept appeared to run but Codex could not prove final content/state.',
+      fallbackNextAction: 'Inspect Overleaf Reviewing before continuing.'
+    }
+  };
+
+  // Build a structured FailureReason record (§7) for emit at the content
+  // runtime layer. `overrides` merges into the entry: callers supply `file` /
+  // `activeFile` / `userMessage` / `evidence` / `changedDocument` /
+  // `terminalState` etc. The `op` argument is the operation context that
+  // augments `file` / `operationType` when not explicitly overridden.
+  function buildContentFailure(code, op, overrides) {
+    const entry = CONTENT_FAILURE_CATALOG[code];
+    if (!entry) {
+      return null;
+    }
+    const merged = overrides || {};
+    const opCtx = op || {};
+    const failure = {
+      code,
+      stage: entry.stage,
+      severity: entry.severity,
+      userMessage: merged.userMessage || entry.fallbackUserMessage,
+      retryable: merged.retryable === undefined ? entry.defaultRetryable : merged.retryable === true,
+      nextAction: merged.nextAction || entry.fallbackNextAction
+    };
+    const file = merged.file !== undefined ? merged.file : opCtx.path;
+    if (file) failure.file = file;
+    const operationType = merged.operationType !== undefined ? merged.operationType : opCtx.type;
+    if (operationType) failure.operationType = operationType;
+    if (merged.activeFile !== undefined) failure.activeFile = merged.activeFile;
+    if (merged.changedDocument !== undefined) failure.changedDocument = merged.changedDocument === true;
+    if (merged.terminalState !== undefined) failure.terminalState = merged.terminalState;
+    if (merged.technicalMessage !== undefined) failure.technicalMessage = merged.technicalMessage;
+    if (merged.evidence !== undefined) failure.evidence = merged.evidence;
+    return failure;
   }
 
   // Per §7 of the Specific Failure Reasons spec, Accept / Undo may only land in
