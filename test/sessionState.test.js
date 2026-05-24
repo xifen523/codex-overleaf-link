@@ -1179,7 +1179,8 @@ test('createSession defaults codexThreadId to empty string', () => {
 const STABLE_TRACKED_CHANGE_STATUSES = [
   'pending',
   'accepted',
-  'rejected'
+  'rejected',
+  'needs_review'
 ];
 const TERMINAL_TRACKED_CHANGE_STATUSES = ['accepted', 'rejected'];
 // Values from the superseded partial / closed-ledger model. They must never be
@@ -1394,7 +1395,7 @@ test('normalizeRun trackedChangeStatus normalization is idempotent', () => {
   }
 });
 
-const NON_TERMINAL_TRACKED_CHANGE_STATUSES = ['pending'];
+const NON_TERMINAL_TRACKED_CHANGE_STATUSES = ['pending', 'needs_review'];
 
 for (const status of NON_TERMINAL_TRACKED_CHANGE_STATUSES) {
   test(`normalizeRun drops a non-terminal trackedChangeStatus "${status}" when the reloaded run has no tracked-change refs`, () => {
@@ -1495,4 +1496,48 @@ test('trackedChangeStatus survives storage compaction as a lightweight field', (
 
   assert.equal(runs.find(run => run.id === 'run_tc_accepted').trackedChangeStatus, 'accepted');
   assert.equal(runs.find(run => run.id === 'run_tc_pending').trackedChangeStatus, 'pending');
+});
+
+test('normalizeRuns round-trips trackedChangeStatus "needs_review" as a stable non-terminal value', () => {
+  // needs_review is the §7 settlement state surfaced when Accept/Undo cannot
+  // prove a clean post-action state. It must survive normalization (step 1
+  // value recovery), the migration step must leave it alone, and the terminal
+  // cleanup step must not strip the refs (the user is supposed to retry).
+  const run = normalizeRun({
+    id: 'run_needs_review',
+    task: 'tracked change run needing review',
+    status: 'completed',
+    trackedChangeStatus: 'needs_review',
+    undoTrackedChanges: trackedChangeRefs(),
+    undoExpectedFiles: [{ path: 'main.tex', content: 'after' }]
+  });
+
+  assert.equal(run.trackedChangeStatus, 'needs_review');
+  // needs_review is non-terminal — the refs and expected files survive so the
+  // user can retry Accept/Undo after inspecting Overleaf.
+  assert.equal(run.undoTrackedChanges.length, 1);
+  assert.equal(run.undoExpectedFiles.length, 1);
+});
+
+test('storageDb compactRunForStorage round-trips trackedChangeStatus "needs_review"', () => {
+  const state = normalizePanelState({
+    activeSessionId: 'session_tc_nr',
+    sessions: [{
+      id: 'session_tc_nr',
+      title: 'Needs review session',
+      runs: [{
+        id: 'run_tc_needs_review',
+        task: 'needs-review tracked change run',
+        status: 'completed',
+        trackedChangeStatus: 'needs_review',
+        undoTrackedChanges: trackedChangeRefs(),
+        undoExpectedFiles: [{ path: 'main.tex', content: 'after' }]
+      }]
+    }]
+  });
+
+  const compact = prepareStateForStorage(state);
+  const runs = compact.sessions[0].runs;
+
+  assert.equal(runs.find(run => run.id === 'run_tc_needs_review').trackedChangeStatus, 'needs_review');
 });

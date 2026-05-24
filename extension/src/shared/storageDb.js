@@ -41,7 +41,8 @@
   var VALID_TRACKED_CHANGE_STATUSES = {
     pending: true,
     accepted: true,
-    rejected: true
+    rejected: true,
+    needs_review: true
   };
   var SECRET_REDACTION_PATTERNS = [
     /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,

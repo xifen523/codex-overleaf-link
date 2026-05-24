@@ -38,10 +38,16 @@
   const VALID_LOCALES = new Set(['en', 'zh']);
   const VALID_EVENT_STATUSES = new Set(['info', 'running', 'completed', 'failed', 'warning', 'blocked', 'skipped', 'pending']);
   const VALID_TITLE_SOURCES = new Set(['auto', 'manual']);
+  // `needs_review` is the §7 settlement state surfaced when Accept/Undo cannot
+  // prove a clean post-action state. It is non-terminal for UI purposes: both
+  // Accept and Undo remain visible AND actionable so the user can inspect
+  // Overleaf and reconcile. Step 3 (terminal payload cleanup) intentionally
+  // does NOT empty refs for `needs_review` — the user is supposed to retry.
   const VALID_TRACKED_CHANGE_STATUS = new Set([
     'pending',
     'accepted',
-    'rejected'
+    'rejected',
+    'needs_review'
   ]);
   const TERMINAL_TRACKED_CHANGE_STATUS = new Set(['accepted', 'rejected']);
   const LEGACY_DEFAULT_SESSION_TITLE = 'New task';

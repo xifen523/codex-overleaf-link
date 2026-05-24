@@ -8572,9 +8572,26 @@
   // Renders the Undo button for a tracked-change-lifecycle run from
   // trackedChangeStatus. At a terminal status both buttons stay visible but
   // disabled: `rejected` shows the disabled "Undone" label, `accepted` keeps
-  // Undo present but greyed. `pending` is actionable.
+  // Undo present but greyed. `pending` is actionable. `needs_review` is also
+  // actionable per the §7 settlement matrix — proof was insufficient, so the
+  // user can re-trigger Undo (or Accept) after inspecting Overleaf.
   function configureLifecycleUndoButton(button, run) {
     const status = run.trackedChangeStatus || '';
+    // §7 settlement matrix: needs_review keeps BOTH controls visible AND
+    // actionable. Branch placed before the terminal branches so a
+    // needs_review run is never treated as terminal.
+    if (status === 'needs_review') {
+      const inFlight = trackedChangeInFlight.get(run.id);
+      button.hidden = false;
+      button.disabled = inFlight === 'reject' || inFlight === 'accept';
+      button.textContent = tr('runUndoNeedsReview');
+      button.title = tr('runUndoNeedsReviewTitle');
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        undoRun(run.id);
+      });
+      return;
+    }
     if (status === 'rejected') {
       button.hidden = false;
       button.disabled = true;
@@ -8628,6 +8645,24 @@
     }
 
     const status = run.trackedChangeStatus || '';
+    // §7 settlement matrix: needs_review keeps BOTH controls visible AND
+    // actionable. Branch placed before the terminal accepted/rejected branches
+    // so a needs_review run is never treated as terminal; the user can retry
+    // Accept after inspecting Overleaf.
+    if (status === 'needs_review') {
+      const inFlight = trackedChangeInFlight.get(run.id);
+      button.hidden = false;
+      button.disabled = inFlight === 'accept' || inFlight === 'reject';
+      if (inFlight === 'accept') {
+        button.textContent = tr('runAcceptTrackedConfirming');
+        button.title = tr('runAcceptTrackedConfirming');
+        return;
+      }
+      button.textContent = tr('runAcceptTrackedNeedsReview');
+      button.title = tr('runAcceptTrackedNeedsReviewTitle');
+      wireAcceptInlineConfirm(button, run.id);
+      return;
+    }
     if (status === 'accepted') {
       button.hidden = false;
       button.disabled = true;
@@ -8877,7 +8912,11 @@
       }
     });
     if (lifecycleReject) {
-      applyTerminalTrackedChangeStatus(runId, 'rejected');
+      // §7 settlement matrix: only land in terminal `rejected` when post-action
+      // proof is sufficient. If any per-op failure marks `needs_review` (or
+      // matches a known unverified code), settle as `needs_review` so both
+      // Accept and Undo stay actionable and the user can reconcile.
+      applyRejectSettlement(runId, result);
       return;
     }
     setRunUndoStatus(runId, result.skipped?.length ? 'partial' : 'applied');
@@ -8889,7 +8928,10 @@
       return;
     }
     const status = run.trackedChangeStatus || '';
-    if (status !== 'pending') {
+    // pending and needs_review are both actionable per §7: needs_review means
+    // the prior attempt could not prove a clean post-action state, and the
+    // user is supposed to be able to retry after inspecting Overleaf.
+    if (status !== 'pending' && status !== 'needs_review') {
       return;
     }
     if (!Array.isArray(run.undoTrackedChanges) || !run.undoTrackedChanges.length) {
@@ -8960,7 +9002,11 @@
       refreshRunCardControls(runId);
       return;
     }
-    applyTerminalTrackedChangeStatus(runId, 'accepted');
+    // §7 settlement matrix: only land in terminal `accepted` when post-action
+    // proof is sufficient. If any per-op failure marks `needs_review` (or
+    // matches a known unverified code), settle as `needs_review` so both
+    // Accept and Undo stay actionable and the user can reconcile.
+    applyAcceptSettlement(runId, result);
   }
 
   // Translates the page bridge's Accept All `diagnostics` array into one
@@ -9014,13 +9060,13 @@
     return 'info';
   }
 
-  // Drives a tracked-change-lifecycle run to a decisive terminal status.
-  // Accept All and the lifecycle Undo are best-effort, all-or-nothing: once the
-  // page-layer accept/reject returns — regardless of its applied/skipped split —
-  // the run reaches `accepted` / `rejected` and stays there. There is no
-  // partial state and no retry. The heavy payload is emptied so stale refs
-  // never re-enter retention. Any "some changes could not be settled" detail is
-  // already surfaced as the preceding run event.
+  // Drives a tracked-change-lifecycle run to a decisive terminal status when
+  // post-action proof is sufficient. Called by `applyAcceptSettlement` /
+  // `applyRejectSettlement` only after the §7 settlement matrix has cleared
+  // the run: if the page-layer returned per-op failures that imply unverified
+  // post-action state, the settlement helper routes to `needs_review` instead,
+  // and this helper is never called. The heavy payload is emptied here so
+  // stale refs never re-enter retention.
   function applyTerminalTrackedChangeStatus(runId, status) {
     const run = findRunRecord(runId);
     if (!run || !TERMINAL_TRACKED_CHANGE_STATUS.has(status)) {
@@ -9029,6 +9075,140 @@
     run.trackedChangeStatus = status;
     run.undoTrackedChanges = [];
     run.undoExpectedFiles = [];
+    saveStateSoon();
+    refreshRunCardControls(runId);
+  }
+
+  // Per §7 of the Specific Failure Reasons spec, Accept / Undo may only land in
+  // terminal `accepted` / `rejected` when post-action proof is sufficient.
+  // Otherwise the run settles in `needs_review` and both Accept and Undo stay
+  // actionable so the user can inspect Overleaf and reconcile. These two
+  // settlement helpers replace the v1.3.7 unconditional terminal calls.
+
+  // Codes that imply post-Accept proof is missing or contradicted. A page-side
+  // emitter (T4) is expected to fill these in; render-time normalization from
+  // the FailureReasons module repairs legacy `{ ok: false, code, reason }`
+  // shapes into the same structured failure record so this matrix works
+  // uniformly across both shapes.
+  const ACCEPT_NEEDS_REVIEW_CODES = new Set([
+    'tracked_changes_remain',
+    'accept_not_verified',
+    'tracked_changes_created_unexpectedly',
+    'accept_replay_created_tracked_changes',
+    'write_observed_mismatch'
+  ]);
+
+  const REJECT_NEEDS_REVIEW_CODES = new Set([
+    'undo_not_verified',
+    'undo_operation_failed',
+    'undo_reviewing_restore_unverified',
+    'tracked_change_nodes_not_identified',
+    'tracked_changes_remain',
+    'write_observed_mismatch'
+  ]);
+
+  // Walks the page-layer result's applied/skipped lists, normalizing each
+  // item's `result` (whether structured `failure` or legacy `code` + `reason`)
+  // into a `FailureReason` record. Used by `applyAcceptSettlement` /
+  // `applyRejectSettlement` to decide between `accepted`/`rejected`,
+  // `needs_review`, and "stay pending" (blocked).
+  function collectFailuresFromResult(result) {
+    const failures = [];
+    if (!result || typeof result !== 'object') {
+      return failures;
+    }
+    if (FailureReasons && FailureReasons.normalizeFailureReason instanceof Function) {
+      for (const entry of Array.isArray(result.skipped) ? result.skipped : []) {
+        const inner = (entry && entry.result) || entry;
+        if (!inner || inner.ok === true) continue;
+        const operation = (entry && entry.operation) || (entry && entry.trackedChange ? { path: entry.trackedChange.path } : undefined);
+        failures.push(FailureReasons.normalizeFailureReason(inner, operation));
+      }
+      for (const entry of Array.isArray(result.applied) ? result.applied : []) {
+        const inner = entry && entry.result;
+        if (!inner || inner.ok !== false) continue;
+        const operation = (entry && entry.operation) || (entry && entry.trackedChange ? { path: entry.trackedChange.path } : undefined);
+        failures.push(FailureReasons.normalizeFailureReason(inner, operation));
+      }
+    } else {
+      // Defensive fallback: the FailureReasons module should be present in
+      // production (loaded by the content script bundle) but tests that strip
+      // it out should still see the legacy code-only path treated as a
+      // generic non-blocking failure.
+      for (const entry of Array.isArray(result.skipped) ? result.skipped : []) {
+        const inner = (entry && entry.result) || entry;
+        if (inner && inner.ok !== true) {
+          failures.push({
+            code: (inner && typeof inner.code === 'string' ? inner.code : '') || 'unknown_legacy_failure',
+            severity: 'error'
+          });
+        }
+      }
+    }
+    return failures;
+  }
+
+  // §7 settlement matrix for Accept All. Three branches:
+  //   1. The primary failure is `blocked` (e.g. preflight / navigation refused
+  //      to touch Overleaf) — stay pending so the user can retry without the
+  //      card claiming terminal accepted.
+  //   2. Any per-op failure carries `terminalState === 'needs_review'` or one
+  //      of the unverified-proof codes — settle as `needs_review` so the user
+  //      can reconcile.
+  //   3. Otherwise — proof is sufficient — settle as terminal `accepted`.
+  function applyAcceptSettlement(runId, result) {
+    const failures = collectFailuresFromResult(result);
+    const primary = FailureReasons && FailureReasons.selectPrimaryFailure instanceof Function
+      ? FailureReasons.selectPrimaryFailure(failures)
+      : (failures[0] || null);
+    if (primary && primary.terminalState === 'blocked') {
+      // Stay pending — page bridge declined the operation before any document
+      // change. The preceding result event already showed the user the reason.
+      refreshRunCardControls(runId);
+      return;
+    }
+    const needsReview = failures.some(failure =>
+      failure.terminalState === 'needs_review' ||
+      ACCEPT_NEEDS_REVIEW_CODES.has(failure.code)
+    );
+    if (needsReview) {
+      applyNeedsReviewTrackedChangeStatus(runId);
+      return;
+    }
+    applyTerminalTrackedChangeStatus(runId, 'accepted');
+  }
+
+  // §7 settlement matrix for lifecycle Undo (Reject). Same three-branch shape
+  // as `applyAcceptSettlement`, using the undo-side unverified-proof codes.
+  function applyRejectSettlement(runId, result) {
+    const failures = collectFailuresFromResult(result);
+    const primary = FailureReasons && FailureReasons.selectPrimaryFailure instanceof Function
+      ? FailureReasons.selectPrimaryFailure(failures)
+      : (failures[0] || null);
+    if (primary && primary.terminalState === 'blocked') {
+      refreshRunCardControls(runId);
+      return;
+    }
+    const needsReview = failures.some(failure =>
+      failure.terminalState === 'needs_review' ||
+      REJECT_NEEDS_REVIEW_CODES.has(failure.code)
+    );
+    if (needsReview) {
+      applyNeedsReviewTrackedChangeStatus(runId);
+      return;
+    }
+    applyTerminalTrackedChangeStatus(runId, 'rejected');
+  }
+
+  // Sets `needs_review` on a run without emptying refs — the user is supposed
+  // to retry Accept or Undo after inspecting Overleaf, so the heavy payload
+  // (tracked-change refs + expected files) must survive.
+  function applyNeedsReviewTrackedChangeStatus(runId) {
+    const run = findRunRecord(runId);
+    if (!run) {
+      return;
+    }
+    run.trackedChangeStatus = 'needs_review';
     saveStateSoon();
     refreshRunCardControls(runId);
   }
