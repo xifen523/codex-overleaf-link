@@ -2,7 +2,42 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const projectFiles = require('../extension/src/shared/projectFiles');
-const writebackRouter = require('../extension/src/page/writebackRouter');
+const writebackRouterModule = require('../extension/src/page/writebackRouter');
+
+// Welcome-panel + write-guard v1.3.8 add-on (Task 2): every entry point on
+// the writeback router now requires a non-empty `params.runProjectId` as
+// defense-in-depth against bypass callers. Production callsites in
+// contentRuntime always set it; legacy tests in this file predate the field,
+// so we wrap the module's `create()` to auto-inject a stable id on every
+// guarded entry. Tests that want to drive the missing-runProjectId branch
+// pass `runProjectId: ''` to opt out of the wrapper's default.
+const writebackRouter = {
+  create(deps) {
+    const raw = writebackRouterModule.create(deps);
+    const guarded = ['applyOperations', 'acceptTrackedChanges', 'rejectTrackedChanges'];
+    const wrapped = { ...raw };
+    for (const method of guarded) {
+      const original = raw[method];
+      if (original instanceof Function) {
+        wrapped[method] = (...args) => {
+          // applyOperations supports a payload-object call AND an
+          // (operations, options) call. The runProjectId guard only fires
+          // on the payload-object shape; legacy array-first calls are
+          // unaffected so we pass them through verbatim.
+          if (method === 'applyOperations' && Array.isArray(args[0])) {
+            return original.apply(raw, args);
+          }
+          const payload = args[0] && typeof args[0] === 'object' ? args[0] : {};
+          if (typeof payload.runProjectId === 'string') {
+            return original.apply(raw, args);
+          }
+          return original.call(raw, { runProjectId: 'test-project', ...payload }, ...args.slice(1));
+        };
+      }
+    }
+    return wrapped;
+  }
+};
 
 // --- Accept All — editor-undo + non-tracked replay -------------------------
 //

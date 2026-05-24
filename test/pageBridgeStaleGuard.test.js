@@ -2382,6 +2382,156 @@ test('pageBridge ensureReviewing emits structured failure for reviewing_state_un
   assert.match(pageBridgeText, /reviewingFailureCode\s*=\s*switched\.attempted\s*\?\s*'reviewing_enable_failed'\s*:\s*'reviewing_state_unknown'/);
 });
 
+// ---------------------------------------------------------------------------
+// Welcome-panel + write-guard v1.3.8 add-on (Task 2): page-side writeback
+// project-ID guard. Every applyOperations / acceptTrackedChanges /
+// rejectTrackedChanges dispatch is gated by `runWriteGuard` which compares
+// `params.runProjectId` against the page-side `editorProjectId`. The guard
+// runs BEFORE any other readiness / openFile / staleness check — it is the
+// first gate. The writebackRouter entries additionally check for a missing
+// `runProjectId` as defense-in-depth in case a future caller bypasses the
+// pageBridge wrapper.
+// ---------------------------------------------------------------------------
+test('page-bridge applyOperations aborts with aborted_project_changed when runProjectId mismatches editorProjectId', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorProjectId: 'editorPID',
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    runProjectId: 'differentPID',
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      { type: 'edit', path: 'main.tex', find: 'alpha', replace: 'omega' }
+    ]
+  });
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.failure.code, 'aborted_project_changed');
+  assert.equal(result.skipped[0].result.failure.stage, 'write');
+  assert.equal(result.skipped[0].result.failure.severity, 'blocked');
+  assert.equal(result.skipped[0].result.failure.terminalState, 'blocked');
+  // Page-side editor was NOT mutated. The dispatch never ran.
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getDispatchCount(), 0);
+});
+
+test('page-bridge applyOperations aborts with editor_project_id_unavailable when editorProjectId is null', async () => {
+  // editorProjectId omitted (no `_ide.project`) and no `[data-project-id]` →
+  // the guard reads null and fails closed before any dispatch.
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorProjectId: null,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    runProjectId: 'somePID',
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      { type: 'edit', path: 'main.tex', find: 'alpha', replace: 'omega' }
+    ]
+  });
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.failure.code, 'editor_project_id_unavailable');
+  assert.equal(result.skipped[0].result.failure.stage, 'write');
+  assert.equal(result.skipped[0].result.failure.severity, 'blocked');
+  assert.equal(result.skipped[0].result.failure.terminalState, 'blocked');
+  assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
+  assert.equal(bridge.getDispatchCount(), 0);
+});
+
+test('page-bridge acceptTrackedChanges runs the same guard', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorProjectId: 'editorPID',
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const result = await bridge.call('acceptTrackedChanges', {
+    runProjectId: 'differentPID',
+    trackedChanges: [{ key: 'id:change-1', id: 'change-1', path: 'main.tex' }],
+    expectedFiles: [{ path: 'main.tex', content: 'alpha beta gamma' }],
+    postFiles: [{ path: 'main.tex', content: 'alpha delta gamma' }]
+  });
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.failure.code, 'aborted_project_changed');
+  assert.equal(result.skipped[0].result.failure.stage, 'write');
+  assert.equal(bridge.getEditorUndoClickCount(), 0);
+  assert.equal(bridge.getAcceptClickCount(), 0);
+});
+
+test('page-bridge rejectTrackedChanges runs the same guard', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorProjectId: 'editorPID',
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const result = await bridge.call('rejectTrackedChanges', {
+    runProjectId: 'differentPID',
+    trackedChanges: [{ key: 'id:change-1', id: 'change-1', path: 'main.tex' }],
+    expectedFiles: [{ path: 'main.tex', content: 'alpha beta gamma' }]
+  });
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.failure.code, 'aborted_project_changed');
+  assert.equal(result.skipped[0].result.failure.stage, 'write');
+  assert.equal(bridge.getRejectClickCount(), 0);
+  assert.equal(bridge.getEditorUndoClickCount(), 0);
+});
+
+test('writebackRouter.applyOperations rejects payload without runProjectId as editor_project_id_unavailable (defense-in-depth)', async () => {
+  // Direct module call, bypassing pageBridge. Even with the page-bridge
+  // wrapper absent (or a future caller that goes straight to the router),
+  // a missing runProjectId on the params object must block the write.
+  const writebackRouter = require('../extension/src/page/writebackRouter');
+  const router = writebackRouter.create({
+    window: { CodexOverleafProjectFiles: projectFiles, CodexOverleafStaleGuard: staleGuard },
+    treeOperations: {
+      getProjectId() { return 'editorPID'; }
+    }
+  });
+
+  const result = await router.applyOperations({
+    // runProjectId intentionally absent
+    operations: [
+      { type: 'edit', path: 'main.tex', find: 'alpha', replace: 'omega' }
+    ],
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta' }
+    ]
+  });
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.skipped[0].result.failure.code, 'editor_project_id_unavailable');
+  assert.equal(result.skipped[0].result.failure.stage, 'write');
+  assert.equal(result.skipped[0].result.failure.severity, 'blocked');
+});
+
 function createPageBridgeHarness({
   activePath,
   files,
@@ -2407,7 +2557,14 @@ function createPageBridgeHarness({
   initialEditorCatchUpDelayMs = null,
   editorSwitchDelayMs = 0,
   basenameOnlyTreeLabels = false,
-  exposeInternalDocTree = false
+  exposeInternalDocTree = false,
+  // Welcome-panel + write-guard v1.3.8 add-on (Task 2): the page-side
+  // `getEditorProjectIdPageSide()` reader looks first at `window._ide.project._id`.
+  // The harness defaults to a stable id that matches `bridge.call`'s auto-
+  // injected `runProjectId` so legacy tests pass the guard without changes.
+  // Tests can override with another string (to assert the project-changed
+  // branch) or with explicit `null` (to assert the unavailable branch).
+  editorProjectId = 'test-project'
 }) {
   const fileMap = new Map(Object.entries(files));
   const trackedChanges = [];
@@ -2509,7 +2666,15 @@ function createPageBridgeHarness({
       editorView: createEditorView(),
       fileTreeManager: createFileTreeManager(),
       ...(exposeInternalDocTree ? { rootFolder: buildInternalDocTree(Array.from(fileMap.keys())) } : {}),
-      ...(internalReviewingState === undefined ? {} : { reviewing: internalReviewingState })
+      ...(internalReviewingState === undefined ? {} : { reviewing: internalReviewingState }),
+      // `editorProjectId === undefined` → omit `project` so legacy tests are
+      // unaffected. `editorProjectId === null` → omit it too (the guard then
+      // falls through to the data-project-id attribute, which the stub doc
+      // also does not have, and lands on null → unavailable). A string sets a
+      // stable id the guard can match against `params.runProjectId`.
+      ...(typeof editorProjectId === 'string' && editorProjectId
+        ? { project: { _id: editorProjectId } }
+        : {})
     },
     addEventListener(event, callback) {
       if (event === 'message') {
@@ -2570,7 +2735,25 @@ function createPageBridgeHarness({
     },
     async call(method, params) {
       await this.initializeCapability();
-      return sendPageBridgeRequest(method, params, {
+      // Welcome-panel + write-guard v1.3.8 add-on (Task 2): every guarded
+      // method now requires `runProjectId`. Production callsites in
+      // contentRuntime always set it; the harness mirrors that by auto-
+      // injecting the configured `editorProjectId` when the test omits it.
+      // Tests that explicitly drive the guard pass their own runProjectId.
+      const guardedMethods = new Set(['applyOperations', 'acceptTrackedChanges', 'rejectTrackedChanges']);
+      let nextParams = params;
+      if (guardedMethods.has(method)
+        && params
+        && typeof params === 'object'
+        && typeof params.runProjectId !== 'string') {
+        nextParams = {
+          ...params,
+          runProjectId: typeof editorProjectId === 'string' && editorProjectId
+            ? editorProjectId
+            : 'test-project'
+        };
+      }
+      return sendPageBridgeRequest(method, nextParams, {
         capability: bridgeCapability
       });
     },

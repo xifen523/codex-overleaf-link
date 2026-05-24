@@ -600,8 +600,30 @@
     }
   }
 
+  // Welcome-panel + write-guard v1.3.8 add-on (Task 2): the run lifecycle now
+  // settles on three additional values when the user navigates away mid-run
+  // and the original run completes (or aborts) in the background. They land on
+  // the ORIGINAL project's session record, not the active one. The catalog is
+  // a `Set` so the recovery branch can defensively coerce any unknown legacy
+  // value to `pending` without throwing.
+  const VALID_RUN_STATUS = new Set([
+    'pending',
+    'running',
+    'completed',
+    'failed',
+    'background_completed',
+    'needs_review_after_navigation',
+    'abandoned_after_navigation'
+  ]);
+
   function normalizeRunStatus(status) {
-    return ['running', 'completed', 'failed'].includes(status) ? status : 'completed';
+    if (VALID_RUN_STATUS.has(status)) return status;
+    // Legacy persisted runs without an explicit status fall back to `completed`
+    // (the historical default for the recovery branch); unknown values land on
+    // `pending` so the UI surfaces them as fresh / actionable rather than
+    // pretending they finished.
+    if (status === undefined || status === null || status === '') return 'completed';
+    return 'pending';
   }
 
   function normalizeEventStatus(status) {

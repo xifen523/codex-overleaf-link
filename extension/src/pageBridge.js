@@ -174,20 +174,33 @@
       return ensureEditing(params);
     }
     if (method === 'applyOperations') {
+      // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
+      // First gate: runProjectId vs page-side editorProjectId. Runs before
+      // any reviewing / save-state / open-file readiness check so a
+      // mid-run navigation cannot write into a different project.
+      const blocked = runWriteGuard(params);
+      if (blocked) return blocked;
       return applyOperations(params.operations || [], {
         baseFiles: params.baseFiles || null,
         reviewingPolicy: params.reviewingPolicy || '',
         requireReviewing: params.requireReviewing === true,
-        requireEditing: params.requireEditing === true
+        requireEditing: params.requireEditing === true,
+        // Propagate runProjectId so the writeback router's defense-in-depth
+        // missing-runProjectId check sees it on this in-bridge dispatch path.
+        runProjectId: typeof params.runProjectId === 'string' ? params.runProjectId : ''
       });
     }
     if (method === 'jumpToPosition') {
       return jumpToPosition(params);
     }
     if (method === 'rejectTrackedChanges') {
+      const blocked = runWriteGuard(params);
+      if (blocked) return blocked;
       return rejectTrackedChanges(params);
     }
     if (method === 'acceptTrackedChanges') {
+      const blocked = runWriteGuard(params);
+      if (blocked) return blocked;
       return acceptTrackedChanges(params);
     }
     if (method === 'triggerCompile') {
@@ -2045,6 +2058,89 @@
 
   function getProjectId() {
     return treeOperations?.getProjectId?.() || null;
+  }
+
+  // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
+  // The writeback guard needs the project id of the project currently SHOWN
+  // by the Overleaf editor — distinct from the URL the user is on, which can
+  // race the in-page IDE state during SPA navigation. The acceptable sources,
+  // in order, are:
+  //   1. `window._ide.project._id` — the in-page IDE module's authoritative
+  //      project id once the SPA has bound the project.
+  //   2. `[data-project-id]` on the CodeMirror root — best-effort second
+  //      source for cases where `_ide.project` is still hydrating.
+  // The URL is INTENTIONALLY NOT a source: it changes ahead of the editor
+  // module during route changes, which is precisely the race this guard
+  // exists to close. When neither source is observable the function returns
+  // null so the guard fails closed.
+  function getEditorProjectIdPageSide() {
+    try {
+      const ideId = window._ide && window._ide.project && window._ide.project._id;
+      if (typeof ideId === 'string' && ideId) return ideId;
+    } catch (_error) { /* swallow; fall through */ }
+    try {
+      const cmRoot = document.querySelector && document.querySelector('[data-project-id]');
+      const attr = cmRoot && cmRoot.getAttribute && cmRoot.getAttribute('data-project-id');
+      if (typeof attr === 'string' && attr) return attr;
+    } catch (_error) { /* swallow */ }
+    return null;
+  }
+
+  // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
+  // Run this BEFORE any other readiness / openFile / staleness check on
+  // every writeback dispatch. Returns the abort result the caller should
+  // return verbatim, or null when the guard passes and the caller should
+  // proceed to the real dispatch. Three abort branches, all fail-closed:
+  //   • editorProjectId === null    → editor_project_id_unavailable
+  //   • runProjectId missing/empty  → editor_project_id_unavailable
+  //   • runProjectId !== editorPID  → aborted_project_changed
+  function runWriteGuard(params) {
+    const editorId = getEditorProjectIdPageSide();
+    const runId = params && typeof params.runProjectId === 'string' ? params.runProjectId : '';
+    if (!editorId) {
+      return abortDispatchResult('editor_project_id_unavailable', runId || null, null);
+    }
+    if (!runId) {
+      return abortDispatchResult('editor_project_id_unavailable', null, editorId);
+    }
+    if (runId !== editorId) {
+      return abortDispatchResult('aborted_project_changed', runId, editorId);
+    }
+    return null;
+  }
+
+  function abortDispatchResult(code, runProjectId, editorProjectId) {
+    const userMessages = {
+      aborted_project_changed: 'Codex stopped a write because Overleaf switched to a different project mid-run.',
+      editor_project_id_unavailable: 'Codex could not confirm which Overleaf project the editor is showing, so it did not write.'
+    };
+    const nextActions = {
+      aborted_project_changed: 'Reopen the original project and rerun the task if you still want this change.',
+      editor_project_id_unavailable: 'Refresh Overleaf and retry; if it persists, reload the extension.'
+    };
+    return {
+      ok: false,
+      applied: [],
+      skipped: [{
+        operation: null,
+        result: {
+          ok: false,
+          code,
+          reason: userMessages[code],
+          failure: {
+            code,
+            stage: 'write',
+            severity: 'blocked',
+            userMessage: userMessages[code],
+            nextAction: nextActions[code],
+            retryable: true,
+            terminalState: 'blocked',
+            changedDocument: false,
+            evidence: { runProjectId, editorProjectId }
+          }
+        }
+      }]
+    };
   }
 
   function getActiveFilePath() {

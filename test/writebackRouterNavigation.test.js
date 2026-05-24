@@ -3,7 +3,36 @@ const test = require('node:test');
 
 const projectFiles = require('../extension/src/shared/projectFiles');
 const staleGuard = require('../extension/src/shared/staleGuard');
-const writebackRouter = require('../extension/src/page/writebackRouter');
+const writebackRouterModule = require('../extension/src/page/writebackRouter');
+
+// Welcome-panel + write-guard v1.3.8 add-on (Task 2): the writeback router
+// now requires `params.runProjectId` as defense-in-depth. These legacy
+// navigation tests predate the field, so we wrap `create()` to auto-inject a
+// stable id on guarded entry points and let the existing assertions run
+// against the routing logic itself, unchanged.
+const writebackRouter = {
+  create(deps) {
+    const raw = writebackRouterModule.create(deps);
+    const guarded = ['applyOperations', 'acceptTrackedChanges', 'rejectTrackedChanges'];
+    const wrapped = { ...raw };
+    for (const method of guarded) {
+      const original = raw[method];
+      if (original instanceof Function) {
+        wrapped[method] = (...args) => {
+          if (method === 'applyOperations' && Array.isArray(args[0])) {
+            return original.apply(raw, args);
+          }
+          const payload = args[0] && typeof args[0] === 'object' ? args[0] : {};
+          if (typeof payload.runProjectId === 'string') {
+            return original.apply(raw, args);
+          }
+          return original.call(raw, { runProjectId: 'test-project', ...payload }, ...args.slice(1));
+        };
+      }
+    }
+    return wrapped;
+  }
+};
 
 test('writeback router refuses cross-file patch writes when the editor document did not switch', async () => {
   const files = new Map([

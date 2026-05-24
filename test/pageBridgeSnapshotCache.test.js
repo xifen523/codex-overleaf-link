@@ -1088,6 +1088,16 @@ function createSnapshotHarness({
       open_doc_name: internalState.editor?.open_doc_name || selectedPath
     };
   }
+  // Welcome-panel + write-guard v1.3.8 add-on (Task 2): the page-side
+  // `getEditorProjectIdPageSide()` reader looks for `_ide.project._id`
+  // first. Mutate `internalState.project` (keeping the live reference the
+  // page bridge holds via `_ide: internalState`) so a stable `_id` is
+  // present unless the test pre-supplied one. Other `project.*` fields
+  // tests pass (cachedNames, buildOutput, …) are preserved verbatim.
+  internalState.project = {
+    _id: 'test-project',
+    ...(internalState.project || {})
+  };
   const bridgeCapability = 'test-page-bridge-capability';
   let capabilityInitialized = false;
   const treeNodes = treePaths
@@ -1278,7 +1288,19 @@ function createSnapshotHarness({
     },
     async call(method, params) {
       await this.initializeCapability();
-      return sendPageBridgeRequest(method, params, {
+      // Welcome-panel + write-guard v1.3.8 add-on (Task 2): auto-inject
+      // runProjectId on guarded methods so legacy snapshot tests pass the
+      // page-side write guard. Production callsites in contentRuntime
+      // always set it; this harness mirrors that.
+      const guardedMethods = new Set(['applyOperations', 'acceptTrackedChanges', 'rejectTrackedChanges']);
+      let nextParams = params;
+      if (guardedMethods.has(method)
+        && params
+        && typeof params === 'object'
+        && typeof params.runProjectId !== 'string') {
+        nextParams = { ...params, runProjectId: 'test-project' };
+      }
+      return sendPageBridgeRequest(method, nextParams, {
         capability: bridgeCapability
       });
     },

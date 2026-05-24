@@ -3669,7 +3669,11 @@
         operations,
         baseFiles: project?.files || [],
         requireReviewing: runRequireReviewing,
-        requireEditing: !runRequireReviewing
+        requireEditing: !runRequireReviewing,
+        // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0):
+        // immutable per-run project id, checked by the page-side guard
+        // against `_ide.project._id` before any mutation.
+        runProjectId: currentRunView?.runProjectId || ''
       }), additionalSkippedEntries)
       : mergeApplyResultSkipped({ ok: true, applied: [], skipped: [] }, additionalSkippedEntries);
     const hasConfirmedApplyResult = hasApplyResultEntries(applied);
@@ -5354,7 +5358,9 @@
         operations: partitioned.safe,
         baseFiles: project?.files || [],
         requireReviewing: runRequireReviewing,
-        requireEditing: !runRequireReviewing
+        requireEditing: !runRequireReviewing,
+        // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
+        runProjectId: currentRunView?.runProjectId || ''
       })
       : { ok: true, applied: [], skipped: [] };
 
@@ -7421,7 +7427,15 @@
       undoOperations: [],
       undoTrackedChanges: [],
       undoExpectedFiles: [],
-      undoStatus: ''
+      undoStatus: '',
+      // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
+      // Immutable per-run capture of the project this run was submitted
+      // against. Every writeback / accept / undo dispatch attaches this id
+      // to its page-bridge params so the page-side guard can verify the run
+      // is still acting on the same project before mutating the editor. No
+      // language-level enforcement — the field is treated as immutable by
+      // convention and never reassigned anywhere downstream.
+      runProjectId: getCurrentProjectId() || ''
     };
     const active = getActiveSession(state);
     const titlePatch = active?.titleSource !== 'manual'
@@ -7447,6 +7461,9 @@
     return {
       sessionId: state.activeSessionId,
       recordId: record.id,
+      // Mirror the immutable runProjectId on the view so writeback /
+      // accept / undo dispatches don't need to re-look up the record.
+      runProjectId: record.runProjectId,
       root,
       runProcess: root.querySelector('[data-run-process]'),
       processLabel: root.querySelector('[data-run-process-summary]'),
@@ -9004,7 +9021,11 @@
       const result = await callPageBridge('applyOperations', {
         operations: undoOperations,
         baseFiles: run.undoBaseFiles || [],
-        reviewingPolicy: 'no-trace-undo'
+        reviewingPolicy: 'no-trace-undo',
+        // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0):
+        // route the undo through the same project-ID guard. The undo is
+        // bound to the run's original project, not the editor's active one.
+        runProjectId: run.runProjectId || ''
       });
       const undoApplied = isUndoResultEffectivelyApplied(run, result);
       appendUndoReviewingPolicyEvent(runId, result.reviewingPolicy);
@@ -9066,7 +9087,12 @@
       result = await callPageBridge('rejectTrackedChanges', {
         trackedChanges: run.undoTrackedChanges || [],
         expectedFiles: run.undoExpectedFiles || [],
-        postFiles: buildTrackedUndoPostFiles(run)
+        postFiles: buildTrackedUndoPostFiles(run),
+        // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0):
+        // bind the reject to the run's original project. If the user has
+        // navigated away the page-side guard refuses with
+        // `aborted_project_changed` and the document is left untouched.
+        runProjectId: run.runProjectId || ''
       });
     } finally {
       if (lifecycleReject) {
@@ -9216,7 +9242,12 @@
         // The run's own forward writeback operations. The Accept replay
         // re-applies these exact patches so it writes only the changed
         // fragments, never a whole-file overwrite.
-        appliedOperations: Array.isArray(run.appliedOperations) ? run.appliedOperations : []
+        appliedOperations: Array.isArray(run.appliedOperations) ? run.appliedOperations : [],
+        // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0):
+        // bind the accept replay to the run's original project. If the user
+        // has navigated to a different project the page-side guard refuses
+        // with `aborted_project_changed` before any mutation.
+        runProjectId: run.runProjectId || ''
       });
     } finally {
       trackedChangeInFlight.delete(runId);

@@ -1541,3 +1541,30 @@ test('storageDb compactRunForStorage round-trips trackedChangeStatus "needs_revi
 
   assert.equal(runs.find(run => run.id === 'run_tc_needs_review').trackedChangeStatus, 'needs_review');
 });
+
+// ---------------------------------------------------------------------------
+// runStatus enum extension (welcome-panel + write-guard v1.3.8 add-on, Task 2)
+// `normalizeRunStatus` must accept the three new post-navigation status values
+// so a settled run persisted with one of them round-trips intact, and it must
+// defensively recover any unknown legacy value to `pending` (the existing safe
+// default) without throwing.
+// ---------------------------------------------------------------------------
+test('runStatus normalizer accepts background_completed', () => {
+  const out = normalizeRuns([{ id: 'r', task: 't', mode: 'auto', status: 'background_completed' }]);
+  assert.equal(out[0].status, 'background_completed');
+});
+
+test('runStatus normalizer accepts needs_review_after_navigation', () => {
+  const out = normalizeRuns([{ id: 'r', task: 't', mode: 'auto', status: 'needs_review_after_navigation' }]);
+  assert.equal(out[0].status, 'needs_review_after_navigation');
+});
+
+test('runStatus normalizer accepts abandoned_after_navigation', () => {
+  const out = normalizeRuns([{ id: 'r', task: 't', mode: 'auto', status: 'abandoned_after_navigation' }]);
+  assert.equal(out[0].status, 'abandoned_after_navigation');
+});
+
+test('runStatus normalizer recovers unknown legacy value to pending', () => {
+  const out = normalizeRuns([{ id: 'r', task: 't', mode: 'auto', status: 'totally_unknown_value' }]);
+  assert.equal(out[0].status, 'pending', JSON.stringify(out[0]));
+});

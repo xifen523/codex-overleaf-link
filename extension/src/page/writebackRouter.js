@@ -485,6 +485,14 @@
   }
 
   async function rejectTrackedChanges(params = {}) {
+    // Welcome-panel + write-guard v1.3.8 add-on (Task 2): defense-in-depth.
+    // The pageBridge wrapper already runs the runProjectId guard, but a
+    // future caller could reach the router directly. A missing or empty
+    // `runProjectId` blocks the reject with the same shape the page-side
+    // guard uses. Existing tests that target individual reject behaviors set
+    // `runProjectId` on params; tests that intentionally omit it land here.
+    const writeGuardBlock = checkWritebackRunProjectId(params);
+    if (writeGuardBlock) return writeGuardBlock;
     const trackedChanges = normalizeTrackedChangeRefs(params.trackedChanges || []);
     const expectedFiles = Array.isArray(params.expectedFiles) ? params.expectedFiles : [];
     const postFiles = Array.isArray(params.postFiles) ? params.postFiles : [];
@@ -690,6 +698,13 @@
   // the user edited after the run), this bails WITHOUT re-writing so it never
   // makes the document worse, mirroring Undo's safety stance.
   async function acceptTrackedChanges(params = {}) {
+    // Welcome-panel + write-guard v1.3.8 add-on (Task 2): defense-in-depth.
+    // The pageBridge wrapper already runs the runProjectId guard, but a
+    // future caller could reach the router directly. A missing or empty
+    // `runProjectId` blocks the accept with the same shape the page-side
+    // guard uses.
+    const writeGuardBlock = checkWritebackRunProjectId(params);
+    if (writeGuardBlock) return writeGuardBlock;
     const expectedFiles = Array.isArray(params.expectedFiles) ? params.expectedFiles : [];
     const postFiles = Array.isArray(params.postFiles) ? params.postFiles : [];
     const applied = [];
@@ -3024,7 +3039,42 @@
         return applyOperations(operationsOrOptions, options);
       }
       const payload = operationsOrOptions || {};
+      // Welcome-panel + write-guard v1.3.8 add-on (Task 2): defense-in-depth.
+      // The pageBridge wrapper already runs the runProjectId guard, but a
+      // future caller could reach the router directly. A missing or empty
+      // `runProjectId` on the payload-shaped call blocks the write with the
+      // same `editor_project_id_unavailable` shape the page-side guard uses.
+      const writeGuardBlock = checkWritebackRunProjectId(payload);
+      if (writeGuardBlock) return writeGuardBlock;
       return applyOperations(payload.operations || [], payload);
+    }
+
+    function checkWritebackRunProjectId(params) {
+      const runProjectId = params && typeof params.runProjectId === 'string' ? params.runProjectId : '';
+      if (runProjectId) return null;
+      return {
+        ok: false,
+        applied: [],
+        skipped: [{
+          operation: null,
+          result: {
+            ok: false,
+            code: 'editor_project_id_unavailable',
+            reason: 'Writeback request did not carry runProjectId.',
+            failure: {
+              code: 'editor_project_id_unavailable',
+              stage: 'write',
+              severity: 'blocked',
+              userMessage: 'Codex could not confirm which Overleaf project the editor is showing, so it did not write.',
+              nextAction: 'Refresh Overleaf and retry; if it persists, reload the extension.',
+              retryable: true,
+              terminalState: 'blocked',
+              changedDocument: false,
+              evidence: { runProjectId: null }
+            }
+          }
+        }]
+      };
     }
 
     async function verifySaveState(paths = [], timeoutMs = 5000) {

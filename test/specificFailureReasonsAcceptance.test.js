@@ -5,8 +5,38 @@ const test = require('node:test');
 
 const failureReasons = require('../extension/src/shared/failureReasons');
 const projectFiles = require('../extension/src/shared/projectFiles');
-const writebackRouter = require('../extension/src/page/writebackRouter');
+const writebackRouterModule = require('../extension/src/page/writebackRouter');
 const staleGuard = require('../extension/src/shared/staleGuard');
+
+// Welcome-panel + write-guard v1.3.8 add-on (Task 2): the writeback router
+// now requires `params.runProjectId` as defense-in-depth. These existing
+// failure-acceptance tests cover the §17 high-priority codes; they pre-date
+// the field. We wrap `create()` to auto-inject a stable id on guarded entry
+// points so the original acceptance assertions still drive the failure-code
+// emit sites without touching this file's many call sites.
+const writebackRouter = {
+  create(deps) {
+    const raw = writebackRouterModule.create(deps);
+    const guarded = ['applyOperations', 'acceptTrackedChanges', 'rejectTrackedChanges'];
+    const wrapped = { ...raw };
+    for (const method of guarded) {
+      const original = raw[method];
+      if (original instanceof Function) {
+        wrapped[method] = (...args) => {
+          if (method === 'applyOperations' && Array.isArray(args[0])) {
+            return original.apply(raw, args);
+          }
+          const payload = args[0] && typeof args[0] === 'object' ? args[0] : {};
+          if (typeof payload.runProjectId === 'string') {
+            return original.apply(raw, args);
+          }
+          return original.call(raw, { runProjectId: 'test-project', ...payload }, ...args.slice(1));
+        };
+      }
+    }
+    return wrapped;
+  }
+};
 
 // Minimal window-shim used to satisfy writebackRouter's freshness preflight
 // (`window.CodexOverleafStaleGuard.checkOperationFreshness`). The router

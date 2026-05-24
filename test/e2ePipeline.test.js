@@ -138,7 +138,11 @@ function createMinimalPageBridgeHarness({ activePath, files }) {
     CodexOverleafReviewing: reviewing,
     CodexOverleafStaleGuard: staleGuard,
     _ide: {
-      editorView: createEditorView()
+      editorView: createEditorView(),
+      // Welcome-panel + write-guard v1.3.8 add-on (Task 2): the page-side
+      // `getEditorProjectIdPageSide()` reader requires `_ide.project._id`.
+      // Match the auto-injected `runProjectId` below so the guard passes.
+      project: { _id: 'project-e2e' }
     },
     addEventListener(event, callback) {
       if (event === 'message') {
@@ -189,7 +193,18 @@ function createMinimalPageBridgeHarness({ activePath, files }) {
     },
     async call(method, params) {
       await this.initializeCapability();
-      return sendPageBridgeRequest(method, params, {
+      // Welcome-panel + write-guard v1.3.8 add-on (Task 2): auto-inject
+      // runProjectId on guarded methods so legacy e2e tests pass the
+      // page-side write guard. Mirrors contentRuntime's behavior.
+      const guardedMethods = new Set(['applyOperations', 'acceptTrackedChanges', 'rejectTrackedChanges']);
+      let nextParams = params;
+      if (guardedMethods.has(method)
+        && params
+        && typeof params === 'object'
+        && typeof params.runProjectId !== 'string') {
+        nextParams = { ...params, runProjectId: 'project-e2e' };
+      }
+      return sendPageBridgeRequest(method, nextParams, {
         capability: bridgeCapability
       });
     },
