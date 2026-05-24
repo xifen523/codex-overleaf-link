@@ -347,7 +347,25 @@
       failureReason_aborted_project_changed_user: 'Codex stopped a write because Overleaf switched to a different project mid-run.',
       failureReason_aborted_project_changed_next: 'Reopen the original project and rerun the task if you still want this change.',
       failureReason_editor_project_id_unavailable_user: 'Codex could not confirm which Overleaf project the editor is showing, so it did not write.',
-      failureReason_editor_project_id_unavailable_next: 'Refresh the Overleaf tab and retry; if it persists, reload the extension.'
+      failureReason_editor_project_id_unavailable_next: 'Refresh the Overleaf tab and retry; if it persists, reload the extension.',
+      // Welcome-panel + write-guard v1.3.8 add-on (Task 5): Recent-projects
+      // variant copy. Spec §5.3–§5.5, §5.8, §5.10 are the source of truth.
+      recentProjects_welcome: 'Codex Overleaf Link',
+      recentProjects_welcome_subtitle: 'Open a project from the Overleaf list on the left to start.',
+      recentProjects_empty: "You haven't run any Codex sessions yet. Open a project from the Overleaf list on the left to start.",
+      recentProjects_degraded: 'Sign in to Overleaf to see your recent Codex projects.',
+      recentProjects_row_projectLinkUnavailable: 'Project link unavailable.',
+      recentProjects_settings_entry: 'Settings & Diagnostics',
+      recentProjects_badge_pending: 'pending',
+      recentProjects_badge_accepted: 'accepted',
+      recentProjects_badge_rejected: 'rejected',
+      recentProjects_badge_needs_review: 'needs review',
+      recentProjects_badge_running: 'running',
+      recentProjects_badge_completed: 'completed',
+      recentProjects_badge_failed: 'failed',
+      recentProjects_badge_background_completed: 'completed in background',
+      recentProjects_badge_needs_review_after_navigation: 'needs review',
+      recentProjects_badge_abandoned_after_navigation: 'abandoned'
     },
     zh: {
       resizePanel: '拖动调整 Codex 面板宽度，双击恢复默认宽度',
@@ -684,7 +702,25 @@
       failureReason_aborted_project_changed_user: 'Codex 已停止一次写入，因为 Overleaf 在写入过程中切换到了另一个项目。',
       failureReason_aborted_project_changed_next: '如仍需此次改动，请回到原项目后重新运行任务。',
       failureReason_editor_project_id_unavailable_user: 'Codex 无法确认当前 Overleaf 编辑器对应的项目，因此没有写入。',
-      failureReason_editor_project_id_unavailable_next: '请刷新 Overleaf 页面后重试；如果仍然失败，请重新加载扩展。'
+      failureReason_editor_project_id_unavailable_next: '请刷新 Overleaf 页面后重试；如果仍然失败，请重新加载扩展。',
+      // Welcome-panel + write-guard v1.3.8 add-on (Task 5): Recent-projects
+      // variant copy. 见 spec §5.3–§5.5、§5.8、§5.10。
+      recentProjects_welcome: 'Codex Overleaf Link',
+      recentProjects_welcome_subtitle: '从左侧 Overleaf 项目列表中打开任意项目即可开始。',
+      recentProjects_empty: '你还没有运行过 Codex 会话。从左侧 Overleaf 项目列表中打开任意项目即可开始。',
+      recentProjects_degraded: '请登录 Overleaf 后查看你最近的 Codex 项目。',
+      recentProjects_row_projectLinkUnavailable: '项目链接不可用。',
+      recentProjects_settings_entry: '设置与诊断',
+      recentProjects_badge_pending: '待处理',
+      recentProjects_badge_accepted: '已接受',
+      recentProjects_badge_rejected: '已撤回',
+      recentProjects_badge_needs_review: '需核对',
+      recentProjects_badge_running: '运行中',
+      recentProjects_badge_completed: '已完成',
+      recentProjects_badge_failed: '失败',
+      recentProjects_badge_background_completed: '后台已完成',
+      recentProjects_badge_needs_review_after_navigation: '需核对',
+      recentProjects_badge_abandoned_after_navigation: '已中止'
     }
   };
 

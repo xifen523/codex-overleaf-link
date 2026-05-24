@@ -4965,3 +4965,149 @@ test('settleRunAfterNavigation picks background_completed / needs_review_after_n
   assert.equal(sandbox.result.needsReviewMismatch, 'needs_review_after_navigation', 'write_observed_mismatch classifies as needs_review');
   assert.equal(sandbox.result.background, 'background_completed', 'clean run after navigation classifies as background_completed');
 });
+
+// ---------------------------------------------------------------------------
+// Welcome-panel + write-guard v1.3.8 add-on (Task 5): Recent-projects variant
+// UI — markup, row rendering, click validation, badge mapping (10 statuses),
+// settings/diagnostics scope gating, bilingual strings, CSS palette tokens.
+// Source-grep + behavioral pattern consistent with T4 above. See
+// docs/superpowers/specs/2026-05-24-project-list-welcome-panel-design.md
+// §5.3, §5.4, §5.5, §5.8, §5.9, §5.10.
+// ---------------------------------------------------------------------------
+
+test('Recent-projects variant renders a welcome header, list container, and settings entry', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  // Variant renderer plus its required data attributes for empty / degraded /
+  // populated states (spec §5.3, §5.5). Tests downstream rely on these hooks.
+  assert.match(src, /function renderRecentProjectsVariant/);
+  assert.match(src, /renderRecentProjectRow/);
+  assert.match(src, /renderWelcomeHeader/);
+  assert.match(src, /renderEmptyState/);
+  assert.match(src, /renderDegradedState/);
+  assert.match(src, /renderSettingsEntry/);
+  assert.match(src, /data-recent-projects-row/);
+  assert.match(src, /data-recent-projects-list/);
+  assert.match(src, /data-recent-projects-empty/);
+  assert.match(src, /data-recent-projects-degraded/);
+  // The variant pulls rows from the T3 cross-project query.
+  assert.match(src, /listRecentProjectsAcrossAccount/);
+  // Opportunistic enrichment runs as best-effort and must not block render.
+  assert.match(src, /opportunisticEnrichmentFromDom/);
+});
+
+test('Recent-projects row click validates project id and URL-encodes the navigation target', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  assert.match(src, /function isValidProjectId/);
+  assert.match(src, /function openProjectFromRow/);
+  assert.match(src, /encodeURIComponent/);
+  // Disabled-row affordance: invalid ids surface a "Project link unavailable"
+  // warning sourced via tr(...) in the renderer (spec §5.8). The English
+  // i18n key carries the canonical copy; the renderer references it by key.
+  assert.match(src, /recentProjects_row_projectLinkUnavailable/);
+  // Behavioral: isValidProjectId enforces the 24-hex shape + reserved-set guard.
+  const body = extractFunction(src, 'isValidProjectId');
+  const sandbox = { result: null };
+  vm.createContext(sandbox);
+  vm.runInContext(
+    "const PROJECT_EDITOR_RESERVED_IDS = new Set(['new','upload','import']);" + body
+      + ";result = {" +
+        "good: isValidProjectId('a'.repeat(24))," +
+        "upper: isValidProjectId('A'.repeat(24))," +
+        "short: isValidProjectId('abc')," +
+        "reserved: isValidProjectId('new')," +
+        "nonString: isValidProjectId(null)," +
+        "empty: isValidProjectId('')" +
+      "};",
+    sandbox
+  );
+  assert.equal(sandbox.result.good, true, '24-hex lowercase id is valid');
+  assert.equal(sandbox.result.upper, false, 'uppercase hex is rejected');
+  assert.equal(sandbox.result.short, false, 'short id is rejected');
+  assert.equal(sandbox.result.reserved, false, 'reserved /project/new id is rejected');
+  assert.equal(sandbox.result.nonString, false, 'null id is rejected');
+  assert.equal(sandbox.result.empty, false, 'empty string id is rejected');
+});
+
+test('Recent-projects status badge renderer covers all 10 spec status values per §5.10', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  assert.match(src, /function renderStatusBadge/);
+  assert.match(src, /STATUS_BADGE_CLASS/);
+  // All ten status values from spec §5.10 must appear in the badge map so
+  // no row ever renders an unstyled / missing badge (acceptance criterion 6).
+  for (const status of [
+    'pending', 'accepted', 'rejected', 'needs_review',
+    'running', 'completed', 'failed',
+    'background_completed', 'needs_review_after_navigation', 'abandoned_after_navigation'
+  ]) {
+    assert.ok(src.indexOf(status) !== -1, 'badge map must reference ' + status);
+  }
+  // Behavioral: badge map maps each status to its CSS class. Extract the
+  // table object literal and confirm 10 keys (the renderer falls back to
+  // the pending class for unknown values).
+  const tableMatch = src.match(/const STATUS_BADGE_CLASS = \{([\s\S]*?)\n  \};/);
+  assert.ok(tableMatch, 'STATUS_BADGE_CLASS literal should exist');
+  const body = tableMatch[1];
+  for (const status of [
+    'pending', 'accepted', 'rejected', 'needs_review',
+    'running', 'completed', 'failed',
+    'background_completed', 'needs_review_after_navigation', 'abandoned_after_navigation'
+  ]) {
+    assert.ok(body.indexOf(status + ':') !== -1, 'STATUS_BADGE_CLASS must define ' + status);
+  }
+});
+
+test('Recent-projects settings/diagnostics scope gates project-only sections when activeProjectId is null', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  // The variant settings entry opens settings in account scope (spec §5.9).
+  assert.match(src, /scope:\s*['"]account['"]/);
+  // The settings open path must gate the project-scoped sections on a
+  // non-null activeProjectId. The implementer uses a data attribute on the
+  // settings panel root so CSS / template can hide project-scoped scope
+  // blocks when no project is active.
+  assert.match(src, /data-settings-scope|settings-scope-account|activeProjectId\s*!==?\s*null|activeProjectId\s*===?\s*null/);
+});
+
+test('Recent-projects bilingual strings: en + zh both define welcome / empty / degraded / badge keys', () => {
+  const i18n = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'shared', 'i18n.js'), 'utf8');
+  const keys = [
+    'recentProjects_welcome',
+    'recentProjects_welcome_subtitle',
+    'recentProjects_empty',
+    'recentProjects_degraded',
+    'recentProjects_row_projectLinkUnavailable',
+    'recentProjects_badge_pending',
+    'recentProjects_badge_accepted',
+    'recentProjects_badge_rejected',
+    'recentProjects_badge_needs_review',
+    'recentProjects_badge_running',
+    'recentProjects_badge_completed',
+    'recentProjects_badge_failed',
+    'recentProjects_badge_background_completed',
+    'recentProjects_badge_needs_review_after_navigation',
+    'recentProjects_badge_abandoned_after_navigation'
+  ];
+  // Each key must appear at least twice — once in the en block and once in
+  // the zh block. We assert occurrence count >= 2 to confirm parity without
+  // brittle line-position checks.
+  for (const key of keys) {
+    const occurrences = i18n.split(key + ':').length - 1;
+    assert.ok(occurrences >= 2, key + ' should appear in both en and zh blocks (saw ' + occurrences + ')');
+  }
+});
+
+test('Recent-projects CSS variant + badge styles reuse panel palette tokens for all 10 statuses', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'extension', 'styles', 'panel.css'), 'utf8');
+  // Variant container + row + disabled-row styles per spec §5.3 / §5.4 / §5.8.
+  assert.match(css, /\[data-recent-projects-list\]/);
+  assert.match(css, /\[data-recent-projects-row\]/);
+  // All ten badge variants — class naming mirrors the JS STATUS_BADGE_CLASS
+  // map. The renderer adds these classes onto the row badge span.
+  for (const cls of [
+    'badge-pending', 'badge-accepted', 'badge-rejected', 'badge-needs-review',
+    'badge-running', 'badge-completed', 'badge-failed',
+    'badge-background-completed', 'badge-needs-review-after-navigation',
+    'badge-abandoned-after-navigation'
+  ]) {
+    assert.ok(css.indexOf(cls) !== -1, 'panel.css must style .' + cls);
+  }
+});
