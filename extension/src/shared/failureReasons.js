@@ -164,6 +164,18 @@
       fallbackNextAction: 'Review written files; use Undo written parts if needed.'
     },
 
+    // 9.0+ — write-safety primitive (welcome-panel + writeback project-ID guard v1.3.8 add-on)
+    aborted_project_changed: {
+      stage: 'write', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Codex stopped a write because Overleaf switched to a different project mid-run.',
+      fallbackNextAction: 'Reopen the original project and rerun the task if you still want this change.'
+    },
+    editor_project_id_unavailable: {
+      stage: 'write', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Codex could not confirm which Overleaf project the editor is currently showing, so it did not write.',
+      fallbackNextAction: 'Refresh the Overleaf tab and retry; if it persists, reload the extension.'
+    },
+
     // 9.4 Reviewing
     reviewing_state_unknown: {
       stage: 'reviewing', severity: 'blocked', defaultRetryable: true,

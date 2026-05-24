@@ -343,7 +343,11 @@
       failureReason_codex_no_usable_result_user: 'Local Codex returned no usable final report or operations.',
       failureReason_codex_no_usable_result_next: 'Open Technical Details and resolve the local Codex error.',
       failureReason_storage_quota_exceeded_user: 'Browser storage quota was exceeded.',
-      failureReason_storage_quota_exceeded_next: 'Clear old run history or reduce attachments.'
+      failureReason_storage_quota_exceeded_next: 'Clear old run history or reduce attachments.',
+      failureReason_aborted_project_changed_user: 'Codex stopped a write because Overleaf switched to a different project mid-run.',
+      failureReason_aborted_project_changed_next: 'Reopen the original project and rerun the task if you still want this change.',
+      failureReason_editor_project_id_unavailable_user: 'Codex could not confirm which Overleaf project the editor is showing, so it did not write.',
+      failureReason_editor_project_id_unavailable_next: 'Refresh the Overleaf tab and retry; if it persists, reload the extension.'
     },
     zh: {
       resizePanel: '拖动调整 Codex 面板宽度，双击恢复默认宽度',
@@ -676,7 +680,11 @@
       failureReason_codex_no_usable_result_user: '本地 Codex 没有返回可用的最终报告或操作。',
       failureReason_codex_no_usable_result_next: '请打开“技术细节”排查本地 Codex 错误。',
       failureReason_storage_quota_exceeded_user: '浏览器本地存储配额已超出。',
-      failureReason_storage_quota_exceeded_next: '请清理旧的运行历史，或减少附件大小。'
+      failureReason_storage_quota_exceeded_next: '请清理旧的运行历史，或减少附件大小。',
+      failureReason_aborted_project_changed_user: 'Codex 已停止一次写入，因为 Overleaf 在写入过程中切换到了另一个项目。',
+      failureReason_aborted_project_changed_next: '如仍需此次改动，请回到原项目后重新运行任务。',
+      failureReason_editor_project_id_unavailable_user: 'Codex 无法确认当前 Overleaf 编辑器对应的项目，因此没有写入。',
+      failureReason_editor_project_id_unavailable_next: '请刷新 Overleaf 页面后重试；如果仍然失败，请重新加载扩展。'
     }
   };
 

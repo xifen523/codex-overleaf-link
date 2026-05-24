@@ -267,3 +267,40 @@ test('localizeFailureReason interpolates missing fields as empty strings', () =>
   }, 'en', lookup);
   assert.equal(localized.userMessage, 'file=');
 });
+
+test('FAILURE_CODE_CATALOG includes aborted_project_changed', () => {
+  const entry = FAILURE_CODE_CATALOG.aborted_project_changed;
+  assert.ok(entry);
+  assert.equal(entry.stage, 'write');
+  assert.equal(entry.severity, 'blocked');
+  assert.equal(typeof entry.fallbackUserMessage, 'string');
+  assert.equal(typeof entry.fallbackNextAction, 'string');
+});
+
+test('FAILURE_CODE_CATALOG includes editor_project_id_unavailable', () => {
+  const entry = FAILURE_CODE_CATALOG.editor_project_id_unavailable;
+  assert.ok(entry);
+  assert.equal(entry.stage, 'write');
+  assert.equal(entry.severity, 'blocked');
+});
+
+test('validateFailureReason accepts the two new codes with blocked/blocked terminalState', () => {
+  for (const code of ['aborted_project_changed', 'editor_project_id_unavailable']) {
+    const ok = validateFailureReason({
+      code, stage: 'write', severity: 'blocked', userMessage: 'x',
+      retryable: true, nextAction: 'y', terminalState: 'blocked'
+    });
+    assert.equal(ok.ok, true, code + ': ' + JSON.stringify(ok));
+  }
+});
+
+test('normalizeFailureReason produces the new codes when the emitter supplies the catalog entry', () => {
+  const reason = normalizeFailureReason({
+    ok: false,
+    code: 'aborted_project_changed'
+  }, { type: 'edit', path: 'main.tex' });
+  assert.equal(reason.code, 'aborted_project_changed');
+  assert.equal(reason.stage, 'write');
+  assert.equal(reason.severity, 'blocked');
+  assert.equal(reason.file, 'main.tex');
+});
