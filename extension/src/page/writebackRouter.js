@@ -93,6 +93,16 @@
       return treeOperations.projectPathExists?.(filePath) === true;
     }
 
+    // Distinct from `projectPathExists` (which boolean-collapses an
+    // unavailable implementation): returns true only when the underlying
+    // treeOperations actually exposes a projectPathExists hook. Used by
+    // emit sites that only want to fire target_file_not_found when we have
+    // a real path-existence check — older test harnesses do not stub the
+    // hook, and treating "no hook" as "path missing" would break them.
+    function hasProjectPathExistsHook() {
+      return treeOperations.projectPathExists instanceof Function;
+    }
+
     function findFileTreeManager() {
       return treeOperations.findFileTreeManager?.() || null;
     }
@@ -215,6 +225,87 @@
         ...result,
         debug: buildWritebackDebug(stage, operation, baseFileLookup, currentText, extra)
       };
+    }
+
+    // Inline mirror of the page-side subset of the FailureReason §9 catalog used by
+    // T4 emit sites. Keeping it inline avoids an extra script-load dependency for
+    // the page-injected bundle; the catalog itself is duplicated in
+    // shared/failureReasons.js (FAILURE_CODE_CATALOG) — keep in sync when adding
+    // codes. Each entry mirrors stage / severity / defaultRetryable /
+    // fallbackUserMessage / fallbackNextAction.
+    const PAGE_FAILURE_CATALOG = {
+      target_file_not_found: {
+        stage: 'navigation', severity: 'blocked', defaultRetryable: true,
+        fallbackUserMessage: 'Codex could not find the target file in this Overleaf project.',
+        fallbackNextAction: 'Check the file name/path in Overleaf and retry.'
+      },
+      target_file_open_failed: {
+        stage: 'navigation', severity: 'blocked', defaultRetryable: true,
+        fallbackUserMessage: 'Codex could not open the target file in Overleaf.',
+        fallbackNextAction: 'Expand the folder or manually open the file, then retry.'
+      },
+      target_file_not_active: {
+        stage: 'navigation', severity: 'blocked', defaultRetryable: true,
+        fallbackUserMessage: 'Codex tried to write the target file, but another file was active at write time.',
+        fallbackNextAction: 'Open the target file in Overleaf, then retry this run.'
+      },
+      target_editor_not_ready: {
+        stage: 'navigation', severity: 'blocked', defaultRetryable: true,
+        fallbackUserMessage: 'Target file is active but the editor was not ready before timeout.',
+        fallbackNextAction: 'Wait for Overleaf to finish loading, then retry.'
+      },
+      stale_source_changed: {
+        stage: 'preflight', severity: 'blocked', defaultRetryable: true,
+        fallbackUserMessage: 'The file changed while Codex was working.',
+        fallbackNextAction: 'Review the current file, then rerun the task.'
+      },
+      patch_anchor_not_found: {
+        stage: 'preflight', severity: 'blocked', defaultRetryable: true,
+        fallbackUserMessage: 'The edit anchor no longer matches current Overleaf content.',
+        fallbackNextAction: 'Rerun the task against the current document.'
+      },
+      write_observed_mismatch: {
+        stage: 'verify', severity: 'error', defaultRetryable: false,
+        fallbackUserMessage: 'Codex attempted to write, but the content read back from Overleaf did not match the approved change.',
+        fallbackNextAction: 'Open Technical Details and compare expected vs observed.'
+      },
+      editing_not_confirmed: {
+        stage: 'reviewing', severity: 'blocked', defaultRetryable: true,
+        fallbackUserMessage: 'Editing mode could not be proven stable.',
+        fallbackNextAction: 'Do not write; check the mode selector and retry.'
+      },
+      tracked_changes_remain: {
+        stage: 'reviewing', severity: 'warning', defaultRetryable: true,
+        fallbackUserMessage: 'Accept/reject operation finished but tracked changes remain.',
+        fallbackNextAction: 'Open Overleaf Reviewing and inspect remaining changes.'
+      }
+    };
+
+    // Build a structured FailureReason record (§7) for emit at the page layer.
+    // `overrides` merges into the entry: callers supply `file` / `activeFile` /
+    // `userMessage` / `evidence` / `changedDocument` / `terminalState` etc.
+    function buildPageFailure(code, overrides) {
+      const entry = PAGE_FAILURE_CATALOG[code];
+      if (!entry) {
+        return null;
+      }
+      const merged = overrides || {};
+      const failure = {
+        code,
+        stage: entry.stage,
+        severity: entry.severity,
+        userMessage: merged.userMessage || entry.fallbackUserMessage,
+        retryable: merged.retryable === undefined ? entry.defaultRetryable : merged.retryable === true,
+        nextAction: merged.nextAction || entry.fallbackNextAction
+      };
+      if (merged.file !== undefined) failure.file = merged.file;
+      if (merged.activeFile !== undefined) failure.activeFile = merged.activeFile;
+      if (merged.operationType !== undefined) failure.operationType = merged.operationType;
+      if (merged.changedDocument !== undefined) failure.changedDocument = merged.changedDocument === true;
+      if (merged.terminalState !== undefined) failure.terminalState = merged.terminalState;
+      if (merged.technicalMessage !== undefined) failure.technicalMessage = merged.technicalMessage;
+      if (merged.evidence !== undefined) failure.evidence = merged.evidence;
+      return failure;
     }
 
     function normalizeTextPatches(patches, length) {
@@ -695,7 +786,8 @@
     if (!editingSwitch.ok) {
       // The undo already reverted the writeback; without a *confirmed* Editing
       // mode the replay would itself be tracked. Bail rather than re-introduce
-      // tracked changes.
+      // tracked changes. The structured failure from forceEditingForAcceptReplay
+      // (editing_not_confirmed, changedDocument:true) is preserved verbatim.
       return {
         ok: false,
         applied: [],
@@ -704,7 +796,15 @@
           result: {
             ok: false,
             code: editingSwitch.code || 'accept_editing_not_confirmed',
-            reason: editingSwitch.reason || '无法确认 Overleaf 已切换到 Editing 模式；Codex 没有把本轮改动重写为永久文本。'
+            reason: editingSwitch.reason || '无法确认 Overleaf 已切换到 Editing 模式；Codex 没有把本轮改动重写为永久文本。',
+            failure: editingSwitch.failure || buildPageFailure('editing_not_confirmed', {
+              changedDocument: true,
+              userMessage: 'Codex could not confirm Editing mode for the untracked Accept replay, so the run was not finalized.',
+              evidence: {
+                originalCode: editingSwitch.code || 'accept_editing_not_confirmed',
+                writeStarted: false
+              }
+            })
           }
         }],
         diagnostics
@@ -803,7 +903,18 @@
           ok: false,
           code: reToggleResult?.code || 'accept_editing_not_confirmed',
           reason: reToggleResult?.reason
-            || '本次操作前未能确认 Overleaf 处于 Editing 模式；为避免重写又留下留痕，Codex 没有继续重放本轮剩余改动。'
+            || '本次操作前未能确认 Overleaf 处于 Editing 模式；为避免重写又留下留痕，Codex 没有继续重放本轮剩余改动。',
+          failure: buildPageFailure('editing_not_confirmed', {
+            file: opPath || '',
+            operationType: 'accept-replay',
+            changedDocument: true,
+            userMessage: `Codex could not re-confirm Editing mode before replaying ${opPath || 'the next file'}; Codex stopped to avoid landing a tracked write.`,
+            evidence: {
+              originalCode: reToggleResult?.code || 'accept_editing_not_confirmed',
+              reToggled,
+              writeStarted: false
+            }
+          })
         };
         skipped.push({
           trackedChange: {
@@ -1056,10 +1167,26 @@
     // toggle rather than trusting ensureEditing's lenient detection.
     const switched = await setReviewingEnabled(false, { waitMs: 1800 });
     if (!switched.ok) {
+      // §9.4 editing_not_confirmed: the document is at pre-write state after
+      // the editor-undo succeeded; the mode toggle failed. The Accept replay
+      // was rolled back so the user-visible doc state has moved from the
+      // post-write tracked state back to pre-write — set changedDocument:true
+      // per the design spec's "is there text the user might want to inspect"
+      // contract for accept-side failures after a rollback.
       return {
         ok: false,
         code: switched.code || 'accept_editing_not_confirmed',
-        reason: switched.reason || '无法确认 Overleaf 已切换到 Editing 模式；Codex 没有把本轮改动重写为永久文本。'
+        reason: switched.reason || '无法确认 Overleaf 已切换到 Editing 模式；Codex 没有把本轮改动重写为永久文本。',
+        failure: buildPageFailure('editing_not_confirmed', {
+          changedDocument: true,
+          userMessage: 'Codex could not switch Overleaf to Editing mode for the untracked Accept replay, so the run was not finalized.',
+          technicalMessage: switched.reason || '',
+          evidence: {
+            originalCode: switched.code || 'accept_editing_not_confirmed',
+            toggleAttempted: true,
+            writeStarted: false
+          }
+        })
       };
     }
 
@@ -1071,7 +1198,16 @@
       return {
         ok: false,
         code: 'accept_editing_not_confirmed',
-        reason: '切换后仍未能确认 Overleaf 处于 Editing 模式；为避免重写又留下留痕，Codex 没有重放本轮改动。'
+        reason: '切换后仍未能确认 Overleaf 处于 Editing 模式；为避免重写又留下留痕，Codex 没有重放本轮改动。',
+        failure: buildPageFailure('editing_not_confirmed', {
+          changedDocument: true,
+          userMessage: 'Codex toggled Overleaf to Editing, but the post-toggle state did not positively confirm Editing — Codex did not replay the run.',
+          evidence: {
+            originalCode: 'accept_editing_not_confirmed',
+            toggleAttempted: true,
+            writeStarted: false
+          }
+        })
       };
     }
 
@@ -1498,7 +1634,19 @@
     return {
       ok: false,
       code: 'tracked_change_undo_max_iterations',
-      reason: `${path || '当前文件'} 仍有未完成的留痕记录；Codex 已停止以避免误拒绝其它改动。`
+      reason: `${path || '当前文件'} 仍有未完成的留痕记录；Codex 已停止以避免误拒绝其它改动。`,
+      failure: buildPageFailure('tracked_changes_remain', {
+        file: path || '',
+        operationType: 'reject',
+        changedDocument: true,
+        terminalState: 'needs_review',
+        userMessage: `${path || 'The target file'} still has tracked changes after the reject sweep, so Codex stopped to avoid mis-rejecting other edits.`,
+        evidence: {
+          originalCode: 'tracked_change_undo_max_iterations',
+          maxAttemptsReached: true,
+          writeStarted: true
+        }
+      })
     };
   }
 
@@ -1556,7 +1704,19 @@
     return {
       ok: false,
       code: 'tracked_change_undo_max_iterations',
-      reason: `${file.path} 仍有未完成的留痕记录；Codex 已停止以避免误拒绝其它改动。`
+      reason: `${file.path} 仍有未完成的留痕记录；Codex 已停止以避免误拒绝其它改动。`,
+      failure: buildPageFailure('tracked_changes_remain', {
+        file: file.path || '',
+        operationType: 'reject',
+        changedDocument: true,
+        terminalState: 'needs_review',
+        userMessage: `${file.path || 'The target file'} still has tracked changes after the per-expected-file reject sweep, so Codex stopped to avoid mis-rejecting other edits.`,
+        evidence: {
+          originalCode: 'tracked_change_undo_max_iterations',
+          maxAttemptsReached: true,
+          writeStarted: true
+        }
+      })
     };
   }
 
@@ -1653,11 +1813,38 @@
     if (!freshness.ok) {
       const ready = await waitForFreshEditorTextForOperation(operation, options.baseFileLookup, 1500);
       if (!ready.ok) {
-        return attachWritebackDebug(freshness, 'stale_guard', operation, options.baseFileLookup, current, {
+        const decorated = attachWritebackDebug(freshness, 'stale_guard', operation, options.baseFileLookup, current, {
           initialActivePath: currentPath,
           editorReadyDebug: editorReady.debug || null,
           waitFresh: ready
         });
+        // §9.2: legacy stale_snapshot / stale_patch_range / missing_base_file
+        // map to canonical preflight failure codes. The structured failure
+        // attaches the per-emit-site evidence so the run card / final report
+        // can render with file context without round-tripping through the
+        // normalizer's legacy mapping.
+        const staleCode = freshness.code === 'missing_base_file'
+          ? 'missing_base_file'
+          : freshness.code === 'stale_patch_range'
+            ? 'patch_anchor_not_found'
+            : 'stale_source_changed';
+        if (staleCode === 'stale_source_changed' || staleCode === 'patch_anchor_not_found') {
+          decorated.failure = buildPageFailure(staleCode, {
+            file: operation?.path || '',
+            operationType: operation?.type || 'edit',
+            changedDocument: false,
+            userMessage: staleCode === 'stale_source_changed'
+              ? `${operation?.path || 'The target file'} changed while Codex was working, so Codex did not overwrite it.`
+              : `${operation?.path || 'The target file'} no longer contains the text Codex expected to edit, so Codex did not overwrite it.`,
+            technicalMessage: freshness.reason || '',
+            evidence: {
+              originalCode: freshness.code || '',
+              baselineMatched: false,
+              writeStarted: false
+            }
+          });
+        }
+        return decorated;
       }
       current = ready.text;
       freshness = { ok: true };
@@ -1667,10 +1854,29 @@
     if (Array.isArray(operation.patches) && operation.patches.length) {
       const patched = applyTextPatches(current, operation.patches);
       if (!patched.ok) {
-        return attachWritebackDebug(patched, 'apply_text_patches', operation, options.baseFileLookup, current, {
+        const decorated = attachWritebackDebug(patched, 'apply_text_patches', operation, options.baseFileLookup, current, {
           initialActivePath: currentPath,
           editorReadyDebug: editorReady.debug || null
         });
+        // §9.2: stale_patch (a patch `expected` slice did not match the
+        // current document) is the canonical patch_anchor_not_found case.
+        // invalid_patch (range out of bounds / overlapping) also belongs to
+        // patch_anchor_not_found per §9.2: the anchor cannot be aligned to
+        // current content.
+        if (patched.code === 'stale_patch' || patched.code === 'invalid_patch') {
+          decorated.failure = buildPageFailure('patch_anchor_not_found', {
+            file: operation?.path || '',
+            operationType: operation?.type || 'edit',
+            changedDocument: false,
+            userMessage: `Codex's edit anchors no longer match ${operation?.path || 'the current document'}, so Codex did not overwrite it.`,
+            technicalMessage: patched.reason || '',
+            evidence: {
+              originalCode: patched.code || '',
+              writeStarted: false
+            }
+          });
+        }
+        return decorated;
       }
       nextContent = patched.text;
     } else if (typeof operation.replaceAll === 'string') {
@@ -1699,10 +1905,27 @@
 
     const verified = await verifyActiveEditorText(nextContent, operation.path);
     if (!verified.ok) {
-      return attachWritebackDebug(verified, 'write_verification', operation, options.baseFileLookup, readActiveEditorText(), {
+      const decorated = attachWritebackDebug(verified, 'write_verification', operation, options.baseFileLookup, readActiveEditorText(), {
         initialActivePath: currentPath,
         editorReadyDebug: editorReady.debug || null
       });
+      // §9.3 write_observed_mismatch: the write call landed but the readback
+      // does not match. changedDocument:true — the editor state moved, just
+      // not as Codex expected.
+      decorated.failure = buildPageFailure('write_observed_mismatch', {
+        file: operation?.path || '',
+        operationType: operation?.type || 'edit',
+        changedDocument: true,
+        userMessage: `${operation?.path || 'The target file'} did not read back the content Codex wrote; the document state may differ from what was approved.`,
+        technicalMessage: verified.reason || '',
+        evidence: {
+          originalCode: verified.code || '',
+          expectedLength: verified.expectedLength,
+          actualLength: verified.actualLength,
+          writeStarted: true
+        }
+      });
+      return decorated;
     }
     const trackedChanges = [];
     if (observeTrackedChanges) {
@@ -1724,6 +1947,21 @@
           ok: false,
           code: 'accept_replay_created_tracked_changes',
           reason: 'Accept All replay wrote the expected text, but Overleaf created fresh tracked changes during the replay. Codex tried to roll back this replay and left the run pending instead of marking it accepted.',
+          // §9.4 tracked_changes_remain: warning severity, needs_review terminal
+          // state. The replay wrote (changedDocument:true), but Overleaf left
+          // tracked-change nodes behind, so Accept cannot be proven clean.
+          failure: buildPageFailure('tracked_changes_remain', {
+            file: operation?.path || '',
+            operationType: operation?.type || 'edit',
+            changedDocument: true,
+            terminalState: 'needs_review',
+            userMessage: `${operation?.path || 'The target file'} still has tracked changes after the Accept All replay, so the run could not be marked accepted.`,
+            evidence: {
+              originalCode: 'accept_replay_created_tracked_changes',
+              trackedChangeCount: trackedChanges.length,
+              writeStarted: true
+            }
+          }),
           verified: true,
           verifiedContent: nextContent,
           trackedChanges: mergeTrackedChangeRefs(trackedChanges)
@@ -1803,8 +2041,38 @@
     const currentText = readActiveEditorText();
     const previousEditorIdentity = getActiveEditorIdentity();
     const previousSignature = contentSignature(currentText);
+
+    // §9.1 target_file_not_found: if the target path is not visible in the
+    // Overleaf project file tree, refuse the write before attempting to open.
+    // openFileByPath itself would fail anyway, but emitting the canonical
+    // path-not-found code (rather than a generic open failure) gives the run
+    // card / final report a more actionable presentation per §17.3.1.
+    // Only fires when the tree-operations layer actually exposes a
+    // projectPathExists hook; older harnesses without the hook fall through
+    // to the openFileByPath path and surface a generic open failure.
+    if (operation?.type === 'edit' && hasProjectPathExistsHook() && !projectPathExists(filePath)) {
+      return {
+        ok: false,
+        code: 'path_not_found',
+        reason: `Cannot edit ${filePath}; the path is not in the Overleaf project file tree.`,
+        failure: buildPageFailure('target_file_not_found', {
+          file: filePath,
+          activeFile: initialActivePath || '',
+          operationType: operation?.type || 'edit',
+          changedDocument: false,
+          userMessage: `Codex could not find ${filePath} in this Overleaf project.`,
+          evidence: {
+            originalCode: 'path_not_found',
+            initialActivePath: initialActivePath || '',
+            writeStarted: false
+          }
+        })
+      };
+    }
+
     const opened = await openFileByPath(filePath, { force: initialActivePath === filePath });
     if (!opened.ok) {
+      const reasonText = `Cannot edit ${filePath}; active file is ${initialActivePath || 'unknown'}; ${opened.reason}`;
       return {
         ok: false,
         code: 'file_open_failed',
@@ -1812,7 +2080,20 @@
           initialActivePath,
           opened
         }),
-        reason: `Cannot edit ${filePath}; active file is ${initialActivePath || 'unknown'}; ${opened.reason}`
+        reason: reasonText,
+        failure: buildPageFailure('target_file_open_failed', {
+          file: filePath,
+          activeFile: initialActivePath || '',
+          operationType: operation?.type || 'edit',
+          changedDocument: false,
+          userMessage: `Codex could not open ${filePath} in Overleaf.`,
+          technicalMessage: opened.reason || '',
+          evidence: {
+            initialActivePath: initialActivePath || '',
+            openMethod: opened.method || '',
+            writeStarted: false
+          }
+        })
       };
     }
 
@@ -1855,6 +2136,11 @@
       }
       await delay(100);
     }
+    // §9.1: if the active file ended up on a different document, this is
+    // target_file_not_active; if the file did become active but the editor
+    // document never settled, this is target_editor_not_ready.
+    const activeMismatched = Boolean(lastActivePath) && lastActivePath !== filePath;
+    const canonicalCode = activeMismatched ? 'target_file_not_active' : 'target_editor_not_ready';
     return {
       ok: false,
       code: 'editor_document_not_switched',
@@ -1868,6 +2154,22 @@
         currentSignature: contentSignature(lastText),
         openedMethod: options.openedMethod || '',
         elapsedMs: Date.now() - startedAt
+      }),
+      failure: buildPageFailure(canonicalCode, {
+        file: filePath,
+        activeFile: lastActivePath || '',
+        operationType: 'edit',
+        changedDocument: false,
+        userMessage: activeMismatched
+          ? `Codex tried to write ${filePath}, but ${lastActivePath || 'a different file'} was active at write time.`
+          : `${filePath} became active in Overleaf, but the editor was not ready before timeout.`,
+        evidence: {
+          initialActivePath: options.initialActivePath || '',
+          lastActivePath: lastActivePath || '',
+          openedMethod: options.openedMethod || '',
+          elapsedMs: Date.now() - startedAt,
+          writeStarted: false
+        }
       })
     };
   }

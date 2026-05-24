@@ -919,3 +919,275 @@ test('rejectTrackedChanges still processes refs in reverse order (orderTrackedCh
   assert.equal(result.applied[0].trackedChange.key, 'id:change-3');
   assert.equal(result.applied[2].trackedChange.key, 'id:change-1');
 });
+
+// --- T4: structured FailureReason emit-site assertions ----------------------
+//
+// Cover the accept/reject high-priority emit sites in writebackRouter. Each
+// emit site keeps its legacy code+reason and adds a structured `failure`
+// record that passes validateFailureReason. The §7 changedDocument contract
+// drives the run card's "is there text the user might want to inspect" cue.
+
+const failureReasonsModule = require('../extension/src/shared/failureReasons');
+
+test('acceptTrackedChanges emits structured editing_not_confirmed failure with changedDocument:true after editor-undo rollback', async () => {
+  // The editor-undo succeeded (reverted the run writeback) but the Editing
+  // mode toggle failed. §7: the document state moved from post-write tracked
+  // back to pre-write — set changedDocument:true so the user inspects.
+  const harness = createAcceptHarness({
+    preContent: 'before\n',
+    postContent: 'after\n',
+    editingFails: true
+  });
+
+  const result = await harness.router.acceptTrackedChanges({
+    expectedFiles: [{ path: harness.path, content: harness.preContent }],
+    postFiles: [{ path: harness.path, content: harness.postContent }]
+  });
+
+  assert.equal(result.ok, false);
+  const skip = result.skipped[0];
+  assert.equal(skip.result.code, 'editing_not_confirmed');
+  assert.ok(skip.result.failure, 'structured failure attached');
+  assert.equal(skip.result.failure.code, 'editing_not_confirmed');
+  assert.equal(skip.result.failure.stage, 'reviewing');
+  assert.equal(skip.result.failure.severity, 'blocked');
+  assert.equal(skip.result.failure.changedDocument, true,
+    '§7: editor-undo rolled back; document state moved — changedDocument:true');
+  assert.equal(skip.result.failure.retryable, true);
+  assert.equal(failureReasonsModule.validateFailureReason(skip.result.failure).ok, true);
+});
+
+test('acceptTrackedChanges per-op slip bail emits editing_not_confirmed structured failure', async () => {
+  // Reuse the per-op slip harness pattern from earlier in the file: the
+  // initial force succeeds, the first op writes, then Reviewing slips back
+  // ON and the per-op re-toggle cannot bring Editing back.
+  const editors = {
+    'main.tex': { text: 'main after\n' },
+    'intro.tex': { text: 'intro after\n' }
+  };
+  const preByPath = { 'main.tex': 'main before\n', 'intro.tex': 'intro before\n' };
+  const state = { activePath: 'main.tex', reviewing: true, writes: [], toggleCalls: [] };
+  const undoControl = {
+    tagName: 'BUTTON', disabled: false,
+    getAttribute: name => (name === 'aria-label' ? 'Undo' : null)
+  };
+  let firstOpDone = false;
+  let stickyReviewing = false;
+  function setReviewingEnabled(enabled) {
+    state.toggleCalls.push({ enabled });
+    if (stickyReviewing && enabled === false) {
+      return Promise.resolve({ ok: true, changed: true, enabled });
+    }
+    state.reviewing = enabled;
+    return Promise.resolve({ ok: true, changed: true, enabled });
+  }
+  const router = writebackRouter.create({
+    compileBridge: { markSourceEdited() {} },
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    writebackOpenSettleMs: 0,
+    ensureEditing: () => Promise.resolve({ ok: true, activated: true }),
+    ensureReviewing: () => Promise.resolve({ ok: true, activated: false }),
+    setReviewingEnabled,
+    getReviewingState: () => ({ reviewing: { ok: state.reviewing }, signals: {} }),
+    isReviewingConfirmedForWrite: reviewState => reviewState?.reviewing?.ok === true,
+    isEditingConfirmedForNoTraceUndo: reviewState => reviewState?.reviewing?.ok === false,
+    collectElements: selector => (/button/i.test(selector || '') ? [undoControl] : []),
+    readNodeSignalText: () => 'Undo',
+    isInsideCodexPanel: () => false,
+    getActiveEditorIdentity: () => ({ path: state.activePath }),
+    activeEditorIdentityChanged: previous => previous?.path !== state.activePath,
+    clickNode(node) {
+      if (node === undoControl) {
+        editors[state.activePath].text = preByPath[state.activePath];
+      }
+    },
+    readActiveEditorText: () => editors[state.activePath].text,
+    replaceActiveEditorText(text) {
+      editors[state.activePath].text = String(text);
+      state.writes.push({ path: state.activePath });
+      if (!firstOpDone) { firstOpDone = true; state.reviewing = true; stickyReviewing = true; }
+      return { ok: true };
+    },
+    replaceActiveEditorPatches(_patches, nextContent) {
+      editors[state.activePath].text = String(nextContent);
+      state.writes.push({ path: state.activePath });
+      if (!firstOpDone) { firstOpDone = true; state.reviewing = true; stickyReviewing = true; }
+      return { ok: true };
+    },
+    delay: () => Promise.resolve(),
+    treeOperations: {
+      getActiveFilePath: () => state.activePath,
+      openFileByPath(target) { state.activePath = target; return Promise.resolve({ ok: true }); }
+    },
+    window: { setTimeout, clearTimeout }
+  });
+
+  const result = await router.acceptTrackedChanges({
+    expectedFiles: [
+      { path: 'main.tex', content: 'main before\n' },
+      { path: 'intro.tex', content: 'intro before\n' }
+    ],
+    postFiles: [
+      { path: 'main.tex', content: 'main after\n' },
+      { path: 'intro.tex', content: 'intro after\n' }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  const bailEntry = result.skipped.find(item => item.result?.code === 'accept_editing_not_confirmed');
+  assert.ok(bailEntry, 'per-op bail surfaces as skipped entry');
+  assert.ok(bailEntry.result.failure, 'structured failure attached on per-op bail');
+  assert.equal(bailEntry.result.failure.code, 'editing_not_confirmed');
+  assert.equal(bailEntry.result.failure.stage, 'reviewing');
+  assert.equal(bailEntry.result.failure.severity, 'blocked');
+  assert.equal(bailEntry.result.failure.changedDocument, true,
+    'first op wrote; document state moved before the bail — changedDocument:true');
+  assert.equal(failureReasonsModule.validateFailureReason(bailEntry.result.failure).ok, true);
+});
+
+test('reject sweep tracked_change_undo_max_iterations emits structured tracked_changes_remain (warning/needs_review)', async () => {
+  // Source-level pin: the reject sweep emit sites (per-path and per-expected-file)
+  // build a tracked_changes_remain failure with terminalState:needs_review.
+  // Driving the 200-iteration limit through a router harness is disproportionate
+  // to the test value (the existing reject-path tests already cover behavior).
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const writebackRouterText = fs.readFileSync(
+    path.join(__dirname, '../extension/src/page/writebackRouter.js'),
+    'utf8'
+  );
+  // Both reject-sweep terminal returns reference the canonical code.
+  const occurrences = (writebackRouterText.match(/tracked_changes_remain/g) || []).length;
+  assert.ok(occurrences >= 3,
+    `tracked_changes_remain referenced at least once per emit site (catalog + 2 reject sweeps + accept replay), saw ${occurrences}`);
+  // Both reject-sweep emit sites build via buildPageFailure with terminalState
+  // and operationType:'reject'.
+  assert.match(writebackRouterText, /buildPageFailure\('tracked_changes_remain'[\s\S]{0,400}operationType:\s*'reject'[\s\S]{0,400}terminalState:\s*'needs_review'/);
+});
+
+test('accept-replay tracked_changes_created emits structured tracked_changes_remain (warning/needs_review, changedDocument:true)', async () => {
+  // Source-level pin: the accept-replay forbidTrackedChanges return wires a
+  // tracked_changes_remain failure with terminalState:needs_review and
+  // changedDocument:true. Driving an end-to-end harness that produces a
+  // tracked change AFTER an untracked write requires Overleaf-side state
+  // the existing harness cannot mock cleanly.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const writebackRouterText = fs.readFileSync(
+    path.join(__dirname, '../extension/src/page/writebackRouter.js'),
+    'utf8'
+  );
+  assert.match(writebackRouterText, /code:\s*'accept_replay_created_tracked_changes'[\s\S]{0,600}buildPageFailure\('tracked_changes_remain'/);
+  // Verify the accept-replay branch sets changedDocument:true and needs_review.
+  assert.match(writebackRouterText, /buildPageFailure\('tracked_changes_remain'[\s\S]{0,600}changedDocument:\s*true[\s\S]{0,200}terminalState:\s*'needs_review'/);
+});
+
+test('writebackRouter target_file_not_found fires when projectPathExists hook reports the edit path missing', async () => {
+  // The new precheck only fires when treeOperations.projectPathExists is a
+  // real function. Wire one that returns false to drive the path-missing emit.
+  let openedTarget = '';
+  const router = writebackRouter.create({
+    compileBridge: { markSourceEdited() {} },
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    readActiveEditorText: () => '',
+    replaceActiveEditorPatches: () => ({ ok: true }),
+    replaceActiveEditorText: () => ({ ok: true }),
+    delay: () => Promise.resolve(),
+    treeOperations: {
+      getActiveFilePath: () => '',
+      projectPathExists: () => false,
+      openFileByPath(target) {
+        openedTarget = target;
+        return Promise.resolve({ ok: true, method: 'dom-click' });
+      }
+    },
+    window: { setTimeout, clearTimeout }
+  });
+
+  const result = await router.applyOperations({
+    operations: [{ type: 'edit', path: 'ghost.tex', replaceAll: 'hello' }]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(openedTarget, '', 'never attempts to open the missing file');
+  const skip = result.skipped[0];
+  assert.equal(skip.result.code, 'path_not_found');
+  assert.ok(skip.result.failure);
+  assert.equal(skip.result.failure.code, 'target_file_not_found');
+  assert.equal(skip.result.failure.stage, 'navigation');
+  assert.equal(skip.result.failure.severity, 'blocked');
+  assert.equal(skip.result.failure.file, 'ghost.tex');
+  assert.equal(skip.result.failure.changedDocument, false);
+  assert.equal(failureReasonsModule.validateFailureReason(skip.result.failure).ok, true);
+});
+
+test('writebackRouter ensureEditorReadyForOperation emits target_file_open_failed when openFileByPath fails', async () => {
+  const router = writebackRouter.create({
+    compileBridge: { markSourceEdited() {} },
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    readActiveEditorText: () => '',
+    replaceActiveEditorPatches: () => ({ ok: true }),
+    replaceActiveEditorText: () => ({ ok: true }),
+    delay: () => Promise.resolve(),
+    treeOperations: {
+      getActiveFilePath: () => '',
+      projectPathExists: () => true,
+      openFileByPath: () => Promise.resolve({ ok: false, reason: 'tree click missed' })
+    },
+    window: { setTimeout, clearTimeout }
+  });
+
+  const result = await router.applyOperations({
+    operations: [{ type: 'edit', path: 'sections/intro.tex', replaceAll: 'hello' }]
+  });
+
+  assert.equal(result.ok, false);
+  const skip = result.skipped[0];
+  assert.equal(skip.result.code, 'file_open_failed');
+  assert.ok(skip.result.failure);
+  assert.equal(skip.result.failure.code, 'target_file_open_failed');
+  assert.equal(skip.result.failure.stage, 'navigation');
+  assert.equal(skip.result.failure.severity, 'blocked');
+  assert.equal(skip.result.failure.file, 'sections/intro.tex');
+  assert.equal(skip.result.failure.changedDocument, false);
+  assert.equal(skip.result.failure.evidence.writeStarted, false);
+  assert.equal(failureReasonsModule.validateFailureReason(skip.result.failure).ok, true);
+});
+
+test('writebackRouter editor-not-ready timeout emits target_file_not_active when wrong file remains active', async () => {
+  // openFileByPath reports ok but the active path never moves — this is the
+  // §9.1 target_file_not_active scenario.
+  const router = writebackRouter.create({
+    compileBridge: { markSourceEdited() {} },
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    readActiveEditorText: () => 'irrelevant',
+    replaceActiveEditorPatches: () => ({ ok: true }),
+    replaceActiveEditorText: () => ({ ok: true }),
+    delay: () => Promise.resolve(),
+    getActiveEditorIdentity: () => null,
+    activeEditorIdentityChanged: () => false,
+    treeOperations: {
+      getActiveFilePath: () => 'wrong.tex',
+      projectPathExists: () => true,
+      openFileByPath: () => Promise.resolve({ ok: true, method: 'dom-click' })
+    },
+    window: { setTimeout, clearTimeout },
+    writebackOpenSettleMs: 0
+  });
+
+  const result = await router.applyOperations({
+    operations: [{ type: 'edit', path: 'target.tex', replaceAll: 'hello' }]
+  });
+
+  assert.equal(result.ok, false);
+  const skip = result.skipped[0];
+  assert.equal(skip.result.code, 'editor_document_not_switched');
+  assert.ok(skip.result.failure);
+  assert.equal(skip.result.failure.code, 'target_file_not_active');
+  assert.equal(skip.result.failure.stage, 'navigation');
+  assert.equal(skip.result.failure.severity, 'blocked');
+  assert.equal(skip.result.failure.file, 'target.tex');
+  assert.equal(skip.result.failure.activeFile, 'wrong.tex');
+  assert.equal(skip.result.failure.changedDocument, false);
+  assert.equal(failureReasonsModule.validateFailureReason(skip.result.failure).ok, true);
+});

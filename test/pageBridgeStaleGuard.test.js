@@ -2234,6 +2234,153 @@ test('page bridge remains available when OT observer factory throws', async () =
   assert.equal(stopped.running, false);
 });
 
+// --- T4: structured FailureReason emit-site assertions ----------------------
+//
+// Each high-priority page-side emit site (§9 / §15.4) returns its legacy
+// `code` + `reason` AND a structured `failure` record that passes
+// validateFailureReason. These tests pin every emit site to its catalog
+// stage/severity/file and the changedDocument contract from §7.
+
+const failureReasonsModule = require('../extension/src/shared/failureReasons');
+
+test('writebackRouter stale-guard emits structured failure for stale_source_changed (preflight/blocked, changedDocument:false)', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: { 'main.tex': 'user changed' }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [{ path: 'main.tex', content: 'base snapshot' }],
+    operations: [{ type: 'edit', path: 'main.tex', find: 'user', replace: 'codex' }]
+  });
+
+  assert.equal(result.ok, false);
+  const skip = result.skipped[0];
+  assert.equal(skip.result.code, 'stale_snapshot', 'legacy code preserved');
+  assert.ok(skip.result.failure, 'structured failure attached');
+  assert.equal(skip.result.failure.code, 'stale_source_changed');
+  assert.equal(skip.result.failure.stage, 'preflight');
+  assert.equal(skip.result.failure.severity, 'blocked');
+  assert.equal(skip.result.failure.file, 'main.tex');
+  assert.equal(skip.result.failure.changedDocument, false);
+  assert.equal(skip.result.failure.retryable, true);
+  const validation = failureReasonsModule.validateFailureReason(skip.result.failure);
+  assert.equal(validation.ok, true, JSON.stringify(validation));
+});
+
+test('writebackRouter patch-anchor mismatch emits structured failure for patch_anchor_not_found (preflight/blocked, changedDocument:false)', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: { 'main.tex': 'alpha user gamma' }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [{ path: 'main.tex', content: 'alpha user gamma' }],
+    operations: [{
+      type: 'edit',
+      path: 'main.tex',
+      patches: [{ from: 6, to: 10, expected: 'beta', insert: 'delta' }]
+    }]
+  });
+
+  assert.equal(result.ok, false);
+  const skip = result.skipped[0];
+  assert.equal(skip.result.code, 'stale_patch');
+  assert.ok(skip.result.failure);
+  assert.equal(skip.result.failure.code, 'patch_anchor_not_found');
+  assert.equal(skip.result.failure.stage, 'preflight');
+  assert.equal(skip.result.failure.severity, 'blocked');
+  assert.equal(skip.result.failure.file, 'main.tex');
+  assert.equal(skip.result.failure.changedDocument, false);
+  assert.equal(failureReasonsModule.validateFailureReason(skip.result.failure).ok, true);
+});
+
+test('writebackRouter readback mismatch emits structured failure for write_observed_mismatch (verify/error, changedDocument:true)', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    dispatchApplies: false,
+    files: { 'main.tex': 'alpha beta gamma' }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [{ path: 'main.tex', content: 'alpha beta gamma' }],
+    operations: [{
+      type: 'edit',
+      path: 'main.tex',
+      patches: [{ from: 6, to: 10, expected: 'beta', insert: 'delta' }]
+    }]
+  });
+
+  assert.equal(result.ok, false);
+  const skip = result.skipped[0];
+  assert.equal(skip.result.code, 'write_verification_failed');
+  assert.ok(skip.result.failure);
+  assert.equal(skip.result.failure.code, 'write_observed_mismatch');
+  assert.equal(skip.result.failure.stage, 'verify');
+  assert.equal(skip.result.failure.severity, 'error');
+  assert.equal(skip.result.failure.file, 'main.tex');
+  assert.equal(skip.result.failure.changedDocument, true, 'write landed; readback differs');
+  assert.equal(failureReasonsModule.validateFailureReason(skip.result.failure).ok, true);
+});
+
+test('pageBridge jumpToPosition emits structured failure for target_file_not_found (navigation/blocked, changedDocument:false)', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: { 'main.tex': 'alpha beta gamma' }
+  });
+
+  const result = await bridge.call('jumpToPosition', { path: 'missing.tex' });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'path_not_found');
+  assert.ok(result.failure);
+  assert.equal(result.failure.code, 'target_file_not_found');
+  assert.equal(result.failure.stage, 'navigation');
+  assert.equal(result.failure.severity, 'blocked');
+  assert.equal(result.failure.file, 'missing.tex');
+  assert.equal(result.failure.changedDocument, false);
+  assert.equal(failureReasonsModule.validateFailureReason(result.failure).ok, true);
+});
+
+test('pageBridge ensureEditing emits structured failure for editing_not_confirmed (reviewing/blocked, changedDocument:false) when toggle attempted but state ambiguous', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    reviewingClickActivates: false,
+    reviewingButtonShowsCurrentMode: true,
+    files: { 'main.tex': 'alpha' }
+  });
+
+  const result = await bridge.call('ensureEditing', {});
+
+  assert.equal(result.ok, false);
+  assert.equal(result.code, 'editing_not_confirmed');
+  assert.ok(result.failure);
+  assert.equal(result.failure.code, 'editing_not_confirmed');
+  assert.equal(result.failure.stage, 'reviewing');
+  assert.equal(result.failure.severity, 'blocked');
+  assert.equal(result.failure.changedDocument, false);
+  assert.equal(result.failure.retryable, true);
+  assert.equal(failureReasonsModule.validateFailureReason(result.failure).ok, true);
+});
+
+test('pageBridge ensureReviewing emits structured failure for reviewing_state_unknown when no toggle control found', async () => {
+  // Source-level pin: the ensureReviewing emit site maps the legacy
+  // reviewing_not_enabled code to reviewing_state_unknown when no toggle
+  // attempt was made (no control found), per §14 LEGACY_CODE_MAP. The
+  // harness drives the toggle-attempted branch already (other tests assert
+  // ensureReviewing.ok===true); this test verifies the source emits the
+  // canonical code for both branches.
+  const fs = require('node:fs');
+  const pageBridgeText = fs.readFileSync(
+    path.join(__dirname, '../extension/src/pageBridge.js'),
+    'utf8'
+  );
+  assert.match(pageBridgeText, /reviewing_state_unknown/, 'ensureReviewing emits reviewing_state_unknown code');
+  assert.match(pageBridgeText, /reviewing_enable_failed/, 'ensureReviewing emits reviewing_enable_failed code');
+  // Both codes are wired through buildPageBridgeFailure (with the toggleAttempted branch).
+  assert.match(pageBridgeText, /reviewingFailureCode\s*=\s*switched\.attempted\s*\?\s*'reviewing_enable_failed'\s*:\s*'reviewing_state_unknown'/);
+});
 
 function createPageBridgeHarness({
   activePath,

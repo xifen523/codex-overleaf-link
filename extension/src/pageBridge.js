@@ -310,6 +310,72 @@
     };
   }
 
+  // Inline mirror of the page-side subset of the FailureReason §9 catalog used by
+  // T4 emit sites in this module (jumpToPosition, ensureEditing, ensureReviewing,
+  // getReviewingState helpers). Kept in sync with PAGE_FAILURE_CATALOG in
+  // writebackRouter.js and FAILURE_CODE_CATALOG in shared/failureReasons.js.
+  const PAGE_BRIDGE_FAILURE_CATALOG = {
+    target_file_not_found: {
+      stage: 'navigation', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Codex could not find the target file in this Overleaf project.',
+      fallbackNextAction: 'Check the file name/path in Overleaf and retry.'
+    },
+    target_file_open_failed: {
+      stage: 'navigation', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Codex could not open the target file in Overleaf.',
+      fallbackNextAction: 'Expand the folder or manually open the file, then retry.'
+    },
+    target_editor_not_ready: {
+      stage: 'navigation', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Target file is active but the editor was not ready before timeout.',
+      fallbackNextAction: 'Wait for Overleaf to finish loading, then retry.'
+    },
+    reviewing_state_unknown: {
+      stage: 'reviewing', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Codex could not determine whether Reviewing/Track Changes is enabled.',
+      fallbackNextAction: 'Check Overleaf mode manually before retrying.'
+    },
+    reviewing_enable_failed: {
+      stage: 'reviewing', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Codex could not enable Reviewing when it needed to.',
+      fallbackNextAction: 'Enable Reviewing manually or retry.'
+    },
+    reviewing_disable_failed: {
+      stage: 'reviewing', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Codex could not switch to Editing / no-trace mode.',
+      fallbackNextAction: 'Switch to Editing manually, wait briefly, then retry.'
+    },
+    editing_not_confirmed: {
+      stage: 'reviewing', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Editing mode could not be proven stable.',
+      fallbackNextAction: 'Do not write; check the mode selector and retry.'
+    }
+  };
+
+  function buildPageBridgeFailure(code, overrides) {
+    const entry = PAGE_BRIDGE_FAILURE_CATALOG[code];
+    if (!entry) {
+      return null;
+    }
+    const merged = overrides || {};
+    const failure = {
+      code,
+      stage: entry.stage,
+      severity: entry.severity,
+      userMessage: merged.userMessage || entry.fallbackUserMessage,
+      retryable: merged.retryable === undefined ? entry.defaultRetryable : merged.retryable === true,
+      nextAction: merged.nextAction || entry.fallbackNextAction
+    };
+    if (merged.file !== undefined) failure.file = merged.file;
+    if (merged.activeFile !== undefined) failure.activeFile = merged.activeFile;
+    if (merged.operationType !== undefined) failure.operationType = merged.operationType;
+    if (merged.changedDocument !== undefined) failure.changedDocument = merged.changedDocument === true;
+    if (merged.terminalState !== undefined) failure.terminalState = merged.terminalState;
+    if (merged.technicalMessage !== undefined) failure.technicalMessage = merged.technicalMessage;
+    if (merged.evidence !== undefined) failure.evidence = merged.evidence;
+    return failure;
+  }
+
   function withSnapshotCacheIdentity(params = {}) {
     if (params.restrictToRequestedPathsOnly !== true) {
       return params;
@@ -378,13 +444,29 @@
       };
     }
 
+    // §9.4: toggle attempted → reviewing_enable_failed; no control found →
+    // reviewing_state_unknown (per §14 legacy mapping for reviewing_not_enabled).
+    const reviewingFailureCode = switched.attempted ? 'reviewing_enable_failed' : 'reviewing_state_unknown';
     return {
       ok: false,
       code: 'reviewing_not_enabled',
       reason: switched.attempted
         ? 'Codex clicked the Overleaf mode control, but Overleaf still did not report Reviewing/Track Changes as enabled.'
         : 'Overleaf Reviewing/Track Changes is not enabled, and Codex could not find a Reviewing control to activate.',
-      reviewing: switched.reviewing || initial.reviewing
+      reviewing: switched.reviewing || initial.reviewing,
+      evidence: { toggleAttempted: switched.attempted === true },
+      failure: buildPageBridgeFailure(reviewingFailureCode, {
+        operationType: 'ensureReviewing',
+        changedDocument: false,
+        userMessage: switched.attempted
+          ? 'Codex clicked the Overleaf mode control, but Overleaf still did not report Reviewing as enabled.'
+          : 'Codex could not determine whether Reviewing/Track Changes is enabled (no control found).',
+        evidence: {
+          originalCode: 'reviewing_not_enabled',
+          toggleAttempted: switched.attempted === true,
+          writeStarted: false
+        }
+      })
     };
   }
 
@@ -417,7 +499,23 @@
       reason: switched.attempted
         ? 'Codex clicked the Overleaf mode control, but Overleaf still did not clearly report Editing mode.'
         : 'Overleaf Editing mode was not clearly confirmed, and Codex could not find a mode control to switch to Editing.',
-      reviewing: switched.reviewing || initial.reviewing
+      reviewing: switched.reviewing || initial.reviewing,
+      evidence: { toggleAttempted: switched.attempted === true },
+      // §9.4 editing_not_confirmed: this fires BEFORE any write (preflight),
+      // so changedDocument:false. Distinguish from the accept-replay variant
+      // (writebackRouter) which fires after a rollback and is changedDocument:true.
+      failure: buildPageBridgeFailure('editing_not_confirmed', {
+        operationType: 'ensureEditing',
+        changedDocument: false,
+        userMessage: switched.attempted
+          ? 'Codex clicked the Overleaf mode control, but Overleaf still did not confirm Editing mode.'
+          : 'Codex could not find a mode control to switch to Editing.',
+        evidence: {
+          originalCode: 'editing_not_confirmed',
+          toggleAttempted: switched.attempted === true,
+          writeStarted: false
+        }
+      })
     };
   }
 
@@ -435,7 +533,14 @@
         ok: false,
         code: 'path_not_found',
         reason: `Could not find ${filePath} in the Overleaf project`,
-        path: filePath
+        path: filePath,
+        failure: buildPageBridgeFailure('target_file_not_found', {
+          file: filePath,
+          operationType: 'jump',
+          changedDocument: false,
+          userMessage: `Codex could not find ${filePath} in this Overleaf project.`,
+          evidence: { originalCode: 'path_not_found', writeStarted: false }
+        })
       };
     }
 
@@ -449,7 +554,15 @@
           ok: false,
           code: 'file_open_failed',
           reason: opened.reason || `Could not open ${filePath}`,
-          path: filePath
+          path: filePath,
+          failure: buildPageBridgeFailure('target_file_open_failed', {
+            file: filePath,
+            operationType: 'jump',
+            changedDocument: false,
+            userMessage: `Codex could not open ${filePath} in Overleaf.`,
+            technicalMessage: opened.reason || '',
+            evidence: { originalCode: 'file_open_failed', writeStarted: false }
+          })
         };
       }
     }
@@ -462,7 +575,16 @@
         ok: false,
         code: 'editor_not_ready',
         reason: ready.reason || `Editor content was not ready for ${filePath}`,
-        path: filePath
+        path: filePath,
+        failure: buildPageBridgeFailure('target_editor_not_ready', {
+          file: filePath,
+          activeFile: getActiveFilePath() || '',
+          operationType: 'jump',
+          changedDocument: false,
+          userMessage: `${filePath} became active in Overleaf, but the editor was not ready before timeout.`,
+          technicalMessage: ready.reason || '',
+          evidence: { originalCode: 'editor_not_ready', writeStarted: false }
+        })
       };
     }
 
@@ -700,25 +822,39 @@
       };
     }
 
+    const failureCode = enabled
+      ? 'reviewing_enable_failed'
+      : initiallyReviewing
+        ? 'reviewing_disable_failed'
+        : 'editing_not_confirmed';
+    const failureMessage = enabled
+      ? (switched.attempted
+        ? 'Codex clicked the Reviewing control after undo, but Overleaf still did not report Reviewing/Track Changes as enabled.'
+        : 'Codex could not find an Overleaf Reviewing/Track Changes control to restore after undo.')
+      : initiallyReviewing
+        ? (switched.attempted
+          ? 'Codex clicked the Reviewing control before undo, but Overleaf still did not report Reviewing/Track Changes as disabled.'
+          : 'Codex could not find an Overleaf Reviewing/Track Changes control to disable before undo.')
+        : (switched.attempted
+          ? 'Codex clicked the Overleaf mode control before undo, but Overleaf still did not clearly report Editing mode. To avoid tracked undo changes, Codex did not undo.'
+          : 'Codex could not clearly confirm Overleaf Editing mode before undo. To avoid tracked undo changes, Codex did not undo.');
     return {
       ok: false,
-      code: enabled
-        ? 'reviewing_enable_failed'
-        : initiallyReviewing
-          ? 'reviewing_disable_failed'
-          : 'editing_not_confirmed',
-      reason: enabled
-        ? (switched.attempted
-          ? 'Codex clicked the Reviewing control after undo, but Overleaf still did not report Reviewing/Track Changes as enabled.'
-          : 'Codex could not find an Overleaf Reviewing/Track Changes control to restore after undo.')
-        : initiallyReviewing
-          ? (switched.attempted
-            ? 'Codex clicked the Reviewing control before undo, but Overleaf still did not report Reviewing/Track Changes as disabled.'
-            : 'Codex could not find an Overleaf Reviewing/Track Changes control to disable before undo.')
-          : (switched.attempted
-            ? 'Codex clicked the Overleaf mode control before undo, but Overleaf still did not clearly report Editing mode. To avoid tracked undo changes, Codex did not undo.'
-            : 'Codex could not clearly confirm Overleaf Editing mode before undo. To avoid tracked undo changes, Codex did not undo.'),
-      reviewing: switched.reviewing || initial.reviewing
+      code: failureCode,
+      reason: failureMessage,
+      reviewing: switched.reviewing || initial.reviewing,
+      evidence: { toggleAttempted: switched.attempted === true },
+      failure: buildPageBridgeFailure(failureCode, {
+        operationType: 'setReviewingEnabled',
+        changedDocument: false,
+        userMessage: failureMessage,
+        evidence: {
+          originalCode: failureCode,
+          toggleAttempted: switched.attempted === true,
+          targetEnabled: enabled === true,
+          writeStarted: false
+        }
+      })
     };
   }
 
