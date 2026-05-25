@@ -5542,3 +5542,22 @@ test('write-guard emit sites use operation: {} (not null) so downstream audit co
   const next500 = writebackRouterSrc.slice(checkFnIdx, checkFnIdx + 1500);
   assert.doesNotMatch(next500, /operation:\s*null/, 'checkWritebackRunProjectId must NOT emit operation: null');
 });
+
+// ---------------------------------------------------------------------------
+// runCodexTask's outer catch must thread codexReturned through to
+// translateRawError so the post-processing branch fires when Codex's stream
+// completion landed before the exception. Without this signal the user sees
+// the misleading 'local Codex returned no usable result' fallback even
+// though Codex's answer is sitting right there in chat.
+// ---------------------------------------------------------------------------
+
+test('runCodexTask catch passes codexReturned signal to translateRawError', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  // The catch must read the current run's assistant answer and forward the
+  // boolean. Without `codexReturned` (or with it hardcoded false), the
+  // post-processing branch in translateRawError is unreachable from prod.
+  assert.match(src, /const codexReturned\s*=\s*Boolean\(getAssistantAnswerForCurrentRun\(\)\)/,
+    'catch must derive codexReturned from getAssistantAnswerForCurrentRun');
+  assert.match(src, /translateRawError\(error\.message,\s*\{[^}]*codexReturned[^}]*\}\)/,
+    'translateRawError call must include codexReturned in the context object');
+});

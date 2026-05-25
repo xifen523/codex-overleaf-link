@@ -177,8 +177,10 @@
       // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
       // First gate: runProjectId vs page-side editorProjectId. Runs before
       // any reviewing / save-state / open-file readiness check so a
-      // mid-run navigation cannot write into a different project.
-      const blocked = runWriteGuard(params);
+      // mid-run navigation cannot write into a different project. runWriteGuard
+      // is async because it retries the page-side editorProjectId reader with
+      // backoff to ride out Overleaf's hydration window.
+      const blocked = await runWriteGuard(params);
       if (blocked) return blocked;
       return applyOperations(params.operations || [], {
         baseFiles: params.baseFiles || null,
@@ -194,12 +196,12 @@
       return jumpToPosition(params);
     }
     if (method === 'rejectTrackedChanges') {
-      const blocked = runWriteGuard(params);
+      const blocked = await runWriteGuard(params);
       if (blocked) return blocked;
       return rejectTrackedChanges(params);
     }
     if (method === 'acceptTrackedChanges') {
-      const blocked = runWriteGuard(params);
+      const blocked = await runWriteGuard(params);
       if (blocked) return blocked;
       return acceptTrackedChanges(params);
     }
@@ -2094,8 +2096,23 @@
   //   • editorProjectId === null    → editor_project_id_unavailable
   //   • runProjectId missing/empty  → editor_project_id_unavailable
   //   • runProjectId !== editorPID  → aborted_project_changed
-  function runWriteGuard(params) {
-    const editorId = getEditorProjectIdPageSide();
+  //
+  // Hydration tolerance (v1.3.8 polish): Overleaf's `window._ide.project._id`
+  // is observably null for ~200–1000 ms after page load / SPA route change
+  // while the editor module hydrates. The original guard fired immediately on
+  // null and produced misleading 'Refresh Overleaf and retry' errors for users
+  // whose run started on a freshly-loaded page. Retry the reader with backoff
+  // before the null abort — mismatch (runId !== editorId) still short-
+  // circuits without retry because that means hydration completed to a
+  // *different* project and waiting won't fix it.
+  const WRITE_GUARD_HYDRATION_RETRY_MS = [100, 300, 700];  // ~1100 ms ceiling
+  async function runWriteGuard(params) {
+    let editorId = getEditorProjectIdPageSide();
+    for (let attempt = 0; attempt < WRITE_GUARD_HYDRATION_RETRY_MS.length; attempt++) {
+      if (editorId) break;
+      await new Promise(resolve => setTimeout(resolve, WRITE_GUARD_HYDRATION_RETRY_MS[attempt]));
+      editorId = getEditorProjectIdPageSide();
+    }
     const runId = params && typeof params.runProjectId === 'string' ? params.runProjectId : '';
     if (!editorId) {
       return abortDispatchResult('editor_project_id_unavailable', runId || null, null);

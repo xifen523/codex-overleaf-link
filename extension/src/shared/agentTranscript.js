@@ -563,6 +563,21 @@
       };
     }
 
+    // When the caller signals Codex DID produce an answer (assistantMessage
+    // arrived on the stream) but an unrelated exception still escaped to the
+    // outer catch — the original 'no usable result' copy is wrong-by-design
+    // because the user can see Codex's answer in chat. Surface the real
+    // shape: Codex returned, post-processing failed, the answer is preserved.
+    if (context.codexReturned) {
+      return {
+        conclusion: textFor(locale,
+          'Codex 已经返回了结果，但本地处理这一轮时出错了。',
+          'Codex returned a result, but local post-processing of this run failed.'),
+        nextStep: textFor(locale,
+          '请打开技术详情查看错误。Codex 的回答仍保留在会话中。',
+          'Open Technical Details to inspect the error. Codex\'s answer is preserved in the conversation.')
+      };
+    }
     return {
       conclusion: context.mode === 'ask'
         ? textFor(locale, '这轮只问不改没有完成：本地 Codex 没有正常完成，因此没有生成最终说明。', 'This Ask run did not complete: local Codex did not finish normally, so no final answer was generated.')

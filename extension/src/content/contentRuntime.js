@@ -2460,7 +2460,12 @@
         finishRunView(tx('Cancelled', '已中断'), 'rejected');
         return;
       }
-      const translated = translateRawError(error.message, { mode: submittedMode, locale: getLocale() });
+      // codexReturned: assistantMessage arrived on the stream before the
+      // exception escaped, so Codex's answer is preserved in the conversation
+      // — the fallback conclusion must reflect that instead of saying
+      // 'local Codex returned no usable result'.
+      const codexReturned = Boolean(getAssistantAnswerForCurrentRun());
+      const translated = translateRawError(error.message, { mode: submittedMode, locale: getLocale(), codexReturned });
       appendRunEvent({
         title: translated.conclusion,
         status: 'failed',

@@ -2455,6 +2455,51 @@ test('page-bridge applyOperations aborts with editor_project_id_unavailable when
   assert.equal(bridge.getDispatchCount(), 0);
 });
 
+test('page-bridge applyOperations waits out the Overleaf hydration window (editorProjectId arrives mid-retry)', async () => {
+  // The retry budget is 100 + 300 + 700 = 1100 ms. A 250 ms hydration delay
+  // resolves comfortably during the second retry, so the guard MUST succeed
+  // and the write MUST land — not abort with editor_project_id_unavailable.
+  // Regression for the v1.3.8 polish: pre-fix the guard fired immediately on
+  // null, producing misleading 'Refresh Overleaf and retry' errors whenever
+  // a user kicked off a run during Overleaf's hydration window.
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorProjectId: 'hydratedPID',
+    hydrationDelayMs: 250,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    runProjectId: 'hydratedPID',
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      { type: 'edit', path: 'main.tex', find: 'alpha', replace: 'omega' }
+    ]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.applied.length, 1, 'write must land after hydration completes');
+  assert.equal(result.skipped.length, 0);
+  assert.equal(bridge.getFile('main.tex'), 'omega beta gamma');
+});
+
+test('page-bridge applyOperations runWriteGuard is async with hydration retry constants', () => {
+  // Source-grep belt-and-suspenders so removing the retry loop fails this
+  // test even if a future change keeps the function async.
+  const pageBridgeSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'pageBridge.js'), 'utf8');
+  assert.match(pageBridgeSrc, /async function runWriteGuard/, 'runWriteGuard must be async to await retry sleeps');
+  assert.match(pageBridgeSrc, /WRITE_GUARD_HYDRATION_RETRY_MS\s*=\s*\[\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\]/,
+    'retry-ms constant must be defined as a 3-element array');
+  // The router must await; without await the function returns a Promise that
+  // is truthy, so the abort-branch test would fail closed every time.
+  assert.match(pageBridgeSrc, /const blocked\s*=\s*await runWriteGuard/,
+    'router call sites must await runWriteGuard');
+});
+
 test('page-bridge acceptTrackedChanges runs the same guard', async () => {
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
@@ -2564,7 +2609,13 @@ function createPageBridgeHarness({
   // injected `runProjectId` so legacy tests pass the guard without changes.
   // Tests can override with another string (to assert the project-changed
   // branch) or with explicit `null` (to assert the unavailable branch).
-  editorProjectId = 'test-project'
+  editorProjectId = 'test-project',
+  // Write-guard hydration tolerance (v1.3.8 polish): set a positive number
+  // to delay assigning `_ide.project` until this many ms have elapsed —
+  // simulates Overleaf's hydration window where the editor module is loaded
+  // but `_ide.project._id` is briefly null. The runWriteGuard retry loop
+  // (100/300/700 ms) must ride out delays under ~1100 ms.
+  hydrationDelayMs = 0
 }) {
   const fileMap = new Map(Object.entries(files));
   const trackedChanges = [];
@@ -2672,7 +2723,10 @@ function createPageBridgeHarness({
       // falls through to the data-project-id attribute, which the stub doc
       // also does not have, and lands on null → unavailable). A string sets a
       // stable id the guard can match against `params.runProjectId`.
-      ...(typeof editorProjectId === 'string' && editorProjectId
+      // `hydrationDelayMs > 0` defers the project assignment so the runWriteGuard
+      // retry loop can be exercised — initial reads return null, then
+      // `_ide.project` materializes mid-retry.
+      ...(typeof editorProjectId === 'string' && editorProjectId && hydrationDelayMs <= 0
         ? { project: { _id: editorProjectId } }
         : {})
     },
@@ -2721,6 +2775,16 @@ function createPageBridgeHarness({
     vm.runInContext(pageBridgeCapabilitySource, context, { filename: 'pageBridgeCapability.js' });
   }
   vm.runInContext(pageBridgeSource, context, { filename: 'pageBridge.js' });
+
+  // Hydration simulation: defer the `_ide.project` assignment so the first
+  // few writeGuard reads see null. After `hydrationDelayMs` ms the project
+  // materializes with the configured id, exercising the runWriteGuard retry
+  // loop (100/300/700 ms backoff).
+  if (hydrationDelayMs > 0 && typeof editorProjectId === 'string' && editorProjectId) {
+    setTimeout(() => {
+      window._ide.project = { _id: editorProjectId };
+    }, hydrationDelayMs);
+  }
 
   return {
     async initializeCapability() {

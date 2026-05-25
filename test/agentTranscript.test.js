@@ -747,3 +747,51 @@ test('buildHumanCompletionReport attaches structured payload alongside text', ()
   const keys = report.structured.meta.map(row => row.key);
   assert.deepEqual(keys, ['writeResult', 'undo', 'nextStep']);
 });
+
+// ---------------------------------------------------------------------------
+// translateRawError codexReturned context: when an unrelated exception
+// escapes runCodexTask's outer catch AFTER Codex has already produced an
+// assistantMessage, the user sees Codex's answer in the chat — the fallback
+// must NOT claim 'local Codex returned no usable result' (the misleading
+// pre-fix copy that surfaced for hundreds of users when the v1.3.8 write-
+// guard's null-operation crash escaped the catch). Caller passes
+// codexReturned: Boolean(getAssistantAnswerForCurrentRun()).
+// ---------------------------------------------------------------------------
+
+test('translateRawError surfaces post-processing failure when Codex did return a result', () => {
+  const translated = translateRawError('TypeError: cannot read property fooBar of undefined', {
+    mode: 'auto',
+    locale: 'zh',
+    codexReturned: true
+  });
+
+  assert.match(translated.conclusion, /Codex 已经返回了结果/, 'must acknowledge Codex did return');
+  assert.match(translated.nextStep, /Codex 的回答仍保留在会话中/, 'must reassure the user the answer is preserved');
+  // The misleading legacy copy must NOT appear when codexReturned is true.
+  assert.doesNotMatch(translated.conclusion, /没有返回可用结果|did not finish normally/);
+});
+
+test('translateRawError English copy mirrors the codexReturned post-processing branch', () => {
+  const translated = translateRawError('Some unrecognised crash', {
+    mode: 'auto',
+    locale: 'en',
+    codexReturned: true
+  });
+
+  assert.match(translated.conclusion, /Codex returned a result, but local post-processing/);
+  assert.match(translated.nextStep, /Codex's answer is preserved in the conversation/);
+  assert.doesNotMatch(translated.conclusion, /returned no usable result/);
+});
+
+test('translateRawError keeps the original "no usable result" copy when Codex did not return', () => {
+  const translated = translateRawError('Some unrecognised crash', {
+    mode: 'auto',
+    locale: 'en'
+    // codexReturned omitted → falsy
+  });
+
+  assert.match(translated.conclusion, /returned no usable result/);
+  // Negative path also covers ask mode default copy unchanged.
+  const askMode = translateRawError('Some unrecognised crash', { mode: 'ask', locale: 'en' });
+  assert.match(askMode.conclusion, /did not finish normally/);
+});
