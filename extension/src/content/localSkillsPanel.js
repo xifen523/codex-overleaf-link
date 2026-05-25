@@ -127,10 +127,15 @@
         row.dataset.disabled = 'true';
       }
 
-      // Skill name + "(id)" on the left.
+      // Skill display name on the left — a single human-readable label
+      // (title when available, else the id). Avoids redundant "Title (id)"
+      // form per user feedback: one canonical name. The id remains as the
+      // accessible `title` tooltip so the underlying identifier is still
+      // discoverable on hover for advanced users.
       const text = document.createElement('span');
-      text.textContent = skill.title ? `${skill.title} (${id})` : id;
-      text.title = text.textContent;
+      const trimmedTitle = typeof skill.title === 'string' ? skill.title.trim() : '';
+      text.textContent = trimmedTitle || id;
+      text.title = id;
       row.append(text);
 
       // Per-skill enable switch — appended last so it sits on the right of the

@@ -179,10 +179,15 @@
     setSlashCodexOverleafSkills: skills => {
       slashCodexOverleafSkills = Array.isArray(skills) ? skills : [];
       slashCodexOverleafSkillsLoaded = true;
+      // The settings-entry "N enabled" summary reads from state.codexOverleafSkills
+      // which refreshLocalSkills() just populated; without this call the summary
+      // stays at the stale "0 enabled" computed before the async list resolved.
+      updateSkillsEntrySummary();
     },
     clearSlashCodexOverleafSkills: () => {
       slashCodexOverleafSkills = [];
       slashCodexOverleafSkillsLoaded = false;
+      updateSkillsEntrySummary();
     }
   });
 

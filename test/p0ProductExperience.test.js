@@ -699,13 +699,13 @@ test('project settings renders only Codex Overleaf managed skills', async () => 
   );
   assert.equal(slashSkills[0]?.id, 'auto-rebuttal');
   assert.doesNotMatch(collectElementText(list), /project-local/i);
-  assert.match(collectElementText(list), /Auto Rebuttal \(auto-rebuttal\)/);
+  assert.match(collectElementText(list), /Auto Rebuttal/);
 
   overleafEnabled = false;
   controller.renderLocalSkillList();
 
   assert.match(collectElementText(list), /Codex Overleaf skills are disabled/);
-  assert.match(collectElementText(list), /Auto Rebuttal \(auto-rebuttal\)/);
+  assert.match(collectElementText(list), /Auto Rebuttal/);
 });
 
 test('project settings omits the remove button for official skills with removable: false', async () => {
@@ -764,11 +764,14 @@ test('project settings omits the remove button for official skills with removabl
     list,
     node => node.className === 'codex-local-skill-row'
   );
+  // Row text now shows the human title only ("Annotated Rewrite"); the id
+  // is exposed as the accessible `title` tooltip attribute on the label span
+  // for advanced users. Tests find rows by the visible title.
   const officialRow = rows.find(row =>
-    collectElementText(row).includes('annotated-rewrite')
+    collectElementText(row).includes('Annotated Rewrite')
   );
   const customRow = rows.find(row =>
-    collectElementText(row).includes('custom-style')
+    collectElementText(row).includes('Custom Style')
   );
 
   assert.ok(officialRow, 'official skill row should be present');
