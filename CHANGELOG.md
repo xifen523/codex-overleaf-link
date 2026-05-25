@@ -1,5 +1,45 @@
 # Changelog
 
+## v1.3.8 - 2026-05-25
+
+Reliability and clarity release. This version adds structured failure reasons, a Recent-projects welcome panel on the `/project` URL, a writeback project-ID guard that fails closed on mid-run navigation, and a native-host filter for transient Codex reconnect notifications that was the root cause of "local Codex returned no usable result" failures during network blips. The completion report now visually separates Codex's answer from run metadata, and several UX papercuts around skipped writebacks, post-navigation runs, and tracked-change buttons are smoothed over.
+
+### Added
+
+- **Specific Failure Reasons v1**: a 47-code FailureReason catalog with stage / severity / retryable / terminalState fields. Page-side and content-side writeback paths now emit structured failures, the run card and completion report render the localized userMessage + nextAction, and the same shape persists through the run record so failure reasons survive reload.
+- **Recent-projects welcome panel**: on the `/project` URL (no specific project) the panel now renders a cross-project list of recent runs with status badges, instead of an empty per-project session view. Accounts are scoped via a SHA-256 hashed account identity (no display-name fallback) so projects from different Overleaf accounts stay isolated.
+- **Writeback project-ID guard**: every `applyOperations` / `acceptTrackedChanges` / `rejectTrackedChanges` dispatch is gated by a `runProjectId` vs page-side `editorProjectId` check. Mid-run SPA navigation to a different project aborts with `aborted_project_changed`; an unhydrated editor produces `editor_project_id_unavailable`. The guard is hydration-tolerant — it retries the page-side reader with a 100/300/700 ms backoff (~1100 ms ceiling) before failing closed, so runs that start during Overleaf's initial hydration window now succeed instead of misleadingly reporting "Refresh Overleaf and retry".
+- **`codex_project_locked` failure reason**: when a second Codex task is started for the same Overleaf project while the first is still running, the run card shows "Codex task already running" with a `blocked` (not `failed`) status and clear next-step guidance.
+- **Native-host transient reconnect filter**: Codex app-server "Reconnecting X/Y" notifications during network blips are now classified as warnings instead of fatal errors, so the turn keeps running and surfaces the actual answer once the connection recovers. The reconnect line is shown in the run timeline as its visible title (e.g. "Reconnecting... 2/5") instead of a generic "error".
+- **Run record carries `runProjectId`**: the project the run was bound to is persisted on the run record across reload (used by the writeback guard, the post-navigation settlement, and the undo writeback path).
+
+### Changed
+
+- **Completion report visually separates conclusion from system metadata**: the human-language conclusion keeps the existing 13 px contrast, while `Why nothing changed` / `Write result` / `Undo` / `Next` render in a dedicated `<dl>` meta block beneath a thin separator at 11.5 px in muted color. Failed-status reports keep the alert color on the conclusion but the meta stays muted so it reads as run metadata rather than amplifying the alert.
+- **Post-navigation run settlement**: after the user navigates away from the project a still-running task was bound to, the run settles into one of `background_completed` (writeback applied), `needs_review_after_navigation` (partial), or `abandoned_after_navigation` (no usable result). Each carries a human-readable statusText, and the panel CSS gives `needs_review_after_navigation` its own warning color and `abandoned_after_navigation` the same red as `failed` so the run timeline no longer shows two visually inconsistent "Failed" badges.
+- **Misleading "no usable result" fallback retired when Codex actually returned**: `translateRawError` now accepts a `codexReturned` context flag. When Codex's assistant message landed on the stream before an unrelated exception escaped the outer catch, the conclusion now reads "Codex returned a result, but local post-processing of this run failed" instead of "local Codex returned no usable result, so no writes were confirmed". The legacy copy still fires for genuine no-result paths.
+- **Better "empty result" copy**: when Codex completes a turn with no assistant message and no file changes, the run report now reads "Codex completed, but it produced no assistant response and no local file changes" with explicit retry guidance instead of the generic "Codex finished but did not return a usable result".
+- **`needs_review` tracked-change runs** now show the same primary Accept / Undo buttons as `pending` — the previous "needs review" labels were confusing UX for an internal retryable proof state.
+- **Settings back button respects the current route**: clicking Back from Settings on the `/project` URL now returns to the Recent-projects variant instead of unconditionally rendering the per-project session view.
+- **Codex Overleaf skills entry** now shows a single, clean row name (with the underlying id as the tooltip) and the enabled count refreshes immediately after toggles.
+- **Batch-level guard skip header** now reads "writeback process was not written" instead of the misleading "unknown file: process was not written" when the write-guard fires before any per-op dispatch.
+- **`recentProjects_badge_needs_review` / `_needs_review_after_navigation`** simplified to "pending" / "待处理" to match the executable state the buttons present.
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, and release tracking metadata for the v1.3.8 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.3.8` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.3.8.zip`, `codex-overleaf-native-host-v1.3.8.tar.gz`, and `codex-overleaf-link-1.3.8.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.3.8 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.3.8 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.3.8 -- uninstall-native`.
+
+### Fixed
+
+- **Write-guard batch-skip crash that masked partial-sync conclusions**: when the guard fired, the skip entry carried `operation: null` but `summarizeOperationForAudit(operation = {}, ...)` only defaulted on `undefined` — `null.path` threw `TypeError`, the outer catch swallowed the partial-sync report, and the user saw the misleading "local Codex returned no usable result" fallback. The summarizer now normalizes null/undefined inside the body, and both guard emit sites use `operation: {}` to match the function's signature intent.
+
+### Notes
+
+- Native protocol stays `1`; this release adds structured FailureReason content, the welcome panel, the writeback project-ID guard, and the reconnect-tolerant native host path, not the native messaging protocol.
+- The write-guard hydration retry adds up to ~1100 ms of latency only on writes that hit Overleaf's hydration window; the steady-state happy path is unchanged.
+
 ## v1.3.7 - 2026-05-23
 
 Accept changes release. This version adds a per-run **Accept changes** control on the run card so a Codex run's Overleaf tracked changes can be accepted in one click — the accept counterpart of the existing Undo — along with release metadata alignment for the v1.3.7 packaging, compatibility, and release tracking surfaces.
