@@ -2118,11 +2118,15 @@
       aborted_project_changed: 'Reopen the original project and rerun the task if you still want this change.',
       editor_project_id_unavailable: 'Refresh Overleaf and retry; if it persists, reload the extension.'
     };
+    // operation: {} (not null) — the write-guard fires before any per-op
+    // dispatch so there's no specific operation to attribute the block to,
+    // but downstream audit/transcript code traverses operation.path and the
+    // like; an empty object lets defaults flow through cleanly.
     return {
       ok: false,
       applied: [],
       skipped: [{
-        operation: null,
+        operation: {},
         result: {
           ok: false,
           code,

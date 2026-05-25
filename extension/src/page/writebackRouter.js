@@ -3061,11 +3061,15 @@
     function checkWritebackRunProjectId(params) {
       const runProjectId = params && typeof params.runProjectId === 'string' ? params.runProjectId : '';
       if (runProjectId) return null;
+      // operation: {} (not null) — batch-level guard fired before any per-op
+      // dispatch; matches the abortDispatchResult shape in pageBridge.js and
+      // avoids crashing downstream audit / transcript code that reads
+      // operation.path without a null guard.
       return {
         ok: false,
         applied: [],
         skipped: [{
-          operation: null,
+          operation: {},
           result: {
             ok: false,
             code: 'editor_project_id_unavailable',

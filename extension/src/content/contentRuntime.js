@@ -4369,14 +4369,24 @@
     };
   }
 
-  function summarizeOperationForAudit(operation = {}, result = {}, status = '') {
+  // Tolerates `operation` and `result` being null in addition to undefined.
+  // Default-parameter values fire only for `undefined`, but the v1.3.8
+  // write-guard (pageBridge.runWriteGuard / writebackRouter.checkWritebackRunProjectId)
+  // emits batch-level skips with `operation: null` — there is no specific
+  // op to attribute the block to. Without this normalization the audit pass
+  // crashed with "Cannot read properties of null (reading 'path')", the
+  // outer-catch swallowed the partial-sync conclusion, and the user saw the
+  // misleading "local Codex returned no usable result" fallback.
+  function summarizeOperationForAudit(operation, result, status = '') {
+    const op = operation || {};
+    const res = result || {};
     return {
-      path: operation.path || operation.from || operation.to || '',
-      destinationPath: operation.destinationPath || operation.to || '',
-      type: operation.type || '',
-      reason: result.reasonKey || result.code || result.reason || operation.reasonKey || operation.reason || '',
+      path: op.path || op.from || op.to || '',
+      destinationPath: op.destinationPath || op.to || '',
+      type: op.type || '',
+      reason: res.reasonKey || res.code || res.reason || op.reasonKey || op.reason || '',
       status,
-      size: operation.size
+      size: op.size
     };
   }
 

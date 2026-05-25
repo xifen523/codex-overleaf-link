@@ -5482,3 +5482,63 @@ test('panel.css ships a muted meta block style with separator', () => {
   assert.match(metaBlock[0], /font-size:\s*11(\.\d+)?px/, 'meta block must use the smaller font size');
   assert.match(metaBlock[0], /color:\s*#858585/, 'meta block must use the muted color');
 });
+
+// ---------------------------------------------------------------------------
+// Write-guard regression: when runWriteGuard fires (Overleaf hydration race
+// or project_id mismatch) it emits a batch-level skip with `operation: <empty>`
+// — no specific per-op to attribute the block to. summarizeOperationForAudit
+// must tolerate that shape. The original v1.3.8 add-on pushed `operation: null`
+// AND used `function summarizeOperationForAudit(operation = {}, ...)`, but JS
+// default-parameter values fire only for undefined — null walked right past
+// the default and crashed with "Cannot read properties of null (reading
+// 'path')". The crash escaped runCodexTask's catch, masking the real
+// partial-sync conclusion with the misleading "local Codex returned no usable
+// result" fallback.
+// ---------------------------------------------------------------------------
+
+test('summarizeOperationForAudit tolerates null operation (write-guard batch-skip shape)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  const summarize = new Function(`
+    ${extractFunction(src, 'summarizeOperationForAudit')}
+    return summarizeOperationForAudit;
+  `)();
+
+  // The crashing case: write-guard pushed `operation: null` and audit code
+  // called summarizeOperationForAudit(null, {code: '...'}, 'skipped').
+  const fromNull = summarize(null, { code: 'editor_project_id_unavailable', failure: { code: 'editor_project_id_unavailable' } }, 'skipped');
+  assert.equal(fromNull.path, '');
+  assert.equal(fromNull.type, '');
+  assert.equal(fromNull.reason, 'editor_project_id_unavailable');
+  assert.equal(fromNull.status, 'skipped');
+
+  // undefined still works (default parameter was the original intent).
+  const fromUndef = summarize(undefined, undefined, 'changed');
+  assert.equal(fromUndef.path, '');
+  assert.equal(fromUndef.status, 'changed');
+
+  // Real operations still work end-to-end.
+  const fromReal = summarize({ path: 'main.tex', type: 'edit' }, { code: 'ok' }, 'applied');
+  assert.equal(fromReal.path, 'main.tex');
+  assert.equal(fromReal.type, 'edit');
+  assert.equal(fromReal.status, 'applied');
+});
+
+test('write-guard emit sites use operation: {} (not null) so downstream audit code does not crash', () => {
+  const pageBridgeSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'pageBridge.js'), 'utf8');
+  const writebackRouterSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'page', 'writebackRouter.js'), 'utf8');
+
+  // The pageBridge runWriteGuard / abortDispatchResult path.
+  const abortFn = extractFunction(pageBridgeSrc, 'abortDispatchResult');
+  assert.match(abortFn, /operation:\s*\{\}/, 'abortDispatchResult must emit operation: {} (empty object)');
+  assert.doesNotMatch(abortFn, /operation:\s*null/, 'abortDispatchResult must NOT emit operation: null');
+
+  // The writebackRouter defense-in-depth check.
+  assert.match(writebackRouterSrc, /function checkWritebackRunProjectId[\s\S]*?operation:\s*\{\}/,
+    'checkWritebackRunProjectId must emit operation: {} (empty object)');
+  // Bound the scan so we don't catch operation: null in unrelated code: the
+  // checkWritebackRunProjectId function is short — extract it and grep.
+  const checkFnIdx = writebackRouterSrc.indexOf('function checkWritebackRunProjectId');
+  assert.notEqual(checkFnIdx, -1, 'checkWritebackRunProjectId must exist');
+  const next500 = writebackRouterSrc.slice(checkFnIdx, checkFnIdx + 1500);
+  assert.doesNotMatch(next500, /operation:\s*null/, 'checkWritebackRunProjectId must NOT emit operation: null');
+});
