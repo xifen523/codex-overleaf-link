@@ -8660,7 +8660,12 @@
       // emits a content-side failure. Sanitized like other user-visible
       // payloads so it stays JSON-safe through the run-record persistence
       // path. Downstream renderers (and tests) can read `event.failure`.
-      failure: input.failure ? sanitizeAssistantVisibleValue(input.failure) : undefined
+      failure: input.failure ? sanitizeAssistantVisibleValue(input.failure) : undefined,
+      // Structured completion-report payload (conclusion + body + meta rows)
+      // for the report-kind render path. Sanitized so it survives storage
+      // round-trips; the renderer falls back to `detail` text when absent
+      // (legacy / recovered-history events).
+      detailStructured: input.detailStructured ? sanitizeAssistantVisibleValue(input.detailStructured) : undefined
     };
     const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
     let renderedEvent = event;
@@ -9780,6 +9785,51 @@
     report.className = 'run-completion-report';
     report.dataset.status = event.status || 'completed';
 
+    // Structured path: conclusion + body render as the Codex answer; meta
+    // rows (Why nothing changed / Write result / Undo / Next) render as a
+    // visually demoted block beneath, with a separator and muted color so
+    // they read as run metadata rather than part of the answer.
+    const structured = event.detailStructured;
+    const hasStructured = structured
+      && (structured.conclusion || structured.body || (Array.isArray(structured.meta) && structured.meta.length));
+    if (hasStructured) {
+      const main = document.createElement('div');
+      main.className = 'run-final-answer';
+      const mainSections = [];
+      if (structured.conclusion) {
+        mainSections.push(getLocale() === 'zh'
+          ? `结论：${structured.conclusion}`
+          : `Conclusion: ${structured.conclusion}`);
+      }
+      if (structured.body) {
+        mainSections.push(structured.body);
+      }
+      if (mainSections.length) {
+        renderMarkdownBlockText(main, mainSections.join('\n\n'));
+        report.append(main);
+      }
+
+      if (Array.isArray(structured.meta) && structured.meta.length) {
+        const metaBlock = document.createElement('dl');
+        metaBlock.className = 'run-final-answer__meta';
+        for (const row of structured.meta) {
+          if (!row || !row.label || !row.value) continue;
+          const dt = document.createElement('dt');
+          dt.className = 'run-final-answer__meta-label';
+          dt.textContent = row.label;
+          if (row.key) dt.dataset.metaKey = row.key;
+          const dd = document.createElement('dd');
+          dd.className = 'run-final-answer__meta-value';
+          dd.textContent = row.value;
+          metaBlock.append(dt, dd);
+        }
+        report.append(metaBlock);
+      }
+      return report;
+    }
+
+    // Legacy fallback: events persisted before structured payloads were added
+    // (and the recovered-history shape that uses `detail: { '结论': result }`).
     const body = document.createElement('div');
     body.className = 'run-final-answer';
     renderMarkdownBlockText(body, formatEventDetail(event.detail || {}));
@@ -11208,7 +11258,12 @@
       kind: 'report',
       title: report.title,
       status: report.status,
-      detail: report.text
+      detail: report.text,
+      // Structured shape — conclusion vs system-meta fields — so the renderer
+      // can demote the meta block visually (separator + muted color). The
+      // legacy `detail` text stays attached for storage / transcripts / the
+      // fallback render path used when reloading older persisted events.
+      detailStructured: report.structured || null
     });
   }
 

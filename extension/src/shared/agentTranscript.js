@@ -597,7 +597,8 @@
     return {
       title: textFor(locale, '本轮完成报告', 'Task report'),
       status: failed ? 'failed' : 'completed',
-      text: formatHumanReport(report, locale)
+      text: formatHumanReport(report, locale),
+      structured: buildStructuredHumanReport(report, locale)
     };
   }
 
@@ -620,6 +621,62 @@
       undoCount: 0
     });
     return report.text;
+  }
+
+  /**
+   * Splits the human report into a conclusion (the human-language outcome),
+   * a body of list-style content sections (checked / findings / planned /
+   * changes / skipped), and a meta block of run-metadata key/value rows
+   * (unchanged reason, write result, undo, next). The renderer uses this to
+   * visually demote the meta block — it is system info about the run, not
+   * part of Codex's answer. `formatHumanReport` retains the legacy flat-text
+   * shape for transcripts, storage fallback, and existing assertions.
+   */
+  function buildStructuredHumanReport(report = {}, locale = 'zh') {
+    const conclusion = cleanVisibleMarkdownText(report.conclusion || '');
+
+    const bodySections = [];
+    addListSection(bodySections, textFor(locale, '检查范围', 'Checked'), report.checked, locale);
+    addListSection(bodySections, textFor(locale, '发现', 'Findings'), report.findings, locale);
+    addListSection(bodySections, textFor(locale, '计划修改', 'Planned changes'), report.plannedChanges, locale);
+    addListSection(bodySections, textFor(locale, '修改', 'Changes'), report.appliedChanges, locale);
+    addStructuredListSection(bodySections, textFor(locale, '跳过原因', 'Skipped'), report.skippedChanges, locale);
+
+    const meta = [];
+    const unchangedReason = localizeVisibleReason(report.unchangedReason || '', locale);
+    if (unchangedReason) {
+      meta.push({
+        key: 'unchangedReason',
+        label: textFor(locale, '未修改原因', 'Why nothing changed'),
+        value: unchangedReason
+      });
+    }
+    const writeResult = cleanVisibleText(report.writeResult || '');
+    if (writeResult) {
+      meta.push({
+        key: 'writeResult',
+        label: textFor(locale, '写入结果', 'Write result'),
+        value: writeResult
+      });
+    }
+    const undo = cleanVisibleText(report.undo || '');
+    if (undo) {
+      meta.push({
+        key: 'undo',
+        label: textFor(locale, '可撤销', 'Undo'),
+        value: undo
+      });
+    }
+    const nextStep = cleanVisibleText(report.nextStep || '');
+    if (nextStep) {
+      meta.push({
+        key: 'nextStep',
+        label: textFor(locale, '下一步', 'Next'),
+        value: nextStep
+      });
+    }
+
+    return { conclusion, body: bodySections.join('\n\n'), meta };
   }
 
   function formatHumanReport(report = {}, locale = 'zh') {
@@ -1378,6 +1435,7 @@
 
   return {
     buildHumanCompletionReport,
+    buildStructuredHumanReport,
     formatFallbackFinalReport,
     formatFailureBlock,
     formatHumanReport,

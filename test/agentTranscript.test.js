@@ -3,6 +3,7 @@ const test = require('node:test');
 
 const {
   buildHumanCompletionReport,
+  buildStructuredHumanReport,
   formatHumanReport,
   mapAgentEventToActivity,
   translateRawError
@@ -658,4 +659,91 @@ test('formatHumanReport omits empty sections', () => {
   });
 
   assert.equal(text, '结论：没有发现问题。');
+});
+
+// ---------------------------------------------------------------------------
+// Structured human report shape: the renderer uses this to demote system-meta
+// fields (Why nothing changed / Write result / Undo / Next) visually away from
+// the human-language conclusion. `formatHumanReport` keeps its legacy flat-
+// text shape; `buildHumanCompletionReport` returns both `text` (legacy) and
+// `structured` (new).
+// ---------------------------------------------------------------------------
+
+test('buildStructuredHumanReport separates conclusion from system-meta rows', () => {
+  const structured = buildStructuredHumanReport({
+    conclusion: '没有发现缺失 citation key，也没有修改文件。',
+    checked: ['main.tex', 'references.bib'],
+    findings: ['4 个 citation key 都能在 .bib 中找到对应条目。'],
+    unchangedReason: '这轮是只问不改。',
+    writeResult: '已写入 0 项，跳过 0 项',
+    undo: '本轮没有可撤销的写入',
+    nextStep: '可以继续追问，或运行下一项任务。'
+  }, 'zh');
+
+  assert.equal(structured.conclusion, '没有发现缺失 citation key，也没有修改文件。');
+  assert.match(structured.body, /检查范围：\n- main\.tex\n- references\.bib/);
+  assert.match(structured.body, /发现：\n- 4 个 citation key/);
+  // The body must NOT include the meta-field labels (those live in `meta`).
+  assert.doesNotMatch(structured.body, /未修改原因|写入结果|可撤销|下一步/);
+
+  const keys = structured.meta.map(row => row.key);
+  assert.deepEqual(keys, ['unchangedReason', 'writeResult', 'undo', 'nextStep']);
+  const byKey = Object.fromEntries(structured.meta.map(row => [row.key, row]));
+  assert.equal(byKey.unchangedReason.label, '未修改原因');
+  assert.equal(byKey.unchangedReason.value, '这轮是只问不改。');
+  assert.equal(byKey.writeResult.label, '写入结果');
+  assert.equal(byKey.undo.label, '可撤销');
+  assert.equal(byKey.nextStep.label, '下一步');
+});
+
+test('buildStructuredHumanReport omits empty fields (no zero-value meta rows)', () => {
+  const structured = buildStructuredHumanReport({
+    conclusion: '没有发现问题。',
+    unchangedReason: '',
+    writeResult: '',
+    undo: '',
+    nextStep: ''
+  }, 'zh');
+
+  assert.equal(structured.conclusion, '没有发现问题。');
+  assert.equal(structured.body, '');
+  assert.deepEqual(structured.meta, []);
+});
+
+test('buildStructuredHumanReport English labels match the legacy text format', () => {
+  const structured = buildStructuredHumanReport({
+    conclusion: 'No file was overwritten.',
+    writeResult: 'wrote 0 items, skipped 0 items',
+    undo: 'this run has no reversible writes',
+    nextStep: 'You can continue the conversation, or adjust @context and run again.'
+  }, 'en');
+
+  assert.equal(structured.conclusion, 'No file was overwritten.');
+  const labels = structured.meta.map(row => row.label);
+  assert.deepEqual(labels, ['Write result', 'Undo', 'Next']);
+});
+
+test('buildHumanCompletionReport attaches structured payload alongside text', () => {
+  // includeWriteResult + undoCount drive the same auto-fill paths the real
+  // run pipeline uses (writeResult populated from applyResults counts; undo
+  // populated from the run-record undo count).
+  const report = buildHumanCompletionReport({
+    status: 'completed',
+    userReport: {
+      conclusion: '没有发现缺失 citation key。',
+      nextStep: '可以继续追问。'
+    },
+    applyResults: [{ applied: [], skipped: [] }],
+    includeWriteResult: true,
+    undoCount: 0
+  });
+
+  assert.equal(typeof report.text, 'string');
+  assert.match(report.text, /结论：没有发现缺失 citation key。/);
+
+  assert.ok(report.structured, 'structured payload must be attached');
+  assert.equal(report.structured.conclusion, '没有发现缺失 citation key。');
+  // writeResult (auto-filled) + undo (auto-filled from undoCount: 0) + nextStep.
+  const keys = report.structured.meta.map(row => row.key);
+  assert.deepEqual(keys, ['writeResult', 'undo', 'nextStep']);
 });

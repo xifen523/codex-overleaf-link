@@ -1413,8 +1413,47 @@
   font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+#codex-overleaf-panel .run-final-answer__meta {
+  margin: 10px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid #2b2b2b;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: 12px;
+  row-gap: 4px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: #858585;
+}
+
+#codex-overleaf-panel .run-final-answer__meta-label {
+  margin: 0;
+  color: #a0a0a0;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+#codex-overleaf-panel .run-final-answer__meta-value {
+  margin: 0;
+  color: #858585;
+  word-break: break-word;
+}
+
 #codex-overleaf-panel .run-completion-report[data-status="failed"] {
   color: #f48771;
+}
+
+/* Failed-status reports keep their alert color for the conclusion, but the
+   meta block stays muted so it still reads as system info rather than amplifying
+   the alert. */
+#codex-overleaf-panel .run-completion-report[data-status="failed"] .run-final-answer__meta,
+#codex-overleaf-panel .run-completion-report[data-status="failed"] .run-final-answer__meta-label,
+#codex-overleaf-panel .run-completion-report[data-status="failed"] .run-final-answer__meta-value {
+  color: #858585;
+}
+
+#codex-overleaf-panel .run-completion-report[data-status="failed"] .run-final-answer__meta-label {
+  color: #a0a0a0;
 }
 
 #codex-overleaf-panel .codex-probe-line {

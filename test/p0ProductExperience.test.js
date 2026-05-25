@@ -5430,3 +5430,55 @@ test('closeCustomInstructionsSettings branches on isProjectEditorRoute (does not
   assert.ok(routeCheckIndex !== -1 && sessionIndex !== -1, 'both calls must be present');
   assert.ok(routeCheckIndex < sessionIndex, 'session view dispatch must be guarded by the route check');
 });
+
+// ---------------------------------------------------------------------------
+// Completion-report rendering: the conclusion (Codex's human answer) and the
+// system-meta fields (Why nothing changed / Write result / Undo / Next) must
+// be visually distinguishable. The renderer takes a structured payload and
+// emits a dedicated meta block beneath the conclusion; CSS demotes it with a
+// separator + muted color. Legacy (string-detail) events still render via
+// the fallback path so persisted reports keep working after reload.
+// ---------------------------------------------------------------------------
+
+test('renderCompletionReport branches on detailStructured and emits a meta block', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  const body = extractFunction(src, 'renderCompletionReport');
+  assert.match(body, /detailStructured/, 'renderer must read the structured payload off the event');
+  assert.match(body, /run-final-answer__meta/, 'renderer must emit the meta-block class');
+  assert.match(body, /run-final-answer__meta-label/, 'renderer must emit the meta label class');
+  assert.match(body, /run-final-answer__meta-value/, 'renderer must emit the meta value class');
+  // Legacy fallback (string detail) must still be reachable; the old class
+  // and markdown-text path must be preserved for persisted / recovered events.
+  assert.match(body, /'run-final-answer'/, 'legacy fallback path must remain');
+  assert.match(body, /formatEventDetail/, 'legacy fallback must still call formatEventDetail');
+});
+
+test('appendCompletionReport forwards detailStructured from the report shaper', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  // Same default-value brace caveat as appendRunEvent above — grep the file
+  // directly instead of extracting the function body.
+  assert.match(src, /detailStructured:\s*report\.structured/, 'must forward report.structured as detailStructured');
+});
+
+test('appendRunEvent preserves detailStructured through the event-shape contract', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  // extractFunction can't grab appendRunEvent's body cleanly because its
+  // signature uses a `{}` default value that fools the brace counter; the
+  // structural property is unique enough that a source-level grep is fine.
+  assert.match(src, /detailStructured:\s*input\.detailStructured\s*\?\s*sanitizeAssistantVisibleValue/,
+    'event must include sanitized detailStructured');
+});
+
+test('panel.css ships a muted meta block style with separator', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'styles', 'panel.css'), 'utf8');
+  assert.match(src, /\.run-final-answer__meta\b/, 'meta block class must exist');
+  assert.match(src, /\.run-final-answer__meta-label\b/, 'meta label class must exist');
+  assert.match(src, /\.run-final-answer__meta-value\b/, 'meta value class must exist');
+  // The defining characteristic the user picked: separator (border-top)
+  // plus muted color (#858585) on a smaller font (11.5px).
+  const metaBlock = src.match(/\.run-final-answer__meta\s*\{[^}]*\}/);
+  assert.ok(metaBlock, 'meta block CSS rule must be present');
+  assert.match(metaBlock[0], /border-top:\s*1px solid/, 'meta block must have a top separator');
+  assert.match(metaBlock[0], /font-size:\s*11(\.\d+)?px/, 'meta block must use the smaller font size');
+  assert.match(metaBlock[0], /color:\s*#858585/, 'meta block must use the muted color');
+});
