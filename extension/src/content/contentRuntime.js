@@ -709,8 +709,18 @@
   }
 
   function closeCustomInstructionsSettings() {
-    panelRendererInstance?.setView?.('session');
     SettingsPanel.hide(settingsPanelInstance);
+    // Back from settings must return to the variant that matches the current
+    // route, not unconditionally to the per-project session view. On a
+    // non-project URL (e.g. /project, /project/, account / billing) the
+    // session view is meaningless and shows an empty per-project conversation
+    // UI; the user expects to return to the Recent-projects variant they
+    // came from. Mirror the SPA route hook's variant dispatch.
+    if (isProjectEditorRoute(window.location)) {
+      panelRendererInstance?.setView?.('session');
+    } else {
+      renderRecentProjectsVariant().catch(() => { /* swallow */ });
+    }
   }
 
   // Skills sub-page: reached from the settings screen's Codex Overleaf skills

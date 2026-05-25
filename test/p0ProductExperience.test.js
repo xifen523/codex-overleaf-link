@@ -3793,6 +3793,11 @@ test('project custom instructions editor auto-saves on change and restores by pr
     function renderSessionList() {}
     function tr(key) { return key; }
     async function saveState() { savedCount++; }
+    // Stub the route-aware branch of closeCustomInstructionsSettings; this
+    // settings-persistence test pins the in-project flow.
+    const window = { location: { pathname: '/project/' + 'a'.repeat(24) } };
+    function isProjectEditorRoute() { return true; }
+    function renderRecentProjectsVariant() { return Promise.resolve(); }
     ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
     ${extractFunction(contentScript, 'getCustomInstructionsForCurrentProject')}
     ${extractFunction(contentScript, 'setCustomInstructionsForProject')}
@@ -4053,6 +4058,11 @@ test('project settings gear toggles the settings panel closed when already open'
     function syncProjectSettingsEditorForProject() {}
     function refreshLocalSkills() { return Promise.resolve(); }
     function tr(key) { return key; }
+    // Stub the route-aware branch of closeCustomInstructionsSettings; this
+    // toggle test pins the in-project flow (per-project session view).
+    const window = { location: { pathname: '/project/' + 'a'.repeat(24) } };
+    function isProjectEditorRoute() { return true; }
+    function renderRecentProjectsVariant() { return Promise.resolve(); }
     ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
     ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
     ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
@@ -4153,6 +4163,16 @@ test('project settings transient status is cleared when reopening the panel', ()
     function tr(key) { return key; }
     function syncProjectSettingsEditorForProject() {}
     function refreshLocalSkills() { return Promise.resolve(); }
+    // The transient-status test pins the in-project flow; stub the route check
+    // to true so closeCustomInstructionsSettings exercises the per-project
+    // setView('session') branch (the original behaviour this test pre-dates
+    // the route-aware fix). The off-route branch is covered by its own test
+    // ('closeCustomInstructionsSettings branches on isProjectEditorRoute …').
+    // window is referenced by the route check; supply a stub location so the
+    // sandbox does not blow up on window.location dereferences.
+    const window = { location: { pathname: '/project/' + 'a'.repeat(24) } };
+    function isProjectEditorRoute() { return true; }
+    function renderRecentProjectsVariant() { return Promise.resolve(); }
     ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
     ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
     ${extractFunction(contentScript, 'setProjectSettingsStatus')}
@@ -5388,4 +5408,25 @@ test('Fix B: runCodexTask passes the full syncOutcome to settleRunAfterNavigatio
   // stays — it's still useful for the applied-array shape and legacy tests.)
   assert.ok(!/settleRunAfterNavigation\([^,]+,\s*\{\s*skipped:\s*collectRunResultSkipped/.test(src),
     'old pre-flattened call shape must be removed');
+});
+
+// ---------------------------------------------------------------------------
+// Settings back-button must respect the current route variant.
+// Bug: clicking Settings from the Recent-projects variant (/project URL) and
+// then clicking Back rendered the per-project session view, which is empty /
+// meaningless when no project is active. closeCustomInstructionsSettings must
+// branch on isProjectEditorRoute and re-render Recent projects when off-route.
+// ---------------------------------------------------------------------------
+
+test('closeCustomInstructionsSettings branches on isProjectEditorRoute (does not unconditionally setView session)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  const body = extractFunction(src, 'closeCustomInstructionsSettings');
+  assert.match(body, /isProjectEditorRoute/, 'back handler must check the route');
+  assert.match(body, /renderRecentProjectsVariant/, 'back handler must re-render Recent projects on non-project URLs');
+  // The session-view dispatch must only happen on the project-editor branch
+  // (i.e. inside the `if (isProjectEditorRoute(...))` block — same line ordering).
+  const sessionIndex = body.indexOf("setView?.('session')");
+  const routeCheckIndex = body.indexOf('isProjectEditorRoute');
+  assert.ok(routeCheckIndex !== -1 && sessionIndex !== -1, 'both calls must be present');
+  assert.ok(routeCheckIndex < sessionIndex, 'session view dispatch must be guarded by the route check');
 });
