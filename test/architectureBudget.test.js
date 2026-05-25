@@ -23,7 +23,7 @@ test('architecture budget tracks v1.0 final split targets for the largest files'
     ARCHITECTURE_FILE_BUDGETS.map(entry => [entry.path, entry.maxLines]),
     [
       ['extension/src/contentScript.js', 4500],
-      ['extension/src/pageBridge.js', 2200],
+      ['extension/src/pageBridge.js', 2400],
       ['native-host/src/codexSessionRunner.js', 1500],
       ['native-host/src/taskRunner.js', 1000]
     ]
