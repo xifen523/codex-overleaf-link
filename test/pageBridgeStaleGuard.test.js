@@ -2425,7 +2425,9 @@ test('page-bridge applyOperations aborts with aborted_project_changed when runPr
 
 test('page-bridge applyOperations aborts with editor_project_id_unavailable when editorProjectId is null', async () => {
   // editorProjectId omitted (no `_ide.project`) and no `[data-project-id]` →
-  // the guard reads null and fails closed before any dispatch.
+  // the guard falls through to the URL fallback. Because the request's
+  // runProjectId does not match the URL project id, the fallback is not
+  // accepted and the guard fails closed before any dispatch.
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
     editorProjectId: null,
@@ -2453,6 +2455,33 @@ test('page-bridge applyOperations aborts with editor_project_id_unavailable when
   assert.equal(result.skipped[0].result.failure.terminalState, 'blocked');
   assert.equal(bridge.getFile('main.tex'), 'alpha beta gamma');
   assert.equal(bridge.getDispatchCount(), 0);
+});
+
+test('page-bridge applyOperations uses same-project URL fallback when Overleaf editor project id is unavailable', async () => {
+  // Current Overleaf builds can expose a stable /project/<id> URL while
+  // window._ide.project._id remains unavailable. The guard may use the URL as
+  // a fallback only when it exactly equals the immutable runProjectId.
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorProjectId: null,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    runProjectId: 'test-project',
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      { type: 'edit', path: 'main.tex', find: 'alpha', replace: 'omega' }
+    ]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(bridge.getFile('main.tex'), 'omega beta gamma');
+  assert.equal(bridge.getDispatchCount(), 1);
 });
 
 test('page-bridge applyOperations waits out the Overleaf hydration window (editorProjectId arrives mid-retry)', async () => {

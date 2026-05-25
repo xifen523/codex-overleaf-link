@@ -821,12 +821,21 @@ function runCodexAppServerSession(input) {
 
       if (message.method) {
         recordAssistantMessage(message);
-        emitCodexEvent(input.emit, 'codex.session.event', message.method, {
+        // For `error` events surface the actual error text as the visible
+        // title so the run timeline reads "Reconnecting... 2/5" instead of
+        // a generic "error". Other methods continue to use the method name.
+        const eventTitle = message.method === 'error'
+          ? (extractCodexAppServerErrorMessage(message.params) || message.method)
+          : message.method;
+        emitCodexEvent(input.emit, 'codex.session.event', eventTitle, {
           method: message.method,
           params: message.params || {}
         }, inferNotificationStatus(message));
         if (message.method === 'turn/completed' && (!activeTurnId || message.params?.turn?.id === activeTurnId || message.params?.turnId === activeTurnId)) {
           succeed();
+        }
+        if (message.method === 'error' && isTransientCodexAppServerError(message.params)) {
+          return;
         }
         if (message.method === 'error') {
           fail(new Error(message.params?.error?.message || 'Codex turn failed'));
@@ -1211,10 +1220,33 @@ function emitCodexEvent(emit, type, title, detail = {}, status = 'running') {
 }
 
 function inferNotificationStatus(message) {
+  if (message.method === 'error' && isTransientCodexAppServerError(message.params)) {
+    return 'warning';
+  }
   if (/completed|updated|delta|started/.test(message.method || '')) {
     return /completed/.test(message.method || '') ? 'completed' : 'running';
   }
   return 'running';
+}
+
+function isTransientCodexAppServerError(params = {}) {
+  const message = extractCodexAppServerErrorMessage(params);
+  return /^Reconnecting(?:\.\.\.|…)?\s+\d+\s*\/\s*\d+\.?$/i.test(message);
+}
+
+function extractCodexAppServerErrorMessage(params = {}) {
+  const candidates = [
+    params?.error?.message,
+    params?.message,
+    params?.title,
+    params?.error
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return '';
 }
 
 function normalizeReasoningEffort(value) {

@@ -193,11 +193,15 @@ function formatWriteExpectation({ mode = 'auto', task = '', skillInvocation = nu
     return '- This is read-only. Inspect and explain; do not edit files.';
   }
   if (requestImpliesFileChanges(task)) {
-    return [
+    const lines = [
       '- The request asks for file changes. You must edit the local workspace when you find concrete fixes.',
       '- Do not stop at a suggestion list or say you will not modify files unless no safe concrete edit exists.',
       '- If you intentionally leave files unchanged, explain the specific blocker in the final answer.'
-    ].join('\n');
+    ];
+    if (requestTargetsAbstract(task)) {
+      lines.push('- The request targets the abstract/summary. Locate the LaTeX abstract environment or summary paragraph and edit that local project file directly.');
+    }
+    return lines.join('\n');
   }
   return [
     '- This mode can write. If the request asks for corrections, revisions, fixes, polishing, updates, or implementation, edit the local workspace directly.',
@@ -207,6 +211,10 @@ function formatWriteExpectation({ mode = 'auto', task = '', skillInvocation = nu
 
 function requestImpliesFileChanges(task = '') {
   return /修正|修复|修改|改[一-龥]*|完善|补全|补充|润色|重写|改写|整理|调整|应用|写入|fix|correct|repair|revise|edit|update|rewrite|polish|improve|apply/i.test(String(task || ''));
+}
+
+function requestTargetsAbstract(task = '') {
+  return /摘要|abstract|summary/i.test(String(task || ''));
 }
 
 function normalizeFocusFiles(value) {

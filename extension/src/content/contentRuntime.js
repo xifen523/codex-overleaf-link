@@ -2274,28 +2274,35 @@
               errorCode: response.error?.code || ''
             }
           })
+          : response.error?.code === 'project_locked'
+            ? buildContentFailure('codex_project_locked', { path: 'codex.run' }, {
+              technicalMessage: response.error?.message || '',
+              evidence: {
+                errorCode: response.error?.code || ''
+              }
+            })
           : buildContentFailure('codex_no_usable_result', { path: 'codex.run' }, {
             technicalMessage: response.error?.message || '',
             evidence: {
               hasFinalReport: false,
               errorCode: response.error?.code || ''
             }
-          });
+        });
         appendRunEvent({
           title: translated.conclusion,
-          status: 'failed',
+          status: response.error?.code === 'project_locked' ? 'blocked' : 'failed',
           technicalDetail: response.error,
           failure: codexRunFailure
         });
         appendTechnicalEvent({
           type: 'native.error',
           title: 'Native bridge error',
-          status: 'failed',
+          status: response.error?.code === 'project_locked' ? 'blocked' : 'failed',
           detail: response.error
         });
         appendCompletionReport({
           conclusion: translated.conclusion,
-          status: 'failed',
+          status: response.error?.code === 'project_locked' ? 'blocked' : 'failed',
           operations: [],
           applyResults: [],
           nextStep: translated.nextStep,
@@ -2308,7 +2315,9 @@
           sensitiveFindings: sensitiveFindings.findings,
           blockedFiles: [{ path: 'codex.run', reason: response.error?.code || response.error?.message || 'native_error' }]
         });
-        finishRunView(tx('Local Codex error', '本地 Codex 错误'), 'failed');
+        finishRunView(response.error?.code === 'project_locked'
+          ? tx('Codex task already running', 'Codex 任务正在运行')
+          : tx('Local Codex error', '本地 Codex 错误'), 'failed');
         return;
       }
 
@@ -2329,17 +2338,25 @@
               : false
           }
         });
+        const emptyResultConclusion = tx(
+          'Codex completed, but it produced no assistant response and no local file changes.',
+          'Codex 已完成，但没有产生助手回复，也没有产生本地文件改动。'
+        );
+        const emptyResultNextStep = tx(
+          'Retry with an explicit target such as @file:main.tex and the exact section to edit; if this repeats, open Technical Details.',
+          '请带上明确目标重试，例如 @file:main.tex 和具体要修改的小节；如果重复出现，请打开 Technical Details。'
+        );
         appendRunEvent({
-          title: tx('Codex finished but did not return a usable result.', 'Codex 已结束，但没有返回可用结果。'),
+          title: emptyResultConclusion,
           status: 'failed',
           failure: emptyFailure
         });
         appendCompletionReport({
-          conclusion: tx('Codex finished but did not return a usable result.', 'Codex 已结束，但没有返回可用结果。'),
+          conclusion: emptyResultConclusion,
           status: 'failed',
           operations: [],
           applyResults: [],
-          nextStep: tx('Open Technical Details to inspect the local Codex output, then retry.', '请打开 Technical Details 查看本地 Codex 输出后再重试。'),
+          nextStep: emptyResultNextStep,
           mode: submittedMode,
           failure: emptyFailure
         });
@@ -5288,7 +5305,9 @@
     if (!run || !postNavigationStatus) {
       return;
     }
+    const postNavigationStatusText = getPostNavigationRunStatusText(postNavigationStatus);
     run.status = postNavigationStatus;
+    run.statusText = postNavigationStatusText;
     run.finishedAt = run.finishedAt || new Date().toISOString();
     if (currentRunView && currentRunView.runProjectId === activeProjectId) {
       // Same project still active — the run record is reachable through the
@@ -5316,6 +5335,7 @@
         return;
       }
       targetRun.status = postNavigationStatus;
+      targetRun.statusText = postNavigationStatusText;
       targetRun.finishedAt = run.finishedAt;
       record.lastActivityAt = new Date().toISOString();
       record.updatedAt = record.lastActivityAt;
@@ -5326,6 +5346,19 @@
       // dashboard badge does not show the post-navigation reclassification
       // for this one run.
     }
+  }
+
+  function getPostNavigationRunStatusText(status) {
+    if (status === 'background_completed') {
+      return tx('Completed in background', '已在后台完成');
+    }
+    if (status === 'needs_review_after_navigation') {
+      return tx('Needs review after navigation', '切换项目后需核对');
+    }
+    if (status === 'abandoned_after_navigation') {
+      return tx('Abandoned after navigation', '切换项目后已中止');
+    }
+    return getRunStatusText({ status });
   }
 
   // Expose internals for testing surfaces (panel smoke helper + T5).
@@ -9907,9 +9940,9 @@
   // Renders the Undo button for a tracked-change-lifecycle run from
   // trackedChangeStatus. At a terminal status both buttons stay visible but
   // disabled: `rejected` shows the disabled "Undone" label, `accepted` keeps
-  // Undo present but greyed. `pending` is actionable. `needs_review` is also
-  // actionable per the §7 settlement matrix — proof was insufficient, so the
-  // user can re-trigger Undo (or Accept) after inspecting Overleaf.
+  // Undo present but greyed. `pending` is actionable. `needs_review` is an
+  // internal retryable proof state, but the primary UI still renders it as the
+  // same executable state as `pending`.
   function configureLifecycleUndoButton(button, run) {
     const status = run.trackedChangeStatus || '';
     // §7 settlement matrix: needs_review keeps BOTH controls visible AND
@@ -9919,8 +9952,8 @@
       const inFlight = trackedChangeInFlight.get(run.id);
       button.hidden = false;
       button.disabled = inFlight === 'reject' || inFlight === 'accept';
-      button.textContent = tr('runUndoNeedsReview');
-      button.title = tr('runUndoNeedsReviewTitle');
+      button.textContent = tr('undoRun');
+      button.title = tr('undoRunTitle');
       button.addEventListener('click', event => {
         event.stopPropagation();
         undoRun(run.id);
@@ -9981,9 +10014,8 @@
 
     const status = run.trackedChangeStatus || '';
     // §7 settlement matrix: needs_review keeps BOTH controls visible AND
-    // actionable. Branch placed before the terminal accepted/rejected branches
-    // so a needs_review run is never treated as terminal; the user can retry
-    // Accept after inspecting Overleaf.
+    // actionable. It remains an internal retryable proof state, while the
+    // primary button label stays in the same executable state as `pending`.
     if (status === 'needs_review') {
       const inFlight = trackedChangeInFlight.get(run.id);
       button.hidden = false;
@@ -9993,8 +10025,8 @@
         button.title = tr('runAcceptTrackedConfirming');
         return;
       }
-      button.textContent = tr('runAcceptTrackedNeedsReview');
-      button.title = tr('runAcceptTrackedNeedsReviewTitle');
+      button.textContent = tr('runAcceptTracked');
+      button.title = tr('runAcceptTrackedTitle');
       wireAcceptInlineConfirm(button, run.id);
       return;
     }
@@ -10164,7 +10196,7 @@
         // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0):
         // route the undo through the same project-ID guard. The undo is
         // bound to the run's original project, not the editor's active one.
-        runProjectId: run.runProjectId || ''
+        runProjectId: getRunProjectIdForWriteback(run)
       });
       const undoApplied = isUndoResultEffectivelyApplied(run, result);
       appendUndoReviewingPolicyEvent(runId, result.reviewingPolicy);
@@ -10231,7 +10263,7 @@
         // bind the reject to the run's original project. If the user has
         // navigated away the page-side guard refuses with
         // `aborted_project_changed` and the document is left untouched.
-        runProjectId: run.runProjectId || ''
+        runProjectId: getRunProjectIdForWriteback(run)
       });
     } finally {
       if (lifecycleReject) {
@@ -10386,7 +10418,7 @@
         // bind the accept replay to the run's original project. If the user
         // has navigated to a different project the page-side guard refuses
         // with `aborted_project_changed` before any mutation.
-        runProjectId: run.runProjectId || ''
+        runProjectId: getRunProjectIdForWriteback(run)
       });
     } finally {
       trackedChangeInFlight.delete(runId);
@@ -10441,6 +10473,10 @@
     // matches a known unverified code), settle as `needs_review` so both
     // Accept and Undo stay actionable and the user can reconcile.
     applyAcceptSettlement(runId, result);
+  }
+
+  function getRunProjectIdForWriteback(run) {
+    return run?.runProjectId || getCurrentProjectId() || activeProjectId || '';
   }
 
   // Post-accept proof step (§9.6). Called only on lifecycle accept paths
@@ -10616,6 +10652,11 @@
       fallbackUserMessage: 'Local Codex returned no usable final report or operations.',
       fallbackNextAction: 'Open Technical Details and resolve the local Codex error.'
     },
+    codex_project_locked: {
+      stage: 'codex', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Another Codex task is already running for this Overleaf project.',
+      fallbackNextAction: 'Wait for the active task to finish, or cancel it before retrying.'
+    },
     storage_quota_exceeded: {
       stage: 'storage', severity: 'warning', defaultRetryable: true,
       fallbackUserMessage: 'Browser storage quota was exceeded.',
@@ -10670,11 +10711,10 @@
     return failure;
   }
 
-  // Per §7 of the Specific Failure Reasons spec, Accept / Undo may only land in
-  // terminal `accepted` / `rejected` when post-action proof is sufficient.
-  // Otherwise the run settles in `needs_review` and both Accept and Undo stay
-  // actionable so the user can inspect Overleaf and reconcile. These two
-  // settlement helpers replace the v1.3.7 unconditional terminal calls.
+  // Accept / Undo has a two-state user lifecycle: actionable before the page
+  // action, terminal after a successful page action. Warning-class verification
+  // evidence can still be recorded in technical details, but it must not keep
+  // the primary buttons actionable after Overleaf accepted the operation.
 
   // Codes that imply post-Accept proof is missing or contradicted. A page-side
   // emitter (T4) is expected to fill these in; render-time normalization from
@@ -10739,14 +10779,12 @@
     return failures;
   }
 
-  // §7 settlement matrix for Accept All. Three branches:
+  // Run-card settlement for Accept changes. Three branches:
   //   1. The primary failure is `blocked` (e.g. preflight / navigation refused
   //      to touch Overleaf) — stay pending so the user can retry without the
   //      card claiming terminal accepted.
-  //   2. Any per-op failure carries `terminalState === 'needs_review'` or one
-  //      of the unverified-proof codes — settle as `needs_review` so the user
-  //      can reconcile.
-  //   3. Otherwise — proof is sufficient — settle as terminal `accepted`.
+  //   2. Any successful page-side accept work — settle as terminal `accepted`.
+  //   3. Otherwise, unverified/no-op failures can remain retryable.
   function applyAcceptSettlement(runId, result) {
     const failures = collectFailuresFromResult(result);
     const primary = FailureReasons && FailureReasons.selectPrimaryFailure instanceof Function
@@ -10756,6 +10794,10 @@
       // Stay pending — page bridge declined the operation before any document
       // change. The preceding result event already showed the user the reason.
       refreshRunCardControls(runId);
+      return;
+    }
+    if (isSuccessfulTrackedChangeSettlement(result)) {
+      applyTerminalTrackedChangeStatus(runId, 'accepted');
       return;
     }
     const needsReview = failures.some(failure =>
@@ -10769,8 +10811,8 @@
     applyTerminalTrackedChangeStatus(runId, 'accepted');
   }
 
-  // §7 settlement matrix for lifecycle Undo (Reject). Same three-branch shape
-  // as `applyAcceptSettlement`, using the undo-side unverified-proof codes.
+  // Same three-branch shape as `applyAcceptSettlement`, using the undo-side
+  // unverified-proof codes only when no successful reject/undo work happened.
   function applyRejectSettlement(runId, result) {
     const failures = collectFailuresFromResult(result);
     const primary = FailureReasons && FailureReasons.selectPrimaryFailure instanceof Function
@@ -10778,6 +10820,10 @@
       : (failures[0] || null);
     if (primary && primary.terminalState === 'blocked') {
       refreshRunCardControls(runId);
+      return;
+    }
+    if (isSuccessfulTrackedChangeSettlement(result)) {
+      applyTerminalTrackedChangeStatus(runId, 'rejected');
       return;
     }
     const needsReview = failures.some(failure =>
@@ -10789,6 +10835,22 @@
       return;
     }
     applyTerminalTrackedChangeStatus(runId, 'rejected');
+  }
+
+  function isSuccessfulTrackedChangeSettlement(result) {
+    if (!result || typeof result !== 'object') {
+      return false;
+    }
+    if (result.ok === true) {
+      return true;
+    }
+    if (!Array.isArray(result.applied)) {
+      return false;
+    }
+    return result.applied.some(entry => {
+      const inner = entry && (entry.result || entry);
+      return !inner || inner.ok !== false;
+    });
   }
 
   // Sets `needs_review` on a run without emptying refs — the user is supposed

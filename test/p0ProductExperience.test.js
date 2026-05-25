@@ -3340,9 +3340,10 @@ test('applyTerminalTrackedChangeStatus: terminal is unconditional and decisive �
   assert.equal(pendingRun.undoTrackedChanges.length, 2);
 });
 
-test('configureAcceptButton: needs_review keeps Accept actionable so the user can retry after inspecting Overleaf (behavioral)', () => {
+test('configureAcceptButton: needs_review keeps Accept actionable without exposing a third button state (behavioral)', () => {
   // §7 settlement matrix: a needs_review run means proof was insufficient. Both
-  // Accept and Undo stay visible AND actionable so the user can reconcile.
+  // Accept and Undo stay visible AND actionable, but the primary controls still
+  // render as the same executable state as pending.
   const run = { id: 'run-nr', trackedChangeStatus: 'needs_review', undoTrackedChanges: trackedRefs() };
   const harness = loadRunCardControlsHarness({ state: { runs: [run] } });
   const root = buildRunCardRoot('run-nr');
@@ -3354,11 +3355,11 @@ test('configureAcceptButton: needs_review keeps Accept actionable so the user ca
   const undo = root.querySelector('[data-run-undo]');
   assert.equal(accept.hidden, false, 'needs_review: Accept visible');
   assert.equal(accept.disabled, false, 'needs_review: Accept actionable');
-  assert.equal(accept.textContent, 'runAcceptTrackedNeedsReview', 'needs_review: Accept label distinguishes from pending');
-  assert.equal(accept.title, 'runAcceptTrackedNeedsReviewTitle', 'needs_review: Accept tooltip explains reconcile');
+  assert.equal(accept.textContent, 'runAcceptTracked', 'needs_review: Accept label stays executable');
+  assert.equal(accept.title, 'runAcceptTrackedTitle', 'needs_review: Accept tooltip stays executable');
   assert.equal(undo.hidden, false, 'needs_review: Undo visible');
   assert.equal(undo.disabled, false, 'needs_review: Undo actionable');
-  assert.equal(undo.textContent, 'runUndoNeedsReview', 'needs_review: Undo label distinguishes from pending');
+  assert.equal(undo.textContent, 'undoRun', 'needs_review: Undo label stays executable');
 });
 
 test('configureAcceptButton needs_review branch wires the inline-confirm flow so Accept can still be retried (behavioral)', () => {
@@ -3373,8 +3374,9 @@ test('configureAcceptButton needs_review branch wires the inline-confirm flow so
   assert.equal(root.querySelectorAll('[data-run-accept-cancel]').length, 1, 'needs_review: Cancel button appears');
 });
 
-test('acceptRun settlement: tracked_changes_remain (and accept_not_verified) routes to needs_review, not accepted (source)', () => {
-  // §7 settlement matrix — verify the source wires the proof-aware branch.
+test('acceptRun settlement: successful page action routes to accepted even with warning-class proof codes (source)', () => {
+  // Two-state run-card lifecycle — verify the source keeps the settlement
+  // helper but lets successful page-side accept work become terminal.
   // Behavioral acceptRun coverage requires a full content-runtime harness that
   // is out of scope for this test file; the source-level assertion locks the
   // contract that downstream subagents can rely on.
@@ -3383,7 +3385,8 @@ test('acceptRun settlement: tracked_changes_remain (and accept_not_verified) rou
     'utf8'
   );
 
-  // Settlement helper must exist and dispatch on the needs_review codes.
+  // Settlement helper must exist and still know about needs_review codes for
+  // explicit no-op/failure outcomes.
   assert.match(contentScript, /function applyAcceptSettlement\(/);
   assert.match(contentScript, /tracked_changes_remain/);
   assert.match(contentScript, /accept_not_verified/);
@@ -3394,7 +3397,7 @@ test('acceptRun settlement: tracked_changes_remain (and accept_not_verified) rou
   assert.doesNotMatch(acceptRunBody, /applyTerminalTrackedChangeStatus\(runId,\s*'accepted'\)/);
 });
 
-test('undoRunTrackedChanges settlement: undo_not_verified routes to needs_review, not rejected (source)', () => {
+test('undoRunTrackedChanges settlement: successful page action routes to rejected even with warning-class proof codes (source)', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
@@ -3414,26 +3417,28 @@ test('undoRunTrackedChanges settlement: undo_not_verified routes to needs_review
   assert.doesNotMatch(undoTrackedBody, /applyTerminalTrackedChangeStatus\(runId,\s*'rejected'\)/);
 });
 
-test('applyAcceptSettlement distinguishes blocked vs needs_review vs clean accept (source)', () => {
+test('applyAcceptSettlement distinguishes blocked vs successful terminal vs retryable needs_review (source)', () => {
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
   const body = contentScript.match(/function applyAcceptSettlement\([\s\S]*?\n  function /)?.[0] || '';
 
-  // Three branches per §7 settlement matrix:
+  // Three branches:
   //   1. primary.terminalState === 'blocked' → stay pending (no terminal call).
-  //   2. any needs_review code/terminalState → set 'needs_review'.
-  //   3. clean → applyTerminalTrackedChangeStatus(runId, 'accepted').
+  //   2. successful page-side work → applyTerminalTrackedChangeStatus(runId, 'accepted').
+  //   3. otherwise needs_review code/terminalState → set 'needs_review'.
   assert.match(body, /terminalState\s*===\s*'blocked'/);
+  assert.match(body, /isSuccessfulTrackedChangeSettlement\(result\)/);
   assert.match(body, /'needs_review'/);
   assert.match(body, /applyTerminalTrackedChangeStatus\(runId,\s*'accepted'\)/);
 });
 
-test('content runtime tracks needs_review as a non-terminal status for button rendering (source)', () => {
+test('content runtime tracks needs_review as actionable without exposing a third button state (source)', () => {
   // Source-level assertion: configureAcceptButton/configureLifecycleUndoButton
   // include a needs_review branch BEFORE the terminal accepted/rejected branches
-  // so the user can still reconcile.
+  // so the user can still retry, while rendering the same executable copy as
+  // pending.
   const contentScript = fs.readFileSync(
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
@@ -3442,9 +3447,11 @@ test('content runtime tracks needs_review as a non-terminal status for button re
   const undoBody = contentScript.match(/function configureLifecycleUndoButton\([\s\S]*?\n  (?:async )?function /)?.[0] || '';
 
   assert.match(acceptBody, /status\s*===\s*'needs_review'/);
-  assert.match(acceptBody, /runAcceptTrackedNeedsReview/);
+  assert.match(acceptBody, /runAcceptTracked/);
+  assert.doesNotMatch(acceptBody, /runAcceptTrackedNeedsReview/);
   assert.match(undoBody, /status\s*===\s*'needs_review'/);
-  assert.match(undoBody, /runUndoNeedsReview/);
+  assert.match(undoBody, /undoRun/);
+  assert.doesNotMatch(undoBody, /runUndoNeedsReview/);
 });
 
 test('lifecycle Undo defers terminal rejected to the settlement helper, not an unconditional call', () => {

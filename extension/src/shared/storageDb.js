@@ -645,6 +645,7 @@
       speedTier: typeof run.speedTier === 'string' ? redactSecretLikeText(run.speedTier) : '',
       status: normalizeRunStatus(run.status),
       statusText: normalizeDisplayTextForStorage(run.statusText, SESSION_STORAGE_LIMITS.statusTextChars),
+      runProjectId: normalizeProjectPrefKey(run.runProjectId),
       startedAt: typeof run.startedAt === 'string' ? redactSecretLikeText(run.startedAt) : '',
       finishedAt: typeof run.finishedAt === 'string' ? redactSecretLikeText(run.finishedAt) : '',
       events: compactRunEventsForStorage(run.events),

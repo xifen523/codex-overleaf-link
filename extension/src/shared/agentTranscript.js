@@ -538,6 +538,16 @@
         nextStep: textFor(locale, '请确认终端里可以运行 `codex`，然后重新安装 native host 或刷新扩展后重试。', 'Confirm `codex` works in Terminal, then reinstall the native host or reload the extension.')
       };
     }
+    if (/project_locked|currently in use by codex\.run/i.test(text)) {
+      return {
+        conclusion: textFor(locale,
+          '这轮没有启动：同一个 Overleaf 项目里已经有一轮 Codex 任务正在运行。',
+          'This run did not start: another Codex task is already running for this Overleaf project.'),
+        nextStep: textFor(locale,
+          '请等待当前任务完成，或先取消当前任务后再重试。',
+          'Wait for the current task to finish, or cancel it before retrying.')
+      };
+    }
     if (/unsupported[_ ]parameter/i.test(text) && /reasoning\.summary|summary/i.test(text)) {
       return {
         conclusion: textFor(locale, '这轮没有继续：当前 Codex 模型不支持插件请求的推理摘要参数。', 'This run did not continue: the selected Codex model does not support the requested reasoning summary parameter.'),
@@ -1189,8 +1199,12 @@
     const operation = item?.operation || {};
     const labels = OPERATION_LABELS[locale] || OPERATION_LABELS.zh;
     const label = labels[operation.type] || operation.type || textFor(locale, '处理', 'process');
-    const filePath = operation.path || operation.from || operation.to || textFor(locale, '未知文件', 'unknown file');
     const result = item?.result || {};
+    const filePath = operation.path || operation.from || operation.to || (
+      result?.failure?.stage === 'write' || result?.code === 'editor_project_id_unavailable' || result?.code === 'aborted_project_changed'
+        ? textFor(locale, '写入流程', 'writeback process')
+        : textFor(locale, '未知文件', 'unknown file')
+    );
     const headerLine = locale === 'en'
       ? `${filePath}: ${label} was not written`
       : `${filePath}：${label}没有写入`;

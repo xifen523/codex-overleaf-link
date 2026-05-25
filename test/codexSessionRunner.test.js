@@ -205,6 +205,44 @@ test('codex app-server exit before turn completion rejects instead of hanging', 
   }
 });
 
+test('codex app-server transient reconnect notification does not fail the turn', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-reconnect-'));
+  const events = [];
+  try {
+    const fakeCodex = writeFakeCodexTransientReconnect(tempDir);
+
+    const result = await Promise.race([
+      runCodexAppServerSession({
+        task: 'test',
+        env: {
+          CODEX_OVERLEAF_ENV_READY: '1',
+          CODEX_OVERLEAF_CODEX_PATH: fakeCodex,
+          PATH: process.env.PATH
+        },
+        emit: event => events.push(event)
+      }).then(
+        value => ({ settled: 'resolved', value }),
+        error => ({ settled: 'rejected', message: error.message })
+      ),
+      new Promise(resolve => setTimeout(() => resolve({ settled: 'timeout' }), 2000))
+    ]);
+
+    assert.equal(result.settled, 'resolved');
+    assert.equal(result.value.assistantMessage, 'Recovered answer');
+    assert.equal(
+      events.some(event =>
+        event.type === 'codex.session.event' &&
+        event.detail?.method === 'error' &&
+        event.status === 'warning' &&
+        /Reconnecting/.test(event.title)
+      ),
+      true
+    );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 function writeFakeCodexExit(tempDir, code) {
   const scriptPath = path.join(tempDir, 'fake-codex.js');
   fs.writeFileSync(scriptPath, `process.exit(${code});\n`, 'utf8');
@@ -222,6 +260,56 @@ function writeFakeCodexExit(tempDir, code) {
   fs.writeFileSync(commandPath, [
     '#!/usr/bin/env node',
     `process.exit(${code});`,
+    ''
+  ].join('\n'), 'utf8');
+  fs.chmodSync(commandPath, 0o755);
+  return commandPath;
+}
+
+function writeFakeCodexTransientReconnect(tempDir) {
+  const scriptPath = path.join(tempDir, 'fake-codex-reconnect.js');
+  fs.writeFileSync(scriptPath, [
+    "const readline = require('node:readline');",
+    "const rl = readline.createInterface({ input: process.stdin });",
+    "function send(message) { process.stdout.write(`${JSON.stringify(message)}\\n`); }",
+    "rl.on('line', line => {",
+    "  const message = JSON.parse(line);",
+    "  if (message.id && message.method === 'initialize') {",
+    "    send({ id: message.id, result: {} });",
+    "    return;",
+    "  }",
+    "  if (message.method === 'initialized') {",
+    "    return;",
+    "  }",
+    "  if (message.id && message.method === 'thread/start') {",
+    "    send({ id: message.id, result: { thread: { id: 'thread-1' } } });",
+    "    return;",
+    "  }",
+    "  if (message.id && message.method === 'turn/start') {",
+    "    send({ id: message.id, result: { turn: { id: 'turn-1' } } });",
+    "    send({ method: 'turn/started', params: { turn: { id: 'turn-1' } } });",
+    "    send({ method: 'error', params: { error: { message: 'Reconnecting... 2/5' } } });",
+    "    send({ method: 'item/agentMessage/delta', params: { itemId: 'msg-1', delta: 'Recovered answer' } });",
+    "    send({ method: 'turn/completed', params: { turn: { id: 'turn-1' } } });",
+    "  }",
+    "});",
+    "process.on('SIGTERM', () => process.exit(0));",
+    ''
+  ].join('\n'), 'utf8');
+  if (process.platform === 'win32') {
+    const commandPath = path.join(tempDir, 'codex.cmd');
+    fs.writeFileSync(commandPath, [
+      '@echo off',
+      `"${process.execPath}" "${scriptPath}" %*`,
+      ''
+    ].join('\r\n'), 'utf8');
+    return commandPath;
+  }
+
+  const commandPath = path.join(tempDir, 'codex');
+  fs.writeFileSync(commandPath, [
+    '#!/usr/bin/env node',
+    `require(${JSON.stringify(scriptPath)});`,
     ''
   ].join('\n'), 'utf8');
   fs.chmodSync(commandPath, 0o755);

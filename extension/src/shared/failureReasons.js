@@ -288,6 +288,11 @@
       fallbackUserMessage: 'Local Codex returned no usable final report or operations.',
       fallbackNextAction: 'Open Technical Details and resolve the local Codex error.'
     },
+    codex_project_locked: {
+      stage: 'codex', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Another Codex task is already running for this Overleaf project.',
+      fallbackNextAction: 'Wait for the active task to finish, or cancel it before retrying.'
+    },
     codex_result_parse_failed: {
       stage: 'codex', severity: 'error', defaultRetryable: true,
       fallbackUserMessage: 'Codex output could not be parsed into operations.',

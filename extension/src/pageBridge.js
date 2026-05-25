@@ -2064,18 +2064,19 @@
 
   // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
   // The writeback guard needs the project id of the project currently SHOWN
-  // by the Overleaf editor — distinct from the URL the user is on, which can
-  // race the in-page IDE state during SPA navigation. The acceptable sources,
-  // in order, are:
+  // by the Overleaf editor. The acceptable sources, in order, are:
   //   1. `window._ide.project._id` — the in-page IDE module's authoritative
   //      project id once the SPA has bound the project.
   //   2. `[data-project-id]` on the CodeMirror root — best-effort second
   //      source for cases where `_ide.project` is still hydrating.
-  // The URL is INTENTIONALLY NOT a source: it changes ahead of the editor
-  // module during route changes, which is precisely the race this guard
-  // exists to close. When neither source is observable the function returns
-  // null so the guard fails closed.
-  function getEditorProjectIdPageSide() {
+  //   3. URL project id, but ONLY when it exactly matches the immutable
+  //      runProjectId captured at run start. This keeps SPA-navigation safety:
+  //      a different URL project still fails closed, while current Overleaf
+  //      builds that no longer expose `_ide.project._id` can still write on a
+  //      stable same-project page.
+  // When none of these sources can prove the same project, return null so the
+  // guard fails closed.
+  function getEditorProjectIdPageSide(expectedRunProjectId = '') {
     try {
       const ideId = window._ide && window._ide.project && window._ide.project._id;
       if (typeof ideId === 'string' && ideId) return ideId;
@@ -2084,6 +2085,12 @@
       const cmRoot = document.querySelector && document.querySelector('[data-project-id]');
       const attr = cmRoot && cmRoot.getAttribute && cmRoot.getAttribute('data-project-id');
       if (typeof attr === 'string' && attr) return attr;
+    } catch (_error) { /* swallow */ }
+    try {
+      const urlProjectId = getProjectId();
+      if (expectedRunProjectId && urlProjectId === expectedRunProjectId) {
+        return urlProjectId;
+      }
     } catch (_error) { /* swallow */ }
     return null;
   }
@@ -2107,13 +2114,13 @@
   // *different* project and waiting won't fix it.
   const WRITE_GUARD_HYDRATION_RETRY_MS = [100, 300, 700];  // ~1100 ms ceiling
   async function runWriteGuard(params) {
-    let editorId = getEditorProjectIdPageSide();
+    const runId = params && typeof params.runProjectId === 'string' ? params.runProjectId : '';
+    let editorId = getEditorProjectIdPageSide(runId);
     for (let attempt = 0; attempt < WRITE_GUARD_HYDRATION_RETRY_MS.length; attempt++) {
       if (editorId) break;
       await new Promise(resolve => setTimeout(resolve, WRITE_GUARD_HYDRATION_RETRY_MS[attempt]));
-      editorId = getEditorProjectIdPageSide();
+      editorId = getEditorProjectIdPageSide(runId);
     }
-    const runId = params && typeof params.runProjectId === 'string' ? params.runProjectId : '';
     if (!editorId) {
       return abortDispatchResult('editor_project_id_unavailable', runId || null, null);
     }

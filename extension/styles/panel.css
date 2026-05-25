@@ -1197,6 +1197,14 @@
   color: #f48771 !important;
 }
 
+#codex-overleaf-panel .transcript-turn[data-status="abandoned_after_navigation"] .run-status {
+  color: #f48771 !important;
+}
+
+#codex-overleaf-panel .transcript-turn[data-status="needs_review_after_navigation"] .run-status {
+  color: #d7ba7d !important;
+}
+
 #codex-overleaf-panel .run-activity-list {
   display: grid;
   gap: 0;
