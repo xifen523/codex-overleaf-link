@@ -239,7 +239,7 @@
     var now = new Date().toISOString();
     var titleSource = input.titleSource === 'manual' ? 'manual' : 'auto';
     var updatedAt = typeof input.updatedAt === 'string' ? input.updatedAt : now;
-    // Welcome-panel + write-guard v1.3.8 add-on (Task 3): persist the four
+    // Welcome-panel + write-guard: persist the four
     // Recent-projects fields on every session record so the cross-project
     // query (`listRecentProjectsAcrossAccount`) can filter / sort / render
     // without touching the raw `task` text.
@@ -845,7 +845,7 @@
   }
 
   function normalizeRunStatus(status) {
-    // Welcome-panel + write-guard v1.3.8 add-on (Task 2/3): the run-status
+    // Welcome-panel + write-guard: the run-status
     // enum gained three post-navigation values. The storage normalizer must
     // accept them so a settled run round-trips intact through `buildSessionRecord`.
     // Unknown legacy values fall through to `completed` (the historical default).
@@ -1065,7 +1065,7 @@
     return result;
   }
 
-  // Welcome-panel + write-guard v1.3.8 add-on (Task 3): the Recent-projects
+  // Welcome-panel + write-guard: the Recent-projects
   // dashboard variant calls `listRecentProjectsAcrossAccount` to get the
   // sorted, deduped, capped list of projects in the current account scope.
   //

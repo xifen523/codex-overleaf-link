@@ -3,6 +3,7 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { extractFunction } = require('./_helpers/extractFunction');
 const { pathToFileURL } = require('node:url');
 const vm = require('node:vm');
 
@@ -18,28 +19,6 @@ function runSmokeModuleScript(source) {
   return JSON.parse(result.stdout);
 }
 
-function extractFunction(source, name) {
-  const markers = [`function ${name}(`, `async function ${name}(`];
-  const start = markers
-    .map(marker => source.indexOf(marker))
-    .filter(index => index !== -1)
-    .sort((a, b) => a - b)[0] ?? -1;
-  assert.notEqual(start, -1, `${name} should exist`);
-  const openBrace = source.indexOf('{', start);
-  assert.notEqual(openBrace, -1, `${name} should have a body`);
-  let depth = 0;
-  for (let index = openBrace; index < source.length; index += 1) {
-    if (source[index] === '{') {
-      depth += 1;
-    } else if (source[index] === '}') {
-      depth -= 1;
-      if (depth === 0) {
-        return source.slice(start, index + 1);
-      }
-    }
-  }
-  assert.fail(`${name} body should close`);
-}
 
 test('package exposes a real Chrome extension smoke-test entrypoint', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));

@@ -8,7 +8,7 @@
   'use strict';
 
   // -------------------------------------------------------------------------
-  // Welcome-panel + write-guard v1.3.8 add-on (Fix C / spec §5.6.2).
+  // Welcome-panel + write-guard:
   //
   // Canonical local-path sanitizer shared between `computeSafeTaskSummary`
   // (sessionState) and the storage-side audit redaction helpers

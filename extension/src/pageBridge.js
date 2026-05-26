@@ -20,6 +20,7 @@
   let snapshotRouter = null;
   let projectSnapshotBridge = null;
   let writebackRouter = null;
+  let writeGuard = null;
   const compileBridge = window.CodexOverleafCompileBridge.create({
     document,
     getActiveFilePath,
@@ -52,6 +53,11 @@
   snapshotRouter = requirePageModule('CodexOverleafSnapshotRouter').create({
     normalizePath: normalizeSafeProjectPath,
     readActiveEditorText,
+    treeOperations,
+    window
+  });
+  writeGuard = requirePageModule('CodexOverleafWriteGuard').create({
+    document,
     treeOperations,
     window
   });
@@ -174,13 +180,13 @@
       return ensureEditing(params);
     }
     if (method === 'applyOperations') {
-      // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
+      // Welcome-panel + write-guard:
       // First gate: runProjectId vs page-side editorProjectId. Runs before
       // any reviewing / save-state / open-file readiness check so a
       // mid-run navigation cannot write into a different project. runWriteGuard
       // is async because it retries the page-side editorProjectId reader with
       // backoff to ride out Overleaf's hydration window.
-      const blocked = await runWriteGuard(params);
+      const blocked = await writeGuard.runWriteGuard(params);
       if (blocked) return blocked;
       return applyOperations(params.operations || [], {
         baseFiles: params.baseFiles || null,
@@ -196,12 +202,12 @@
       return jumpToPosition(params);
     }
     if (method === 'rejectTrackedChanges') {
-      const blocked = await runWriteGuard(params);
+      const blocked = await writeGuard.runWriteGuard(params);
       if (blocked) return blocked;
       return rejectTrackedChanges(params);
     }
     if (method === 'acceptTrackedChanges') {
-      const blocked = await runWriteGuard(params);
+      const blocked = await writeGuard.runWriteGuard(params);
       if (blocked) return blocked;
       return acceptTrackedChanges(params);
     }
@@ -2062,114 +2068,9 @@
     return treeOperations?.getProjectId?.() || null;
   }
 
-  // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
-  // The writeback guard needs the project id of the project currently SHOWN
-  // by the Overleaf editor. The acceptable sources, in order, are:
-  //   1. `window._ide.project._id` — the in-page IDE module's authoritative
-  //      project id once the SPA has bound the project.
-  //   2. `[data-project-id]` on the CodeMirror root — best-effort second
-  //      source for cases where `_ide.project` is still hydrating.
-  //   3. URL project id, but ONLY when it exactly matches the immutable
-  //      runProjectId captured at run start. This keeps SPA-navigation safety:
-  //      a different URL project still fails closed, while current Overleaf
-  //      builds that no longer expose `_ide.project._id` can still write on a
-  //      stable same-project page.
-  // When none of these sources can prove the same project, return null so the
-  // guard fails closed.
-  function getEditorProjectIdPageSide(expectedRunProjectId = '') {
-    try {
-      const ideId = window._ide && window._ide.project && window._ide.project._id;
-      if (typeof ideId === 'string' && ideId) return ideId;
-    } catch (_error) { /* swallow; fall through */ }
-    try {
-      const cmRoot = document.querySelector && document.querySelector('[data-project-id]');
-      const attr = cmRoot && cmRoot.getAttribute && cmRoot.getAttribute('data-project-id');
-      if (typeof attr === 'string' && attr) return attr;
-    } catch (_error) { /* swallow */ }
-    try {
-      const urlProjectId = getProjectId();
-      if (expectedRunProjectId && urlProjectId === expectedRunProjectId) {
-        return urlProjectId;
-      }
-    } catch (_error) { /* swallow */ }
-    return null;
-  }
-
-  // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
-  // Run this BEFORE any other readiness / openFile / staleness check on
-  // every writeback dispatch. Returns the abort result the caller should
-  // return verbatim, or null when the guard passes and the caller should
-  // proceed to the real dispatch. Three abort branches, all fail-closed:
-  //   • editorProjectId === null    → editor_project_id_unavailable
-  //   • runProjectId missing/empty  → editor_project_id_unavailable
-  //   • runProjectId !== editorPID  → aborted_project_changed
-  //
-  // Hydration tolerance (v1.3.8 polish): Overleaf's `window._ide.project._id`
-  // is observably null for ~200–1000 ms after page load / SPA route change
-  // while the editor module hydrates. The original guard fired immediately on
-  // null and produced misleading 'Refresh Overleaf and retry' errors for users
-  // whose run started on a freshly-loaded page. Retry the reader with backoff
-  // before the null abort — mismatch (runId !== editorId) still short-
-  // circuits without retry because that means hydration completed to a
-  // *different* project and waiting won't fix it.
-  const WRITE_GUARD_HYDRATION_RETRY_MS = [100, 300, 700];  // ~1100 ms ceiling
-  async function runWriteGuard(params) {
-    const runId = params && typeof params.runProjectId === 'string' ? params.runProjectId : '';
-    let editorId = getEditorProjectIdPageSide(runId);
-    for (let attempt = 0; attempt < WRITE_GUARD_HYDRATION_RETRY_MS.length; attempt++) {
-      if (editorId) break;
-      await new Promise(resolve => setTimeout(resolve, WRITE_GUARD_HYDRATION_RETRY_MS[attempt]));
-      editorId = getEditorProjectIdPageSide(runId);
-    }
-    if (!editorId) {
-      return abortDispatchResult('editor_project_id_unavailable', runId || null, null);
-    }
-    if (!runId) {
-      return abortDispatchResult('editor_project_id_unavailable', null, editorId);
-    }
-    if (runId !== editorId) {
-      return abortDispatchResult('aborted_project_changed', runId, editorId);
-    }
-    return null;
-  }
-
-  function abortDispatchResult(code, runProjectId, editorProjectId) {
-    const userMessages = {
-      aborted_project_changed: 'Codex stopped a write because Overleaf switched to a different project mid-run.',
-      editor_project_id_unavailable: 'Codex could not confirm which Overleaf project the editor is showing, so it did not write.'
-    };
-    const nextActions = {
-      aborted_project_changed: 'Reopen the original project and rerun the task if you still want this change.',
-      editor_project_id_unavailable: 'Refresh Overleaf and retry; if it persists, reload the extension.'
-    };
-    // operation: {} (not null) — the write-guard fires before any per-op
-    // dispatch so there's no specific operation to attribute the block to,
-    // but downstream audit/transcript code traverses operation.path and the
-    // like; an empty object lets defaults flow through cleanly.
-    return {
-      ok: false,
-      applied: [],
-      skipped: [{
-        operation: {},
-        result: {
-          ok: false,
-          code,
-          reason: userMessages[code],
-          failure: {
-            code,
-            stage: 'write',
-            severity: 'blocked',
-            userMessage: userMessages[code],
-            nextAction: nextActions[code],
-            retryable: true,
-            terminalState: 'blocked',
-            changedDocument: false,
-            evidence: { runProjectId, editorProjectId }
-          }
-        }
-      }]
-    };
-  }
+  // Writeback project-ID guard surface lives in extension/src/page/writeGuard.js
+  // and is accessed here via `writeGuard.runWriteGuard(params)` from the
+  // applyOperations / acceptTrackedChanges / rejectTrackedChanges dispatchers.
 
   function getActiveFilePath() {
     return getActiveFilePathFromEditorStore()

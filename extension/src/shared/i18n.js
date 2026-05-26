@@ -350,7 +350,7 @@
       failureReason_aborted_project_changed_next: 'Reopen the original project and rerun the task if you still want this change.',
       failureReason_editor_project_id_unavailable_user: 'Codex could not confirm which Overleaf project the editor is showing, so it did not write.',
       failureReason_editor_project_id_unavailable_next: 'Refresh the Overleaf tab and retry; if it persists, reload the extension.',
-      // Welcome-panel + write-guard v1.3.8 add-on (Task 5): Recent-projects
+      // Welcome-panel + write-guard: Recent-projects
       // variant copy. Spec §5.3–§5.5, §5.8, §5.10 are the source of truth.
       recentProjects_welcome: 'Codex Overleaf Link',
       recentProjects_welcome_subtitle: 'Open a project from the Overleaf list on the left to start.',
@@ -707,7 +707,7 @@
       failureReason_aborted_project_changed_next: '如仍需此次改动，请回到原项目后重新运行任务。',
       failureReason_editor_project_id_unavailable_user: 'Codex 无法确认当前 Overleaf 编辑器对应的项目，因此没有写入。',
       failureReason_editor_project_id_unavailable_next: '请刷新 Overleaf 页面后重试；如果仍然失败，请重新加载扩展。',
-      // Welcome-panel + write-guard v1.3.8 add-on (Task 5): Recent-projects
+      // Welcome-panel + write-guard: Recent-projects
       // variant copy. 见 spec §5.3–§5.5、§5.8、§5.10。
       recentProjects_welcome: 'Codex Overleaf Link',
       recentProjects_welcome_subtitle: '从左侧 Overleaf 项目列表中打开任意项目即可开始。',

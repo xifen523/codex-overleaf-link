@@ -45,6 +45,10 @@ const snapshotRouterSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/page/snapshotRouter.js'),
   'utf8'
 );
+const writeGuardSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/writeGuard.js'),
+  'utf8'
+);
 const writebackRouterSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/page/writebackRouter.js'),
   'utf8'
@@ -2516,17 +2520,21 @@ test('page-bridge applyOperations waits out the Overleaf hydration window (edito
   assert.equal(bridge.getFile('main.tex'), 'omega beta gamma');
 });
 
-test('page-bridge applyOperations runWriteGuard is async with hydration retry constants', () => {
+test('writeGuard module is async with hydration retry constants and the router awaits it', () => {
   // Source-grep belt-and-suspenders so removing the retry loop fails this
-  // test even if a future change keeps the function async.
-  const pageBridgeSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'pageBridge.js'), 'utf8');
-  assert.match(pageBridgeSrc, /async function runWriteGuard/, 'runWriteGuard must be async to await retry sleeps');
-  assert.match(pageBridgeSrc, /WRITE_GUARD_HYDRATION_RETRY_MS\s*=\s*\[\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\]/,
+  // test even if a future change keeps the function async. The guard surface
+  // lives in extension/src/page/writeGuard.js; pageBridge.js dispatches to it
+  // via writeGuard.runWriteGuard.
+  const writeGuardSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'page', 'writeGuard.js'), 'utf8');
+  assert.match(writeGuardSrc, /async function runWriteGuard/, 'runWriteGuard must be async to await retry sleeps');
+  assert.match(writeGuardSrc, /WRITE_GUARD_HYDRATION_RETRY_MS\s*=\s*\[\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\]/,
     'retry-ms constant must be defined as a 3-element array');
-  // The router must await; without await the function returns a Promise that
-  // is truthy, so the abort-branch test would fail closed every time.
-  assert.match(pageBridgeSrc, /const blocked\s*=\s*await runWriteGuard/,
-    'router call sites must await runWriteGuard');
+  // The router must await the guard call; without await the function returns
+  // a Promise that is truthy, so the abort-branch tests would fail closed
+  // every time.
+  const pageBridgeSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'pageBridge.js'), 'utf8');
+  assert.match(pageBridgeSrc, /const blocked\s*=\s*await writeGuard\.runWriteGuard/,
+    'router call sites must await writeGuard.runWriteGuard');
 });
 
 test('page-bridge acceptTrackedChanges runs the same guard', async () => {
@@ -2794,6 +2802,7 @@ function createPageBridgeHarness({
   vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });
   vm.runInContext(treeOperationsSource, context, { filename: 'treeOperations.js' });
   vm.runInContext(snapshotRouterSource, context, { filename: 'snapshotRouter.js' });
+  vm.runInContext(writeGuardSource, context, { filename: 'writeGuard.js' });
   vm.runInContext(writebackRouterSource, context, { filename: 'writebackRouter.js' });
   if (realtimeObserverFactory) {
     window.CodexOverleafRealtimeObserver = { create: realtimeObserverFactory };

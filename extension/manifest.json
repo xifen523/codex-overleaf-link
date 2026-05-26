@@ -94,6 +94,7 @@
         "src/page/pageBridgeCapability.js",
         "src/page/treeOperations.js",
         "src/page/snapshotRouter.js",
+        "src/page/writeGuard.js",
         "src/page/writebackRouter.js",
         "src/pageBridge.js"
       ],

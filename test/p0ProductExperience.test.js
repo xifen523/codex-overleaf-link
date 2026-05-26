@@ -2,34 +2,13 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { extractFunction } = require('./_helpers/extractFunction');
 const vm = require('node:vm');
 
 const ReviewHunks = require('../extension/src/content/reviewHunks');
 
 const DIFF_REVIEW_PANEL_PATH = '../extension/src/content/diffReviewPanel.js';
 
-function extractFunction(source, name) {
-  const markers = [`function ${name}(`, `async function ${name}(`];
-  const start = markers
-    .map(marker => source.indexOf(marker))
-    .filter(index => index !== -1)
-    .sort((a, b) => a - b)[0] ?? -1;
-  assert.notEqual(start, -1, `${name} should exist`);
-  const openBrace = source.indexOf('{', start);
-  assert.notEqual(openBrace, -1, `${name} should have a body`);
-  let depth = 0;
-  for (let index = openBrace; index < source.length; index++) {
-    if (source[index] === '{') {
-      depth++;
-    } else if (source[index] === '}') {
-      depth--;
-      if (depth === 0) {
-        return source.slice(start, index + 1);
-      }
-    }
-  }
-  assert.fail(`${name} body should close`);
-}
 
 function createMinimalDocument() {
   class Element {
@@ -5531,11 +5510,12 @@ test('summarizeOperationForAudit tolerates null operation (write-guard batch-ski
 });
 
 test('write-guard emit sites use operation: {} (not null) so downstream audit code does not crash', () => {
-  const pageBridgeSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'pageBridge.js'), 'utf8');
+  const writeGuardSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'page', 'writeGuard.js'), 'utf8');
   const writebackRouterSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'page', 'writebackRouter.js'), 'utf8');
 
-  // The pageBridge runWriteGuard / abortDispatchResult path.
-  const abortFn = extractFunction(pageBridgeSrc, 'abortDispatchResult');
+  // The page-side writeGuard.abortDispatchResult path (extracted from
+  // pageBridge.js for the v1.3.9 budget refactor).
+  const abortFn = extractFunction(writeGuardSrc, 'abortDispatchResult');
   assert.match(abortFn, /operation:\s*\{\}/, 'abortDispatchResult must emit operation: {} (empty object)');
   assert.doesNotMatch(abortFn, /operation:\s*null/, 'abortDispatchResult must NOT emit operation: null');
 

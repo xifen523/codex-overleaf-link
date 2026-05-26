@@ -164,7 +164,7 @@
       fallbackNextAction: 'Review written files; use Undo written parts if needed.'
     },
 
-    // 9.0+ — write-safety primitive (welcome-panel + writeback project-ID guard v1.3.8 add-on)
+    // 9.0+ — write-safety primitive (welcome-panel + writeback project-ID guard)
     aborted_project_changed: {
       stage: 'write', severity: 'blocked', defaultRetryable: true,
       fallbackUserMessage: 'Codex stopped a write because Overleaf switched to a different project mid-run.',

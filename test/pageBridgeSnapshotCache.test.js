@@ -40,6 +40,10 @@ const snapshotRouterSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/page/snapshotRouter.js'),
   'utf8'
 );
+const writeGuardSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/writeGuard.js'),
+  'utf8'
+);
 const writebackRouterSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/page/writebackRouter.js'),
   'utf8'
@@ -1269,6 +1273,7 @@ function createSnapshotHarness({
   vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });
   vm.runInContext(treeOperationsSource, context, { filename: 'treeOperations.js' });
   vm.runInContext(snapshotRouterSource, context, { filename: 'snapshotRouter.js' });
+  vm.runInContext(writeGuardSource, context, { filename: 'writeGuard.js' });
   vm.runInContext(writebackRouterSource, context, { filename: 'writebackRouter.js' });
   if (pageBridgeCapabilitySource) {
     vm.runInContext(pageBridgeCapabilitySource, context, { filename: 'pageBridgeCapability.js' });

@@ -283,7 +283,7 @@
     state = normalizePanelState(await loadStoredState(), { restoreRunningRuns: true });
     ensurePanelOpen();
     applyStateToPanel();
-    // Welcome-panel + write-guard v1.3.8 (Task 4): seed the lifecycle
+    // Welcome-panel + write-guard: seed the lifecycle
     // module-locals from the current URL, install the SPA route hook so
     // future Overleaf navigations swap variants, and warm the account-scope
     // cache so the very first saveState sees a non-null scope when the
@@ -298,7 +298,7 @@
     loadProjectNameCacheFromStorage().catch(() => { /* swallow */ });
     refreshAccountScopeId()
       .then(() => {
-        // Welcome-panel + write-guard v1.3.8 add-on (Task 5): if the user
+        // Welcome-panel + write-guard: if the user
         // landed on a non-project URL (e.g. /project), swap immediately into
         // the Recent-projects variant. Per-project mounts continue to render
         // through the existing applyStateToPanel path.
@@ -2387,7 +2387,7 @@
         syncOutcome.hasSkippedOperations ? tx('Sync completed with skipped items', '同步完成但有跳过项') : tx('Sync completed', '同步完成'),
         syncOutcome.hasSkippedOperations ? 'failed' : 'completed'
       );
-      // Welcome-panel + write-guard v1.3.8 (Task 4 / spec §5.7.1):
+      // Welcome-panel + write-guard:
       // post-navigation run settlement. If the user navigated away from
       // run.runProjectId before this run finished, override the run.status
       // with one of background_completed / needs_review_after_navigation /
@@ -2411,7 +2411,7 @@
           })
           : null;
         if (finishedRunRecord) {
-          // Fix B (spec §5.7.1): pass the full syncOutcome — including
+          // Spec §5.7.1: pass the full syncOutcome — including
           // hasSkippedOperations and the raw `applied` — so the settlement
           // can catch early-return branches and unrecognized skip codes.
           const postNavigationStatus = settleRunAfterNavigation(finishedRunRecord, syncOutcome);
@@ -3766,7 +3766,7 @@
         baseFiles: project?.files || [],
         requireReviewing: runRequireReviewing,
         requireEditing: !runRequireReviewing,
-        // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0):
+        // Welcome-panel + write-guard:
         // immutable per-run project id, checked by the page-side guard
         // against `_ide.project._id` before any mutation.
         runProjectId: currentRunView?.runProjectId || ''
@@ -3842,7 +3842,7 @@
     return {
       summaryLine,
       hasSkippedOperations: writebackIncomplete || hasSkippedApplyOperations([applied]),
-      // Welcome-panel + write-guard v1.3.8 (Task 4): expose the raw applied
+      // Welcome-panel + write-guard: expose the raw applied
       // result so the post-navigation settlement (spec §5.7.1) can classify
       // the run by inspecting the `applied.skipped` entries' failure codes.
       // Existing call sites that only read `summaryLine` / `hasSkippedOperations`
@@ -4433,7 +4433,7 @@
   }
 
   // -------------------------------------------------------------------------
-  // Welcome-panel + write-guard v1.3.8 add-on (Task 4): SPA route lifecycle,
+  // Welcome-panel + write-guard: SPA route lifecycle,
   // account scope derivation, post-navigation run settlement. See
   // docs/superpowers/specs/2026-05-24-project-list-welcome-panel-design.md
   // §5.1 (trigger), §5.2 (account scope, fail-closed), §5.7 (lifecycle).
@@ -5204,7 +5204,7 @@
       // continues unchanged.
       return null;
     }
-    // Welcome-panel + write-guard v1.3.8 add-on (Fix B / spec §5.7.1):
+    // Welcome-panel + write-guard:
     // accept the full `syncOutcome` (not just a pre-flattened skipped list).
     // The previous shape — only `{ skipped: [...] }` from
     // `collectRunResultSkipped` — silently classified runs as
@@ -5263,7 +5263,7 @@
   //      `syncOutcome.applied.skipped`.
   //   2. A pre-flattened shape `{ skipped: [...] }` — used by tests and by
   //      historical call sites.
-  // Fix B (spec §5.7.1): settleRunAfterNavigation now consumes the full
+  // Spec §5.7.1: settleRunAfterNavigation now consumes the full
   // syncOutcome directly, but this helper remains useful for the
   // applied-array path AND keeps the legacy test surface intact.
   function collectRunResultSkipped(syncOutcome) {
@@ -6422,7 +6422,7 @@
         baseFiles: project?.files || [],
         requireReviewing: runRequireReviewing,
         requireEditing: !runRequireReviewing,
-        // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
+        // Welcome-panel + write-guard:
         runProjectId: currentRunView?.runProjectId || ''
       })
       : { ok: true, applied: [], skipped: [] };
@@ -7527,6 +7527,7 @@
     await injectScriptOnce('src/page/pageBridgeCapability.js', 'codex-overleaf-page-bridge-capability-script');
     await injectScriptOnce('src/page/treeOperations.js', 'codex-overleaf-tree-operations-script', { force: true });
     await injectScriptOnce('src/page/snapshotRouter.js', 'codex-overleaf-snapshot-router-script');
+    await injectScriptOnce('src/page/writeGuard.js', 'codex-overleaf-write-guard-script', { force: true });
     await injectScriptOnce('src/page/writebackRouter.js', 'codex-overleaf-writeback-router-script', { force: true });
     await injectScriptOnce('src/pageBridge.js', 'codex-overleaf-page-bridge-script', { force: true });
     await initializePageBridgeCapability();
@@ -7648,7 +7649,7 @@
     }
   }
 
-  // Welcome-panel + write-guard v1.3.8 add-on (Fix A): defensive accessor.
+  // Welcome-panel + write-guard: defensive accessor.
   // Some legacy test harnesses inline `saveState` without re-declaring the
   // module-local `currentRunView`. ReferenceError would otherwise crash the
   // function before its try/catch could run. Production callers always have
@@ -7666,7 +7667,7 @@
     try {
       const StorageDb = window.CodexOverleafStorageDb;
       const Migration = window.CodexOverleafStorageMigration;
-      // Welcome-panel + write-guard v1.3.8 add-on (Fix A / spec §5.7.1):
+      // Welcome-panel + write-guard:
       // post-navigation persistence gate. The normal URL-derived projectId
       // belongs to the route the user is *currently looking at*. When a run
       // is in flight on a different project (mid-run SPA navigation), saving
@@ -8538,7 +8539,7 @@
       undoTrackedChanges: [],
       undoExpectedFiles: [],
       undoStatus: '',
-      // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0).
+      // Welcome-panel + write-guard:
       // Immutable per-run capture of the project this run was submitted
       // against. Every writeback / accept / undo dispatch attaches this id
       // to its page-bridge params so the page-side guard can verify the run
@@ -8597,7 +8598,7 @@
       record.status = status;
       record.statusText = statusText;
       record.finishedAt = new Date().toISOString();
-      // Welcome-panel + write-guard v1.3.8 add-on (Fix A / spec §5.7.1):
+      // Welcome-panel + write-guard:
       // when the user navigated away mid-run, the URL-derived projectId now
       // belongs to a different project (or /project). Routing this finish
       // through `saveStateSoon` -> `saveState` would persist the original
@@ -10193,7 +10194,7 @@
         operations: undoOperations,
         baseFiles: run.undoBaseFiles || [],
         reviewingPolicy: 'no-trace-undo',
-        // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0):
+        // Welcome-panel + write-guard:
         // route the undo through the same project-ID guard. The undo is
         // bound to the run's original project, not the editor's active one.
         runProjectId: getRunProjectIdForWriteback(run)
@@ -10259,7 +10260,7 @@
         trackedChanges: run.undoTrackedChanges || [],
         expectedFiles: run.undoExpectedFiles || [],
         postFiles: buildTrackedUndoPostFiles(run),
-        // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0):
+        // Welcome-panel + write-guard:
         // bind the reject to the run's original project. If the user has
         // navigated away the page-side guard refuses with
         // `aborted_project_changed` and the document is left untouched.
@@ -10414,7 +10415,7 @@
         // re-applies these exact patches so it writes only the changed
         // fragments, never a whole-file overwrite.
         appliedOperations: Array.isArray(run.appliedOperations) ? run.appliedOperations : [],
-        // Welcome-panel + write-guard v1.3.8 add-on (Task 2 / spec §5.0):
+        // Welcome-panel + write-guard:
         // bind the accept replay to the run's original project. If the user
         // has navigated to a different project the page-side guard refuses
         // with `aborted_project_changed` before any mutation.

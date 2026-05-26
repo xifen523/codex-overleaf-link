@@ -602,7 +602,7 @@
     }
   }
 
-  // Welcome-panel + write-guard v1.3.8 add-on (Task 2): the run lifecycle now
+  // Welcome-panel + write-guard: the run lifecycle now
   // settles on three additional values when the user navigates away mid-run
   // and the original run completes (or aborts) in the background. They land on
   // the ORIGINAL project's session record, not the active one. The catalog is
@@ -906,7 +906,7 @@
       requireReviewing: session.requireReviewing !== false,
       focusFiles: normalizeFocusFiles(session.focusFiles)
     };
-    // Welcome-panel + write-guard v1.3.8 add-on (Task 3): preserve the four
+    // Welcome-panel + write-guard: preserve the four
     // Recent-projects fields through compaction so they round-trip when state
     // is reloaded from chrome.storage.local. The active record builder in
     // `buildSessionRecord` is the canonical writer; this branch preserves an
@@ -1129,7 +1129,7 @@
     return Math.round(Math.min(760, Math.max(340, width)));
   }
 
-  // Welcome-panel + write-guard v1.3.8 add-on (Task 3): the Recent-projects
+  // Welcome-panel + write-guard: the Recent-projects
   // dashboard variant renders one sanitized line per project. `computeSafeTaskSummary`
   // is the privacy floor for that line. It is written on every `saveState` and
   // stored on the session record (`session.safeTaskSummary`), so the dashboard
@@ -1148,7 +1148,7 @@
     if (typeof task !== 'string' || !task) return '';
     let s = task;
     // Strip absolute local paths via the canonical shared helper
-    // (spec §5.6.2 / Fix C). The helper covers Unix (/Users, /home,
+    // (spec §5.6.2). The helper covers Unix (/Users, /home,
     // /private/var, /tmp, /var/folders, /Volumes, /etc, /opt, /usr, ...),
     // Windows drive letters with both `\\` and `/`, UNC `\\server\share`,
     // and `file:///` URLs. Adding a new path shape is a one-line change

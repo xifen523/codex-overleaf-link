@@ -485,7 +485,7 @@
   }
 
   async function rejectTrackedChanges(params = {}) {
-    // Welcome-panel + write-guard v1.3.8 add-on (Task 2): defense-in-depth.
+    // Welcome-panel + write-guard: defense-in-depth.
     // The pageBridge wrapper already runs the runProjectId guard, but a
     // future caller could reach the router directly. A missing or empty
     // `runProjectId` blocks the reject with the same shape the page-side
@@ -698,7 +698,7 @@
   // the user edited after the run), this bails WITHOUT re-writing so it never
   // makes the document worse, mirroring Undo's safety stance.
   async function acceptTrackedChanges(params = {}) {
-    // Welcome-panel + write-guard v1.3.8 add-on (Task 2): defense-in-depth.
+    // Welcome-panel + write-guard: defense-in-depth.
     // The pageBridge wrapper already runs the runProjectId guard, but a
     // future caller could reach the router directly. A missing or empty
     // `runProjectId` blocks the accept with the same shape the page-side
@@ -3036,7 +3036,7 @@
 
     async function applyOperationsForBridge(operationsOrOptions, options = {}) {
       if (Array.isArray(operationsOrOptions)) {
-        // Welcome-panel + write-guard v1.3.8 add-on (Fix D): defense-in-depth
+        // Welcome-panel + write-guard: defense-in-depth
         // also runs on the array-shaped entry. T2 only guarded the
         // payload-object branch; if any future caller goes straight to the
         // array entry without `options.runProjectId`, the router would have
@@ -3048,7 +3048,7 @@
         return applyOperations(operationsOrOptions, options);
       }
       const payload = operationsOrOptions || {};
-      // Welcome-panel + write-guard v1.3.8 add-on (Task 2): defense-in-depth.
+      // Welcome-panel + write-guard: defense-in-depth.
       // The pageBridge wrapper already runs the runProjectId guard, but a
       // future caller could reach the router directly. A missing or empty
       // `runProjectId` on the payload-shaped call blocks the write with the

@@ -3,18 +3,42 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Freeze-line ceilings for the large production files that don't yet have a
+// proper "target" split — the rule is "must not grow further from here". The
+// number is `current size + ~1%` so a true freeze; future growth requires
+// raising the ceiling (which makes the growth deliberate + visible in diff).
+// Files marked "split target" have an explicit lower aspirational ceiling
+// (`maxLines`) the codebase should converge to; today they're frozen at
+// `current + headroom` until the split lands.
 export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
   {
     path: 'extension/src/contentScript.js',
     maxLines: 4500
   },
   {
-    // v1.3.8 grew the file past 2200 with the writeback project-ID guard
-    // (runWriteGuard / abortDispatchResult / getEditorProjectIdPageSide +
-    // hydration retry). Budget raised to 2400 to ship the P0 release;
-    // v1.3.9 should extract the write-guard surface into a dedicated module.
     path: 'extension/src/pageBridge.js',
-    maxLines: 2400
+    maxLines: 2200
+  },
+  {
+    // Elephant. 12088 lines is unhealthy but a real split needs its own
+    // multi-week refactor (panel renderer, run controller, settings, skills,
+    // recent-projects, writeback orchestration are all interleaved here).
+    // Freeze at +112 lines headroom to catch unintended growth in CI.
+    path: 'extension/src/content/contentRuntime.js',
+    maxLines: 12200
+  },
+  {
+    // Writeback router: large but cohesive. Freeze with modest headroom.
+    path: 'extension/src/page/writebackRouter.js',
+    maxLines: 3200
+  },
+  {
+    path: 'extension/src/page/treeOperations.js',
+    maxLines: 1650
+  },
+  {
+    path: 'extension/src/shared/storageDb.js',
+    maxLines: 1350
   },
   {
     path: 'native-host/src/codexSessionRunner.js',

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { extractFunction } = require('./_helpers/extractFunction');
 
 const CONTENT_SCRIPT_PATH = path.join(__dirname, '../extension/src/content/contentRuntime.js');
 const CONTEXT_TRAY_PATH = path.join(__dirname, '../extension/src/content/contextTray.js');
@@ -10,28 +11,6 @@ function readFileIfExists(filePath) {
   return fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
 }
 
-function extractFunction(source, name) {
-  const markers = [`function ${name}(`, `async function ${name}(`];
-  const start = markers
-    .map(marker => source.indexOf(marker))
-    .filter(index => index !== -1)
-    .sort((a, b) => a - b)[0] ?? -1;
-  assert.notEqual(start, -1, `${name} should exist`);
-  const openBrace = source.indexOf('{', start);
-  assert.notEqual(openBrace, -1, `${name} should have a body`);
-  let depth = 0;
-  for (let index = openBrace; index < source.length; index++) {
-    if (source[index] === '{') {
-      depth++;
-    } else if (source[index] === '}') {
-      depth--;
-      if (depth === 0) {
-        return source.slice(start, index + 1);
-      }
-    }
-  }
-  assert.fail(`${name} body should close`);
-}
 
 function createMinimalDocument() {
   class Element {
