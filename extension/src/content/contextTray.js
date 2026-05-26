@@ -9,37 +9,39 @@
 
   const DEFAULT_CONTEXT_EXACT_FILE_LIST_ZIP_TIMEOUT_MS = 30000;
 
-  function createContextTrayController(deps = {}) {
-    const root = deps.root || (typeof window !== 'undefined' ? window : globalThis);
-    const document = deps.document || root.document || (typeof globalThis !== 'undefined' ? globalThis.document : null);
-    const getPanel = typeof deps.getPanel === 'function' ? deps.getPanel : () => null;
-    const getState = typeof deps.getState === 'function' ? deps.getState : () => null;
-    const setState = typeof deps.setState === 'function' ? deps.setState : () => {};
-    const saveState = typeof deps.saveState === 'function' ? deps.saveState : null;
-    const saveStateSoon = typeof deps.saveStateSoon === 'function' ? deps.saveStateSoon : () => {};
-    const updateActiveSession = typeof deps.updateActiveSession === 'function'
-      ? deps.updateActiveSession
-      : defaultUpdateActiveSession;
-    const callPageBridge = typeof deps.callPageBridge === 'function'
-      ? deps.callPageBridge
-      : () => Promise.resolve({ ok: false });
-    const getCurrentProjectId = typeof deps.getCurrentProjectId === 'function'
-      ? deps.getCurrentProjectId
-      : () => '';
-    const getLocationHref = typeof deps.getLocationHref === 'function'
-      ? deps.getLocationHref
-      : () => root.location?.href || '';
-    const tr = typeof deps.tr === 'function' ? deps.tr : (key) => key;
-    const closeModelConfigPopover = typeof deps.closeModelConfigPopover === 'function' ? deps.closeModelConfigPopover : () => {};
-    const closeDiagnosticsMenu = typeof deps.closeDiagnosticsMenu === 'function' ? deps.closeDiagnosticsMenu : () => {};
-    const closeCustomInstructionsSettings = typeof deps.closeCustomInstructionsSettings === 'function'
-      ? deps.closeCustomInstructionsSettings
-      : () => {};
-    const closeSlashMenu = typeof deps.closeSlashMenu === 'function' ? deps.closeSlashMenu : () => {};
-    const projectFiles = deps.projectFiles ||
-      root.CodexOverleafProjectFiles ||
-      (typeof window !== 'undefined' ? window.CodexOverleafProjectFiles : null);
-    const exactFileListZipTimeoutMs = Number(deps.exactFileListZipTimeoutMs) ||
+  // Destructuring defaults handle the "dep omitted" case. Production callers
+  // always pass real functions; tests that exercise partial wiring can rely
+  // on undefined-only defaults to reach the noop. Passing `null` or a non-
+  // function value is no longer silently coerced — that was an antipattern
+  // (the typeof guards used to hide a missing wire-up by swapping in a noop).
+  function createContextTrayController({
+    root = (typeof window !== 'undefined' ? window : globalThis),
+    document: documentDep = null,
+    getPanel = () => null,
+    getState = () => null,
+    setState = () => {},
+    saveState = null,
+    saveStateSoon = () => {},
+    updateActiveSession = defaultUpdateActiveSession,
+    callPageBridge = () => Promise.resolve({ ok: false }),
+    getCurrentProjectId = () => '',
+    getLocationHref: getLocationHrefDep,
+    tr = (key) => key,
+    closeModelConfigPopover = () => {},
+    closeDiagnosticsMenu = () => {},
+    closeCustomInstructionsSettings = () => {},
+    closeSlashMenu = () => {},
+    projectFiles: projectFilesDep,
+    exactFileListZipTimeoutMs: exactFileListZipTimeoutMsDep
+  } = {}) {
+    const document = documentDep
+      || root.document
+      || (typeof globalThis !== 'undefined' ? globalThis.document : null);
+    const getLocationHref = getLocationHrefDep || (() => root.location?.href || '');
+    const projectFiles = projectFilesDep
+      || root.CodexOverleafProjectFiles
+      || (typeof window !== 'undefined' ? window.CodexOverleafProjectFiles : null);
+    const exactFileListZipTimeoutMs = Number(exactFileListZipTimeoutMsDep) ||
       DEFAULT_CONTEXT_EXACT_FILE_LIST_ZIP_TIMEOUT_MS;
 
     let contextProject = null;

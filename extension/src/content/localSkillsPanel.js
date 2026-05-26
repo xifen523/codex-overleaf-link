@@ -7,45 +7,34 @@
 })(typeof window !== 'undefined' ? window : globalThis, function localSkillsPanelFactory() {
   'use strict';
 
-  function createLocalSkillsPanelController(deps = {}) {
-    const getPanel = typeof deps.getPanel === 'function' ? deps.getPanel : () => null;
-    const root = deps.root || (typeof window !== 'undefined' ? window : globalThis);
-    const document = deps.document || root.document || (typeof globalThis !== 'undefined' ? globalThis.document : null);
-    const getState = typeof deps.getState === 'function' ? deps.getState : () => null;
-    const setState = typeof deps.setState === 'function' ? deps.setState : () => {};
-    const saveState = typeof deps.saveState === 'function' ? deps.saveState : null;
-    const sendBackgroundNative = typeof deps.sendBackgroundNative === 'function'
-      ? deps.sendBackgroundNative
-      : () => Promise.resolve({ ok: false });
-    const getSkillLoadingSettings = typeof deps.getSkillLoadingSettings === 'function'
-      ? deps.getSkillLoadingSettings
-      : () => ({ loadCodexOverleafSkills: true });
-    const isCodexOverleafSkillEnabled = typeof deps.isCodexOverleafSkillEnabled === 'function'
-      ? deps.isCodexOverleafSkillEnabled
-      : () => true;
-    const setCodexOverleafSkillEnabled = typeof deps.setCodexOverleafSkillEnabled === 'function'
-      ? deps.setCodexOverleafSkillEnabled
-      : () => {};
-    const setProjectSettingsStatus = typeof deps.setProjectSettingsStatus === 'function'
-      ? deps.setProjectSettingsStatus
-      : () => {};
-    const tr = typeof deps.tr === 'function' ? deps.tr : key => key;
-    const tx = typeof deps.tx === 'function' ? deps.tx : (english) => english;
-    const getComposerSkillInvocation = typeof deps.getComposerSkillInvocation === 'function'
-      ? deps.getComposerSkillInvocation
-      : () => null;
-    const normalizeComposerSkillInvocation = typeof deps.normalizeComposerSkillInvocation === 'function'
-      ? deps.normalizeComposerSkillInvocation
-      : value => value;
-    const clearComposerSkillInvocation = typeof deps.clearComposerSkillInvocation === 'function'
-      ? deps.clearComposerSkillInvocation
-      : () => {};
-    const setSlashCodexOverleafSkills = typeof deps.setSlashCodexOverleafSkills === 'function'
-      ? deps.setSlashCodexOverleafSkills
-      : () => {};
-    const clearSlashCodexOverleafSkills = typeof deps.clearSlashCodexOverleafSkills === 'function'
-      ? deps.clearSlashCodexOverleafSkills
-      : () => {};
+  // Destructuring defaults handle the "dep omitted" case. Production callers
+  // pass real functions; tests that exercise partial wiring rely on the
+  // undefined-only defaults to land on the noop. Passing `null` or a non-
+  // function value is no longer silently coerced — that was an antipattern
+  // (the typeof guards used to hide a missing wire-up by swapping in a noop).
+  function createLocalSkillsPanelController({
+    root = (typeof window !== 'undefined' ? window : globalThis),
+    document: documentDep = null,
+    getPanel = () => null,
+    getState = () => null,
+    setState = () => {},
+    saveState = null,
+    sendBackgroundNative = () => Promise.resolve({ ok: false }),
+    getSkillLoadingSettings = () => ({ loadCodexOverleafSkills: true }),
+    isCodexOverleafSkillEnabled = () => true,
+    setCodexOverleafSkillEnabled = () => {},
+    setProjectSettingsStatus = () => {},
+    tr = (key) => key,
+    tx = (english) => english,
+    getComposerSkillInvocation = () => null,
+    normalizeComposerSkillInvocation = (value) => value,
+    clearComposerSkillInvocation = () => {},
+    setSlashCodexOverleafSkills = () => {},
+    clearSlashCodexOverleafSkills = () => {}
+  } = {}) {
+    const document = documentDep
+      || root.document
+      || (typeof globalThis !== 'undefined' ? globalThis.document : null);
 
     async function refreshLocalSkills() {
       showSkillListLoading();
