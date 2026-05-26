@@ -5180,3 +5180,50 @@ test('runCodexTask catch passes codexReturned signal to translateRawError', () =
   assert.match(src, /translateRawError\(error\.message,\s*\{[^}]*codexReturned[^}]*\}\)/,
     'translateRawError call must include codexReturned in the context object');
 });
+
+// ---------------------------------------------------------------------------
+// applyOperations page-bridge timeout must accommodate the realistic page-
+// side worst case. writebackRouter's openFileByPath can wait 5s for DOM-
+// click activation (treeOperations.js:230) AND retry through 4 manager
+// methods × ~5s each, plus waitForActiveEditorText, plus save-state
+// verification. The pre-fix default of 8000ms timed out mid-flight and
+// left a zombie write running on the page side. Verify the carve-out.
+// ---------------------------------------------------------------------------
+
+test('getPageBridgeTimeoutMs gives applyOperations 30s to accommodate the slow openFile path', () => {
+  const src = getContentScriptSource();
+  const body = extractFromContentScript('getPageBridgeTimeoutMs');
+  assert.match(body, /method === 'applyOperations'/,
+    'applyOperations must have a dedicated branch (not the 8000 default)');
+  // The carve-out branch must return at least 30000.
+  const applyMatch = body.match(/method === 'applyOperations'[\s\S]*?return\s+(\d+)/);
+  assert.ok(applyMatch, 'applyOperations branch must return a numeric timeout');
+  assert.ok(Number(applyMatch[1]) >= 30000,
+    `applyOperations timeout must be >= 30000ms, got ${applyMatch[1]}`);
+});
+
+// ---------------------------------------------------------------------------
+// saveState in-flight serialization. saveStateSoon used to start a fresh
+// saveState() each time the debounce fired; if a debounce timer was cleared
+// while a previous saveState() was still writing async, the older
+// snapshot's writes could end up landing AFTER newer state mutations.
+// The fix tracks an in-flight flag and queues at most one trailing run.
+// ---------------------------------------------------------------------------
+
+test('saveStateSoon serializes against an in-flight saveState (no parallel writers)', () => {
+  const src = getContentScriptSource();
+  // The two state flags must exist.
+  assert.match(src, /let saveStateInFlight\s*=\s*false/, 'saveStateInFlight flag must be declared');
+  assert.match(src, /let saveStateRunAfterFlight\s*=\s*false/, 'trailing-run flag must be declared');
+  // saveStateSoon must short-circuit when a save is in flight, setting the
+  // trailing flag instead of starting a parallel save.
+  const body = extractFromContentScript('saveStateSoon');
+  assert.match(body, /if \(saveStateInFlight\)/, 'saveStateSoon must check the in-flight flag');
+  assert.match(body, /saveStateRunAfterFlight\s*=\s*true/, 'saveStateSoon must set the trailing flag instead of starting a parallel save');
+  // runQueuedSaveState must flip the flag, await saveState, and re-trigger
+  // when the trailing flag was set during the in-flight phase.
+  const runner = extractFromContentScript('runQueuedSaveState');
+  assert.match(runner, /saveStateInFlight\s*=\s*true/, 'runQueuedSaveState must mark in-flight');
+  assert.match(runner, /\.finally\(/, 'runQueuedSaveState must clear in-flight in finally');
+  assert.match(runner, /if \(saveStateRunAfterFlight\)/, 'runQueuedSaveState must re-trigger when the trailing flag fired');
+});

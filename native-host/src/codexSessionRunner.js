@@ -677,8 +677,22 @@ function runCodexAppServerSession(input) {
     const assistantMessages = new Map();
     const assistantMessageOrder = [];
     let settled = false;
+    // Two-layer timeout strategy:
+    //   1. Optional absolute deadline (CODEX_OVERLEAF_CODEX_TIMEOUT_MS) —
+    //      legacy override; off by default. When set, the whole run must
+    //      finish within that envelope.
+    //   2. Idle watchdog — fires after a stretch of silence from the
+    //      app-server (no stdout / no messages). Default 10 minutes; the
+    //      runtime resets it on every incoming line and on every outgoing
+    //      request. This catches the failure mode where Codex sends
+    //      turn/started, then hangs without ever emitting completed/error
+    //      and the project lock would otherwise be held forever.
     const timeout = createOptionalTimeout(childEnv.CODEX_OVERLEAF_CODEX_TIMEOUT_MS, timeoutMs => {
       fail(new Error(`Codex app-server did not complete within configured timeout (${timeoutMs}ms)`));
+    });
+    const idleTimeoutMs = parseOptionalPositiveInteger(childEnv.CODEX_OVERLEAF_CODEX_IDLE_TIMEOUT_MS) || 600000;
+    const idleWatchdog = createCodexIdleWatchdog(idleTimeoutMs, ms => {
+      fail(new Error(`Codex app-server produced no events for ${ms}ms (idle watchdog); the run was aborted to release the project lock.`));
     });
     const onAbort = () => {
       fail(getAbortReason(input.signal));
@@ -688,6 +702,7 @@ function runCodexAppServerSession(input) {
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', chunk => {
+      idleWatchdog.reset();
       stdoutBuffer += chunk;
       const lines = stdoutBuffer.split(/\r?\n/);
       stdoutBuffer = lines.pop() || '';
@@ -924,6 +939,7 @@ function runCodexAppServerSession(input) {
 
     function cleanup() {
       timeout.cancel();
+      idleWatchdog.cancel();
       input.signal?.removeEventListener('abort', onAbort);
     }
   });
@@ -1135,6 +1151,30 @@ function createOptionalTimeout(value, onTimeout) {
   }
   const timer = setTimeout(() => onTimeout(timeoutMs), timeoutMs);
   return {
+    cancel() {
+      clearTimeout(timer);
+    }
+  };
+}
+
+// Idle-style watchdog: fires only after the app-server has been silent for
+// `idleMs`. Callers must invoke .reset() on every signal of liveness
+// (incoming line, outgoing request). cancel() stops the timer on settle.
+// Returns no-op when idleMs is non-positive (defensive guard against bad env
+// var values).
+function createCodexIdleWatchdog(idleMs, onIdle) {
+  if (!(idleMs > 0)) {
+    return {
+      reset() {},
+      cancel() {}
+    };
+  }
+  let timer = setTimeout(() => onIdle(idleMs), idleMs);
+  return {
+    reset() {
+      clearTimeout(timer);
+      timer = setTimeout(() => onIdle(idleMs), idleMs);
+    },
     cancel() {
       clearTimeout(timer);
     }

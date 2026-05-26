@@ -161,7 +161,10 @@ test('panel persistence uses hybrid IndexedDB storage with legacy fallback', () 
 
   assert.match(contentScript, /prepareStateForStorage/);
   assert.match(contentScript, /chrome\.storage\.local\.set\(\{ \[storageKey\]: prepareStateForStorage\(state\) \}\)/);
-  assert.match(contentScript, /saveState\(\)\.catch/);
+  // saveState() is wrapped in a .catch/.finally chain inside runQueuedSaveState
+  // (the in-flight serialization fix). The chain may be single-line or split
+  // across lines; either form is acceptable.
+  assert.match(contentScript, /saveState\(\)\s*\.catch/);
   // Hybrid approach: prefs via Migration, sessions via StorageDb
   assert.match(contentScript, /Migration\.savePrefs\(prefs\)/);
   assert.match(contentScript, /StorageDb\.putRecords\('sessions', sessionRecords\)/);

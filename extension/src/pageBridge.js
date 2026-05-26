@@ -174,9 +174,24 @@
       return createCheckpoint(params.label);
     }
     if (method === 'ensureReviewing') {
+      // Gate the Reviewing-mode toggle with the same writeGuard the per-write
+      // path uses. Without this, a mid-flight SPA navigation could leave the
+      // pre-flight toggle flipping Track Changes in a different Overleaf
+      // project than the run was bound to. params.runProjectId is set by
+      // the content-side caller (preflightWriteSafety / ensureReviewingBeforeWrite);
+      // when absent (defensive), the guard short-circuits via its own
+      // missing-runProjectId branch.
+      if (typeof params?.runProjectId === 'string' && params.runProjectId) {
+        const blocked = await writeGuard.runWriteGuard(params);
+        if (blocked) return blocked;
+      }
       return ensureReviewing(params);
     }
     if (method === 'ensureEditing') {
+      if (typeof params?.runProjectId === 'string' && params.runProjectId) {
+        const blocked = await writeGuard.runWriteGuard(params);
+        if (blocked) return blocked;
+      }
       return ensureEditing(params);
     }
     if (method === 'applyOperations') {

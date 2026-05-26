@@ -435,8 +435,40 @@
     const safeBaseFiles = normalizeBaseFilesForSafety(options.baseFiles);
     const baseFileLookup = window.CodexOverleafStaleGuard?.buildBaseFileLookup(safeBaseFiles);
     const baseBinaryFileLookup = buildBaseBinaryFileLookup(safeBaseFiles);
+    // Mid-run project-change guard. The pageBridge wrapper already ran the
+    // writeGuard once at entry, but each per-op step here can take 0.5-5s
+    // (openFileByPath, waitForActiveEditorText, save-state verification),
+    // so a multi-op write can span 10-30 seconds total. If the user SPA-
+    // navigates to a different project mid-flight, the remaining operations
+    // would land in the wrong project. Re-check the editor project before
+    // each op and short-circuit the rest of the queue when it diverges.
+    const runProjectId = typeof options.runProjectId === 'string' ? options.runProjectId : '';
+    const writeGuardSurface = window.CodexOverleafWriteGuard?.create({
+      window,
+      document: window.document,
+      treeOperations
+    });
 
     for (const rawOperation of operations) {
+      // Per-op re-check: if a runProjectId was supplied and the page-side
+      // guard is available, verify the editor still shows the same project
+      // before committing the next write. Mismatch → push aborted_project_changed
+      // for THIS op and every remaining op in the queue, then return.
+      if (runProjectId && writeGuardSurface) {
+        const guardBlock = await writeGuardSurface.runWriteGuard({ runProjectId });
+        if (guardBlock) {
+          // First push the guard's structured skip for the current op so the
+          // caller can attribute the abort to a real operation path, then
+          // pad the remaining ops with the same failure shape.
+          const guardFailure = guardBlock.skipped[0].result;
+          skipped.push({ operation: normalizeOperationPaths(rawOperation), result: guardFailure });
+          const remaining = operations.slice(operations.indexOf(rawOperation) + 1);
+          for (const tailOperation of remaining) {
+            skipped.push({ operation: normalizeOperationPaths(tailOperation), result: guardFailure });
+          }
+          break;
+        }
+      }
       const operation = normalizeOperationPaths(rawOperation);
       const pathSafety = validateOperationProjectPaths(operation);
       if (!pathSafety.ok) {

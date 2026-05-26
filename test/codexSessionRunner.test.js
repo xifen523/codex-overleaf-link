@@ -243,6 +243,78 @@ test('codex app-server transient reconnect notification does not fail the turn',
   }
 });
 
+test('idle watchdog aborts a Codex app-server that hangs after turn/started without further events', async () => {
+  // Regression for the P1 #8 lock-stuck-forever case: pre-fix, a Codex
+  // app-server that sent turn/started but never sent completed/error/exit
+  // would leave the runner waiting indefinitely and the project lock held
+  // forever. The idle watchdog (default 10 min, env-tunable) catches this.
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-idle-'));
+  try {
+    const fakeCodex = writeFakeCodexHangAfterTurnStarted(tempDir);
+
+    const error = await runCodexAppServerSession({
+      task: 'test',
+      env: {
+        CODEX_OVERLEAF_ENV_READY: '1',
+        CODEX_OVERLEAF_CODEX_PATH: fakeCodex,
+        CODEX_OVERLEAF_CODEX_IDLE_TIMEOUT_MS: '300',  // short for the test
+        PATH: process.env.PATH
+      },
+      emit: () => {}
+    }).then(
+      () => null,
+      err => err
+    );
+
+    assert.ok(error, 'idle watchdog must reject the session');
+    assert.match(error.message, /idle watchdog/i,
+      'rejection must cite the idle watchdog so callers / users can distinguish from real Codex errors');
+    assert.match(error.message, /no events for \d+ms/,
+      'rejection should report the idle window so logs explain the abort');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+function writeFakeCodexHangAfterTurnStarted(tempDir) {
+  const scriptPath = path.join(tempDir, 'fake-codex-hang.js');
+  fs.writeFileSync(scriptPath, [
+    "const readline = require('node:readline');",
+    "const rl = readline.createInterface({ input: process.stdin });",
+    "function send(message) { process.stdout.write(`${JSON.stringify(message)}\\n`); }",
+    "rl.on('line', line => {",
+    "  const message = JSON.parse(line);",
+    "  if (message.id && message.method === 'initialize') { send({ id: message.id, result: {} }); return; }",
+    "  if (message.method === 'initialized') return;",
+    "  if (message.id && message.method === 'thread/start') { send({ id: message.id, result: { thread: { id: 'thread-1' } } }); return; }",
+    "  if (message.id && message.method === 'turn/start') {",
+    "    send({ id: message.id, result: { turn: { id: 'turn-1' } } });",
+    "    send({ method: 'turn/started', params: { turn: { id: 'turn-1' } } });",
+    "    // No further messages. Just hang forever waiting for stdin.",
+    "  }",
+    "});",
+    "process.on('SIGTERM', () => process.exit(0));",
+    ''
+  ].join('\n'), 'utf8');
+  if (process.platform === 'win32') {
+    const commandPath = path.join(tempDir, 'codex.cmd');
+    fs.writeFileSync(commandPath, [
+      '@echo off',
+      `"${process.execPath}" "${scriptPath}" %*`,
+      ''
+    ].join('\r\n'), 'utf8');
+    return commandPath;
+  }
+  const commandPath = path.join(tempDir, 'codex');
+  fs.writeFileSync(commandPath, [
+    '#!/usr/bin/env node',
+    `require(${JSON.stringify(scriptPath)});`,
+    ''
+  ].join('\n'), 'utf8');
+  fs.chmodSync(commandPath, 0o755);
+  return commandPath;
+}
+
 function writeFakeCodexExit(tempDir, code) {
   const scriptPath = path.join(tempDir, 'fake-codex.js');
   fs.writeFileSync(scriptPath, `process.exit(${code});\n`, 'utf8');

@@ -2520,6 +2520,27 @@ test('page-bridge applyOperations waits out the Overleaf hydration window (edito
   assert.equal(bridge.getFile('main.tex'), 'omega beta gamma');
 });
 
+test('applyOperationsCore re-checks editor project before each operation in a multi-op write', () => {
+  // Source-grep regression: a multi-op applyOperations call can span 10-30s
+  // (openFileByPath + save-state verification per op). If the user SPA-
+  // navigates to a different project mid-flight, the remaining operations
+  // would land in the wrong project. The fix re-checks runWriteGuard before
+  // each op and short-circuits with aborted_project_changed for the rest of
+  // the queue. The integration test path (mutating _ide.project._id between
+  // op 1 and op 2) needs harness changes; this source-grep belts the
+  // structural guarantee.
+  const writebackRouterSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'page', 'writebackRouter.js'), 'utf8');
+  // The core loop must read options.runProjectId.
+  assert.match(writebackRouterSrc, /function applyOperationsCore[\s\S]*?options\.runProjectId/,
+    'applyOperationsCore must read options.runProjectId');
+  // It must consult CodexOverleafWriteGuard for the per-op re-check.
+  assert.match(writebackRouterSrc, /function applyOperationsCore[\s\S]*?CodexOverleafWriteGuard\?\.create/,
+    'applyOperationsCore must create a writeGuard surface for the per-op re-check');
+  // And it must await writeGuard.runWriteGuard inside the for-of loop.
+  assert.match(writebackRouterSrc, /function applyOperationsCore[\s\S]*?for \(const rawOperation of operations\)[\s\S]*?await writeGuardSurface\.runWriteGuard/,
+    'applyOperationsCore must await writeGuard.runWriteGuard inside the per-op loop');
+});
+
 test('writeGuard module is async with hydration retry constants and the router awaits it', () => {
   // Source-grep belt-and-suspenders so removing the retry loop fails this
   // test even if a future change keeps the function async. The guard surface
@@ -2535,6 +2556,57 @@ test('writeGuard module is async with hydration retry constants and the router a
   const pageBridgeSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'pageBridge.js'), 'utf8');
   assert.match(pageBridgeSrc, /const blocked\s*=\s*await writeGuard\.runWriteGuard/,
     'router call sites must await writeGuard.runWriteGuard');
+});
+
+test('page-bridge ensureReviewing aborts with aborted_project_changed when runProjectId mismatches editorProjectId', async () => {
+  // The pre-flight reviewing-mode toggle is gated by the same writeGuard the
+  // writeback path uses. Without this gate, a mid-flight SPA navigation could
+  // leave the toggle flipping Track Changes / Editing in the wrong project.
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorProjectId: 'editorPID',
+    files: { 'main.tex': 'alpha' }
+  });
+
+  const result = await bridge.call('ensureReviewing', {
+    waitMs: 100,
+    runProjectId: 'differentPID'
+  });
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.skipped[0].result.failure.code, 'aborted_project_changed');
+  assert.equal(result.skipped[0].result.failure.stage, 'write');
+});
+
+test('page-bridge ensureEditing aborts with aborted_project_changed when runProjectId mismatches editorProjectId', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorProjectId: 'editorPID',
+    files: { 'main.tex': 'alpha' }
+  });
+
+  const result = await bridge.call('ensureEditing', {
+    waitMs: 100,
+    runProjectId: 'differentPID'
+  });
+
+  assert.equal(result.ok, false, JSON.stringify(result));
+  assert.equal(result.skipped[0].result.failure.code, 'aborted_project_changed');
+});
+
+test('page-bridge ensureReviewing passes through when no runProjectId is supplied (defensive)', async () => {
+  // Defensive: legacy callers that did not thread runProjectId through must
+  // continue to work. The guard only fires when params.runProjectId is set,
+  // so an absent value lets the toggle proceed (matching the pre-fix behaviour
+  // for backwards compatibility).
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorProjectId: 'editorPID',
+    files: { 'main.tex': 'alpha' }
+  });
+
+  const result = await bridge.call('ensureReviewing', { waitMs: 100 });
+  assert.equal(result.ok, true, JSON.stringify(result));
 });
 
 test('page-bridge acceptTrackedChanges runs the same guard', async () => {

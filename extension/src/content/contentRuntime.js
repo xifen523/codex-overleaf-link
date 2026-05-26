@@ -201,6 +201,15 @@
   let storageKey = LEGACY_STORAGE_KEY;
   let currentRunView = null;
   let saveStateTimer = null;
+  // Two-phase saveState scheduling. `saveStateInFlight` flips to true while
+  // an async saveState() is actually writing; `saveStateRunAfterFlight` is
+  // set when a fresh saveStateSoon() fires during the in-flight phase. When
+  // the in-flight save finishes, the trailing flag triggers ONE more save
+  // so the final disk snapshot reflects the latest state. Without this,
+  // a debounce timer cleared mid-write would let an older snapshot
+  // (captured at the start of the in-flight save) be the last writer.
+  let saveStateInFlight = false;
+  let saveStateRunAfterFlight = false;
   let streamRenderTimer = null;
   let pendingStreamRenderEvents = new Map();
   let storageNoticeKeys = new Set();
@@ -2680,7 +2689,15 @@
 
     let result = null;
     try {
-      result = await callPageBridge(method, { waitMs: 1800 });
+      // Thread runProjectId through so the page-bridge dispatcher applies the
+      // writeGuard. Without it, a mid-flight SPA navigation could leave the
+      // pre-flight ensureReviewing/Editing toggle landing in the wrong
+      // project — Track Changes flipped on/off in a project the user did
+      // not intend to write to.
+      result = await callPageBridge(method, {
+        waitMs: 1800,
+        runProjectId: currentRunView?.runProjectId || ''
+      });
     } catch (error) {
       result = {
         ok: false,
@@ -6475,7 +6492,13 @@
         : tx('Verifying Overleaf Editing mode before writing.', '正在确认 Overleaf 已切到 Editing 模式。'),
       status: 'running'
     });
-    const result = await callPageBridge(method, { waitMs: 1800 });
+    // Thread runProjectId so the page-side dispatcher gates the toggle. Same
+    // intent as the pre-flight check above: do not flip Track Changes /
+    // Editing in a different project than the run is bound to.
+    const result = await callPageBridge(method, {
+      waitMs: 1800,
+      runProjectId: currentRunView?.runProjectId || ''
+    });
     if (result?.ok) {
       appendRunEvent({
         title: requireReviewing
@@ -7530,6 +7553,18 @@
     if (method === 'rejectTrackedChanges' || method === 'acceptTrackedChanges') {
       return 120000;
     }
+    if (method === 'applyOperations') {
+      // Each per-op step inside writebackRouter.applyOperationsCore can wait
+      // up to 5s for openFileByPath (treeOperations.js:230, :259) plus up to
+      // 5s for waitForActiveEditorText plus reviewing/save-state polling.
+      // A multi-op write on a freshly-loaded Overleaf editor can run 15-30s
+      // in the wild. The pre-fix default of 8000ms timed out mid-write and
+      // left the page-side promise running uncontrolled — a 'zombie' write
+      // could still land after the content-side reported failure. 30s is a
+      // sane upper bound that covers the realistic slow path without
+      // letting a genuinely hung dispatch tie up the UI indefinitely.
+      return 30000;
+    }
     return 8000;
   }
 
@@ -7864,12 +7899,31 @@
   }
 
   function saveStateSoon(delayMs = 120) {
+    // If a saveState() is already in flight, do NOT start a parallel one.
+    // Mark the trailing flag so the in-flight save's completion callback
+    // schedules another one — that way the final disk snapshot reflects
+    // the latest state. Without this, a saveStateSoon() during an in-flight
+    // save would either (a) start a parallel save whose stale snapshot
+    // could overwrite the in-flight save's terminal data, or (b) be lost
+    // because the debounce timer was cleared by another caller.
+    if (saveStateInFlight) {
+      saveStateRunAfterFlight = true;
+      return;
+    }
     if (saveStateTimer) {
       clearTimeout(saveStateTimer);
     }
     saveStateTimer = setTimeout(() => {
       saveStateTimer = null;
-      saveState().catch(error => {
+      runQueuedSaveState();
+    }, delayMs);
+  }
+
+  function runQueuedSaveState() {
+    saveStateInFlight = true;
+    saveStateRunAfterFlight = false;
+    saveState()
+      .catch(error => {
         if (isStorageQuotaError(error)) {
           // Structured FailureReason §9.8: timer-driven saveState raised a
           // quota error. saveState's own catch path already covers the
@@ -7878,8 +7932,16 @@
           emitStorageQuotaFailure(error, null);
         }
         appendPlainLog(tx(`Failed to save session state: ${formatStateSaveError(error)}`, `保存会话状态失败：${formatStateSaveError(error)}`));
+      })
+      .finally(() => {
+        saveStateInFlight = false;
+        if (saveStateRunAfterFlight) {
+          // A saveStateSoon() landed during the in-flight phase. Flush it
+          // now so the final disk snapshot reflects the latest state.
+          saveStateRunAfterFlight = false;
+          saveStateSoon(0);
+        }
       });
-    }, delayMs);
   }
 
   function scheduleRunStateSave(kind) {
@@ -10499,8 +10561,20 @@
     applyAcceptSettlement(runId, result);
   }
 
+  // Fail-closed when the run record carries no runProjectId of its own.
+  //
+  // Older persisted runs (pre-v1.3.8) and restored-from-history runs may have
+  // an empty runProjectId. Returning the editor's current projectId as a
+  // fallback would let the page-side write-guard pass when the user happens
+  // to be in the project they originally ran the task on — but the run
+  // itself has NO authoritative binding, so we can't actually prove it.
+  // Returning '' triggers the runProjectId-missing branch of writeGuard /
+  // checkWritebackRunProjectId, which surfaces editor_project_id_unavailable
+  // with the canonical 'Refresh Overleaf and retry' next-step text.
   function getRunProjectIdForWriteback(run) {
-    return run?.runProjectId || getCurrentProjectId() || activeProjectId || '';
+    return typeof run?.runProjectId === 'string' && run.runProjectId
+      ? run.runProjectId
+      : '';
   }
 
   // Post-accept proof step (§9.6). Called only on lifecycle accept paths
