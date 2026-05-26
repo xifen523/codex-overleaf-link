@@ -9,24 +9,18 @@
 
   const TEXT_PATH_EXTENSION_PATTERN = '(?:tex|bib|sty|cls|bst|bbx|cbx|lbx|cfg|def|clo|ist|txt|md|latex)';
 
-  function create(deps = {}) {
-    const window = deps.window || (typeof globalThis !== 'undefined' ? globalThis : {});
-    const document = deps.document || window.document || {};
-    const normalizeSafeProjectPath = typeof deps.normalizePath === 'function'
-      ? deps.normalizePath
-      : fallbackNormalizeSafeProjectPath;
-    const readActiveEditorText = typeof deps.readActiveEditorText === 'function'
-      ? deps.readActiveEditorText
-      : () => '';
-    const getActiveEditorIdentity = typeof deps.getActiveEditorIdentity === 'function'
-      ? deps.getActiveEditorIdentity
-      : () => null;
-    const activeEditorIdentityChanged = typeof deps.activeEditorIdentityChanged === 'function'
-      ? deps.activeEditorIdentityChanged
-      : () => false;
-    const readActiveFilePathFromEditorStore = typeof deps.getActiveFilePathFromEditorStore === 'function'
-      ? deps.getActiveFilePathFromEditorStore
-      : () => '';
+  function create({
+    window: windowDep,
+    document: documentDep,
+    normalizePath = fallbackNormalizeSafeProjectPath,
+    readActiveEditorText = () => '',
+    getActiveEditorIdentity = () => null,
+    activeEditorIdentityChanged = () => false,
+    getActiveFilePathFromEditorStore: readActiveFilePathFromEditorStore = () => ''
+  } = {}) {
+    const window = windowDep || (typeof globalThis !== 'undefined' ? globalThis : {});
+    const document = documentDep || window.document || {};
+    const normalizeSafeProjectPath = normalizePath;
     const NodeCtor = window.Node || (typeof Node !== 'undefined' ? Node : null);
     const EventTargetCtor = window.EventTarget || (typeof EventTarget !== 'undefined' ? EventTarget : null);
     let internalDocPathByIdCache = null;

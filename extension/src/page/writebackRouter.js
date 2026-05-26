@@ -12,22 +12,18 @@
     const treeOperations = deps.treeOperations || {};
     const compileBridge = deps.compileBridge || { markSourceEdited() {} };
     const projectSnapshotBridge = deps.projectSnapshotBridge || {};
-    const normalizeSafeProjectPath = typeof deps.normalizeSafeProjectPath === 'function'
-      ? deps.normalizeSafeProjectPath
-      : fallbackNormalizeSafeProjectPath;
+    const normalizeSafeProjectPath = deps.normalizeSafeProjectPath || fallbackNormalizeSafeProjectPath;
     const writebackOpenSettleMs = Number.isFinite(Number(deps.writebackOpenSettleMs))
       ? Math.max(0, Number(deps.writebackOpenSettleMs))
       : 1200;
     const diagnosticsRevision = String(deps.diagnosticsRevision || '');
 
     function invalidProjectPathResult(label = 'path') {
-      return typeof deps.invalidProjectPathResult === 'function'
-        ? deps.invalidProjectPathResult(label)
-        : {
-          ok: false,
-          code: 'invalid_project_path',
-          reason: 'Invalid ' + label + '.'
-        };
+      return deps.invalidProjectPathResult?.(label) || {
+        ok: false,
+        code: 'invalid_project_path',
+        reason: 'Invalid ' + label + '.'
+      };
     }
 
     function ensureReviewing(params = {}) {
@@ -74,13 +70,14 @@
     }
 
     function getActiveEditorIdentity() {
-      return typeof deps.getActiveEditorIdentity === 'function'
-        ? deps.getActiveEditorIdentity()
-        : null;
+      return deps.getActiveEditorIdentity?.() ?? null;
     }
 
     function activeEditorIdentityChanged(previous) {
-      return typeof deps.activeEditorIdentityChanged === 'function'
+      // When no detector is wired (test/early-init), assume identity changed
+      // so callers re-run their per-op editor checks rather than silently
+      // reusing stale state.
+      return deps.activeEditorIdentityChanged
         ? deps.activeEditorIdentityChanged(previous)
         : true;
     }
@@ -112,7 +109,7 @@
     }
 
     function waitForActiveEditorText(filePath, timeoutMs, options = {}) {
-      if (typeof treeOperations.waitForActiveEditorText === 'function') {
+      if (treeOperations.waitForActiveEditorText) {
         return treeOperations.waitForActiveEditorText(filePath, timeoutMs, options);
       }
       return Promise.resolve({
@@ -123,7 +120,7 @@
     }
 
     function contentSignature(content) {
-      if (typeof treeOperations.contentSignature === 'function') {
+      if (treeOperations.contentSignature) {
         return treeOperations.contentSignature(content);
       }
       const text = String(content ?? '');
@@ -174,11 +171,11 @@
     }
 
     function clickNode(node) {
-      if (typeof deps.clickNode === 'function') {
+      if (deps.clickNode) {
         deps.clickNode(node);
         return;
       }
-      if (typeof node?.click === 'function') {
+      if (node?.click) {
         node.click();
         return;
       }
@@ -186,14 +183,14 @@
     }
 
     function delay(ms) {
-      if (typeof deps.delay === 'function') {
+      if (deps.delay) {
         return deps.delay(ms);
       }
       return new Promise(resolve => window.setTimeout(resolve, ms));
     }
 
     function compact(value, limit) {
-      if (typeof deps.compact === 'function') {
+      if (deps.compact) {
         return deps.compact(value, limit);
       }
       const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -309,7 +306,7 @@
     }
 
     function normalizeTextPatches(patches, length) {
-      if (typeof deps.normalizeTextPatches === 'function') {
+      if (deps.normalizeTextPatches) {
         return deps.normalizeTextPatches(patches, length);
       }
       const normalized = [];
@@ -2989,7 +2986,7 @@
     }
 
     for (const scope of scopes) {
-      const candidates = typeof scope.querySelectorAll === 'function'
+      const candidates = scope.querySelectorAll
         ? Array.from(scope.querySelectorAll('button,[role="button"],[aria-label],[title]'))
         : [];
       const reject = candidates.find(isRejectTrackedChangeControl);
@@ -3091,7 +3088,7 @@
     }
 
     async function verifySaveState(paths = [], timeoutMs = 5000) {
-      const result = typeof deps.waitForSaveState === 'function'
+      const result = deps.waitForSaveState
         ? await deps.waitForSaveState({ deadlineMs: timeoutMs })
         : { ok: false, state: 'unavailable' };
       const verified = result.ok === true && result.state === 'verified_saved';
