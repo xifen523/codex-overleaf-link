@@ -502,40 +502,53 @@
   function translateRawError(message, context = {}) {
     const locale = normalizeLocale(context);
     const text = String(message || '');
+    // Each branch returns the user-visible {conclusion, nextStep} pair and,
+    // when the error maps to a structured FailureReason code in the v1.3.8
+    // catalog, the `failureCode`. Callers that emit a content-side failure
+    // event can attach the catalog code so the run record carries structured
+    // failure data alongside the human-readable text. The string text is kept
+    // verbatim because it has mode-aware nuance (e.g. "No files were written"
+    // vs "This run did not start") the catalog's fallback strings don't capture.
     if (/Mode must be "confirm" or "auto"/i.test(text)) {
       return {
         conclusion: textFor(locale, '这轮没有写入：当前是“只问不改”，但这个任务需要写入权限。', 'No files were written: this task needs write access, but the current mode is Ask.'),
-        nextStep: textFor(locale, '请切换到“建议修改”或“自动写入”后重新运行。', 'Switch to Suggest or Auto and run the task again.')
+        nextStep: textFor(locale, '请切换到“建议修改”或“自动写入”后重新运行。', 'Switch to Suggest or Auto and run the task again.'),
+        failureCode: null  // no direct catalog match — preflight / governance
       };
     }
     if (/Agent returned invalid JSON/i.test(text)) {
       return {
         conclusion: textFor(locale, '这轮没有写入：Codex 已结束，但本地桥接器没有读到可用结果。', 'No files were written: Codex finished, but the local bridge did not receive a usable result.'),
-        nextStep: textFor(locale, '请重新运行一次；如果再次失败，请打开技术详情查看本地 Codex 输出。', 'Run it again. If it fails again, open Technical Details to inspect local Codex output.')
+        nextStep: textFor(locale, '请重新运行一次；如果再次失败，请打开技术详情查看本地 Codex 输出。', 'Run it again. If it fails again, open Technical Details to inspect local Codex output.'),
+        failureCode: 'codex_result_parse_failed'
       };
     }
     if (/Could not parse Codex output/i.test(text)) {
       return {
         conclusion: textFor(locale, '这轮没有写入：Codex 返回的结果格式不完整。', 'No files were written: Codex returned an incomplete result format.'),
-        nextStep: textFor(locale, '请重新运行一次；如果再次失败，请打开技术详情查看原始输出。', 'Run it again. If it fails again, open Technical Details to inspect the raw output.')
+        nextStep: textFor(locale, '请重新运行一次；如果再次失败，请打开技术详情查看原始输出。', 'Run it again. If it fails again, open Technical Details to inspect the raw output.'),
+        failureCode: 'codex_result_parse_failed'
       };
     }
     if (/timed out/i.test(text)) {
       return {
         conclusion: textFor(locale, '这轮没有写入：本地 Codex 长时间没有完成。', 'No files were written: local Codex took too long to finish.'),
-        nextStep: textFor(locale, '请检查本机 Codex 是否仍在运行；如果没有进展，可以中断后缩小 @context 再重试。', 'Check whether local Codex is still running. If there is no progress, cancel and retry with smaller @context.')
+        nextStep: textFor(locale, '请检查本机 Codex 是否仍在运行；如果没有进展，可以中断后缩小 @context 再重试。', 'Check whether local Codex is still running. If there is no progress, cancel and retry with smaller @context.'),
+        failureCode: 'codex_timeout'
       };
     }
     if (/output limit exceeded/i.test(text)) {
       return {
         conclusion: textFor(locale, '这轮没有写入：本地 Codex 输出过长，桥接器停止读取。', 'No files were written: local Codex output was too large, so the bridge stopped reading.'),
-        nextStep: textFor(locale, '请缩小 @context 后重试，或在技术详情中查看输出限制。', 'Retry with smaller @context, or open Technical Details to inspect the output limit.')
+        nextStep: textFor(locale, '请缩小 @context 后重试，或在技术详情中查看输出限制。', 'Retry with smaller @context, or open Technical Details to inspect the output limit.'),
+        failureCode: 'codex_output_limit'
       };
     }
     if (/codex_not_found|Codex CLI was not found|ENOENT/i.test(text)) {
       return {
         conclusion: textFor(locale, '这轮没有启动：本机没有找到 Codex CLI。', 'This run did not start: Codex CLI was not found locally.'),
-        nextStep: textFor(locale, '请确认终端里可以运行 `codex`，然后重新安装 native host 或刷新扩展后重试。', 'Confirm `codex` works in Terminal, then reinstall the native host or reload the extension.')
+        nextStep: textFor(locale, '请确认终端里可以运行 `codex`，然后重新安装 native host 或刷新扩展后重试。', 'Confirm `codex` works in Terminal, then reinstall the native host or reload the extension.'),
+        failureCode: 'codex_not_found'
       };
     }
     if (/project_locked|currently in use by codex\.run/i.test(text)) {
@@ -545,31 +558,36 @@
           'This run did not start: another Codex task is already running for this Overleaf project.'),
         nextStep: textFor(locale,
           '请等待当前任务完成，或先取消当前任务后再重试。',
-          'Wait for the current task to finish, or cancel it before retrying.')
+          'Wait for the current task to finish, or cancel it before retrying.'),
+        failureCode: 'codex_project_locked'
       };
     }
     if (/unsupported[_ ]parameter/i.test(text) && /reasoning\.summary|summary/i.test(text)) {
       return {
         conclusion: textFor(locale, '这轮没有继续：当前 Codex 模型不支持插件请求的推理摘要参数。', 'This run did not continue: the selected Codex model does not support the requested reasoning summary parameter.'),
-        nextStep: textFor(locale, '请刷新扩展并重新运行；插件会按模型能力自动去掉不兼容参数。', 'Reload the extension and run again; the plugin will omit incompatible parameters based on model capability.')
+        nextStep: textFor(locale, '请刷新扩展并重新运行；插件会按模型能力自动去掉不兼容参数。', 'Reload the extension and run again; the plugin will omit incompatible parameters based on model capability.'),
+        failureCode: 'native_protocol_incompatible'
       };
     }
     if (/quota|kQuotaBytes|QUOTA_BYTES/i.test(text)) {
       return {
         conclusion: textFor(locale, 'Codex 结果已经生成，但本地会话记录超出 Chrome 存储配额。', 'Codex produced a result, but local session history exceeded Chrome storage quota.'),
-        nextStep: textFor(locale, '请删除一些旧 session，或刷新扩展后重试；这不是论文分析本身失败。', 'Delete older sessions or reload the extension and retry. The paper analysis itself did not fail.')
+        nextStep: textFor(locale, '请删除一些旧 session，或刷新扩展后重试；这不是论文分析本身失败。', 'Delete older sessions or reload the extension and retry. The paper analysis itself did not fail.'),
+        failureCode: 'storage_quota_exceeded'
       };
     }
     if (/checkpoint/i.test(text)) {
       return {
         conclusion: textFor(locale, '这轮没有自动写入：Codex 没有拿到可恢复版本。', 'This run did not auto-write: Codex did not get a recoverable version.'),
-        nextStep: textFor(locale, '请切换到“建议修改”，或确认 Overleaf Reviewing 已开启后再用“自动写入”。', 'Switch to Suggest, or confirm Overleaf Reviewing is enabled before using Auto.')
+        nextStep: textFor(locale, '请切换到“建议修改”，或确认 Overleaf Reviewing 已开启后再用“自动写入”。', 'Switch to Suggest, or confirm Overleaf Reviewing is enabled before using Auto.'),
+        failureCode: null  // no current catalog code; preflight reviewing issue
       };
     }
     if (/changed while Codex was working|任务执行期间被你或协作者改过/i.test(text)) {
       return {
         conclusion: textFor(locale, '这轮没有覆盖文件：任务执行期间文件被你或协作者改过。', 'No file was overwritten: a file changed while Codex was working.'),
-        nextStep: textFor(locale, '请先确认 Overleaf 当前内容，再重新运行任务。', 'Review the current Overleaf content, then run the task again.')
+        nextStep: textFor(locale, '请先确认 Overleaf 当前内容，再重新运行任务。', 'Review the current Overleaf content, then run the task again.'),
+        failureCode: 'stale_source_changed'
       };
     }
 
@@ -585,14 +603,16 @@
           'Codex returned a result, but local post-processing of this run failed.'),
         nextStep: textFor(locale,
           '请打开技术详情查看错误。Codex 的回答仍保留在会话中。',
-          'Open Technical Details to inspect the error. Codex\'s answer is preserved in the conversation.')
+          'Open Technical Details to inspect the error. Codex\'s answer is preserved in the conversation.'),
+        failureCode: null  // post-processing path; the real error already attached its own structured failure
       };
     }
     return {
       conclusion: context.mode === 'ask'
         ? textFor(locale, '这轮只问不改没有完成：本地 Codex 没有正常完成，因此没有生成最终说明。', 'This Ask run did not complete: local Codex did not finish normally, so no final answer was generated.')
         : textFor(locale, '这轮任务失败：本地 Codex 没有返回可用结果，未确认任何写入。', 'This task failed: local Codex returned no usable result, so no writes were confirmed.'),
-      nextStep: textFor(locale, '请查看技术详情，处理本地 Codex 错误后重试。', 'Open Technical Details, resolve the local Codex error, and retry.')
+      nextStep: textFor(locale, '请查看技术详情，处理本地 Codex 错误后重试。', 'Open Technical Details, resolve the local Codex error, and retry.'),
+      failureCode: 'codex_no_usable_result'
     };
   }
 

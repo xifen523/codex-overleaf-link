@@ -795,3 +795,41 @@ test('translateRawError keeps the original "no usable result" copy when Codex di
   const askMode = translateRawError('Some unrecognised crash', { mode: 'ask', locale: 'en' });
   assert.match(askMode.conclusion, /did not finish normally/);
 });
+
+// ---------------------------------------------------------------------------
+// translateRawError → FailureReason catalog mapping. Each branch returns a
+// `failureCode` from the 47-code catalog (or null when no direct map exists)
+// so callers can attach a structured failure event alongside the existing
+// user-visible text. Pre-fix, classification was duplicated between the
+// regex branches here and the structured FailureReason emissions in the
+// content-side runtime.
+// ---------------------------------------------------------------------------
+
+test('translateRawError surfaces failureCode for known catalog codes', () => {
+  // 1:1 catalog mappings — these MUST be present so the run-record carries
+  // machine-readable failure data.
+  assert.equal(translateRawError('Codex CLI was not found locally (ENOENT)', {}).failureCode, 'codex_not_found');
+  assert.equal(translateRawError('Codex app-server timed out after 600000ms', {}).failureCode, 'codex_timeout');
+  assert.equal(translateRawError('Codex stdout output limit exceeded', {}).failureCode, 'codex_output_limit');
+  assert.equal(translateRawError('Agent returned invalid JSON', {}).failureCode, 'codex_result_parse_failed');
+  assert.equal(translateRawError('Could not parse Codex output', {}).failureCode, 'codex_result_parse_failed');
+  assert.equal(translateRawError('Resource::kQuotaBytes quota exceeded', {}).failureCode, 'storage_quota_exceeded');
+  assert.equal(translateRawError('project_locked: currently in use by codex.run', {}).failureCode, 'codex_project_locked');
+  assert.equal(translateRawError('changed while Codex was working', {}).failureCode, 'stale_source_changed');
+  assert.equal(translateRawError('Unsupported parameter: reasoning.summary', {}).failureCode, 'native_protocol_incompatible');
+});
+
+test('translateRawError leaves failureCode null for branches without a catalog match', () => {
+  // Preflight / governance — no current code maps cleanly.
+  assert.equal(translateRawError('Mode must be "confirm" or "auto"', {}).failureCode, null);
+  // Auto-mode checkpoint preflight failure — also no current code.
+  assert.equal(translateRawError('checkpoint version unavailable', {}).failureCode, null);
+  // codexReturned post-processing branch — the real underlying error already
+  // attached its own structured failure earlier in the run.
+  assert.equal(translateRawError('Some crash', { codexReturned: true }).failureCode, null);
+});
+
+test('translateRawError default branch (unrecognised error, codex did not return) emits codex_no_usable_result', () => {
+  const translated = translateRawError('Some unrecognised crash', { mode: 'auto' });
+  assert.equal(translated.failureCode, 'codex_no_usable_result');
+});

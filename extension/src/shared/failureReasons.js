@@ -303,6 +303,21 @@
       fallbackUserMessage: 'The local run was cancelled.',
       fallbackNextAction: 'Start a new run.'
     },
+    codex_timeout: {
+      stage: 'codex', severity: 'error', defaultRetryable: true,
+      fallbackUserMessage: 'Local Codex took too long to finish.',
+      fallbackNextAction: 'Check whether local Codex is still running; cancel and retry with smaller @context.'
+    },
+    codex_output_limit: {
+      stage: 'codex', severity: 'error', defaultRetryable: true,
+      fallbackUserMessage: 'Local Codex output was too large; the bridge stopped reading.',
+      fallbackNextAction: 'Retry with smaller @context, or open Technical Details to inspect the output limit.'
+    },
+    codex_not_found: {
+      stage: 'codex', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Codex CLI was not found on this machine.',
+      fallbackNextAction: 'Confirm `codex` works in Terminal, then reinstall the native host or reload the extension.'
+    },
 
     // 9.8 Storage
     storage_quota_exceeded: {

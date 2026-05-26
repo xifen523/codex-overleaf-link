@@ -2483,12 +2483,23 @@
       // 'local Codex returned no usable result'.
       const codexReturned = Boolean(getAssistantAnswerForCurrentRun());
       const translated = translateRawError(error.message, { mode: submittedMode, locale: getLocale(), codexReturned });
+      // When translateRawError maps the raw error to a FailureReason code,
+      // attach the structured failure to the run-event and completion-report
+      // so the run record carries machine-readable failure data alongside
+      // the user-visible text.
+      const translatedFailure = translated.failureCode
+        ? buildContentFailure(translated.failureCode, { path: 'task' }, {
+            technicalMessage: error.message,
+            evidence: { errorMessage: error.message }
+          })
+        : null;
       appendRunEvent({
         title: translated.conclusion,
         status: 'failed',
         technicalDetail: {
           message: error.message
-        }
+        },
+        failure: translatedFailure
       });
       appendTechnicalEvent({
         type: 'task.exception',
@@ -2505,7 +2516,8 @@
         applyResults: [],
         nextStep: translated.nextStep,
         errorMessage: error.message,
-        mode: submittedMode
+        mode: submittedMode,
+        failure: translatedFailure
       });
       await finalizeAuditRecord(runAuditDraft, {
         resultStatus: 'failed',
@@ -2571,10 +2583,20 @@
         return;
       }
       const translated = translateRawError(response.error.message, { mode: submittedMode, locale: getLocale() });
+      // Attach the structured FailureReason from the regex → catalog mapping
+      // (when translateRawError surfaces one) so the skill-installer failure
+      // path carries the same machine-readable shape the run-card consumes.
+      const translatedFailure = translated.failureCode
+        ? buildContentFailure(translated.failureCode, { path: 'skill.install' }, {
+            technicalMessage: response.error.message,
+            evidence: { errorCode: response.error?.code || '' }
+          })
+        : null;
       appendRunEvent({
         title: translated.conclusion,
         status: 'failed',
-        technicalDetail: response.error
+        technicalDetail: response.error,
+        failure: translatedFailure
       });
       appendCompletionReport({
         conclusion: translated.conclusion,
@@ -2583,7 +2605,8 @@
         applyResults: [],
         nextStep: translated.nextStep,
         errorMessage: response.error.message,
-        mode: submittedMode
+        mode: submittedMode,
+        failure: translatedFailure
       });
       await finalizeAuditRecord(runAuditDraft, {
         resultStatus: 'failed',
