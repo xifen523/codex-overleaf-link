@@ -5227,3 +5227,61 @@ test('saveStateSoon serializes against an in-flight saveState (no parallel write
   assert.match(runner, /\.finally\(/, 'runQueuedSaveState must clear in-flight in finally');
   assert.match(runner, /if \(saveStateRunAfterFlight\)/, 'runQueuedSaveState must re-trigger when the trailing flag fired');
 });
+
+// ---------------------------------------------------------------------------
+// Cancel-by-projectKey + force-release recovery flow.
+//
+// After a page refresh, content-side currentRunView is null and the original
+// requestId from nativeChannel is gone. The user is otherwise locked out
+// (Run button shows "Send", clicking it fires a new task that hits
+// project_locked). Two fixes thread through:
+//   - cancelActiveRun now includes projectKey so the native host can find
+//     the controller even when activeRequestId is null.
+//   - forceCancelStuckTaskForCurrentProject + a recovery button rendered
+//     inside the completion-report for codex_project_locked failures gives
+//     the user a one-click escape hatch.
+// ---------------------------------------------------------------------------
+
+test('cancelActiveRun forwards projectKey to the native cancel so post-refresh cancel succeeds', () => {
+  const src = getContentScriptSource();
+  const body = extractFromContentScript('cancelActiveRun');
+  assert.match(body, /projectKey/,
+    'cancelActiveRun must reference projectKey for the native cancel payload');
+  assert.match(body, /currentRunView\?\.runProjectId\s*\|\|\s*getCurrentProjectId\(\)/,
+    'cancelActiveRun must derive projectKey from currentRunView with URL fallback');
+  // The native send must include both fields so the host matches whichever resolves.
+  assert.match(body, /method:\s*'codex\.cancel'[\s\S]*?requestId:[\s\S]*?projectKey:/,
+    'codex.cancel payload must carry both requestId and projectKey');
+});
+
+test('forceCancelStuckTaskForCurrentProject sends force=true so a zombie lock can be dropped', () => {
+  const body = extractFromContentScript('forceCancelStuckTaskForCurrentProject');
+  assert.match(body, /projectKey/, 'force-cancel must read the current project key');
+  assert.match(body, /force:\s*true/,
+    'force-cancel must set force: true so the native host drops zombie lock entries');
+  assert.match(body, /method:\s*'codex\.cancel'/, 'must dispatch via codex.cancel');
+});
+
+test('renderCompletionReport surfaces a recovery action button for codex_project_locked', () => {
+  const src = getContentScriptSource();
+  const renderer = extractFromContentScript('renderCompletionReport');
+  assert.match(renderer, /appendRecoveryActionForFailure/,
+    'renderCompletionReport must call the recovery-action appender');
+  const action = extractFromContentScript('appendRecoveryActionForFailure');
+  assert.match(action, /failureCode\s*!==\s*'codex_project_locked'/,
+    'only codex_project_locked failures get the action button today');
+  assert.match(action, /forceCancelStuckTaskForCurrentProject/,
+    'button click must invoke the force-cancel helper');
+  assert.match(action, /run-final-answer__recovery-action/,
+    'button must carry the canonical CSS class');
+});
+
+test('panel.css ships visible styling for the recovery action button', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'extension', 'styles', 'panel.css'), 'utf8');
+  assert.match(css, /\.run-final-answer__recovery-action\s*\{/,
+    'recovery action button must have a CSS rule');
+  assert.match(css, /\.run-final-answer__recovery-action:hover/,
+    'recovery action button must have a :hover state');
+  assert.match(css, /\.run-final-answer__recovery-action:disabled/,
+    'recovery action button must have a :disabled state');
+});

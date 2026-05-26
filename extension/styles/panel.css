@@ -1464,6 +1464,32 @@
   color: #a0a0a0;
 }
 
+/* Recovery action button. Only renders for failure codes that have a
+   one-click recovery path (today: codex_project_locked). Positioned below
+   the meta block so it reads as the user's next move. */
+#codex-overleaf-panel .run-final-answer__recovery-action {
+  margin: 12px 0 0;
+  padding: 5px 10px;
+  background: #2a2d2e;
+  border: 1px solid #454545;
+  border-radius: 3px;
+  color: #d4d4d4;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+#codex-overleaf-panel .run-final-answer__recovery-action:hover {
+  background: #353838;
+  border-color: #6a6a6a;
+}
+
+#codex-overleaf-panel .run-final-answer__recovery-action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 #codex-overleaf-panel .codex-probe-line {
   flex: 0 0 auto;
   min-height: 18px;

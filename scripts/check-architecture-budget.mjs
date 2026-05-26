@@ -20,12 +20,13 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     maxLines: 2200
   },
   {
-    // Elephant. 12088 lines is unhealthy but a real split needs its own
+    // Elephant. 12266 lines is unhealthy but a real split needs its own
     // multi-week refactor (panel renderer, run controller, settings, skills,
     // recent-projects, writeback orchestration are all interleaved here).
-    // Freeze at +112 lines headroom to catch unintended growth in CI.
+    // Bumped from 12200 → 12300 to fit the cancel-by-projectKey +
+    // force-release recovery helpers (~70 lines).
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 12200
+    maxLines: 12300
   },
   {
     // Writeback router: large but cohesive. Freeze with modest headroom.

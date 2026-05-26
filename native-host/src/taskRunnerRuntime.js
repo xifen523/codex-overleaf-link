@@ -25,6 +25,11 @@ const { version: PACKAGE_VERSION } = require('../../package.json');
 
 const activeProjectLocks = new Map();
 const activeRunControllers = new Map();
+// Parallel index of active runs by projectKey so codex.cancel can find a
+// controller even when the original request id is unknown (e.g. after the
+// Overleaf tab was reloaded — the requestId lived in content-side JS state
+// and is gone, but the native-host-side controller is still running).
+const activeRunByProject = new Map();
 const pendingPlans = new Map();
 const PENDING_PLAN_TTL_MS = 30 * 60 * 1000;
 const CODEX_RUN_PASSTHROUGH_ERROR_CODES = new Set(['thread_resume_failed']);
@@ -138,6 +143,7 @@ async function handleCodexRun(request, env, emit) {
   const abortController = new AbortController();
   if (request.id) {
     activeRunControllers.set(request.id, abortController);
+    activeRunByProject.set(projectKey, { id: request.id, controller: abortController });
   }
   try {
     if (params.useExistingMirror) {
@@ -213,24 +219,63 @@ async function handleCodexRun(request, env, emit) {
     if (request.id && activeRunControllers.get(request.id) === abortController) {
       activeRunControllers.delete(request.id);
     }
+    if (activeRunByProject.get(projectKey)?.controller === abortController) {
+      activeRunByProject.delete(projectKey);
+    }
     releaseProjectLock(projectKey, lockToken);
   }
 }
 
+// Cancel paths, in priority order:
+//   1. By requestId (legacy + primary, when the caller still has it)
+//   2. By projectKey (after page refresh — requestId is lost but projectKey
+//      is derivable from the Overleaf URL)
+//   3. Force-release the project lock when no controller is registered for
+//      the given projectKey. Covers the zombie-lock case where a previous
+//      run leaked the lock (unhandled error path, process bug, etc.) and
+//      the user otherwise has no way to recover short of restarting Chrome.
+//      Only fires when `force: true` is explicitly set so accidental calls
+//      can't punch through a real live run.
 function handleCodexCancel(request) {
-  const targetId = request.params?.requestId || request.params?.id;
-  if (!targetId || !activeRunControllers.has(targetId)) {
+  const params = request.params || {};
+  const targetId = params.requestId || params.id;
+  const projectKey = typeof params.projectKey === 'string' ? params.projectKey : '';
+  const force = params.force === true;
+
+  if (targetId && activeRunControllers.has(targetId)) {
+    activeRunControllers.get(targetId).abort(createCancellationError());
     return okResponse(request.id, {
-      cancelled: false,
-      reason: 'No active Codex run matched the cancellation request'
+      cancelled: true,
+      requestId: targetId
     });
   }
 
-  const controller = activeRunControllers.get(targetId);
-  controller.abort(createCancellationError());
+  if (projectKey) {
+    const entry = activeRunByProject.get(projectKey);
+    if (entry?.controller) {
+      entry.controller.abort(createCancellationError());
+      return okResponse(request.id, {
+        cancelled: true,
+        projectKey,
+        requestId: entry.id || ''
+      });
+    }
+    if (force && activeProjectLocks.has(projectKey)) {
+      activeProjectLocks.delete(projectKey);
+      activeRunByProject.delete(projectKey);
+      logDebug('codex.cancel.force_released_zombie_lock', { projectKey });
+      return okResponse(request.id, {
+        cancelled: false,
+        lockReleased: true,
+        projectKey,
+        reason: 'No active controller; force-released the project lock entry'
+      });
+    }
+  }
+
   return okResponse(request.id, {
-    cancelled: true,
-    requestId: targetId
+    cancelled: false,
+    reason: 'No active Codex run matched the cancellation request'
   });
 }
 

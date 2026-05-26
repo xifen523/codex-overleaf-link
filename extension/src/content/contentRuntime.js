@@ -2800,14 +2800,20 @@
     });
 
     const activeRequestId = nativeChannel.getActiveRequestId();
-    if (!activeRequestId) {
+    // Even when activeRequestId is null (e.g. the request was tracked in a
+    // page session that has since been reloaded), the native host can still
+    // find the controller by projectKey. Send both so the host can match on
+    // whichever it can resolve.
+    const projectKey = currentRunView?.runProjectId || getCurrentProjectId() || '';
+    if (!activeRequestId && !projectKey) {
       return;
     }
 
     const response = await sendBackgroundNative({
       method: 'codex.cancel',
       params: {
-        requestId: activeRequestId
+        requestId: activeRequestId || undefined,
+        projectKey: projectKey || undefined
       }
     });
     if (!response?.ok) {
@@ -2817,6 +2823,51 @@
         status: 'failed'
       });
     }
+  }
+
+  // Recovery path for the case where a previous Codex run leaked the
+  // project lock (idle watchdog should normally catch this, but a stuck run
+  // from a pre-watchdog binary, or a process bug, could still strand the
+  // lock). Sends codex.cancel with `force: true` so the native host
+  // unconditionally drops the lock entry when no controller is registered.
+  // Surfaced from the completion-report when a codex_project_locked
+  // failure is rendered.
+  async function forceCancelStuckTaskForCurrentProject() {
+    const projectKey = currentRunView?.runProjectId || getCurrentProjectId() || '';
+    if (!projectKey) {
+      appendPlainLog(tx(
+        'Could not force-release: no Overleaf project id available from the current URL.',
+        '无法强制释放：当前 URL 没有可解析的 Overleaf 项目 ID。'
+      ));
+      return { ok: false, reason: 'no_project_key' };
+    }
+    const response = await sendBackgroundNative({
+      method: 'codex.cancel',
+      params: {
+        projectKey,
+        force: true
+      }
+    });
+    if (response?.ok) {
+      const result = response.result || response;
+      const released = result.lockReleased === true || result.cancelled === true;
+      appendPlainLog(released
+        ? tx(
+          `Force-released the stuck Codex run for project ${projectKey}. You can retry now.`,
+          `已强制释放项目 ${projectKey} 的 Codex 占用，可以重试了。`
+        )
+        : tx(
+          `No stuck run was found for project ${projectKey}.`,
+          `没有发现项目 ${projectKey} 上的卡住任务。`
+        ));
+      return response;
+    }
+    const message = response?.error?.message || tx('native host did not respond', 'native host 没有响应');
+    appendPlainLog(tx(
+      `Force-release request was not delivered: ${message}`,
+      `强制释放请求没有送达：${message}`
+    ));
+    return response;
   }
 
   function throwIfRunCancellationRequested() {
@@ -9959,6 +10010,7 @@
         }
         report.append(metaBlock);
       }
+      appendRecoveryActionForFailure(report, event);
       return report;
     }
 
@@ -9968,7 +10020,36 @@
     body.className = 'run-final-answer';
     renderMarkdownBlockText(body, formatEventDetail(event.detail || {}));
     report.append(body);
+    appendRecoveryActionForFailure(report, event);
     return report;
+  }
+
+  // For failure codes that have an actionable recovery path the user can
+  // invoke directly from the run card, append a button inside the completion
+  // report. Today's only consumer is codex_project_locked → "Force-release
+  // the stuck task" (covers the page-refresh-then-locked-out scenario where
+  // the normal cancel button is hidden because currentRunView is null).
+  function appendRecoveryActionForFailure(report, event) {
+    const failureCode = event?.failure?.code;
+    if (failureCode !== 'codex_project_locked') return;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'run-final-answer__recovery-action';
+    button.dataset.recoveryFor = failureCode;
+    button.textContent = tx('Force-release the stuck task', '强制释放卡住的任务');
+    button.title = tx(
+      'Sends a force-cancel to the native host that drops the project lock so a new run can start. Use this when refreshing the tab did not free the project.',
+      '向 native host 发送强制取消请求，释放当前 Overleaf 项目的占用，让新的任务可以启动。刷新页面没用时使用。'
+    );
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      button.disabled = true;
+      button.textContent = tx('Releasing…', '正在释放…');
+      forceCancelStuckTaskForCurrentProject().finally(() => {
+        button.textContent = tx('Force-released — you can retry the run.', '已释放，可以重试本轮任务。');
+      });
+    });
+    report.append(button);
   }
 
   // The three stable trackedChangeStatus values are `pending`, `accepted`, and
