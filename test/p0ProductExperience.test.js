@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { extractFunction } = require('./_helpers/extractFunction');
-const { getContentScriptSource } = require('./_helpers/contentScriptSource');
+const { getContentScriptSource, extractFromContentScript } = require('./_helpers/contentScriptSource');
 const vm = require('node:vm');
 
 const ReviewHunks = require('../extension/src/content/reviewHunks');
@@ -141,15 +141,15 @@ function loadMarkdownRendererHarness(projectFiles = [], options = {}) {
   const toasts = [];
   const start = contentScript.indexOf('function getCurrentProjectReferenceFiles');
   assert.notEqual(start, -1, 'line-reference renderer helpers should exist');
-  const endFunction = extractFunction(contentScript, 'normalizeInlineOrderedLists');
+  const endFunction = extractFromContentScript( 'normalizeInlineOrderedLists');
   const end = contentScript.indexOf(endFunction) + endFunction.length;
   const markdownRegion = [
     contentScript.slice(start, end),
-    extractFunction(contentScript, 'isMarkdownHeadingLine'),
-    extractFunction(contentScript, 'isMarkdownListLine'),
-    extractFunction(contentScript, 'isMarkdownOrderedListLine'),
-    extractFunction(contentScript, 'isSameMarkdownListKind'),
-    extractFunction(contentScript, 'stripMarkdownListMarker')
+    extractFromContentScript( 'isMarkdownHeadingLine'),
+    extractFromContentScript( 'isMarkdownListLine'),
+    extractFromContentScript( 'isMarkdownOrderedListLine'),
+    extractFromContentScript( 'isSameMarkdownListKind'),
+    extractFromContentScript( 'stripMarkdownListMarker')
   ].join('\n');
 
   return Function('document', 'LineReferences', 'projectFiles', 'pageBridgeCalls', 'toasts', 'options', `
@@ -335,13 +335,13 @@ function loadRunCardControlsHarness(options = {}) {
   const document = createRunCardDocument();
   const region = [
     'const TERMINAL_TRACKED_CHANGE_STATUS = new Set([\'accepted\', \'rejected\']);',
-    extractFunction(contentScript, 'isTrackedChangeLifecycleRun'),
-    extractFunction(contentScript, 'configureAcceptButton'),
-    extractFunction(contentScript, 'configureLifecycleUndoButton'),
-    extractFunction(contentScript, 'wireAcceptInlineConfirm'),
-    extractFunction(contentScript, 'applyTerminalTrackedChangeStatus'),
-    extractFunction(contentScript, 'refreshRunCardControls'),
-    extractFunction(contentScript, 'cssEscape')
+    extractFromContentScript( 'isTrackedChangeLifecycleRun'),
+    extractFromContentScript( 'configureAcceptButton'),
+    extractFromContentScript( 'configureLifecycleUndoButton'),
+    extractFromContentScript( 'wireAcceptInlineConfirm'),
+    extractFromContentScript( 'applyTerminalTrackedChangeStatus'),
+    extractFromContentScript( 'refreshRunCardControls'),
+    extractFromContentScript( 'cssEscape')
   ].join('\n');
 
   return Function('document', 'state', 'panel', 'options', `
@@ -756,7 +756,7 @@ test('composer slash menu offers Codex Overleaf skill installation and installed
   );
   const composerSource = `${contentScript}\n${composerPanel}`;
   const keydownBody = contentScript.match(/function handleTaskInputKeydown\(event\) \{[\s\S]*?\n  function createDiffReviewElement/)?.[0] || '';
-  const selectBody = extractFunction(contentScript, 'selectSlashCommand');
+  const selectBody = extractFromContentScript( 'selectSlashCommand');
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
 
   assert.match(composerSource, /data-slash-menu/);
@@ -833,7 +833,7 @@ test('composer supports pasted or dropped turn attachments without Overleaf asse
   );
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '../extension/manifest.json'), 'utf8'));
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
-  const clearBody = extractFunction(contentScript, 'clearTaskComposer');
+  const clearBody = extractFromContentScript( 'clearTaskComposer');
   const scriptOrder = manifest.content_scripts[0].js;
 
   assert.match(composerPanel, /data-attachment-strip/);
@@ -963,7 +963,7 @@ test('composer and run history render image previews and file attachment icons',
 
 test('reused mirror sensitive preflight scans native mirror before Codex dispatch', () => {
   const contentScript = getContentScriptSource();
-  const preflightBody = extractFunction(contentScript, 'runSensitivePreflight');
+  const preflightBody = extractFromContentScript( 'runSensitivePreflight');
 
   assert.match(preflightBody, /useExistingMirror/);
   assert.match(preflightBody, /scanNativeMirrorSensitiveFindings/);
@@ -1258,8 +1258,8 @@ test('OT warm starts force focused run params for initial and thread-resume code
 
 test('experimental OT warm mirror polls page OT events and patches the native mirror', () => {
   const contentScript = getContentScriptSource();
-  const pollBody = extractFunction(contentScript, 'pollOtEvents');
-  const flushBody = extractFunction(contentScript, 'flushOtPatchBatch');
+  const pollBody = extractFromContentScript( 'pollOtEvents');
+  const flushBody = extractFromContentScript( 'flushOtPatchBatch');
 
   assert.match(contentScript, /CodexOverleafOtWarmMirrorController/);
   assert.match(contentScript, /function scheduleOtEventPolling/);
@@ -1276,7 +1276,7 @@ test('experimental OT warm mirror polls page OT events and patches the native mi
 
 test('invalid native OT patch results mark the warm mirror inconsistent using skippedFiles fields', () => {
   const contentScript = getContentScriptSource();
-  const flushBody = extractFunction(contentScript, 'flushOtPatchBatch');
+  const flushBody = extractFromContentScript( 'flushOtPatchBatch');
 
   assert.match(flushBody, /skippedFiles/);
   assert.match(flushBody, /skippedCount/);
@@ -1286,7 +1286,7 @@ test('invalid native OT patch results mark the warm mirror inconsistent using sk
 
 test('native OT patch success requires valid appliedCount and appliedFiles evidence', () => {
   const contentScript = getContentScriptSource();
-  const flushBody = extractFunction(contentScript, 'flushOtPatchBatch');
+  const flushBody = extractFromContentScript( 'flushOtPatchBatch');
 
   assert.match(flushBody, /appliedFiles/);
   assert.match(flushBody, /appliedCount/);
@@ -1712,9 +1712,9 @@ test('write tasks preflight Reviewing or Editing before syncing or starting loca
 
 test('native side-effecting requests are gated on compatibility before dispatch', () => {
   const contentScript = getContentScriptSource();
-  const sendNativeBody = extractFunction(contentScript, 'sendNative');
-  const sendBackgroundNativeBody = extractFunction(contentScript, 'sendBackgroundNative');
-  const ensureBody = extractFunction(contentScript, 'ensureNativeCompatibilityForMethod');
+  const sendNativeBody = extractFromContentScript( 'sendNative');
+  const sendBackgroundNativeBody = extractFromContentScript( 'sendBackgroundNative');
+  const ensureBody = extractFromContentScript( 'ensureNativeCompatibilityForMethod');
 
   assert.match(contentScript, /NATIVE_COMPATIBILITY_GATED_METHODS/);
   for (const method of [
@@ -1740,7 +1740,7 @@ test('native side-effecting requests are gated on compatibility before dispatch'
 
 test('cancellation during native compatibility gate prevents codex.run dispatch', async () => {
   const contentScript = getContentScriptSource();
-  const sendNativeBody = extractFunction(contentScript, 'sendNative');
+  const sendNativeBody = extractFromContentScript( 'sendNative');
 
   let cancellationRequested = false;
   let nativeSent = false;
@@ -1780,9 +1780,9 @@ test('cancellation during native compatibility gate prevents codex.run dispatch'
 
 test('read-only native discovery and diagnostics bypass the compatibility run gate', () => {
   const contentScript = getContentScriptSource();
-  const loadModelBody = extractFunction(contentScript, 'loadModelOptions');
-  const mirrorFreshnessBody = extractFunction(contentScript, 'getMirrorFreshness');
-  const inspectBody = extractFunction(contentScript, 'inspectNativeEnvironment');
+  const loadModelBody = extractFromContentScript( 'loadModelOptions');
+  const mirrorFreshnessBody = extractFromContentScript( 'getMirrorFreshness');
+  const inspectBody = extractFromContentScript( 'inspectNativeEnvironment');
 
   assert.match(loadModelBody, /method:\s*'codex\.models'/);
   assert.match(mirrorFreshnessBody, /method:\s*'mirror\.status'/);
@@ -3455,16 +3455,16 @@ test('project custom instructions editor auto-saves on change and restores by pr
     const window = { location: { pathname: '/project/' + 'a'.repeat(24) } };
     function isProjectEditorRoute() { return true; }
     function renderRecentProjectsVariant() { return Promise.resolve(); }
-    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
-    ${extractFunction(contentScript, 'getCustomInstructionsForCurrentProject')}
-    ${extractFunction(contentScript, 'setCustomInstructionsForProject')}
-    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
-    ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
-    ${extractFunction(contentScript, 'openCustomInstructionsSettings')}
-    ${extractFunction(contentScript, 'closeCustomInstructionsSettings')}
-    ${extractFunction(contentScript, 'setSettingsSaveStatus')}
-    ${extractFunction(contentScript, 'readPanelInputs')}
-    ${extractFunction(contentScript, 'persistPanelInputs')}
+    ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
+    ${extractFromContentScript( 'getCustomInstructionsForCurrentProject')}
+    ${extractFromContentScript( 'setCustomInstructionsForProject')}
+    ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
+    ${extractFromContentScript( 'clearProjectSettingsStatus')}
+    ${extractFromContentScript( 'openCustomInstructionsSettings')}
+    ${extractFromContentScript( 'closeCustomInstructionsSettings')}
+    ${extractFromContentScript( 'setSettingsSaveStatus')}
+    ${extractFromContentScript( 'readPanelInputs')}
+    ${extractFromContentScript( 'persistPanelInputs')}
     return {
       input: customInstructionsInput,
       panel,
@@ -3557,14 +3557,14 @@ test('persistPanelInputs save-status lifecycle: success path ends at settingsSav
     function renderSessionList() {}
     function tr(key) { return key; }
     async function saveState() {}
-    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
-    ${extractFunction(contentScript, 'getCustomInstructionsForCurrentProject')}
-    ${extractFunction(contentScript, 'setCustomInstructionsForProject')}
-    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
-    ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
-    ${extractFunction(contentScript, 'setSettingsSaveStatus')}
-    ${extractFunction(contentScript, 'readPanelInputs')}
-    ${extractFunction(contentScript, 'persistPanelInputs')}
+    ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
+    ${extractFromContentScript( 'getCustomInstructionsForCurrentProject')}
+    ${extractFromContentScript( 'setCustomInstructionsForProject')}
+    ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
+    ${extractFromContentScript( 'clearProjectSettingsStatus')}
+    ${extractFromContentScript( 'setSettingsSaveStatus')}
+    ${extractFromContentScript( 'readPanelInputs')}
+    ${extractFromContentScript( 'persistPanelInputs')}
     return { persistPanelInputs };
   `)(v => statusHistory.push(v));
 
@@ -3629,14 +3629,14 @@ test('persistPanelInputs save-status lifecycle: status ends at settingsSaved eve
     function renderSessionList() {}
     function tr(key) { return key; }
     async function saveState() { throw new Error('storage quota exceeded'); }
-    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
-    ${extractFunction(contentScript, 'getCustomInstructionsForCurrentProject')}
-    ${extractFunction(contentScript, 'setCustomInstructionsForProject')}
-    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
-    ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
-    ${extractFunction(contentScript, 'setSettingsSaveStatus')}
-    ${extractFunction(contentScript, 'readPanelInputs')}
-    ${extractFunction(contentScript, 'persistPanelInputs')}
+    ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
+    ${extractFromContentScript( 'getCustomInstructionsForCurrentProject')}
+    ${extractFromContentScript( 'setCustomInstructionsForProject')}
+    ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
+    ${extractFromContentScript( 'clearProjectSettingsStatus')}
+    ${extractFromContentScript( 'setSettingsSaveStatus')}
+    ${extractFromContentScript( 'readPanelInputs')}
+    ${extractFromContentScript( 'persistPanelInputs')}
     return { persistPanelInputs };
   `)(v => statusHistory.push(v));
 
@@ -3711,12 +3711,12 @@ test('project settings gear toggles the settings panel closed when already open'
     const window = { location: { pathname: '/project/' + 'a'.repeat(24) } };
     function isProjectEditorRoute() { return true; }
     function renderRecentProjectsVariant() { return Promise.resolve(); }
-    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
-    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
-    ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
-    ${extractFunction(contentScript, 'openCustomInstructionsSettings')}
-    ${extractFunction(contentScript, 'closeCustomInstructionsSettings')}
-    ${extractFunction(contentScript, 'toggleCustomInstructionsSettings')}
+    ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
+    ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
+    ${extractFromContentScript( 'clearProjectSettingsStatus')}
+    ${extractFromContentScript( 'openCustomInstructionsSettings')}
+    ${extractFromContentScript( 'closeCustomInstructionsSettings')}
+    ${extractFromContentScript( 'toggleCustomInstructionsSettings')}
     return {
       settingsPanel: customInstructionsPanel,
       settingsButton,
@@ -3818,12 +3818,12 @@ test('project settings transient status is cleared when reopening the panel', ()
     const window = { location: { pathname: '/project/' + 'a'.repeat(24) } };
     function isProjectEditorRoute() { return true; }
     function renderRecentProjectsVariant() { return Promise.resolve(); }
-    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
-    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
-    ${extractFunction(contentScript, 'setProjectSettingsStatus')}
-    ${extractFunction(contentScript, 'clearProjectSettingsStatus')}
-    ${extractFunction(contentScript, 'openCustomInstructionsSettings')}
-    ${extractFunction(contentScript, 'closeCustomInstructionsSettings')}
+    ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
+    ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
+    ${extractFromContentScript( 'setProjectSettingsStatus')}
+    ${extractFromContentScript( 'clearProjectSettingsStatus')}
+    ${extractFromContentScript( 'openCustomInstructionsSettings')}
+    ${extractFromContentScript( 'closeCustomInstructionsSettings')}
     return {
       status: projectSettingsStatus,
       openCustomInstructionsSettings,
@@ -3884,9 +3884,9 @@ test('mirror prefetch state sync preserves unsaved custom instructions for same 
     function getCurrentProjectId() { return currentProjectId; }
     function tr(key) { return key; }
     function syncOtWarmMirrorStateForProject() {}
-    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
-    ${extractFunction(contentScript, 'syncCustomInstructionsEditorForProject')}
-    ${extractFunction(contentScript, 'syncMirrorPrefetchStateForProject')}
+    ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
+    ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
+    ${extractFromContentScript( 'syncMirrorPrefetchStateForProject')}
     return {
       input: customInstructionsInput,
       syncCustomInstructionsEditorForProject,
@@ -4033,8 +4033,8 @@ test('saveState merges latest lightweight prefs before saving project-scoped set
       const map = state.codexOverleafSkillEnabled;
       return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
     }
-    ${extractFunction(contentScript, 'normalizeExperimentalOtByProject')}
-    ${extractFunction(contentScript, 'normalizeCustomInstructionsByProject')}
+    ${extractFromContentScript( 'normalizeExperimentalOtByProject')}
+    ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
     // Fix A inlined helpers: saveState now reads currentRunView through a
     // defensive accessor and the projectIdOverride / divergent-skip branch
     // logs via appendPlainLog(tx(...)). Provide minimal stubs so the
@@ -4042,8 +4042,8 @@ test('saveState merges latest lightweight prefs before saving project-scoped set
     let currentRunView = null;
     function appendPlainLog() {}
     function tx(en) { return en; }
-    ${extractFunction(contentScript, 'readLiveRunViewForSaveStateGuard')}
-    ${extractFunction(contentScript, 'saveState')}
+    ${extractFromContentScript( 'readLiveRunViewForSaveStateGuard')}
+    ${extractFromContentScript( 'saveState')}
     return {
       saveState,
       getSavedPrefs: () => savedPrefs[0],
@@ -4145,11 +4145,11 @@ test('experimental OT input persistence does not leak checked state after projec
     function readSelectedSpeedInput() { return state.speedTier; }
     function updateOtStatusDisplay(status) { currentOtStatus = status; }
     function updateExperimentalOtToggleControl() {}
-    ${extractFunction(contentScript, 'normalizeExperimentalOtByProject')}
-    ${extractFunction(contentScript, 'isExperimentalOtEnabledForProject')}
-    ${extractFunction(contentScript, 'setExperimentalOtEnabledForProject')}
-    ${extractFunction(contentScript, 'syncExperimentalOtToggleForProject')}
-    ${extractFunction(contentScript, 'readPanelInputs')}
+    ${extractFromContentScript( 'normalizeExperimentalOtByProject')}
+    ${extractFromContentScript( 'isExperimentalOtEnabledForProject')}
+    ${extractFromContentScript( 'setExperimentalOtEnabledForProject')}
+    ${extractFromContentScript( 'syncExperimentalOtToggleForProject')}
+    ${extractFromContentScript( 'readPanelInputs')}
     return {
       checkbox: experimentalOtCheckbox,
       getState: () => state,
