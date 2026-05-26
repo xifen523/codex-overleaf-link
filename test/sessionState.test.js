@@ -1671,8 +1671,6 @@ test('Fix C: shared pathRedaction helper exists and covers the spec\'s path fami
   const PathRedaction = require('../extension/src/shared/pathRedaction');
   assert.ok(PathRedaction.redactLocalPaths instanceof Function,
     'pathRedaction.redactLocalPaths must be exported');
-  assert.ok(PathRedaction.mightContainLocalPath instanceof Function,
-    'pathRedaction.mightContainLocalPath must be exported');
   // Spot-check a known-positive and a known-negative.
   assert.equal(PathRedaction.redactLocalPaths('/Users/alice/foo'), '<local-path>');
   assert.equal(PathRedaction.redactLocalPaths('plain text with no paths'), 'plain text with no paths');

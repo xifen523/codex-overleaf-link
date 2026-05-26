@@ -155,8 +155,6 @@
     updateExpectedFileContent,
     removeExpectedFile,
     moveExpectedFile,
-    checkPatchRangeFreshness,
-    normalizeText,
     normalizePath
   };
 });

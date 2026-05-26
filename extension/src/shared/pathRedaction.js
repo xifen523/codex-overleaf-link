@@ -95,19 +95,6 @@
     'gi'
   );
 
-  // Quick predicate — used by callers that only want to do the (more
-  // expensive) substitution pass when there's actually something to strip.
-  const MIGHT_CONTAIN_LOCAL_PATH_PATTERN = new RegExp(
-    [
-      'file:\\/{2,3}',
-      '(?:\\\\\\\\|\\/\\/)[A-Za-z0-9._-]+[\\\\\\/]',
-      '[A-Za-z]:[\\\\\\/]',
-      '\\/(?:' + UNIX_TOPLEVELS.join('|') + ')\\/',
-      '\\.codex-overleaf[\\\\\\/]projects[\\\\\\/]'
-    ].join('|'),
-    'i'
-  );
-
   // Replace every absolute-local-path token in `value` with `placeholder`.
   // Default placeholder is `<local-path>` to match the prior summary-side
   // sanitizer. The storage-side audit redactor uses a richer `[local path]`
@@ -124,20 +111,7 @@
     return value.replace(ABSOLUTE_PATH_PATTERN, token);
   }
 
-  function mightContainLocalPath(value) {
-    if (typeof value !== 'string' || !value) {
-      return false;
-    }
-    return MIGHT_CONTAIN_LOCAL_PATH_PATTERN.test(value);
-  }
-
   return {
-    redactLocalPaths,
-    mightContainLocalPath,
-    // Exposed so the storage-side audit redactor (which formats per-token
-    // placeholders with line-suffix preservation) can iterate the same set
-    // without duplicating the regex source.
-    ABSOLUTE_PATH_PATTERN,
-    UNIX_TOPLEVELS
+    redactLocalPaths
   };
 });

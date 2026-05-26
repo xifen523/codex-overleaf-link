@@ -106,11 +106,8 @@
   }
 
   return {
-    DETECTORS,
     scanSensitiveText,
     scanSensitiveProjectFiles,
-    scanSensitiveInputs,
-    buildRedactedPreview,
-    redactPreviewLine
+    scanSensitiveInputs
   };
 });
