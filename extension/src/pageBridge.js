@@ -78,6 +78,10 @@
     diagnosticsRevision: PAGE_BRIDGE_INSTALL_REVISION,
     ensureEditing,
     ensureReviewing,
+    // Cross-world cancel: the router's per-op loop polls this each iteration
+    // and aborts remaining ops when the value bumps. content-side cancel
+    // invokes pageBridge.cancelActiveWrite which calls bumpWriteCancellationSequence.
+    readWriteCancellationSequence,
     getActiveEditorIdentity,
     getReviewingState,
     invalidProjectPathResult,
@@ -156,9 +160,31 @@
   window.__codexOverleafPageBridgeMessageHandler = pageBridgeMessageHandler;
   window.addEventListener('message', pageBridgeMessageHandler);
 
+  // Cross-world cancel signal. The native-host codex.cancel aborts the Codex
+  // CLI but it can't reach into the Overleaf page world. If the user clicks
+  // cancel during the writeback phase (Codex already returned; the router
+  // is mid-flight through applyOperationsCore's per-op loop), nothing
+  // currently interrupts the dispatch. content-side cancelActiveRun now
+  // also calls 'cancelActiveWrite' which bumps this counter; applyOperationsCore
+  // captures the value at start and re-reads it between ops — a bump means
+  // the user cancelled and the remaining ops should be skipped with a
+  // codex_cancelled result so the run card settles immediately.
+  let writeCancellationSequence = 0;
+  function bumpWriteCancellationSequence() {
+    writeCancellationSequence += 1;
+    return writeCancellationSequence;
+  }
+  function readWriteCancellationSequence() {
+    return writeCancellationSequence;
+  }
+
   async function dispatch(method, params) {
     if (method === 'probe') {
       return probe(params);
+    }
+    if (method === 'cancelActiveWrite') {
+      const sequence = bumpWriteCancellationSequence();
+      return { ok: true, cancelled: true, sequence };
     }
     if (method === 'getProjectSnapshot') {
       return projectSnapshotBridge.getProjectSnapshot(withSnapshotCacheIdentity(params));

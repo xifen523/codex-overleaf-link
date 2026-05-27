@@ -36,7 +36,6 @@
   const NATIVE_COMPATIBILITY_GATED_METHODS = new Set([
     'mirror.status',
     'codex.models',
-    'codex.cancel',
     'codex.run',
     'task.run',
     'task.confirm',
@@ -48,6 +47,12 @@
     'skills.install',
     'skills.remove'
   ]);
+  const CANCELLABLE_PAGE_BRIDGE_METHODS = new Set([
+    'applyOperations',
+    'acceptTrackedChanges',
+    'rejectTrackedChanges'
+  ]);
+  const activePageBridgeCancellationHandlers = new Map();
   const PANEL_DEFAULT_WIDTH = 380;
   const PANEL_MIN_WIDTH = 340;
   const PANEL_MAX_WIDTH = 760;
@@ -2792,6 +2797,7 @@
       return;
     }
     runCancellationRequested = true;
+    cancelActivePageBridgeRequests();
     panel.dataset.cancelling = 'true';
     setRunning(true);
     appendRunEvent({
@@ -2799,29 +2805,55 @@
       status: 'running'
     });
 
+    // Fire both cancel signals in parallel:
+    //   - codex.cancel (native): aborts the Codex CLI if it's still running.
+    //   - cancelActiveWrite (page): bumps the page-bridge sequence so the
+    //     in-flight writebackRouter loop aborts remaining ops with
+    //     codex_cancelled instead of grinding through the rest of the queue.
+    // Without the page-side signal, a cancel during writeback waits up to
+    // the applyOperations content-side timeout (30s) before the run settles.
     const activeRequestId = nativeChannel.getActiveRequestId();
-    // Even when activeRequestId is null (e.g. the request was tracked in a
-    // page session that has since been reloaded), the native host can still
-    // find the controller by projectKey. Send both so the host can match on
-    // whichever it can resolve.
     const projectKey = currentRunView?.runProjectId || getCurrentProjectId() || '';
-    if (!activeRequestId && !projectKey) {
-      return;
-    }
 
-    const response = await sendBackgroundNative({
-      method: 'codex.cancel',
-      params: {
-        requestId: activeRequestId || undefined,
-        projectKey: projectKey || undefined
+    const cancelTargets = [];
+    if (activeRequestId || projectKey) {
+      cancelTargets.push(sendBackgroundNative({
+        method: 'codex.cancel',
+        params: {
+          requestId: activeRequestId || undefined,
+          projectKey: projectKey || undefined
+        }
+      }));
+    }
+    // The page-side cancel is best-effort — it only matters if a writeback
+    // is currently in flight. Swallow errors / unavailable bridge so the
+    // native cancel still completes even if the page side is unreachable.
+    cancelTargets.push(callPageBridge('cancelActiveWrite', {}).catch(() => ({ ok: false })));
+
+    Promise.allSettled(cancelTargets).then((results) => {
+      const nativeResult = results[0];
+      const nativeResponse = nativeResult?.status === 'fulfilled' ? nativeResult.value : null;
+      if (nativeResponse && !nativeResponse.ok) {
+        const message = nativeResponse?.error?.message || tx('native host did not respond', 'native host 没有响应');
+        appendRunEvent({
+          title: tx(`Cancel request was not delivered: ${message}`, `中断请求没有送达：${message}`),
+          status: 'failed'
+        });
+      } else if (nativeResult?.status === 'rejected') {
+        appendRunEvent({
+          title: tx('Cancel request was not delivered: native host request failed', '中断请求没有送达：native host 请求失败'),
+          detail: nativeResult.reason?.message || '',
+          status: 'failed'
+        });
       }
     });
-    if (!response?.ok) {
-      const message = response?.error?.message || tx('native host did not respond', 'native host 没有响应');
-      appendRunEvent({
-        title: tx(`Cancel request was not delivered: ${message}`, `中断请求没有送达：${message}`),
-        status: 'failed'
-      });
+  }
+
+  function cancelActivePageBridgeRequests() {
+    const handlers = Array.from(activePageBridgeCancellationHandlers.values());
+    activePageBridgeCancellationHandlers.clear();
+    for (const cancel of handlers) {
+      cancel();
     }
   }
 
@@ -7556,11 +7588,49 @@
 
   function sendPageBridgeRequest(method, params, options = {}) {
     const id = crypto.randomUUID();
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Number(options.timeoutMs) : 8000;
-      const timeout = window.setTimeout(() => {
+      const cancellable = CANCELLABLE_PAGE_BRIDGE_METHODS.has(method);
+      let settled = false;
+      let timeout = null;
+
+      function cleanup() {
+        if (timeout !== null) {
+          window.clearTimeout(timeout);
+        }
         window.removeEventListener('message', onMessage);
-        resolve({ ok: false, error: 'Page bridge timed out' });
+        if (cancellable) {
+          activePageBridgeCancellationHandlers.delete(id);
+        }
+      }
+
+      function resolveOnce(value) {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve(value);
+      }
+
+      function rejectOnce(error) {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        reject(error);
+      }
+
+      function cancelRequest() {
+        const error = new Error('Codex run was cancelled by the user');
+        error.code = 'codex_cancelled';
+        error.cancelled = true;
+        rejectOnce(error);
+      }
+
+      timeout = window.setTimeout(() => {
+        resolveOnce({ ok: false, error: 'Page bridge timed out' });
       }, timeoutMs);
 
       function onMessage(event) {
@@ -7572,9 +7642,14 @@
           || event.data.id !== id) {
           return;
         }
-        window.clearTimeout(timeout);
-        window.removeEventListener('message', onMessage);
-        resolve(event.data.result);
+        resolveOnce(event.data.result);
+      }
+
+      if (cancellable) {
+        activePageBridgeCancellationHandlers.set(id, cancelRequest);
+        if (runCancellationRequested) {
+          window.queueMicrotask(cancelRequest);
+        }
       }
 
       window.addEventListener('message', onMessage);

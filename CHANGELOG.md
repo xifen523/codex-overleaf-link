@@ -1,5 +1,53 @@
 # Changelog
 
+## v1.3.9 - 2026-05-27
+
+Cancellation and concurrency hardening release. v1.3.9 makes the cancel button responsive sub-100 ms in every phase of a Codex run (Codex thinking, mid-writeback, post-write verification), adds a force-release recovery for stuck project locks, eliminates the cross-project write race introduced by long per-op pipelines, and ships a cleanup batch (debt registry, architecture budgets, extractFunction helper) that returned the codebase to a maintainable state after the v1.3.8 P0 churn.
+
+### Added
+
+- **Sub-100 ms cancel during writeback.** The content-side `sendPageBridgeRequest` now registers a per-request reject handler in `activePageBridgeCancellationHandlers` for the writeback methods (`applyOperations`, `acceptTrackedChanges`, `rejectTrackedChanges`). `cancelActiveRun` synchronously rejects every in-flight handler before doing anything else, so the run-card's spinner stops on the very next microtask instead of waiting for the page bridge to finish its loop. The native `codex.cancel` and the page-side `cancelActiveWrite` signals are now fire-and-forget (`Promise.allSettled`) — UI no longer waits for either round-trip. A new page-side cross-world cancel mechanism (`pageBridge.cancelActiveWrite` + `writebackRouter.applyOperationsCore`'s sequence-bump check + per-op `Promise.race` against a 50 ms poller) tells the background writeback to also stop cleanly so abandoned ops do not keep mutating Overleaf state.
+- **Force-release recovery for stuck project locks.** When a run leaks the native-host project lock (Codex CLI hangs past the idle watchdog, a previous extension version crashed mid-writeback, etc.), `codex.cancel` now accepts a `projectKey` to find the controller without the original `requestId` and a `force: true` flag to drop the lock entry when no controller is registered. The completion-report renders a one-click **"Force-release the stuck task"** button under `codex_project_locked` failures so the user no longer has to restart Chrome to escape a stuck lock.
+- **Mid-run project-change guard inside `applyOperationsCore`.** Each per-op iteration re-checks the editor's current project against the run's bound `runProjectId`. If the user SPA-navigates Overleaf to a different project mid-writeback, the remaining operations are skipped with `aborted_project_changed` instead of landing in the wrong project. `ensureReviewing` / `ensureEditing` dispatchers now run the same guard so the pre-flight toggle cannot flip Track Changes in a wrong project.
+- **Hydration-tolerant write-guard.** The page-side editor project-id reader now retries with 100/300/700 ms backoff (~1.1 s ceiling) before failing closed, so a writeback that starts during Overleaf's editor hydration window no longer reports the misleading "Refresh Overleaf and retry" error. URL is accepted as a third source only when it exactly matches the immutable run project id.
+- **Codex app-server idle watchdog.** `codexSessionRunner` now has a default 10-minute idle timeout (`CODEX_OVERLEAF_CODEX_IDLE_TIMEOUT_MS` overridable) that aborts a Codex session if it stays silent past the deadline and releases the project lock — covers the "Codex sends `turn/started` and hangs forever" case.
+- **New FailureReason catalog codes**: `codex_project_locked`, `codex_timeout`, `codex_output_limit`, `codex_not_found`, plus bilingual i18n strings. `translateRawError`'s eleven regex branches now also return a `failureCode` so callers attach structured failure data alongside the human text.
+- **Structured run-state persistence**: `runProjectId` is now persisted on every run record (`sessionState` + `storageDb`), so writeback / Accept / Undo on a restored run targets the original project rather than the editor's current one. `getRunProjectIdForWriteback` fails closed when the run record has no `runProjectId` instead of falling back to the current project id.
+- **Native-host transient reconnect filter.** The Codex app-server's `error: 'Reconnecting X/Y'` notifications during network blips are recognized as transient and surfaced as warnings — they no longer abort the turn. The reconnect text is surfaced as the visible event title so the run timeline reads `Reconnecting... 2/5` instead of a generic `error`.
+
+### Changed
+
+- **Completion-report visual demotion of system meta**: the human-language conclusion keeps its 13 px / `#d4d4d4` styling; `Why nothing changed` / `Write result` / `Undo` / `Next` render in a dedicated `<dl>` block beneath a thin separator at 11.5 px in muted color, so they read as run metadata rather than part of Codex's answer. Failed-status reports keep their alert color on the conclusion while the meta stays muted.
+- **`applyOperations` page-bridge timeout raised 8 s → 30 s.** Page-side `openFileByPath` alone can wait 5 s × 4 fallback methods on slow file trees; the pre-fix 8 s timeout fired mid-write and left zombie writes running while the content side reported failure. 30 s covers the realistic slow path; cancel responsiveness is now driven by the cross-world cancel mechanism above, not by the timeout.
+- **Misleading "no usable result" fallback retired.** `translateRawError` now accepts a `codexReturned` context flag; when Codex's `assistantMessage` arrived on the stream before an unrelated exception escaped, the conclusion reads "Codex returned a result, but local post-processing of this run failed" instead of claiming Codex returned nothing. The legacy copy still fires for genuine no-result paths.
+- **`needs_review` tracked-change runs** now render the same primary Accept / Undo buttons as `pending` — the previous "needs review" labels conflated an internal retryable proof state with a different UX.
+- **Settings back-button respects the current route**: clicking Back from Settings on the `/project` Recent-projects URL now returns to Recent rather than unconditionally showing the per-project session view.
+- **Codex Overleaf skills entry** now displays a single clean row name (with the underlying id as the tooltip) and the enabled count refreshes immediately after toggles.
+- **Architecture budget enforcement** added freeze-line ceilings for the four largest unbudgeted files (`contentRuntime.js`, `writebackRouter.js`, `treeOperations.js`, `storageDb.js`). The write-guard surface was extracted from `pageBridge.js` to `extension/src/page/writeGuard.js`, returning `pageBridge.js` under the 2200-line budget; the v1.3.8 budget shim was removed.
+- **Shared test helper for `extractFunction`** (consolidated from five duplicate copies; the parser now walks past the parenthesized signature so default-value braces like `function foo(input = {}) { … }` no longer break extraction — the dormant bug that bit v1.3.8 work three times).
+- **`translateRawError`** regex branches now also return `failureCode` so callers attach structured FailureReason events alongside the existing text; three new catalog codes (`codex_timeout`, `codex_output_limit`, `codex_not_found`) cover branches that previously had no structured match.
+- **DI `typeof X === 'function'` guards collapsed** to destructuring defaults in `contextTray.js`, `localSkillsPanel.js`, `writebackRouter.js`, `treeOperations.js` — 34+13 occurrences eliminated; passing `null` or a non-function value now fails loudly rather than silently swapping in a noop.
+- **Stale `v1.3.8 add-on` framing comments** (~30 sites) rewritten as plain feature descriptions now that v1.3.8 has shipped.
+- **`contentRuntime.js` source reads centralized**: the 145 `fs.readFileSync(.../contentRuntime.js)` repetitions in `test/p0ProductExperience.test.js` are replaced with a cached `getContentScriptSource()` helper; 77 `extractFunction(contentScript, name)` call sites adopt the `extractFromContentScript(name)` shortcut.
+- **Six unused exports trimmed** from `staleGuard.js` / `sensitiveScan.js` / `pathRedaction.js`, and one truly-dead function (`mightContainLocalPath`) removed.
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, and release tracking metadata for the v1.3.9 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.3.9` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.3.9.zip`, `codex-overleaf-native-host-v1.3.9.tar.gz`, and `codex-overleaf-link-1.3.9.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.3.9 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.3.9 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.3.9 -- uninstall-native`.
+
+### Fixed
+
+- **Write-guard batch-skip crash that masked partial-sync conclusions** (v1.3.8 add-on): the guard emitted `operation: null` skip entries; `summarizeOperationForAudit(operation = {}, ...)` only defaulted on `undefined` so `null.path` threw and the outer catch swallowed the partial-sync report. The summarizer now normalizes null/undefined; both emit sites push `operation: {}`.
+- **`saveStateSoon` in-flight race**: a debounce timer firing while an async `saveState()` was still writing could let an older snapshot land after newer state mutations. Tracks an in-flight flag and queues at most one trailing run.
+- **Settings back-button** on `/project` URL no longer renders an empty per-project session view.
+
+### Notes
+
+- Native protocol stays `1`; this release adds cancellation responsiveness, structured cancellation cleanup, the writeback project-ID guard, the force-release recovery, and the native-host idle watchdog, not the native messaging protocol.
+- The page-side `Promise.race` cancel mechanism is preserved as the cleanup path for abandoned background writes — the user-perceived "instant cancel" is delivered by the content-side reject path, but the page-side race still tells the background work to stop so abandoned ops do not keep mutating Overleaf.
+
 ## v1.3.8 - 2026-05-25
 
 Reliability and clarity release. This version adds structured failure reasons, a Recent-projects welcome panel on the `/project` URL, a writeback project-ID guard that fails closed on mid-run navigation, and a native-host filter for transient Codex reconnect notifications that was the root cause of "local Codex returned no usable result" failures during network blips. The completion report now visually separates Codex's answer from run metadata, and several UX papercuts around skipped writebacks, post-navigation runs, and tracked-change buttons are smoothed over.

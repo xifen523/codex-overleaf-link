@@ -3483,3 +3483,66 @@ function createPageBridgeHarness({
     return hash.toString(16).padStart(24, '0').slice(0, 24);
   }
 }
+
+
+test('cancelActiveWrite emits a sequence number that bumps each call', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    editorProjectId: 'seq-pid',
+    files: { 'main.tex': 'x' }
+  });
+  const first = await bridge.call('cancelActiveWrite', {});
+  const second = await bridge.call('cancelActiveWrite', {});
+  assert.equal(first.ok, true);
+  assert.equal(first.cancelled, true);
+  assert.ok(Number.isInteger(first.sequence) && first.sequence > 0);
+  assert.equal(second.sequence, first.sequence + 1, 'sequence must monotonically increment');
+});
+
+test('writebackRouter applyOperationsCore captures the cancel sequence baseline and re-checks it between ops', () => {
+  // Source-grep regression for the cross-world cancel. The full integration
+  // (setTimeout-driven cancelActiveWrite during a real apply loop) is timing-
+  // sensitive and brittle in the VM harness; the structural invariants below
+  // are sufficient to catch removal/regression of the cancel path.
+  const writebackRouterSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'page', 'writebackRouter.js'), 'utf8');
+  // Router must accept the cancel-sequence reader as a dep.
+  assert.match(writebackRouterSrc, /readWriteCancellationSequence/,
+    'writebackRouter.create must accept readWriteCancellationSequence dep');
+  // applyOperationsCore must capture the baseline at start and re-check
+  // inside the per-op loop with a strict-inequality test.
+  assert.match(writebackRouterSrc, /function applyOperationsCore[\s\S]*?cancelBaselineSequence\s*=\s*readWriteCancellationSequence\(\)/,
+    'applyOperationsCore must capture cancelBaselineSequence at the start');
+  assert.match(writebackRouterSrc, /function applyOperationsCore[\s\S]*?for \(const rawOperation of operations\)[\s\S]*?readWriteCancellationSequence\(\)\s*!==\s*cancelBaselineSequence/,
+    'applyOperationsCore must re-check the cancel sequence inside the per-op loop');
+  // The skip result must carry the codex_cancelled code and a write-stage
+  // terminalState so the run-card / completion-report attribute correctly.
+  assert.match(writebackRouterSrc, /code:\s*'codex_cancelled'[\s\S]*?stage:\s*'write'[\s\S]*?terminalState:\s*'cancelled'/,
+    'cancellation skip must carry codex_cancelled + stage:write + terminalState:cancelled');
+});
+
+test('pageBridge exposes cancelActiveWrite as a dispatch method backed by a sequence counter', () => {
+  const pageBridgeSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'pageBridge.js'), 'utf8');
+  assert.match(pageBridgeSrc, /method === 'cancelActiveWrite'/,
+    'pageBridge dispatch must handle cancelActiveWrite');
+  assert.match(pageBridgeSrc, /writeCancellationSequence\s*\+=\s*1/,
+    'cancelActiveWrite must increment the sequence counter');
+  assert.match(pageBridgeSrc, /readWriteCancellationSequence/,
+    'pageBridge must pass the sequence reader to the writebackRouter');
+});
+
+test('content-side cancelActiveRun fires both codex.cancel (native) and cancelActiveWrite (page)', () => {
+  const contentScriptSrc = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'content', 'contentRuntime.js'), 'utf8');
+  // Bound the grep to the cancelActiveRun function so neighbouring code
+  // cannot accidentally satisfy the assertions.
+  const fnIdx = contentScriptSrc.indexOf('async function cancelActiveRun(');
+  assert.notEqual(fnIdx, -1, 'cancelActiveRun must exist');
+  const body = contentScriptSrc.slice(fnIdx, fnIdx + 2500);
+  assert.match(body, /method:\s*'codex\.cancel'/,
+    'native cancel must still fire');
+  assert.match(body, /callPageBridge\(\s*'cancelActiveWrite'/,
+    'page-side cancelActiveWrite must also fire so writeback aborts mid-flight');
+  // The page-side cancel is best-effort — must catch so a missing page
+  // bridge does not break the native cancel completion.
+  assert.match(body, /callPageBridge\(\s*'cancelActiveWrite'[\s\S]{0,80}\.catch/,
+    'cancelActiveWrite call must be best-effort (.catch swallow)');
+});

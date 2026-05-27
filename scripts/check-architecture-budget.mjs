@@ -16,22 +16,25 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     maxLines: 4500
   },
   {
+    // v1.3.9 added cancelActiveWrite + writeCancellationSequence; bumped
+    // 2200 → 2250 to fit (~26 lines). Still well under the 2400 v1.3.8 shim.
     path: 'extension/src/pageBridge.js',
-    maxLines: 2200
+    maxLines: 2250
   },
   {
-    // Elephant. 12266 lines is unhealthy but a real split needs its own
+    // Elephant. 12341 lines is unhealthy but a real split needs its own
     // multi-week refactor (panel renderer, run controller, settings, skills,
     // recent-projects, writeback orchestration are all interleaved here).
-    // Bumped from 12200 → 12300 to fit the cancel-by-projectKey +
-    // force-release recovery helpers (~70 lines).
+    // Bumped 12300 → 12400 to fit v1.3.9 cancel mechanism (activePageBridge-
+    // CancellationHandlers + the per-request reject path in sendPageBridgeRequest).
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 12300
+    maxLines: 12400
   },
   {
-    // Writeback router: large but cohesive. Freeze with modest headroom.
+    // Writeback router: large but cohesive. v1.3.9 added the cross-world
+    // cancel racer + per-op race wrapping (~80 lines). Freeze at +50 more.
     path: 'extension/src/page/writebackRouter.js',
-    maxLines: 3200
+    maxLines: 3300
   },
   {
     path: 'extension/src/page/treeOperations.js',

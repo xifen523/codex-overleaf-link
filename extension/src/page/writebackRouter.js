@@ -17,6 +17,14 @@
       ? Math.max(0, Number(deps.writebackOpenSettleMs))
       : 1200;
     const diagnosticsRevision = String(deps.diagnosticsRevision || '');
+    // Cross-world cancel signal reader. Returns the current page-bridge
+    // sequence number, which monotonically increments when content-side
+    // calls pageBridge.cancelActiveWrite. applyOperationsCore captures the
+    // baseline at start and re-reads between ops; any bump means the user
+    // cancelled and the remaining ops should be skipped with codex_cancelled.
+    const readWriteCancellationSequence = typeof deps.readWriteCancellationSequence === 'function'
+      ? deps.readWriteCancellationSequence
+      : () => 0;
 
     function invalidProjectPathResult(label = 'path') {
       return deps.invalidProjectPathResult?.(label) || {
@@ -448,8 +456,91 @@
       document: window.document,
       treeOperations
     });
+    // Cross-world cancel baseline. The user clicks cancel during writeback →
+    // content-side calls pageBridge.cancelActiveWrite → the sequence number
+    // bumps. Two layers of responsiveness:
+    //   1. Between-ops check — short-circuits the next iteration so the
+    //      remaining ops never start.
+    //   2. Race the in-flight op against a cancellation poller (50ms
+    //      interval) so a click DURING a slow op (e.g. inside a 5s
+    //      waitForActiveFile poll) is observed within ~50ms instead of
+    //      having to wait out the op's internal timeout. The op promise
+    //      keeps running in the page world after the race resolves — its
+    //      eventual result is ignored. This is "user-perceived instant
+    //      cancel": the spinner stops, the run settles to cancelled, and
+    //      any DOM mutation already in flight on the op cannot be undone
+    //      from here anyway.
+    const cancelBaselineSequence = readWriteCancellationSequence();
+    const cancelledSkipResult = {
+      ok: false,
+      code: 'codex_cancelled',
+      reason: 'The Codex run was cancelled by the user while the writeback was in flight; remaining operations were not applied.',
+      failure: {
+        code: 'codex_run_cancelled',
+        stage: 'write',
+        severity: 'info',
+        userMessage: 'The Codex run was cancelled by the user during writeback; remaining file operations were skipped.',
+        nextAction: 'Start a new run if you want to apply these changes.',
+        retryable: true,
+        terminalState: 'cancelled',
+        changedDocument: false
+      }
+    };
+    // 50ms-poller racer using recursive setTimeout. setInterval is NOT
+    // exposed in the test VM context that hosts pageBridge (only setTimeout /
+    // clearTimeout are wired), so this implementation must avoid it. Each
+    // tick re-schedules itself only while the racer has not resolved;
+    // dispose() flips a flag so any tick that fires after dispose is a no-op.
+    // Resolves the first time the cancellation sequence bumps past baseline.
+    function createCancellationRacer() {
+      let resolved = false;
+      let resolveFn;
+      const promise = new Promise(resolve => { resolveFn = resolve; });
+      let timer = null;
+      function tick() {
+        if (resolved) return;
+        if (readWriteCancellationSequence() !== cancelBaselineSequence) {
+          resolved = true;
+          resolveFn();
+          return;
+        }
+        timer = window.setTimeout(tick, 50);
+      }
+      timer = window.setTimeout(tick, 50);
+      return {
+        promise,
+        dispose() {
+          resolved = true;
+          if (timer) window.clearTimeout(timer);
+        }
+      };
+    }
+    const CANCELLED_RACE_SENTINEL = Symbol('writebackRouter.cancelled');
+    async function raceOpAgainstCancellation(opPromise) {
+      const racer = createCancellationRacer();
+      try {
+        return await Promise.race([
+          opPromise,
+          racer.promise.then(() => CANCELLED_RACE_SENTINEL)
+        ]);
+      } finally {
+        racer.dispose();
+      }
+    }
 
     for (const rawOperation of operations) {
+      // Cross-world cancel check. Cheap (synchronous read of a counter),
+      // runs before the writeGuard re-check so a click-cancel that arrived
+      // during the previous op's await microtasks short-circuits before we
+      // burn time on guard / open-file work for the next op.
+      if (readWriteCancellationSequence() !== cancelBaselineSequence) {
+        skipped.push({ operation: normalizeOperationPaths(rawOperation), result: cancelledSkipResult });
+        const remainingForCancel = operations.slice(operations.indexOf(rawOperation) + 1);
+        for (const tailOperation of remainingForCancel) {
+          skipped.push({ operation: normalizeOperationPaths(tailOperation), result: cancelledSkipResult });
+        }
+        break;
+      }
       // Per-op re-check: if a runProjectId was supplied and the page-side
       // guard is available, verify the editor still shows the same project
       // before committing the next write. Mismatch → push aborted_project_changed
@@ -475,21 +566,16 @@
         skipped.push({ operation, result: pathSafety });
         continue;
       }
+      let raceResult;
       if (operation.type === 'edit') {
-        const result = await applyEditOperation(operation, {
+        raceResult = await raceOpAgainstCancellation(applyEditOperation(operation, {
           baseFileLookup,
           trackReviewingChanges: options.trackReviewingChanges === true
-        });
-        if (result.ok && Array.isArray(result.trackedChanges)) {
-          trackedChanges.push(...result.trackedChanges);
-        }
-        (result.ok ? applied : skipped).push({ operation, result });
+        }));
       } else if (['binary-create', 'overwrite-binary'].includes(operation.type)) {
-        const result = await applyBinaryAssetOperation(operation, { baseFileLookup, baseBinaryFileLookup });
-        (result.ok ? applied : skipped).push({ operation, result });
+        raceResult = await raceOpAgainstCancellation(applyBinaryAssetOperation(operation, { baseFileLookup, baseBinaryFileLookup }));
       } else if (['create', 'rename', 'move', 'delete'].includes(operation.type)) {
-        const result = await applyFileTreeOperation(operation, { baseFileLookup });
-        (result.ok ? applied : skipped).push({ operation, result });
+        raceResult = await raceOpAgainstCancellation(applyFileTreeOperation(operation, { baseFileLookup }));
       } else {
         skipped.push({
           operation,
@@ -498,7 +584,25 @@
             reason: `Unsupported operation type: ${operation.type}`
           }
         });
+        continue;
       }
+      // Cancellation race winner: skip current op + the rest of the queue.
+      // The op promise above keeps running in background; its eventual
+      // result is discarded. The user perceives instant cancel because we
+      // settle the loop here instead of waiting for the op to finish.
+      if (raceResult === CANCELLED_RACE_SENTINEL) {
+        skipped.push({ operation, result: cancelledSkipResult });
+        const remainingAfterCancel = operations.slice(operations.indexOf(rawOperation) + 1);
+        for (const tailOperation of remainingAfterCancel) {
+          skipped.push({ operation: normalizeOperationPaths(tailOperation), result: cancelledSkipResult });
+        }
+        break;
+      }
+      const result = raceResult;
+      if (operation.type === 'edit' && result.ok && Array.isArray(result.trackedChanges)) {
+        trackedChanges.push(...result.trackedChanges);
+      }
+      (result.ok ? applied : skipped).push({ operation, result });
     }
 
     if (applied.length > 0) {

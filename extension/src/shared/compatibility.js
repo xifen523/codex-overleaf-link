@@ -12,7 +12,7 @@
   const MIN_NATIVE_VERSION = '1.0.0';
   const MIN_COMPATIBLE_NATIVE_VERSION = '1.0.0';
   const MIN_COMPATIBLE_EXTENSION_VERSION = '1.0.0';
-  const BUILD_TARGET_VERSION = '1.3.8';
+  const BUILD_TARGET_VERSION = '1.3.9';
   const DEFAULT_CHROME_EXTENSION_ID = 'illdpneeeopfffmiepaejglgmhpmdhdc';
   const REQUIRED_CAPABILITIES = Object.freeze([
     'bridgePing',
