@@ -10223,6 +10223,73 @@
     ].filter(Boolean).join('\n');
   }
 
+  // The trailing status sections emitted by formatHumanReport (agentTranscript):
+  // run metadata, not part of Codex's answer. Each entry matches the bilingual
+  // "Label: value" line so the flat-text fallback can split them out of the
+  // body and demote them into the same muted meta block the structured render
+  // uses. Order mirrors the structured meta order.
+  const FLAT_REPORT_STATUS_SECTIONS = [
+    { key: 'unchangedReason', prefixes: ['Why nothing changed:', '未修改原因：'], en: 'Why nothing changed', zh: '未修改原因' },
+    { key: 'writeResult', prefixes: ['Write result:', '写入结果：'], en: 'Write result', zh: '写入结果' },
+    { key: 'undo', prefixes: ['Undo:', '可撤销：'], en: 'Undo', zh: '可撤销' },
+    { key: 'nextStep', prefixes: ['Next:', '下一步：'], en: 'Next', zh: '下一步' }
+  ];
+
+  // Splits a flat completion-report string (formatHumanReport output) into the
+  // answer body and the demoted meta rows. Only single-line sections whose head
+  // matches a known status label are demoted, so a multi-paragraph conclusion
+  // that happens to contain "Next: …" prose stays in the body.
+  function splitFlatCompletionReport(text) {
+    const raw = typeof text === 'string' ? text : '';
+    if (!raw.trim()) {
+      return { body: raw, meta: [] };
+    }
+    const bodySections = [];
+    const meta = [];
+    for (const section of raw.split(/\n{2,}/)) {
+      const trimmed = section.trim();
+      if (!trimmed) continue;
+      const entry = trimmed.includes('\n')
+        ? null
+        : FLAT_REPORT_STATUS_SECTIONS.find(item => item.prefixes.some(prefix => trimmed.startsWith(prefix)));
+      if (entry) {
+        const prefix = entry.prefixes.find(p => trimmed.startsWith(p));
+        const value = trimmed.slice(prefix.length).trim();
+        if (value) {
+          meta.push({ key: entry.key, label: tx(entry.en, entry.zh), value });
+          continue;
+        }
+      }
+      bodySections.push(trimmed);
+    }
+    return { body: bodySections.join('\n\n'), meta };
+  }
+
+  // Renders the demoted run-metadata block (Why nothing changed / Write result /
+  // Undo / Next) beneath the answer. Shared by the structured and flat-fallback
+  // render paths so both demote identically.
+  function appendCompletionMetaBlock(report, meta) {
+    if (!Array.isArray(meta) || !meta.length) {
+      return;
+    }
+    const metaBlock = document.createElement('dl');
+    metaBlock.className = 'run-final-answer__meta';
+    for (const row of meta) {
+      if (!row || !row.label || !row.value) continue;
+      const dt = document.createElement('dt');
+      dt.className = 'run-final-answer__meta-label';
+      dt.textContent = row.label;
+      if (row.key) dt.dataset.metaKey = row.key;
+      const dd = document.createElement('dd');
+      dd.className = 'run-final-answer__meta-value';
+      dd.textContent = row.value;
+      metaBlock.append(dt, dd);
+    }
+    if (metaBlock.children.length) {
+      report.append(metaBlock);
+    }
+  }
+
   function renderCompletionReport(input) {
     const event = sanitizeRunEventForRender(input);
     const report = document.createElement('section');
@@ -10253,32 +10320,23 @@
         report.append(main);
       }
 
-      if (Array.isArray(structured.meta) && structured.meta.length) {
-        const metaBlock = document.createElement('dl');
-        metaBlock.className = 'run-final-answer__meta';
-        for (const row of structured.meta) {
-          if (!row || !row.label || !row.value) continue;
-          const dt = document.createElement('dt');
-          dt.className = 'run-final-answer__meta-label';
-          dt.textContent = row.label;
-          if (row.key) dt.dataset.metaKey = row.key;
-          const dd = document.createElement('dd');
-          dd.className = 'run-final-answer__meta-value';
-          dd.textContent = row.value;
-          metaBlock.append(dt, dd);
-        }
-        report.append(metaBlock);
-      }
+      appendCompletionMetaBlock(report, structured.meta);
       appendRecoveryActionForFailure(report, event);
       return report;
     }
 
     // Legacy fallback: events persisted before structured payloads were added
     // (and the recovered-history shape that uses `detail: { '结论': result }`).
+    // Even without a structured payload, split the trailing status sections out
+    // of the flat text so Write result / Undo / Next demote into the muted meta
+    // block instead of reading as part of the answer.
+    const flatText = formatEventDetail(event.detail || {});
+    const split = splitFlatCompletionReport(flatText);
     const body = document.createElement('div');
     body.className = 'run-final-answer';
-    renderMarkdownBlockText(body, formatEventDetail(event.detail || {}));
+    renderMarkdownBlockText(body, split.body || flatText);
     report.append(body);
+    appendCompletionMetaBlock(report, split.meta);
     appendRecoveryActionForFailure(report, event);
     return report;
   }

@@ -5130,13 +5130,77 @@ test('renderCompletionReport branches on detailStructured and emits a meta block
   const src = getContentScriptSource();
   const body = extractFunction(src, 'renderCompletionReport');
   assert.match(body, /detailStructured/, 'renderer must read the structured payload off the event');
-  assert.match(body, /run-final-answer__meta/, 'renderer must emit the meta-block class');
-  assert.match(body, /run-final-answer__meta-label/, 'renderer must emit the meta label class');
-  assert.match(body, /run-final-answer__meta-value/, 'renderer must emit the meta value class');
+  assert.match(body, /appendCompletionMetaBlock/, 'renderer must delegate to the shared meta-block appender');
   // Legacy fallback (string detail) must still be reachable; the old class
   // and markdown-text path must be preserved for persisted / recovered events.
   assert.match(body, /'run-final-answer'/, 'legacy fallback path must remain');
   assert.match(body, /formatEventDetail/, 'legacy fallback must still call formatEventDetail');
+  // Full-coverage fix: the flat fallback must ALSO split status sections out so
+  // Write result / Undo / Next demote even when no structured payload survived.
+  assert.match(body, /splitFlatCompletionReport/, 'fallback must split status sections from the flat text');
+
+  const appender = extractFunction(src, 'appendCompletionMetaBlock');
+  assert.match(appender, /run-final-answer__meta/, 'appender must emit the meta-block class');
+  assert.match(appender, /run-final-answer__meta-label/, 'appender must emit the meta label class');
+  assert.match(appender, /run-final-answer__meta-value/, 'appender must emit the meta value class');
+});
+
+// The flat-text fallback (events with no structured payload — persisted before
+// structured reports existed, or restored from a prefs-only compact fallback)
+// must still demote the trailing status sections so "Write result / Undo / Next"
+// read as run metadata, not as part of Codex's answer.
+test('splitFlatCompletionReport demotes status sections out of the flat answer body', () => {
+  const src = getContentScriptSource();
+  const constMatch = src.match(/const FLAT_REPORT_STATUS_SECTIONS = \[[\s\S]*?\];/);
+  assert.ok(constMatch, 'FLAT_REPORT_STATUS_SECTIONS const must exist');
+  const split = new Function(`
+    const tx = (en) => en;
+    ${constMatch[0]}
+    ${extractFunction(src, 'splitFlatCompletionReport')}
+    return splitFlatCompletionReport;
+  `)();
+
+  // The exact shape the user reported: a Changes content section followed by
+  // the Write result / Undo / Next status sections, joined by blank lines.
+  const flat = [
+    'Changes:\nmain.tex: edit (Synced 2 local Codex workspace edits.)',
+    'Write result: wrote 1 item, skipped 0 items',
+    'Undo: this run has 1 reversible write',
+    'Next: Review the synced file in Overleaf.'
+  ].join('\n\n');
+
+  const result = split(flat);
+  // Content stays in the body…
+  assert.match(result.body, /Changes:/, 'the Changes content section stays in the body');
+  assert.match(result.body, /main\.tex: edit/, 'the changed-file line stays in the body');
+  // …and the status lines are pulled out of the body entirely.
+  assert.doesNotMatch(result.body, /Write result:/, 'Write result must not remain in the answer body');
+  assert.doesNotMatch(result.body, /Undo:/, 'Undo must not remain in the answer body');
+  assert.doesNotMatch(result.body, /Next:/, 'Next must not remain in the answer body');
+
+  const keys = result.meta.map(row => row.key);
+  assert.deepEqual(keys, ['writeResult', 'undo', 'nextStep'], 'status sections demote in order');
+  const writeRow = result.meta.find(row => row.key === 'writeResult');
+  assert.equal(writeRow.label, 'Write result', 'meta row carries the localized label');
+  assert.equal(writeRow.value, 'wrote 1 item, skipped 0 items', 'meta row strips the label prefix from the value');
+});
+
+// Guard against over-eager demotion: a multi-line conclusion paragraph that
+// merely contains a "Next: …" sentence must NOT be split into the meta block.
+test('splitFlatCompletionReport keeps multi-line prose containing a status word in the body', () => {
+  const src = getContentScriptSource();
+  const constMatch = src.match(/const FLAT_REPORT_STATUS_SECTIONS = \[[\s\S]*?\];/);
+  const split = new Function(`
+    const tx = (en) => en;
+    ${constMatch[0]}
+    ${extractFunction(src, 'splitFlatCompletionReport')}
+    return splitFlatCompletionReport;
+  `)();
+
+  const flat = 'Conclusion: I rewrote the intro.\nNext: I considered trimming it further.';
+  const result = split(flat);
+  assert.match(result.body, /Next: I considered/, 'a multi-line prose section is not demoted');
+  assert.equal(result.meta.length, 0, 'no status rows extracted from prose');
 });
 
 test('appendCompletionReport forwards detailStructured from the report shaper', () => {
