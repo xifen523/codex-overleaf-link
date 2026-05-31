@@ -635,16 +635,29 @@
   function normalizeRunEvents(events) {
     return (Array.isArray(events) ? events : [])
       .filter(event => event && typeof event.title === 'string')
-      .map(event => ({
-        title: sanitizeAssistantVisibleText(event.title) || 'Event',
-        status: typeof event.status === 'string' ? event.status : 'info',
-        detail: sanitizeAssistantVisibleValue(event.detail),
-        timestamp: typeof event.timestamp === 'string' ? event.timestamp : '',
-        kind: typeof event.kind === 'string' ? event.kind : 'activity',
-        technicalDetail: sanitizeAssistantVisibleValue(event.technicalDetail),
-        streamKey: sanitizeAssistantVisibleText(event.streamKey),
-        streamRole: sanitizeAssistantVisibleText(event.streamRole)
-      }))
+      .map(event => {
+        const normalized = {
+          title: sanitizeAssistantVisibleText(event.title) || 'Event',
+          status: typeof event.status === 'string' ? event.status : 'info',
+          detail: sanitizeAssistantVisibleValue(event.detail),
+          timestamp: typeof event.timestamp === 'string' ? event.timestamp : '',
+          kind: typeof event.kind === 'string' ? event.kind : 'activity',
+          technicalDetail: sanitizeAssistantVisibleValue(event.technicalDetail),
+          streamKey: sanitizeAssistantVisibleText(event.streamKey),
+          streamRole: sanitizeAssistantVisibleText(event.streamRole)
+        };
+        // Preserve the structured completion-report payload and the structured
+        // failure across reload. Without these the report re-renders via the
+        // flat legacy path (Write result / Undo / Next NOT demoted into the
+        // muted meta block) and the recovery action button disappears.
+        if (event.detailStructured) {
+          normalized.detailStructured = sanitizeAssistantVisibleValue(event.detailStructured);
+        }
+        if (event.failure) {
+          normalized.failure = sanitizeAssistantVisibleValue(event.failure);
+        }
+        return normalized;
+      })
       .slice(-MAX_RUN_EVENTS);
   }
 
@@ -1009,6 +1022,14 @@
         const detail = compactDetailForStorage(event.detail, getEventDetailLimit(event, limits));
         if (detail !== undefined) {
           compact.detail = detail;
+        }
+        // Keep the structured report payload + structured failure so the
+        // demoted meta block and the recovery action survive a reload.
+        if (event.detailStructured) {
+          compact.detailStructured = sanitizeAssistantVisibleValue(event.detailStructured);
+        }
+        if (event.failure) {
+          compact.failure = sanitizeAssistantVisibleValue(event.failure);
         }
         return compact;
       });

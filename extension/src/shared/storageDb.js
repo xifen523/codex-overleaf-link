@@ -680,8 +680,48 @@
         if (detail !== undefined) {
           compact.detail = detail;
         }
+        // Preserve the structured completion-report payload + structured
+        // failure with their object shape intact (the generic detail
+        // compactor would redact unknown objects to a {redacted,hash}
+        // summary). Without this the report re-renders flat on reload —
+        // Write result / Undo / Next no longer demote into the muted meta
+        // block — and the recovery action button disappears.
+        if (event.detailStructured) {
+          compact.detailStructured = compactStructuredEventValueForStorage(event.detailStructured, 0);
+        }
+        if (event.failure) {
+          compact.failure = compactStructuredEventValueForStorage(event.failure, 0);
+        }
         return compact;
       });
+  }
+
+  // Deep-copies a known-safe structured event value (the completion-report
+  // {conclusion, body, meta[]} payload, or a FailureReason object) preserving
+  // its shape while redacting + truncating every string field. Bounded depth +
+  // breadth so a pathological value can't blow up the stored record.
+  function compactStructuredEventValueForStorage(value, depth) {
+    var d = depth || 0;
+    if (typeof value === 'string') {
+      return normalizeDisplayTextForStorage(value, SESSION_STORAGE_LIMITS.reportDetailChars);
+    }
+    if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+      return value;
+    }
+    if (d > 6 || typeof value !== 'object') {
+      return null;
+    }
+    if (Array.isArray(value)) {
+      return value.slice(0, 32).map(function (item) {
+        return compactStructuredEventValueForStorage(item, d + 1);
+      });
+    }
+    var out = {};
+    var keys = Object.keys(value).slice(0, 32);
+    for (var i = 0; i < keys.length; i++) {
+      out[keys[i]] = compactStructuredEventValueForStorage(value[keys[i]], d + 1);
+    }
+    return out;
   }
 
   function getEventDetailLimit(event) {

@@ -1083,3 +1083,63 @@ test('buildSessionRecord sets accountScopeUnavailable=true and accountScopeId=nu
     global.window = prior;
   }
 });
+
+test('buildSessionRecord preserves a report event detailStructured + failure across persistence', () => {
+  // Regression: the run-event compaction whitelisted fields and dropped
+  // detailStructured + failure, so a completion report re-rendered from a
+  // persisted record fell back to the FLAT legacy render (Write result / Undo
+  // / Next no longer demoted into the muted meta block) and the recovery
+  // action button vanished. Both must survive buildSessionRecord with their
+  // object shape intact.
+  const record = buildSessionRecord({
+    id: 'ses_struct',
+    projectId: 'proj_struct',
+    runs: [{
+      id: 'run_struct',
+      task: 'edit intro',
+      status: 'completed',
+      startedAt: '2026-05-27T00:00:00.000Z',
+      finishedAt: '2026-05-27T00:00:18.000Z',
+      events: [{
+        title: 'Task report',
+        status: 'completed',
+        kind: 'report',
+        detail: 'Conclusion: synced. \n\nWrite result: wrote 1 item, skipped 0 items',
+        detailStructured: {
+          conclusion: 'Local Codex changes were synced back to Overleaf.',
+          body: 'Changes:\n- main.tex: edit',
+          meta: [
+            { key: 'writeResult', label: 'Write result', value: 'wrote 1 item, skipped 0 items' },
+            { key: 'undo', label: 'Undo', value: 'this run has 1 reversible write' },
+            { key: 'nextStep', label: 'Next', value: 'Review the synced file in Overleaf.' }
+          ]
+        },
+        failure: {
+          code: 'codex_project_locked',
+          stage: 'codex',
+          severity: 'blocked',
+          userMessage: 'Another Codex task is already running for this project.',
+          nextAction: 'Wait or cancel before retrying.',
+          retryable: true,
+          terminalState: 'blocked',
+          changedDocument: false
+        }
+      }]
+    }]
+  });
+
+  const event = record.runs[0].events[0];
+  // detailStructured survives with its shape (conclusion/body/meta array).
+  assert.ok(event.detailStructured, 'detailStructured must survive persistence');
+  assert.equal(event.detailStructured.conclusion, 'Local Codex changes were synced back to Overleaf.');
+  assert.match(event.detailStructured.body, /main\.tex: edit/);
+  assert.ok(Array.isArray(event.detailStructured.meta), 'meta must stay an array');
+  assert.equal(event.detailStructured.meta.length, 3);
+  assert.equal(event.detailStructured.meta[0].key, 'writeResult');
+  assert.equal(event.detailStructured.meta[0].label, 'Write result');
+  assert.match(event.detailStructured.meta[0].value, /wrote 1 item/);
+  // failure survives with code (drives the recovery action + run-card status).
+  assert.ok(event.failure, 'failure must survive persistence');
+  assert.equal(event.failure.code, 'codex_project_locked');
+  assert.equal(event.failure.terminalState, 'blocked');
+});
