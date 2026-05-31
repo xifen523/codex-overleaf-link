@@ -1018,12 +1018,69 @@
   text-align: left;
 }
 
+/* ---------------------------------------------------------------------------
+   Run-timeline design tokens. A 4-step text ladder (was 8 near-identical
+   grays) + surfaces + a single accent and semantic state colors. No existing
+   selector depends on these names; adding them is non-breaking and the
+   timeline rules below consume them. */
+#codex-overleaf-panel {
+  --tl-fg-1: #e4e4e4;   /* primary prose / answer */
+  --tl-fg-2: #b7b7b7;   /* activity titles / stream body */
+  --tl-fg-3: #8a8a8a;   /* meta / summary / checkpoints */
+  --tl-fg-4: #6b6b6b;   /* deep-muted / idle */
+  --tl-surface-1: #1e1e1e;
+  --tl-surface-2: #232323;
+  --tl-border: #2a2a2a;
+  --tl-accent: #6f9fd8;
+  --tl-run: #4ec9b0;
+  --tl-ok: #89d185;
+  --tl-fail: #e0795f;
+  --tl-review: #d7ba7d;
+  --tl-r-sm: 4px;
+  --tl-r-md: 8px;
+}
+
+@keyframes tl-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tl-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(78, 201, 176, 0.45); }
+  50%      { box-shadow: 0 0 0 3px rgba(78, 201, 176, 0.10); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #codex-overleaf-panel * { animation: none !important; scroll-behavior: auto !important; }
+}
+
 #codex-overleaf-panel .codex-thread-section {
+  position: relative;       /* positioning context for the floating jump button */
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
   margin-top: 14px;
+}
+
+/* Floating "jump to latest" affordance — shown only while detached. */
+#codex-overleaf-panel .tl-jump-latest {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--tl-border);
+  border-radius: 14px;
+  background: var(--tl-surface-2);
+  color: var(--tl-fg-2);
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  animation: tl-fade-in 120ms ease-out;
+}
+
+#codex-overleaf-panel .tl-jump-latest:hover {
+  color: var(--tl-fg-1);
+  border-color: #3a3a3a;
 }
 
 #codex-overleaf-panel .codex-thread-title {
@@ -1040,7 +1097,28 @@
   min-height: 0;
   overflow-y: auto;
   padding-right: 2px;
-  color: #cccccc;
+  color: var(--tl-fg-2);
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a transparent;
+  overflow-anchor: none;     /* the JS scroll engine owns follow behavior */
+}
+
+#codex-overleaf-panel .col-log::-webkit-scrollbar {
+  width: 8px;
+}
+
+#codex-overleaf-panel .col-log::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 4px;
+}
+
+#codex-overleaf-panel .col-log::-webkit-scrollbar-thumb:hover {
+  background: #4a4a4a;
+}
+
+#codex-overleaf-panel .col-log::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 #codex-overleaf-panel .empty-runs {
@@ -1217,30 +1295,49 @@
   align-items: center;
   gap: 6px;
   min-height: 20px;
-  color: #cfcfcf;
+  color: var(--tl-fg-2);
   padding: 1px 0;
+  animation: tl-fade-in 140ms ease-out;   /* opacity-only — never reflows neighbors */
 }
 
+/* Typographic status glyph (Option B). The .run-activity-dot element is kept
+   (selector/snapshot tests still match it) but is now a glyph slot whose
+   ::before content is driven by data-status: idle ·, running ◐ (spins),
+   completed ✓, failed ✕. Replaces the 2018-era colored circle. */
 #codex-overleaf-panel .run-activity-dot {
   justify-self: center;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #6a6a6a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 11px;
+  line-height: 1;
+  background: transparent;
 }
 
-#codex-overleaf-panel .run-activity[data-status="running"] .run-activity-dot {
-  background: #4ec9b0;
-  box-shadow: 0 0 0 3px rgba(78, 201, 176, 0.14);
+#codex-overleaf-panel .run-activity-dot::before {
+  content: "·";
+  color: var(--tl-fg-4);
 }
 
-#codex-overleaf-panel .run-activity[data-status="completed"] .run-activity-dot {
-  background: #89d185;
+#codex-overleaf-panel .run-activity[data-status="running"] .run-activity-dot::before {
+  content: "◐";
+  color: var(--tl-run);
+  animation: tl-spin 1.4s linear infinite;
 }
 
-#codex-overleaf-panel .run-activity[data-status="failed"] .run-activity-dot {
-  background: #f48771;
+#codex-overleaf-panel .run-activity[data-status="completed"] .run-activity-dot::before {
+  content: "✓";
+  color: var(--tl-ok);
 }
+
+#codex-overleaf-panel .run-activity[data-status="failed"] .run-activity-dot::before {
+  content: "✕";
+  color: var(--tl-fail);
+}
+
+@keyframes tl-spin { to { transform: rotate(360deg); } }
 
 #codex-overleaf-panel .run-activity[data-kind="checkpoint"] {
   grid-template-columns: minmax(0, 1fr);
@@ -1284,7 +1381,19 @@
 
 #codex-overleaf-panel .run-stream {
   margin: 6px 0 2px;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
+  border-left: 2px solid var(--tl-border);
+  padding-left: 9px;
+  animation: tl-fade-in 140ms ease-out;
+}
+
+/* Role-colored left rule distinguishes the assistant answer from reasoning. */
+#codex-overleaf-panel .run-stream[data-stream-role="assistant"] {
+  border-left-color: var(--tl-accent);
+}
+
+#codex-overleaf-panel .run-stream[data-stream-role="reasoning"] {
+  border-left-color: var(--tl-fg-4);
 }
 
 #codex-overleaf-panel .run-stream-text {
@@ -1295,7 +1404,7 @@
 }
 
 #codex-overleaf-panel .run-stream[data-stream-role="reasoning"] .run-stream-text {
-  color: #bdbdbd;
+  color: var(--tl-fg-3);
 }
 
 #codex-overleaf-panel .codex-line-reference {
@@ -1335,25 +1444,66 @@
   margin-top: 4px;
 }
 
+/* Sticky current-step header (Option B). Pins to the top of the scroll
+   container while a run's steps stream past, so the user can always see the
+   run's live state + elapsed without scrolling to it. The status glyph
+   (::before) mirrors the card's data-status; the chevron (::after) is the
+   expand/collapse affordance. */
 #codex-overleaf-panel .run-process summary {
-  display: inline-flex;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
   align-items: center;
-  gap: 5px;
-  width: fit-content;
+  gap: 6px;
   cursor: pointer;
-  color: #969696;
+  color: var(--tl-fg-3);
   font-size: 12px;
   list-style: none;
   user-select: none;
+  background: var(--tl-surface-1);
+  padding: 3px 2px;
+  border-radius: var(--tl-r-sm);
 }
 
 #codex-overleaf-panel .run-process summary::-webkit-details-marker {
   display: none;
 }
 
+/* Status glyph before the summary, driven by the run card's data-status. */
+#codex-overleaf-panel .run-process summary::before {
+  content: "·";
+  color: var(--tl-fg-4);
+  font-size: 11px;
+  line-height: 1;
+}
+
+#codex-overleaf-panel .transcript-turn[data-status="running"] .run-process summary::before {
+  content: "◐";
+  color: var(--tl-run);
+  animation: tl-spin 1.4s linear infinite;
+}
+
+#codex-overleaf-panel .transcript-turn[data-status="completed"] .run-process summary::before {
+  content: "✓";
+  color: var(--tl-ok);
+}
+
+#codex-overleaf-panel .transcript-turn[data-status="failed"] .run-process summary::before,
+#codex-overleaf-panel .transcript-turn[data-status="abandoned_after_navigation"] .run-process summary::before {
+  content: "✕";
+  color: var(--tl-fail);
+}
+
+#codex-overleaf-panel .transcript-turn[data-status="needs_review_after_navigation"] .run-process summary::before {
+  content: "◆";
+  color: var(--tl-review);
+}
+
 #codex-overleaf-panel .run-process summary::after {
   content: "›";
-  color: #858585;
+  margin-left: auto;
+  color: var(--tl-fg-4);
   transition: transform 120ms ease;
 }
 
@@ -1424,44 +1574,43 @@
 #codex-overleaf-panel .run-final-answer__meta {
   margin: 10px 0 0;
   padding: 8px 0 0;
-  border-top: 1px solid #2b2b2b;
+  border-top: 1px solid var(--tl-border);
   display: grid;
   grid-template-columns: max-content 1fr;
   column-gap: 12px;
   row-gap: 4px;
-  font-size: 11.5px;
+  font-size: 12px;            /* 11.5 -> 12: clears WCAG-AA at the muted color */
   line-height: 1.5;
-  color: #858585;
+  color: var(--tl-fg-3);
 }
 
 #codex-overleaf-panel .run-final-answer__meta-label {
   margin: 0;
-  color: #a0a0a0;
+  color: var(--tl-fg-2);
   font-weight: 600;
   letter-spacing: 0.02em;
 }
 
 #codex-overleaf-panel .run-final-answer__meta-value {
   margin: 0;
-  color: #858585;
+  color: var(--tl-fg-3);
   word-break: break-word;
 }
 
 #codex-overleaf-panel .run-completion-report[data-status="failed"] {
-  color: #f48771;
+  color: var(--tl-fail);
 }
 
 /* Failed-status reports keep their alert color for the conclusion, but the
    meta block stays muted so it still reads as system info rather than amplifying
    the alert. */
 #codex-overleaf-panel .run-completion-report[data-status="failed"] .run-final-answer__meta,
-#codex-overleaf-panel .run-completion-report[data-status="failed"] .run-final-answer__meta-label,
 #codex-overleaf-panel .run-completion-report[data-status="failed"] .run-final-answer__meta-value {
-  color: #858585;
+  color: var(--tl-fg-3);
 }
 
 #codex-overleaf-panel .run-completion-report[data-status="failed"] .run-final-answer__meta-label {
-  color: #a0a0a0;
+  color: var(--tl-fg-2);
 }
 
 /* Recovery action button. Only renders for failure codes that have a

@@ -1502,6 +1502,73 @@ test('run log autoscroll follows realtime output unless the user scrolls upward'
   assert.match(contentScript, /scrollLogToBottom\(\)/);
 });
 
+test('scroll engine coalesces writes, re-checks intent at paint, and exposes a jump-to-latest affordance', () => {
+  const contentScript = getContentScriptSource();
+  // Single rAF coalesces a burst into one write per frame (no double reflow):
+  // the rAF id guard means a second call within the same frame returns early.
+  assert.match(contentScript, /let scrollLogRafId = 0/);
+  assert.match(contentScript, /if \(scrollLogRafId\)\s*\{[\s\S]*?return/);
+  // A forced scroll must survive the coalesce so it is never dropped.
+  assert.match(contentScript, /scrollLogPendingForce/);
+  // The paint-time write re-checks follow intent (closes the one-frame fight).
+  assert.match(contentScript, /const writeNow = \(\) =>[\s\S]*?scrollLogPendingForce \|\| logAutoFollow \|\| isLogNearBottom/);
+  // Floating jump-to-latest button: created lazily in the non-scrolling thread
+  // section, toggled by the scroll handler + the unread counter.
+  assert.match(contentScript, /function ensureJumpToLatestButton\(/);
+  assert.match(contentScript, /function updateJumpToLatestButton\(/);
+  assert.match(contentScript, /tl-jump-latest/);
+  assert.match(contentScript, /closest\?\.\('\.codex-thread-section'\)/);
+  assert.match(contentScript, /let unreadSinceDetach = 0/);
+  // The scroll handler keeps the button state current.
+  assert.match(contentScript, /updateJumpToLatestButton\(scroller\)/);
+});
+
+test('panel.css ships the jump-to-latest button, dark scrollbar, and motion primitives', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../extension/styles/panel.css'), 'utf8');
+  // Floating button needs a positioned, non-scrolling host.
+  assert.match(css, /\.codex-thread-section\s*\{[^}]*position:\s*relative/);
+  assert.match(css, /\.tl-jump-latest\s*\{[\s\S]*?position:\s*absolute/);
+  // Dark scrollbar on the scroll container (was the light native default).
+  assert.match(css, /\.col-log[\s\S]*?scrollbar-color:\s*#3a3a3a/);
+  assert.match(css, /\.col-log::-webkit-scrollbar-thumb/);
+  // Motion primitives + reduced-motion guard.
+  assert.match(css, /@keyframes tl-fade-in/);
+  assert.match(css, /@keyframes tl-spin/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+  // The running step's glyph spins; new rows fade in (opacity-only).
+  assert.match(css, /\.run-activity\[data-status="running"\] \.run-activity-dot::before\s*\{[\s\S]*?animation:\s*tl-spin/);
+  assert.match(css, /\.run-activity\s*\{[\s\S]*?animation:\s*tl-fade-in/);
+});
+
+test('Option B visual: glyph status rows, sticky current-step header, left-rule stream', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../extension/styles/panel.css'), 'utf8');
+  // Status glyphs (not colored circles): running ◐, completed ✓, failed ✕.
+  assert.match(css, /\.run-activity-dot::before\s*\{[\s\S]*?content:\s*"·"/);
+  assert.match(css, /\.run-activity\[data-status="running"\] \.run-activity-dot::before\s*\{[\s\S]*?content:\s*"◐"/);
+  assert.match(css, /\.run-activity\[data-status="completed"\] \.run-activity-dot::before\s*\{[\s\S]*?content:\s*"✓"/);
+  assert.match(css, /\.run-activity\[data-status="failed"\] \.run-activity-dot::before\s*\{[\s\S]*?content:\s*"✕"/);
+  // Sticky current-step header: the run-process summary pins to top with a
+  // status glyph mirroring the card's data-status.
+  assert.match(css, /\.run-process summary\s*\{[\s\S]*?position:\s*sticky[\s\S]*?top:\s*0/);
+  assert.match(css, /\.transcript-turn\[data-status="running"\] \.run-process summary::before\s*\{[\s\S]*?content:\s*"◐"/);
+  // Stream rows carry a role-colored left rule.
+  assert.match(css, /\.run-stream\s*\{[\s\S]*?border-left:\s*2px solid/);
+  assert.match(css, /\.run-stream\[data-stream-role="assistant"\]\s*\{[\s\S]*?border-left-color:\s*var\(--tl-accent\)/);
+});
+
+test('Option B JS: live-elapsed tick + collapsed step count', () => {
+  const contentScript = getContentScriptSource();
+  // A 1s tick updates the sticky header's live elapsed while a run is in flight.
+  assert.match(contentScript, /function startRunElapsedTick\(/);
+  assert.match(contentScript, /function stopRunElapsedTick\(/);
+  assert.match(contentScript, /runElapsedTimer = window\.setInterval/);
+  // The tick is started in startRunView and stopped in finishRunView.
+  assert.match(contentScript, /startRunElapsedTick\(\);[\s\S]{0,80}renderSessionList\(\)/);
+  // collapseRunProcess appends the step count.
+  assert.match(contentScript, /function countRunActivitySteps\(/);
+  assert.match(contentScript, /\$\{stepCount\} steps/);
+});
+
 test('task session navigation stays pinned while the transcript scrolls', () => {
   const css = fs.readFileSync(
     path.join(__dirname, '../extension/styles/panel.css'),
@@ -4812,6 +4879,7 @@ test('Fix A: finishRunView still calls saveStateSoon on the happy path (no navig
     + "function saveStateSoon(){ saveCount++; }"
     + "function renderSessionList(){}"
     + "function getCurrentRunViewForRender(){ return null; }"
+    + "function stopRunElapsedTick(){}"
     + body
     + ";"
     + "saveCount = 0; finishRunView('done', 'completed'); result.aligned = saveCount;"
@@ -5092,13 +5160,15 @@ test('panel.css ships a muted meta block style with separator', () => {
   assert.match(src, /\.run-final-answer__meta\b/, 'meta block class must exist');
   assert.match(src, /\.run-final-answer__meta-label\b/, 'meta label class must exist');
   assert.match(src, /\.run-final-answer__meta-value\b/, 'meta value class must exist');
-  // The defining characteristic the user picked: separator (border-top)
-  // plus muted color (#858585) on a smaller font (11.5px).
+  // The defining characteristic the user picked: separator (border-top) plus
+  // a muted color on a smaller font. The v1.3.10 redesign moved these to
+  // design tokens (--tl-border / --tl-fg-3) and bumped 11.5px -> 12px to clear
+  // WCAG-AA at the muted color.
   const metaBlock = src.match(/\.run-final-answer__meta\s*\{[^}]*\}/);
   assert.ok(metaBlock, 'meta block CSS rule must be present');
   assert.match(metaBlock[0], /border-top:\s*1px solid/, 'meta block must have a top separator');
-  assert.match(metaBlock[0], /font-size:\s*11(\.\d+)?px/, 'meta block must use the smaller font size');
-  assert.match(metaBlock[0], /color:\s*#858585/, 'meta block must use the muted color');
+  assert.match(metaBlock[0], /font-size:\s*12px/, 'meta block uses the readable 12px size');
+  assert.match(metaBlock[0], /color:\s*var\(--tl-fg-3\)/, 'meta block must use the muted token color');
 });
 
 // ---------------------------------------------------------------------------

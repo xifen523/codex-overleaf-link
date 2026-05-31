@@ -227,6 +227,18 @@
   let customInstructionsEditorValue = '';
   let logAutoFollow = true;
   let userScrollIntentUntil = 0;
+  // Scroll engine: a single rAF coalesces a burst of scroll requests into one
+  // write per frame (streaming can fire ~25/sec); `scrollLogPendingForce`
+  // survives that coalesce so a forced scroll is never lost. `unreadSinceDetach`
+  // drives the floating "jump to latest" button's counter.
+  let scrollLogRafId = 0;
+  let scrollLogPendingForce = false;
+  let jumpToLatestButton = null;
+  let unreadSinceDetach = 0;
+  // Live-elapsed tick for the sticky run-process header. Without it the header
+  // reads a static "Processing…" and the user can't tell a working run from a
+  // hung one — the single highest-value streaming signal per competitor UX.
+  let runElapsedTimer = null;
   let runCancellationRequested = false;
   let activePluginConfirmResolve = null;
   let modelDiscovery = { status: 'fallback', source: 'fallback', fetchedAt: '' };
@@ -1204,12 +1216,69 @@
     scroller.addEventListener('scroll', () => {
       if (Date.now() <= userScrollIntentUntil) {
         logAutoFollow = isLogNearBottom(scroller);
-        return;
-      }
-      if (isLogNearBottom(scroller)) {
+      } else if (isLogNearBottom(scroller)) {
         logAutoFollow = true;
       }
+      // Reveal / hide the floating "jump to latest" button the instant the
+      // user detaches from or re-reaches the bottom.
+      updateJumpToLatestButton(scroller);
     }, { passive: true });
+  }
+
+  // Floating "↓ latest" affordance. Lives in the non-scrolling thread section
+  // (sibling layer above the scroll container) so it stays pinned while the
+  // user reads backscroll. Shown only while detached from the bottom.
+  function ensureJumpToLatestButton() {
+    if (jumpToLatestButton && jumpToLatestButton.isConnected) {
+      return jumpToLatestButton;
+    }
+    const scroller = getLogScrollContainer();
+    const host = scroller?.closest?.('.codex-thread-section') || scroller?.parentElement;
+    if (!host) {
+      return null;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'tl-jump-latest';
+    button.hidden = true;
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      unreadSinceDetach = 0;
+      scrollLogToBottom({ force: true });
+    });
+    host.append(button);
+    jumpToLatestButton = button;
+    return button;
+  }
+
+  function updateJumpToLatestButton(scroller) {
+    const el = scroller || getLogScrollContainer();
+    if (!el) {
+      return;
+    }
+    const button = ensureJumpToLatestButton();
+    if (!button) {
+      return;
+    }
+    if (isLogNearBottom(el)) {
+      unreadSinceDetach = 0;
+      button.hidden = true;
+      return;
+    }
+    button.hidden = false;
+    button.textContent = unreadSinceDetach > 0
+      ? tx(`↓ Latest · ${unreadSinceDetach}`, `↓ 最新 · ${unreadSinceDetach}`)
+      : tx('↓ Latest', '↓ 最新');
+  }
+
+  // Called by the event-append path so the unread counter only counts discrete
+  // steps (activity / report) while the user is scrolled up — streaming deltas
+  // that update an existing line in place do not inflate the count.
+  function bumpUnreadIfDetached() {
+    const el = getLogScrollContainer();
+    if (el && !isLogNearBottom(el)) {
+      unreadSinceDetach += 1;
+    }
   }
 
   function getLogScrollContainer() {
@@ -1232,15 +1301,47 @@
     if (!scroller) {
       return;
     }
-    if (!(options.force || logAutoFollow || isLogNearBottom(scroller))) {
+    const force = options.force === true;
+    if (force) {
+      // A forced scroll (user submitted a run, clicked "jump to latest", etc.)
+      // re-arms auto-follow and clears any stale user-scroll intent.
+      logAutoFollow = true;
+      userScrollIntentUntil = 0;
+      unreadSinceDetach = 0;
+      scrollLogPendingForce = true;
+    } else if (!(logAutoFollow || isLogNearBottom(scroller))) {
+      // The user has scrolled up: do not yank them. Just keep the jump button
+      // state current.
+      updateJumpToLatestButton(scroller);
       return;
     }
 
-    logAutoFollow = true;
-    setLogScrollPosition(scroller);
-    if (typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(() => setLogScrollPosition(scroller));
+    const writeNow = () => {
+      const el = getLogScrollContainer();
+      if (!el) {
+        return;
+      }
+      // Re-check intent AT PAINT TIME: a user who flicked up between schedule
+      // and paint must not be snapped back down (closes the one-frame fight).
+      if (scrollLogPendingForce || logAutoFollow || isLogNearBottom(el)) {
+        setLogScrollPosition(el);
+      }
+      scrollLogPendingForce = false;
+      updateJumpToLatestButton(el);
+    };
+
+    if (typeof window.requestAnimationFrame !== 'function') {
+      writeNow();
+      return;
     }
+    // Coalesce a burst into one write per frame (no more double reflow).
+    if (scrollLogRafId) {
+      return;
+    }
+    scrollLogRafId = window.requestAnimationFrame(() => {
+      scrollLogRafId = 0;
+      writeNow();
+    });
   }
 
   async function exportDiagnosticsBundle() {
@@ -8812,6 +8913,7 @@
     const root = renderRunCard(record);
     log.append(root);
     scrollLogToBottom({ force: true });
+    startRunElapsedTick();
     renderSessionList();
     applySessionLabel();
 
@@ -8836,6 +8938,7 @@
     if (!currentRunView) {
       return;
     }
+    stopRunElapsedTick();
     const safeText = sanitizeAssistantVisibleText(text);
     const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
     flushPendingStreamRenders();
@@ -8880,8 +8983,50 @@
     }
     const statusEl = view?.status || view?.root?.querySelector('[data-run-status]');
     if (statusEl) {
-      statusEl.textContent = statusText;
+      // Append the step count to the collapsed header ("Processed 18s · 6 steps")
+      // so the user sees how much work the run did without expanding it.
+      const stepCount = countRunActivitySteps(view);
+      statusEl.textContent = stepCount > 0
+        ? `${statusText} · ${tx(`${stepCount} steps`, `${stepCount} 步`)}`
+        : statusText;
     }
+  }
+
+  function countRunActivitySteps(view) {
+    const record = view?.recordId ? findRunRecord(view.recordId, view.sessionId) : null;
+    if (!Array.isArray(record?.events)) {
+      return 0;
+    }
+    return record.events.filter(event => (event.kind || 'activity') === 'activity').length;
+  }
+
+  // The sticky run-process header shows a live "Processing… {elapsed}" while a
+  // run is in flight so the user can distinguish a working run from a hung one.
+  function startRunElapsedTick() {
+    stopRunElapsedTick();
+    if (typeof window.setInterval !== 'function') {
+      return;
+    }
+    runElapsedTimer = window.setInterval(() => {
+      if (!currentRunView) {
+        stopRunElapsedTick();
+        return;
+      }
+      const statusEl = currentRunView.status
+        || currentRunView.root?.querySelector('[data-run-status]');
+      if (statusEl) {
+        statusEl.textContent = tr('processing', {
+          elapsed: formatElapsed(Date.now() - currentRunView.startedAt)
+        });
+      }
+    }, 1000);
+  }
+
+  function stopRunElapsedTick() {
+    if (runElapsedTimer && typeof window.clearInterval === 'function') {
+      window.clearInterval(runElapsedTimer);
+    }
+    runElapsedTimer = null;
   }
 
   function formatProcessedSummary(status, elapsedMs) {
@@ -9039,17 +9184,21 @@
     if (event.kind === 'report') {
       view.report.hidden = false;
       view.report.replaceChildren(renderCompletionReport(event));
+      bumpUnreadIfDetached();
       return;
     }
     if (event.kind === 'technical') {
       return;
     }
     if (event.kind === 'stream') {
+      // Stream deltas update an existing line in place — they must not inflate
+      // the unread-step counter.
       upsertStreamEvent(view, event);
       return;
     }
     view.events.append(renderRunEvent(event));
     appendEventTechnicalDetail(view, event);
+    bumpUnreadIfDetached();
   }
 
   function upsertRunStreamRecordEvent(record, event) {
