@@ -7829,7 +7829,29 @@
         ? [LEGACY_STORAGE_KEY]
         : [storageKey, LEGACY_STORAGE_KEY];
       const stored = await chrome.storage.local.get(keys);
-      return stored[storageKey] || stored[LEGACY_STORAGE_KEY] || {};
+      const fallback = stored[storageKey] || stored[LEGACY_STORAGE_KEY] || {};
+      if (fallback?.__codexOverleafCompactFallback === true) {
+        return {
+          mode: fallback.mode || '',
+          model: fallback.model || '',
+          reasoningEffort: fallback.reasoningEffort || '',
+          speedTier: fallback.speedTier || '',
+          locale: fallback.locale || '',
+          requireReviewing: fallback.requireReviewing !== false,
+          autoOpen: fallback.autoOpen !== false,
+          loadCodexLocalSkills: fallback.loadCodexLocalSkills !== false,
+          loadCodexOverleafSkills: fallback.loadCodexOverleafSkills !== false,
+          codexOverleafSkillEnabled: fallback.codexOverleafSkillEnabled || {},
+          experimentalOtByProject: fallback.experimentalOtByProject || {},
+          customInstructionsByProject: fallback.customInstructionsByProject || {},
+          governanceRulesByProject: normalizeGovernanceRulesByProject(fallback.governanceRulesByProject),
+          panelWidth: fallback.panelWidth || PANEL_DEFAULT_WIDTH,
+          sessions: [],
+          activeSessionId: '',
+          runs: []
+        };
+      }
+      return fallback;
     }
   }
 
@@ -7959,7 +7981,7 @@
     } catch (error) {
       // Fallback: try legacy save
       try {
-        await chrome.storage.local.set({ [storageKey]: prepareStateForStorage(state) });
+        await chrome.storage.local.set({ [storageKey]: prepareCompactFallbackState(state) });
       } catch (fallbackError) {
         // Structured FailureReason §9.8: persistence raised a quota error.
         // Surface a `storage_quota_exceeded` failure (warning, retryable)
@@ -7978,6 +8000,19 @@
         }
       }
     }
+  }
+
+  function prepareCompactFallbackState(inputState) {
+    const compact = prepareStateForStorage(inputState);
+    return {
+      ...compact,
+      __codexOverleafCompactFallback: true,
+      task: '',
+      session: null,
+      sessions: [],
+      runs: [],
+      activeSessionId: ''
+    };
   }
 
   // Tracks whether we have already emitted a `storage_quota_exceeded` failure

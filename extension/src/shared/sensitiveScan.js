@@ -12,6 +12,12 @@
     { id: 'private-key', pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/gi },
     { id: 'bearer-token', pattern: /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b/gi },
     { id: 'api-token', pattern: /\b(?:(?:ghp|github_pat|xox[baprs])_[A-Za-z0-9_=-]{16,}|sk-[A-Za-z0-9_-]{16,})\b/gi },
+    { id: 'aws-access-key', pattern: /\bAKIA[0-9A-Z]{16}\b/g },
+    { id: 'google-api-key', pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g },
+    { id: 'huggingface-token', pattern: /\bhf_[A-Za-z0-9]{20,}\b/g },
+    { id: 'gitlab-token', pattern: /\bglpat-[A-Za-z0-9_-]{20,}\b/g },
+    { id: 'stripe-live-secret', pattern: /\bsk_live_[A-Za-z0-9]{16,}\b/g },
+    { id: 'jwt-token', pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g },
     {
       id: 'secret-assignment',
       pattern: /\b(?:api[_-]?key|token|secret|password|passwd)\b\s*[:=]\s*["']?[^"'\s,;]{4,}/gi

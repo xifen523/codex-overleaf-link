@@ -279,13 +279,13 @@ function formatFocusFiles(files) {
 }
 
 function formatCompileLogContext(context = {}) {
-  const log = String(context.compileLog || '').trim();
+  const log = redactCompileLogText(String(context.compileLog || '').trim());
   if (!log) {
     return '- none provided.';
   }
 
-  const errors = normalizeCompileMessages(context.compileErrors);
-  const warnings = normalizeCompileMessages(context.compileWarnings);
+  const errors = normalizeCompileMessages(context.compileErrors).map(redactCompileLogText);
+  const warnings = normalizeCompileMessages(context.compileWarnings).map(redactCompileLogText);
   const fresh = context.compileLogFresh === false
     ? 'possibly stale'
     : 'fresh';
@@ -303,6 +303,33 @@ function formatCompileLogContext(context = {}) {
     '- log:',
     fencedBlock(log)
   ].filter(Boolean).join('\n');
+}
+
+function redactCompileLogText(value) {
+  let text = String(value || '');
+  const replacements = [
+    [/\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b/g, 'Bearer [REDACTED]'],
+    [/\b(?:ghp|github_pat|xox[baprs]|glpat)-?[_A-Za-z0-9=-]{16,}\b/g, '[REDACTED_TOKEN]'],
+    [/\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}\b/g, '[REDACTED_TOKEN]'],
+    [/\bsk-[A-Za-z0-9_-]{16,}\b/g, '[REDACTED_TOKEN]'],
+    [/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED_AWS_KEY]'],
+    [/\bAIza[0-9A-Za-z_-]{35}\b/g, '[REDACTED_GOOGLE_KEY]'],
+    [/\bhf_[A-Za-z0-9]{20,}\b/g, '[REDACTED_HF_TOKEN]'],
+    [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[REDACTED_JWT]'],
+    [/file:\/\/\/[^\s'"<>]+/g, '<local-path>'],
+    [/(^|[\s({["'=])\/Users\/[^:\s'"<>)]*/g, '$1<local-path>'],
+    [/(^|[\s({["'=])\/private\/var\/[^:\s'"<>)]*/g, '$1<local-path>'],
+    [/(^|[\s({["'=])\/var\/folders\/[^:\s'"<>)]*/g, '$1<local-path>'],
+    [/(^|[\s({["'=])\/tmp\/[^:\s'"<>)]*/g, '$1<local-path>'],
+    [/(^|[\s({["'=])\/Library\/TeX\/[^:\s'"<>)]*/g, '$1<TEXLIVE_PATH>'],
+    [/(^|[\s({["'=])\/usr\/local\/texlive\/[^:\s'"<>)]*/g, '$1<TEXLIVE_PATH>'],
+    [/[A-Za-z]:\\Users\\[^:\s'"<>)]*/g, '<local-path>'],
+    [/[A-Za-z]:\\(?:Program Files|texlive)\\[^:\s'"<>)]*/gi, '<local-path>']
+  ];
+  for (const [pattern, replacement] of replacements) {
+    text = text.replace(pattern, replacement);
+  }
+  return text;
 }
 
 function formatCustomInstructionsContext(customInstructions = '') {

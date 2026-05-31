@@ -33,3 +33,38 @@ test('scanSensitiveProjectFiles reports secret paths and never full secret conte
   assert.equal(findings.some(finding => finding.detectorId === 'confidential-keyword'), false);
   assert.equal(findings.some(finding => String(finding.preview).includes('abc')), false);
 });
+
+test('scanSensitiveText detects the v1.3.x modern token formats (AWS/Google/HF/GitLab/Stripe/JWT)', () => {
+  // Locks in the six detectors added to stop these secrets passing the
+  // preflight gate and reaching Codex (review BLOCKER B6). Each sample uses
+  // a realistic shape for that provider's key format.
+  const samples = {
+    'aws-access-key': 'AKIA' + 'ABCDEFGHIJKLMNOP',                       // AKIA + 16 upper/digits
+    'google-api-key': 'AIza' + 'a'.repeat(35),                          // AIza + 35
+    'huggingface-token': 'hf_' + 'abcdefghijklmnopqrstuvwx',            // hf_ + 20+
+    'gitlab-token': 'glpat-' + 'abcdefghijklmnopqrstuv',                // glpat- + 20+
+    'stripe-live-secret': 'sk_live_' + 'abcdefghijklmnop1234',          // sk_live_ + 16+
+    'jwt-token': ['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'c'.repeat(20)].join('.')
+  };
+  for (const [detectorId, value] of Object.entries(samples)) {
+    const findings = sensitiveScan.scanSensitiveText('prompt', `token: ${value}`);
+    assert.ok(
+      findings.some(f => f.detectorId === detectorId),
+      `expected detector ${detectorId} to fire on ${value}`
+    );
+    // The raw secret must never appear in any preview.
+    for (const f of findings) {
+      assert.equal(String(f.preview).includes(value), false, `preview leaked ${detectorId}`);
+    }
+  }
+});
+
+test('scanSensitiveText does not flag ordinary LaTeX/bib prose as secrets', () => {
+  // Guard against the new detectors over-firing on benign academic text.
+  const benign = 'See \\cite{smith2021} and the equation E=mc^2. The token bearer of the grant is Dr. Smith.';
+  const findings = sensitiveScan.scanSensitiveText('prompt', benign);
+  const ids = findings.map(f => f.detectorId);
+  for (const id of ['aws-access-key', 'google-api-key', 'huggingface-token', 'gitlab-token', 'stripe-live-secret', 'jwt-token']) {
+    assert.equal(ids.includes(id), false, `false positive: ${id} fired on benign prose`);
+  }
+});

@@ -8,18 +8,23 @@
   'use strict';
 
   const COMPILE_TEMPLATE_TTL_MS = 5 * 60 * 1000;
+  const GLOBAL_STATE_KEY = '__codexOverleafCompileBridgeState';
 
   function create(deps = {}) {
     const pageWindow = deps.window || window;
     const pageDocument = deps.document || document;
     let installed = false;
-    const state = {
+    const state = pageWindow[GLOBAL_STATE_KEY] || {
       capturedRequestTemplate: null,
       lastCompileResponse: null,
       lastCompileAt: 0,
       lastCompileSourceChangeTimestamp: 0,
-      lastKnownSourceEditTimestamp: 0
+      lastKnownSourceEditTimestamp: 0,
+      originalFetch: null,
+      wrappedFetch: null,
+      inputListenerInstalled: false
     };
+    pageWindow[GLOBAL_STATE_KEY] = state;
 
     function install() {
       if (installed) {
@@ -27,14 +32,21 @@
       }
       installed = true;
       interceptCompileRequests();
-      if (typeof pageDocument.addEventListener === 'function') {
+      if (typeof pageDocument.addEventListener === 'function' && state.inputListenerInstalled !== true) {
         pageDocument.addEventListener('input', markSourceEditFromInput, true);
+        state.inputListenerInstalled = true;
       }
     }
 
     function interceptCompileRequests() {
-      const originalFetch = pageWindow.fetch;
-      pageWindow.fetch = async function (...args) {
+      if (state.wrappedFetch && pageWindow.fetch === state.wrappedFetch) {
+        return;
+      }
+      if (!state.originalFetch || pageWindow.fetch !== state.wrappedFetch) {
+        state.originalFetch = pageWindow.fetch;
+      }
+      const originalFetch = state.originalFetch;
+      state.wrappedFetch = async function codexOverleafCompileFetchWrapper(...args) {
         const [resource, init] = args;
         const url = typeof resource === 'string' ? resource : (resource?.url || '');
         const method = (init?.method || 'GET').toUpperCase();
@@ -72,6 +84,7 @@
 
         return response;
       };
+      pageWindow.fetch = state.wrappedFetch;
     }
 
     async function triggerCompile(params = {}) {

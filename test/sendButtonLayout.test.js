@@ -160,7 +160,16 @@ test('panel persistence uses hybrid IndexedDB storage with legacy fallback', () 
   );
 
   assert.match(contentScript, /prepareStateForStorage/);
-  assert.match(contentScript, /chrome\.storage\.local\.set\(\{ \[storageKey\]: prepareStateForStorage\(state\) \}\)/);
+  // The chrome.storage.local quota fallback writes a COMPACT shape
+  // (prepareCompactFallbackState) — not the full prepareStateForStorage(state).
+  // The compact form strips task/sessions/runs and tags the blob with
+  // __codexOverleafCompactFallback so the loader returns prefs-only instead
+  // of re-persisting redacted '[task omitted]' markers as real session data
+  // (the B4 data-loss fix). Assert the fallback writes the compact form and
+  // that the compact builder strips the session payload.
+  assert.match(contentScript, /chrome\.storage\.local\.set\(\{ \[storageKey\]: prepareCompactFallbackState\(state\) \}\)/);
+  assert.match(contentScript, /function prepareCompactFallbackState/);
+  assert.match(contentScript, /__codexOverleafCompactFallback: true/);
   // saveState() is wrapped in a .catch/.finally chain inside runQueuedSaveState
   // (the in-flight serialization fix). The chain may be single-line or split
   // across lines; either form is acceptable.

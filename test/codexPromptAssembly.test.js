@@ -79,3 +79,41 @@ test('validatePromptSize reports total prompt characters and native-message over
   assert.equal(large.exceedsLimit, true);
   assert.equal(large.totalChars, 1024 * 1024 + 1);
 });
+
+test('buildCodexTurnPrompt redacts secrets and local paths from the compile log before it reaches Codex', () => {
+  // Review BLOCKER B5: LaTeX compile logs routinely embed local absolute
+  // paths (and occasionally secrets from custom .latexmkrc) and were sent
+  // verbatim to the Codex model (a third party). The prompt assembly must
+  // redact them. Exercised through the public buildCodexTurnPrompt so we
+  // don't widen the module's export surface.
+  const poisonedLog = [
+    'This is pdfTeX, Version 3.14',
+    '(/Users/alice/Library/texmf/tex/latex/custom.sty',
+    'Loading from /private/var/folders/xy/tmpAbc/main.aux',
+    'curl -H "Authorization: Bearer ' + 'a'.repeat(40) + '" https://api.example.com',
+    'AWS key AKIA' + 'ABCDEFGHIJKLMNOP',
+    '! LaTeX Error: File `missing.sty\' not found at /Library/TeX/texmf-dist/foo'
+  ].join('\n');
+
+  const prompt = buildCodexTurnPrompt({
+    task: 'fix the build',
+    mode: 'auto',
+    compileLog: poisonedLog,
+    compileErrors: ['/Users/alice/project/main.tex:42 undefined control sequence'],
+    compileWarnings: ['Overfull hbox in /Users/alice/project/intro.tex']
+  });
+
+  const text = typeof prompt === 'string' ? prompt : JSON.stringify(prompt);
+
+  // Local absolute paths must be gone from the compile context.
+  assert.equal(text.includes('/Users/alice'), false, 'leaked a /Users path');
+  assert.equal(text.includes('/private/var/folders'), false, 'leaked a /private/var path');
+  // Secrets must be redacted.
+  assert.equal(text.includes('Bearer ' + 'a'.repeat(40)), false, 'leaked a Bearer token');
+  assert.equal(text.includes('AKIA' + 'ABCDEFGHIJKLMNOP'), false, 'leaked an AWS key');
+  // Redaction placeholders should be present (proves the path went through redactCompileLogText).
+  assert.match(text, /<local-path>|<TEXLIVE_PATH>|\[REDACTED/);
+  // Non-sensitive log content is preserved (we redact, not drop).
+  assert.match(text, /pdfTeX/);
+  assert.match(text, /undefined control sequence/);
+});

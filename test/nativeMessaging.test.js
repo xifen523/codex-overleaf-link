@@ -76,3 +76,19 @@ test('rejects accumulated native input buffers larger than the allowed size', ()
     /Native message buffer is too large/
   );
 });
+
+test('writeResponse degrades oversize frames instead of crashing the host (B1)', () => {
+  // Review BLOCKER B1: an oversize Codex event made encodeMessage throw out of
+  // the synchronous stdout handler -> uncaughtException -> process exit mid-run.
+  // The fix wraps encodeMessage in a try/catch with a truncated-event fallback
+  // and a final native_response_too_large error. Source-grep guard (writeResponse
+  // is file-local to index.js with no export seam).
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'native-host', 'src', 'index.js'), 'utf8');
+  assert.match(src, /function writeResponse[\s\S]*?try \{[\s\S]*?encodeMessage\(response\)[\s\S]*?catch/,
+    'writeResponse must wrap encodeMessage in try/catch');
+  assert.match(src, /buildOversizeResponseFallback/, 'must build a degraded fallback frame');
+  assert.match(src, /native_response_too_large/, 'must have a final structured-error tier');
+  assert.match(src, /native_event_truncated/, 'event payloads must degrade to a truncated event, not crash');
+});

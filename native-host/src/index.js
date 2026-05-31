@@ -84,9 +84,75 @@ process.on('unhandledRejection', reason => {
 });
 
 function writeResponse(response) {
-  const frame = encodeMessage(response);
+  let frame;
+  try {
+    frame = encodeMessage(response);
+  } catch (error) {
+    const fallback = buildOversizeResponseFallback(response, error);
+    try {
+      frame = encodeMessage(fallback);
+    } catch (fallbackError) {
+      frame = encodeMessage({
+        id: response?.id,
+        ok: false,
+        error: {
+          code: 'native_response_too_large',
+          message: truncateForNativeFrame(fallbackError.message || error.message || 'Native response exceeded the browser frame limit.', 800)
+        }
+      });
+    }
+  }
   logDebug('stdout.write', { bytes: frame.length, ok: response?.ok, code: response?.error?.code });
   process.stdout.write(frame);
+}
+
+function buildOversizeResponseFallback(response, error) {
+  if (response?.event) {
+    const event = response.event || {};
+    return {
+      id: response.id,
+      ok: true,
+      event: {
+        type: event.type || 'native.event.truncated',
+        title: truncateForNativeFrame(event.title || 'Native event was truncated', 500),
+        status: event.status || 'warning',
+        detail: {
+          code: 'native_event_truncated',
+          reason: truncateForNativeFrame(error?.message || 'Native event exceeded the browser frame limit.', 800),
+          originalType: truncateForNativeFrame(event.type || '', 160),
+          originalTitle: truncateForNativeFrame(event.title || '', 500),
+          originalDetailBytes: stringByteLength(safeJsonStringify(event.detail))
+        },
+        timestamp: event.timestamp || new Date().toISOString()
+      }
+    };
+  }
+
+  return {
+    id: response?.id,
+    ok: false,
+    error: {
+      code: 'native_response_too_large',
+      message: truncateForNativeFrame(error?.message || 'Native response exceeded the browser frame limit.', 800),
+      originalOk: response?.ok === true
+    }
+  };
+}
+
+function truncateForNativeFrame(value, limit) {
+  const text = String(value || '');
+  if (text.length <= limit) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, limit - 24))}... [truncated]`;
+}
+
+function safeJsonStringify(value) {
+  try {
+    return JSON.stringify(value);
+  } catch (_error) {
+    return '';
+  }
 }
 
 function summarizeRequest(message) {

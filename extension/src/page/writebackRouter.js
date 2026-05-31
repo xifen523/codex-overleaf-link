@@ -486,6 +486,17 @@
         changedDocument: false
       }
     };
+    const cancelledInFlightResult = {
+      ...cancelledSkipResult,
+      reason: 'The Codex run was cancelled while an Overleaf write operation was already in flight. The editor may have changed; review the current file before starting a new run.',
+      failure: {
+        ...cancelledSkipResult.failure,
+        severity: 'warning',
+        userMessage: 'The Codex run was cancelled during an in-flight write. The editor may already contain part of that write.',
+        nextAction: 'Review the current Overleaf file before starting a new run.',
+        changedDocument: true
+      }
+    };
     // 50ms-poller racer using recursive setTimeout. setInterval is NOT
     // exposed in the test VM context that hosts pageBridge (only setTimeout /
     // clearTimeout are wired), so this implementation must avoid it. Each
@@ -591,7 +602,7 @@
       // result is discarded. The user perceives instant cancel because we
       // settle the loop here instead of waiting for the op to finish.
       if (raceResult === CANCELLED_RACE_SENTINEL) {
-        skipped.push({ operation, result: cancelledSkipResult });
+        skipped.push({ operation, result: cancelledInFlightResult });
         const remainingAfterCancel = operations.slice(operations.indexOf(rawOperation) + 1);
         for (const tailOperation of remainingAfterCancel) {
           skipped.push({ operation: normalizeOperationPaths(tailOperation), result: cancelledSkipResult });
@@ -2680,7 +2691,9 @@
         continue;
       }
 
+      let mutationAttempted = false;
       try {
+        mutationAttempted = true;
         if (operation.type === 'create') {
           await method.call(manager, operation.path, operation.content || '');
         } else if (operation.type === 'rename' || operation.type === 'move') {
@@ -2698,7 +2711,16 @@
           method: `fileTreeManager.${methodName}`,
           verified: true
         };
-      } catch (_error) {
+      } catch (error) {
+        if (mutationAttempted) {
+          return {
+            ok: false,
+            code: 'file_tree_operation_unverified',
+            reason: `Overleaf file-tree method ${methodName} did not complete cleanly after it was invoked. Codex stopped instead of trying another method that could stack a second partial change.`,
+            method: `fileTreeManager.${methodName}`,
+            error: error?.message || String(error || '')
+          };
+        }
         // Try the next known method name.
       }
     }

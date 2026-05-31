@@ -3546,3 +3546,44 @@ test('content-side cancelActiveRun fires both codex.cancel (native) and cancelAc
   assert.match(body, /callPageBridge\(\s*'cancelActiveWrite'[\s\S]{0,80}\.catch/,
     'cancelActiveWrite call must be best-effort (.catch swallow)');
 });
+
+// ---------------------------------------------------------------------------
+// Regression guards for the v1.3.10 BLOCKER fixes (review findings B2/B3/B7).
+// These are source-grep belts: the behaviors are hard to exercise in the VM
+// harness, but the structural invariants must not silently regress.
+// ---------------------------------------------------------------------------
+
+test('cancel-during-in-flight-write reports changedDocument:true (B2)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'page', 'writebackRouter.js'), 'utf8');
+  // The op that was mid-write when cancel landed must be reported with
+  // changedDocument:true + warning severity (the editor may already hold part
+  // of the write), distinct from the not-yet-started tail ops.
+  assert.match(src, /cancelledInFlightResult\s*=\s*\{[\s\S]*?changedDocument:\s*true/,
+    'in-flight cancel result must set changedDocument:true');
+  assert.match(src, /cancelledInFlightResult[\s\S]*?severity:\s*'warning'/,
+    'in-flight cancel must be a warning, not silent info');
+  // The race-winner branch must push the in-flight result for the current op.
+  assert.match(src, /CANCELLED_RACE_SENTINEL[\s\S]*?result:\s*cancelledInFlightResult/,
+    'the op interrupted mid-write must use cancelledInFlightResult');
+});
+
+test('file-tree op stops after a method was invoked rather than stacking a second partial change (B3)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'page', 'writebackRouter.js'), 'utf8');
+  // After a method has been invoked, a throw must NOT fall through to the next
+  // method (which could stack a second partial mutation); it must return a
+  // file_tree_operation_unverified failure.
+  assert.match(src, /let mutationAttempted = false/, 'must track whether a method was invoked');
+  assert.match(src, /if \(mutationAttempted\)[\s\S]*?file_tree_operation_unverified/,
+    'a post-invocation throw must return file_tree_operation_unverified, not try the next method');
+});
+
+test('compileBridge fetch wrapper is install-once via a page-window sentinel (B7)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'page', 'compileBridge.js'), 'utf8');
+  // On extension upgrade the page bridge re-injects; the fetch wrapper must
+  // not stack. State lives on a page-window key and the interceptor bails if
+  // the current fetch is already our wrapper.
+  assert.match(src, /GLOBAL_STATE_KEY\s*=\s*'__codexOverleafCompileBridgeState'/,
+    'compile-bridge state must persist on a page-window sentinel across re-injection');
+  assert.match(src, /if \(state\.wrappedFetch && pageWindow\.fetch === state\.wrappedFetch\)\s*\{[\s\S]*?return/,
+    'interceptCompileRequests must bail when our wrapper is already installed');
+});
