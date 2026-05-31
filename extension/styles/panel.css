@@ -370,19 +370,12 @@
   border-radius: 4px;
 }
 
-#codex-overleaf-panel .codex-custom-instructions-label {
-  color: #9da1a6;
-  font-size: 11px;
-  font-weight: 400;
-  line-height: 1.35;
-}
-
 #codex-overleaf-panel .codex-custom-instructions-input {
   box-sizing: border-box;
   width: 100%;
-  height: 176px;
-  min-height: 176px;
-  max-height: 176px;
+  height: 132px;
+  min-height: 132px;
+  max-height: 132px;
   resize: none;
   border: 1px solid #3a3d41;
   border-radius: 6px;
@@ -420,29 +413,6 @@
   line-height: 1.35;
 }
 
-#codex-overleaf-panel .codex-project-settings-scope-subtitle {
-  margin-top: -4px;
-  color: #9da1a6;
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-#codex-overleaf-panel .codex-project-settings-section {
-  display: grid;
-  gap: 8px;
-  border-top: 1px solid #2d2d30;
-  padding-top: 10px;
-}
-
-#codex-overleaf-panel .codex-project-settings-section-title {
-  color: #d4d4d4;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.35;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
 #codex-overleaf-panel .codex-project-settings-textarea {
   box-sizing: border-box;
   width: 100%;
@@ -455,19 +425,6 @@
   padding: 8px;
   font-size: 12px;
   line-height: 1.4;
-}
-
-#codex-overleaf-panel .codex-project-settings-check {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  color: #d4d4d4;
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-#codex-overleaf-panel .codex-project-settings-check input {
-  margin-top: 1px;
 }
 
 #codex-overleaf-panel .codex-local-skill-list {
@@ -529,18 +486,36 @@
   color: #9be9a8;
 }
 
+/* Save indicator — hidden at rest, flashes "✓ Saved" briefly when a field is
+   persisted (settingsPanel toggles data-state="saved" then clears it). */
 #codex-overleaf-panel .codex-settings-save-status {
   flex: 0 0 auto;
   align-self: flex-start;
   margin-top: 2px;
-  color: #6a6f73;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--tl-ok);
   font-size: 11px;
   line-height: 1.35;
   white-space: nowrap;
+  opacity: 0;
+  transition: opacity 180ms ease;
 }
 
-/* Sliding switch — used for skill enablement (distinct from governance checkboxes).
-   A styled checkbox: track + knob, with :checked sliding the knob right. */
+#codex-overleaf-panel .codex-settings-save-status::before {
+  content: "✓";
+  font-size: 11px;
+  line-height: 1;
+}
+
+#codex-overleaf-panel .codex-settings-save-status[data-state="saved"] {
+  opacity: 1;
+}
+
+/* Sliding switch — the unified control for every boolean setting (skills +
+   governance). A styled checkbox: track + knob, with :checked sliding the knob
+   right. */
 #codex-overleaf-panel .codex-switch {
   -webkit-appearance: none;
   appearance: none;
@@ -639,6 +614,162 @@
   flex: 0 0 auto;
   color: #777d83;
   font-size: 14px;
+}
+
+/* ---------------------------------------------------------------------------
+   Settings cards (A+ redesign). Each section is a collapsible <details> group
+   holding a bordered card of label / help / control rows. Reuses the
+   run-timeline --tl-* tokens (surfaces, border, 4-step text ladder, radii) so
+   Settings reads as the same surface as the thread view. */
+#codex-overleaf-panel .codex-set-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tl-fg-4);
+}
+
+#codex-overleaf-panel .codex-set-group {
+  border: 1px solid var(--tl-border);
+  border-radius: var(--tl-r-md);
+  background: var(--tl-surface-1);
+  overflow: hidden;
+}
+
+#codex-overleaf-panel .codex-set-group + .codex-set-group {
+  margin-top: 8px;
+}
+
+#codex-overleaf-panel .codex-set-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: var(--tl-fg-1);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+#codex-overleaf-panel .codex-set-group-head::-webkit-details-marker {
+  display: none;
+}
+
+/* Disclosure chevron — points right when collapsed, rotates down when open. */
+#codex-overleaf-panel .codex-set-group-head::after {
+  content: "›";
+  margin-left: auto;
+  color: var(--tl-fg-4);
+  font-size: 15px;
+  line-height: 1;
+  transition: transform 120ms ease;
+}
+
+#codex-overleaf-panel .codex-set-group[open] > .codex-set-group-head::after {
+  transform: rotate(90deg);
+}
+
+#codex-overleaf-panel .codex-set-group-head:hover {
+  background: var(--tl-surface-2);
+}
+
+#codex-overleaf-panel .codex-set-card {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+/* On the dedicated skills sub-page the card stands alone (no group header above
+   it), so it becomes a self-contained bordered surface with full padding. */
+#codex-overleaf-panel .codex-skills-panel .codex-set-card {
+  padding-top: 12px;
+  border: 1px solid var(--tl-border);
+  border-radius: var(--tl-r-md);
+  background: var(--tl-surface-1);
+}
+
+#codex-overleaf-panel .codex-set-row {
+  display: grid;
+  gap: 5px;
+}
+
+#codex-overleaf-panel .codex-set-row-label {
+  color: var(--tl-fg-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+#codex-overleaf-panel .codex-set-row-help {
+  margin: 0;
+  color: var(--tl-fg-4);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* Help text that explains a switch sits tight beneath its row. */
+#codex-overleaf-panel .codex-project-settings-row--switch + .codex-set-row-help {
+  margin-top: -5px;
+}
+
+#codex-overleaf-panel .codex-set-hairline {
+  height: 1px;
+  background: var(--tl-border);
+  margin: 2px 0;
+}
+
+/* The personalization field already declares its own height; keep it edge-to-
+   edge inside the card. */
+#codex-overleaf-panel .codex-set-card .codex-custom-instructions-input {
+  margin: 0;
+}
+
+/* Settings buttons — bordered, compact, with subtle and danger variants. Used
+   by the local-skill Remove / Confirm / Cancel actions. */
+#codex-overleaf-panel .codex-set-btn {
+  flex: 0 0 auto;
+  border: 1px solid var(--tl-border);
+  border-radius: var(--tl-r-sm);
+  background: var(--tl-surface-2);
+  color: var(--tl-fg-2);
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+#codex-overleaf-panel .codex-set-btn:hover {
+  background: #2c2c2c;
+  border-color: #3a3a3a;
+  color: var(--tl-fg-1);
+}
+
+#codex-overleaf-panel .codex-set-btn--subtle {
+  background: transparent;
+  border-color: transparent;
+  color: var(--tl-fg-3);
+}
+
+#codex-overleaf-panel .codex-set-btn--subtle:hover {
+  background: var(--tl-surface-2);
+  border-color: var(--tl-border);
+  color: var(--tl-fg-1);
+}
+
+#codex-overleaf-panel .codex-set-btn--danger {
+  border-color: rgba(224, 121, 95, 0.4);
+  color: var(--tl-fail);
+}
+
+#codex-overleaf-panel .codex-set-btn--danger:hover {
+  background: rgba(224, 121, 95, 0.14);
+  border-color: var(--tl-fail);
+  color: var(--tl-fail);
 }
 
 /* Skills sub-page list: full width (the settings-screen list is indented under

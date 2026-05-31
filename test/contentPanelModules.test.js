@@ -1180,9 +1180,12 @@ test('the "Load local Codex skills" control and skill toggles render as sliding 
   // The per-skill enable toggle must carry the sliding-switch class.
   assert.match(localSkillsSrc, /codex-switch/, 'localSkillsPanel should render the per-skill toggle as a codex-switch');
 
-  // Governance options remain plain checkboxes (no switch class on those rows).
-  const governanceBlock = settingsPanelSrc.match(/data-sensitive-check-enabled[\s\S]*?data-sensitive-confirm-allowed/)?.[0] || '';
-  assert.doesNotMatch(governanceBlock, /codex-switch/, 'governance checkboxes must NOT be rendered as sliding switches');
+  // A+ redesign: every boolean setting (governance + skills) uses the unified
+  // sliding-switch treatment, so the governance toggles carry the switch class too.
+  const sensitiveCheck = settingsPanelSrc.match(/<input[^>]*data-sensitive-check-enabled[^>]*>/)?.[0] || '';
+  const sensitiveConfirm = settingsPanelSrc.match(/<input[^>]*data-sensitive-confirm-allowed[^>]*>/)?.[0] || '';
+  assert.match(sensitiveCheck, /codex-switch/, 'sensitive-check toggle should render as a sliding switch');
+  assert.match(sensitiveConfirm, /codex-switch/, 'sensitive-confirm toggle should render as a sliding switch');
 });
 
 test('panel.css defines the sliding-switch component and the data-view="skills" rules', () => {

@@ -151,15 +151,18 @@
         // Remove button — clicking it enters the inline confirmation state.
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
+        removeBtn.className = 'codex-set-btn codex-set-btn--subtle';
         removeBtn.textContent = tr('localSkillRemove');
 
         // Confirm and Cancel buttons — only in the DOM while confirming.
         const confirmBtn = document.createElement('button');
         confirmBtn.type = 'button';
+        confirmBtn.className = 'codex-set-btn codex-set-btn--danger';
         confirmBtn.textContent = tr('localSkillRemoveConfirm');
 
         const cancelBtn = document.createElement('button');
         cancelBtn.type = 'button';
+        cancelBtn.className = 'codex-set-btn';
         cancelBtn.textContent = tr('localSkillRemoveCancel');
 
         function enterConfirming() {

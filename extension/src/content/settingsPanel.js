@@ -24,41 +24,58 @@
         </div>
         <div class="codex-project-settings-status" data-project-settings-status></div>
         <div class="codex-project-settings-scope">
-          <div class="codex-project-settings-scope-title" data-i18n="settingsScopeProjectTitle">This project</div>
-          <div class="codex-project-settings-scope-subtitle" data-i18n="settingsScopeProjectSubtitle">Instructions and rules applied to this Overleaf project only.</div>
-          <label class="codex-custom-instructions-label" for="codex-custom-instructions-input" data-i18n="personalizationConfig">Personalization</label>
-          <textarea id="codex-custom-instructions-input" class="codex-custom-instructions-input" data-custom-instructions-input rows="7" placeholder="Style, terminology, venue constraints, and LaTeX conventions for this project."></textarea>
-          <div class="codex-project-settings-section">
-            <div class="codex-project-settings-section-title" data-i18n="governanceRulesTitle">Governance Rules</div>
-            <label class="codex-custom-instructions-label" for="codex-governance-readonly-patterns" data-i18n="governanceReadonlyPatterns">Read-only patterns</label>
-            <textarea id="codex-governance-readonly-patterns" class="codex-project-settings-textarea" data-governance-readonly-patterns rows="3" placeholder="paper/accepted/**&#10;main.tex"></textarea>
-            <label class="codex-custom-instructions-label" for="codex-governance-writable-patterns" data-i18n="governanceWritablePatterns">Writable patterns</label>
-            <textarea id="codex-governance-writable-patterns" class="codex-project-settings-textarea" data-governance-writable-patterns rows="3" placeholder="sections/**&#10;figures/**"></textarea>
-            <label class="codex-project-settings-check">
-              <input type="checkbox" data-sensitive-check-enabled>
-              <span data-i18n="sensitiveCheckEnabled">Check for sensitive content before Codex runs</span>
-            </label>
-            <label class="codex-project-settings-check">
-              <input type="checkbox" data-sensitive-confirm-allowed>
-              <span data-i18n="sensitiveConfirmAllowed">Allow explicit confirmation when sensitive findings exist</span>
-            </label>
-          </div>
+          <div class="codex-project-settings-scope-title codex-set-eyebrow" data-i18n="settingsScopeProjectTitle">This project</div>
+          <details class="codex-set-group" open>
+            <summary class="codex-set-group-head"><span data-i18n="personalizationConfig">Personalization</span></summary>
+            <div class="codex-set-card">
+              <p class="codex-set-row-help" data-i18n="personalizationHelp">Style, terminology, and LaTeX conventions Codex should follow in this project.</p>
+              <textarea id="codex-custom-instructions-input" class="codex-custom-instructions-input" data-custom-instructions-input rows="6" placeholder="Style, terminology, venue constraints, and LaTeX conventions for this project."></textarea>
+            </div>
+          </details>
+          <details class="codex-set-group" open>
+            <summary class="codex-set-group-head"><span data-i18n="governanceRulesTitle">Governance Rules</span></summary>
+            <div class="codex-set-card">
+              <div class="codex-set-row">
+                <label class="codex-set-row-label" for="codex-governance-readonly-patterns" data-i18n="governanceReadonlyPatterns">Read-only patterns</label>
+                <p class="codex-set-row-help" data-i18n="governanceReadonlyHelp">Files Codex must never modify (one glob per line).</p>
+                <textarea id="codex-governance-readonly-patterns" class="codex-project-settings-textarea" data-governance-readonly-patterns rows="3" placeholder="paper/accepted/**&#10;main.tex"></textarea>
+              </div>
+              <div class="codex-set-row">
+                <label class="codex-set-row-label" for="codex-governance-writable-patterns" data-i18n="governanceWritablePatterns">Writable patterns</label>
+                <p class="codex-set-row-help" data-i18n="governanceWritableHelp">Files Codex may edit (one glob per line).</p>
+                <textarea id="codex-governance-writable-patterns" class="codex-project-settings-textarea" data-governance-writable-patterns rows="3" placeholder="sections/**&#10;figures/**"></textarea>
+              </div>
+              <div class="codex-set-hairline"></div>
+              <label class="codex-project-settings-row codex-project-settings-row--switch">
+                <span class="codex-project-settings-row-label" data-i18n="sensitiveCheckEnabled">Check for sensitive content before Codex runs</span>
+                <input type="checkbox" class="codex-switch" data-sensitive-check-enabled>
+              </label>
+              <p class="codex-set-row-help" data-i18n="sensitiveCheckHelp">Scan project files for secrets and PII before each Codex run.</p>
+              <label class="codex-project-settings-row codex-project-settings-row--switch">
+                <span class="codex-project-settings-row-label" data-i18n="sensitiveConfirmAllowed">Allow explicit confirmation when sensitive findings exist</span>
+                <input type="checkbox" class="codex-switch" data-sensitive-confirm-allowed>
+              </label>
+              <p class="codex-set-row-help" data-i18n="sensitiveConfirmHelp">Let you review and proceed when the scan flags content.</p>
+            </div>
+          </details>
         </div>
         <div class="codex-project-settings-scope codex-project-settings-scope--global">
-          <div class="codex-project-settings-scope-title" data-i18n="settingsScopeGlobalTitle">All projects</div>
-          <div class="codex-project-settings-scope-subtitle" data-i18n="settingsScopeGlobalSubtitle">Skill loading settings that apply across all Overleaf projects.</div>
-          <div class="codex-project-settings-section">
-            <div class="codex-project-settings-section-title" data-i18n="localSkillsTitle">Skills</div>
-            <label class="codex-project-settings-row codex-project-settings-row--switch">
-              <span class="codex-project-settings-row-label" data-i18n="loadCodexLocalSkills">Load local Codex skills</span>
-              <input type="checkbox" class="codex-switch" data-load-codex-local-skills>
-            </label>
-            <button type="button" class="codex-skills-entry" data-skills-entry>
-              <span class="codex-skills-entry-label" data-i18n="codexOverleafSkillsEntry">Codex Overleaf skills</span>
-              <span class="codex-skills-entry-summary" data-skills-entry-summary></span>
-              <span class="codex-skills-entry-chevron" aria-hidden="true">›</span>
-            </button>
-          </div>
+          <div class="codex-project-settings-scope-title codex-set-eyebrow" data-i18n="settingsScopeGlobalTitle">All projects</div>
+          <details class="codex-set-group" open>
+            <summary class="codex-set-group-head"><span data-i18n="localSkillsTitle">Skills</span></summary>
+            <div class="codex-set-card">
+              <label class="codex-project-settings-row codex-project-settings-row--switch">
+                <span class="codex-project-settings-row-label" data-i18n="loadCodexLocalSkills">Load local Codex skills</span>
+                <input type="checkbox" class="codex-switch" data-load-codex-local-skills>
+              </label>
+              <p class="codex-set-row-help" data-i18n="loadCodexLocalSkillsHelp">Pull skills from your local Codex installation.</p>
+              <button type="button" class="codex-skills-entry" data-skills-entry>
+                <span class="codex-skills-entry-label" data-i18n="codexOverleafSkillsEntry">Codex Overleaf skills</span>
+                <span class="codex-skills-entry-summary" data-skills-entry-summary></span>
+                <span class="codex-skills-entry-chevron" aria-hidden="true">›</span>
+              </button>
+            </div>
+          </details>
         </div>
       </section>
       <section class="codex-custom-instructions-panel codex-skills-panel" data-skills-screen>
@@ -68,10 +85,12 @@
             <div class="codex-custom-instructions-title" data-i18n="codexOverleafSkillsTitle">Codex Overleaf skills</div>
           </div>
         </div>
-        <label class="codex-project-settings-row codex-project-settings-row--switch">
-          <span class="codex-project-settings-row-label" data-i18n="loadCodexOverleafSkills">Load Codex Overleaf skills</span>
-          <input type="checkbox" class="codex-switch" data-load-codex-overleaf-skills>
-        </label>
+        <div class="codex-set-card">
+          <label class="codex-project-settings-row codex-project-settings-row--switch">
+            <span class="codex-project-settings-row-label" data-i18n="loadCodexOverleafSkills">Load Codex Overleaf skills</span>
+            <input type="checkbox" class="codex-switch" data-load-codex-overleaf-skills>
+          </label>
+        </div>
         <div class="codex-skills-divider"></div>
         <div class="codex-local-skill-list" data-local-skill-list></div>
       </section>
@@ -82,11 +101,17 @@
     container.querySelector('[data-skills-entry]')?.addEventListener('click', () => instance.callbacks.onSkillsOpen?.());
     // Personalization textarea: auto-save on change (the change event fires on blur — avoids per-keystroke saves).
     const customInstructionsInput = container.querySelector('[data-custom-instructions-input]');
-    customInstructionsInput?.addEventListener('change', event => instance.callbacks.onInputChange?.(event));
+    customInstructionsInput?.addEventListener('change', event => {
+      instance.callbacks.onInputChange?.(event);
+      flashSaved(instance);
+    });
     // Governance and skill fields: auto-save on change and input for immediate response.
     for (const selector of ['[data-governance-readonly-patterns]', '[data-governance-writable-patterns]', '[data-sensitive-check-enabled]', '[data-sensitive-confirm-allowed]', '[data-load-codex-local-skills]', '[data-load-codex-overleaf-skills]']) {
       const element = container.querySelector(selector);
-      element?.addEventListener?.('change', event => instance.callbacks.onInputChange?.(event));
+      element?.addEventListener?.('change', event => {
+        instance.callbacks.onInputChange?.(event);
+        flashSaved(instance);
+      });
       element?.addEventListener?.('input', event => instance.callbacks.onInputChange?.(event));
     }
 
@@ -222,6 +247,26 @@
       return;
     }
     element.textContent = text || '';
+  }
+
+  // Flash the "✓ Saved" indicator after a field auto-saves, then fade it out.
+  // The fields persist immediately on change, so this is purely a confirmation
+  // cue — it never gates the save itself.
+  function flashSaved(instance) {
+    const status = instance?.container?.querySelector('[data-settings-save-status]');
+    if (!status) {
+      return;
+    }
+    status.dataset.state = 'saved';
+    if (instance._savedFlashTimer) {
+      clearTimeout(instance._savedFlashTimer);
+    }
+    instance._savedFlashTimer = setTimeout(() => {
+      const current = instance?.container?.querySelector('[data-settings-save-status]');
+      if (current) {
+        current.dataset.state = '';
+      }
+    }, 1600);
   }
 
   function getRoot(instance) {
