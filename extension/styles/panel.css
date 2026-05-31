@@ -1209,6 +1209,12 @@
   animation: tl-fade-in 120ms ease-out;
 }
 
+/* button.hidden must win over the display above (an id+class display rule
+   out-specifies the UA [hidden] rule), or the affordance never hides. */
+#codex-overleaf-panel .tl-jump-latest[hidden] {
+  display: none;
+}
+
 #codex-overleaf-panel .tl-jump-latest:hover {
   color: var(--tl-fg-1);
   border-color: #3a3a3a;

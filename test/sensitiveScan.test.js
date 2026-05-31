@@ -22,6 +22,17 @@ test('scanSensitiveText detects tokens and redacts previews', () => {
   }
 });
 
+test('counts multiple distinct secrets of the same type in one source', () => {
+  // v1.4.1: the per-finding dedup key includes match.index, so two different
+  // sk- tokens in the same source each count instead of collapsing to one —
+  // the "found N item(s)" total and the confirm-dialog list were under-reporting.
+  const tokenA = ['sk', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'].join('-');
+  const tokenB = ['sk', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'].join('-');
+  const findings = sensitiveScan.scanSensitiveText('prompt', `first ${tokenA} then ${tokenB}`);
+  const apiFindings = findings.filter(finding => finding.detectorId === 'api-token');
+  assert.equal(apiFindings.length, 2, 'both distinct sk- tokens must be reported');
+});
+
 test('scanSensitiveProjectFiles reports secret paths and never full secret content', () => {
   const findings = sensitiveScan.scanSensitiveProjectFiles([
     { path: 'main.tex', content: 'This confidential review must preserve anonymity.' },

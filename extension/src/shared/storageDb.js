@@ -1002,7 +1002,7 @@
   }
 
   function mightContainLocalReferenceText(value) {
-    return /(?:file:\/\/\/?|[A-Za-z]:[\\/]|\/(?:Users|home|private|var|tmp)\/|[\\/]\.codex-overleaf[\\/]projects[\\/]|\.codex-overleaf[\\/]projects[\\/])/i.test(String(value || ''));
+    return /(?:file:\/\/\/?|[A-Za-z]:[\\/]|\/(?:Users|home|root|private|var|tmp|Volumes|etc|opt|usr|srv|mnt|media)\/|[\\/]\.codex-overleaf[\\/]projects[\\/]|\.codex-overleaf[\\/]projects[\\/])/i.test(String(value || ''));
   }
 
   function sanitizeLocalReferencesForStorage(value) {
@@ -1018,13 +1018,13 @@
         }
         return '[' + safeLabel + '](' + sanitizeBareLocalPaths(trimmedTarget, false) + ')';
       })
-      .replace(/(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|private|var|tmp)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi, function (rawPath) {
+      .replace(/(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|root|private|var|tmp|Volumes|etc|opt|usr|srv|mnt|media)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi, function (rawPath) {
         return formatLocalPathPlaceholder(rawPath, true);
       });
   }
 
   function sanitizeBareLocalPaths(value, includeBrackets) {
-    return String(value || '').replace(/(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|private|var|tmp)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi, function (rawPath) {
+    return String(value || '').replace(/(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|root|private|var|tmp|Volumes|etc|opt|usr|srv|mnt|media)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi, function (rawPath) {
       return formatLocalPathPlaceholder(rawPath, includeBrackets);
     });
   }

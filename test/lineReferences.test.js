@@ -333,6 +333,21 @@ test('sanitizes unresolved local paths in render and persist contexts', () => {
   }
 });
 
+test('redacts the full canonical Unix top-level set, not just Users/home/private/var/tmp', () => {
+  // v1.4.1: BARE_LOCAL_PATH_PATTERN widened to the canonical pathRedaction.js
+  // UNIX_TOPLEVELS, so paths under /opt /etc /root /Volumes /usr /srv /mnt
+  // /media no longer leak through the highest-exposure (live + persist) layer.
+  for (const context of ['render', 'persist']) {
+    const sanitized = sanitizeLocalReferences(
+      'a /opt/acme/secret.tex:1 b /etc/passwd c /root/keys.tex:2 d /Volumes/Disk/paper.tex:3 e /usr/share/x.tex:4 f /srv/data/y.tex:5 g /mnt/vol/z.tex:6 h /media/usb/w.tex:7',
+      { projectFiles, context }
+    );
+    for (const leak of ['/opt/acme', '/etc/passwd', '/root/keys', '/Volumes/Disk', '/usr/share', '/srv/data', '/mnt/vol', '/media/usb']) {
+      assert.equal(sanitized.includes(leak), false, `${leak} should be redacted`);
+    }
+  }
+});
+
 test('sanitizes markdown local labels while preserving safe HTTPS targets', () => {
   assert.equal(
     sanitizeLocalReferences(

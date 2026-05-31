@@ -323,6 +323,11 @@ function redactCompileLogText(value) {
     [/(^|[\s({["'=])\/tmp\/[^:\s'"<>)]*/g, '$1<local-path>'],
     [/(^|[\s({["'=])\/Library\/TeX\/[^:\s'"<>)]*/g, '$1<TEXLIVE_PATH>'],
     [/(^|[\s({["'=])\/usr\/local\/texlive\/[^:\s'"<>)]*/g, '$1<TEXLIVE_PATH>'],
+    // Remaining canonical Unix top-levels (kept in sync with pathRedaction.js
+    // UNIX_TOPLEVELS). Runs after the TeX-specific rules so texlive trees keep
+    // their <TEXLIVE_PATH> placeholder; the /Users, /private/var, /var/folders,
+    // and /tmp rules above already handled those dirs.
+    [/(^|[\s({["'=])\/(?:home|root|private|var|Volumes|etc|opt|usr|srv|mnt|media)\/[^:\s'"<>)]*/g, '$1<local-path>'],
     [/[A-Za-z]:\\Users\\[^:\s'"<>)]*/g, '<local-path>'],
     [/[A-Za-z]:\\(?:Program Files|texlive)\\[^:\s'"<>)]*/gi, '<local-path>']
   ];

@@ -16,7 +16,10 @@
   const CJK_PUNCTUATION = '、，；。！？：';
   const REFERENCE_PREFIX_PATTERN = `(^|[\\s\\[({\"',;${CJK_PUNCTUATION}])`;
   const PATH_PATTERN = `([^\\s\\[\\](){}<>"'\`,;${CJK_PUNCTUATION}]+?\\.${TEXT_EXTENSION_PATTERN})`;
-  const BARE_LOCAL_PATH_PATTERN = /(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|private|var|tmp)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi;
+  // Unix top-level set kept in sync with the canonical pathRedaction.js
+  // UNIX_TOPLEVELS list; widening only ever redacts more, never changes
+  // non-path text.
+  const BARE_LOCAL_PATH_PATTERN = /(?:file:\/\/\/?[^\s)\]]+|[A-Za-z]:[\\/][^\s)\]]+|\/(?:Users|home|root|private|var|tmp|Volumes|etc|opt|usr|srv|mnt|media)\/[^\s)\]]+|[^\s)\]]*[\\/]\.codex-overleaf[\\/]projects[\\/][^\s)\]]+)/gi;
 
   function parseLineReferencesFromText({ text, mode }) {
     return collectLineReferences(text, mode).map(toPublicReference);

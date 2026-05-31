@@ -1528,6 +1528,9 @@ test('panel.css ships the jump-to-latest button, dark scrollbar, and motion prim
   // Floating button needs a positioned, non-scrolling host.
   assert.match(css, /\.codex-thread-section\s*\{[^}]*position:\s*relative/);
   assert.match(css, /\.tl-jump-latest\s*\{[\s\S]*?position:\s*absolute/);
+  // button.hidden must actually hide it: the id+class display rule out-specifies
+  // the UA [hidden] rule, so an explicit [hidden] override is required.
+  assert.match(css, /\.tl-jump-latest\[hidden\]\s*\{\s*display:\s*none/);
   // Dark scrollbar on the scroll container (was the light native default).
   assert.match(css, /\.col-log[\s\S]*?scrollbar-color:\s*#3a3a3a/);
   assert.match(css, /\.col-log::-webkit-scrollbar-thumb/);

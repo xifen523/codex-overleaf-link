@@ -117,3 +117,35 @@ test('buildCodexTurnPrompt redacts secrets and local paths from the compile log 
   assert.match(text, /pdfTeX/);
   assert.match(text, /undefined control sequence/);
 });
+
+test('buildCodexTurnPrompt redacts the full canonical Unix top-level set from the compile log', () => {
+  // v1.4.1: redactCompileLogText widened to the canonical pathRedaction.js
+  // UNIX_TOPLEVELS, so Linux / external-volume compile logs (/home /opt /etc
+  // /usr /Volumes /srv /mnt /media) no longer leak absolute paths to Codex —
+  // while /usr/local/texlive keeps its dedicated <TEXLIVE_PATH> placeholder
+  // (the TeX rules still run first).
+  const log = [
+    'reading /home/bob/project/main.tex',
+    'config at /etc/texmf/web2c/texmf.cnf',
+    'cache /opt/cache/foo.fmt',
+    'bin /usr/bin/pdflatex',
+    'volume /Volumes/Backup/refs.bib',
+    'texlive /usr/local/texlive/2026/tex/latex/base/article.cls'
+  ].join('\n');
+
+  const prompt = buildCodexTurnPrompt({
+    task: 'fix the build',
+    mode: 'auto',
+    compileLog: log,
+    compileErrors: ['/opt/build/main.tex:9 some error'],
+    compileWarnings: ['warning in /home/bob/intro.tex']
+  });
+  const text = typeof prompt === 'string' ? prompt : JSON.stringify(prompt);
+
+  for (const leak of ['/home/bob', '/etc/texmf', '/opt/cache', '/opt/build', '/usr/bin', '/Volumes/Backup']) {
+    assert.equal(text.includes(leak), false, `leaked ${leak}`);
+  }
+  // The texlive tree keeps its dedicated placeholder (rule ordering preserved).
+  assert.equal(text.includes('/usr/local/texlive'), false, 'leaked a texlive path');
+  assert.match(text, /<TEXLIVE_PATH>/);
+});

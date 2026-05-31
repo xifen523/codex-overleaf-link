@@ -34,7 +34,10 @@
       const pattern = new RegExp(detector.pattern.source, detector.pattern.flags);
       let match;
       while ((match = pattern.exec(content)) !== null) {
-        const key = detector.id + ':' + sourceKey + ':' + (options.path || '');
+        // Include match.index so multiple distinct secrets of the same type in
+        // one source (e.g. several keys in one .env) each count, instead of
+        // collapsing to a single finding and under-reporting the "found N" total.
+        const key = detector.id + ':' + sourceKey + ':' + (options.path || '') + ':' + match.index;
         if (seen.has(key)) {
           continue;
         }
