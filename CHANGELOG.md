@@ -1,5 +1,44 @@
 # Changelog
 
+## v1.4.0 - 2026-05-31
+
+Experience-and-hardening release. v1.4.0 redesigns the two surfaces the user lives in — the streaming run timeline and the Settings panel — to match the agent panels in VSCode Claude Code / Codex / Cursor, lands the seven BLOCKER fixes from the 10-agent security review (compile-log redaction, modern-token detection, oversize-frame survival, storage-quota corruption, cancel-during-write truthfulness, file-tree partial-mutation, single fetch wrapper), and closes the completion-report status/answer separation so run metadata never reads as part of Codex's answer — on a fresh run, after reload, or from a quota-compacted fallback. No core writeback behavior changes; the native protocol stays `1`.
+
+### Changed
+
+- **Streaming timeline redesign (Cursor-style stepped view).** The run timeline is rebuilt around a typographic status system and a smoother scroll engine, grounded in a code-mapped analysis of the real render pipeline. No information shown changes — only how it looks, scrolls, and feels.
+  - `scrollLogToBottom` coalesces a streaming burst into one `requestAnimationFrame` write per frame (was a synchronous write plus a second rAF write — two forced reflows, up to ~25/sec while streaming) and re-checks follow-intent **at paint time**, so a user who flicks up between schedule and paint is never snapped back. A forced scroll survives the coalesce and re-arms auto-follow.
+  - New floating **jump-to-latest** button (`.tl-jump-latest`): appears only while scrolled up, carries an unread-step counter (discrete activity/report steps, not streaming deltas), and is pinned in the non-scrolling thread section.
+  - Status glyphs (idle / running-spinner / completed / failed) replace the colored-dot rail; the run-process summary pins to the top of the scroller with a **live elapsed tick** so a working run is distinguishable from a hung one; the collapsed header appends the step count; stream rows get a role-colored left rule.
+  - A shared design-token system (`--tl-*`: a 4-step gray ladder replacing eight near-identical grays, surfaces, one accent, semantic state colors, radii), opacity-only row fade-in that never reflows neighbors, a `prefers-reduced-motion` opt-out, and a dark-themed scrollbar on the log column.
+- **Settings panel redesign (cards + collapsible groups).** Personalization, Governance Rules, and Skills are now collapsible `<details>` groups, each a bordered card reusing the timeline `--tl-*` tokens, with per-field help text (English + 中文). The two governance booleans (sensitive-content check, explicit-confirmation) adopt the same sliding switch as the skill toggles, the previously-inert "Saved" label now flashes `✓ Saved` on each auto-save, and the local-skill Remove / Confirm / Cancel actions get real bordered button styling (Confirm in a danger variant).
+- **Completion-report meta block bumped 11.5px → 12px** with token colors to clear WCAG-AA at the muted color.
+- Architecture budget for `contentRuntime.js` raised to fit the scroll engine, timeline, and completion-report split helpers; the deferred `contentRuntime.js` module split remains tracked.
+
+### Fixed
+
+- **Completion-report status lines now demote in every render path.** `Write result` / `Undo` / `Next` / `Why nothing changed` are run metadata, not part of the answer. The structured render already demoted them into a muted, separated block, but any event lacking a structured payload — persisted before structured reports existed, restored from a quota-compacted prefs-only fallback, or reloaded — fell back to a flat render that mixed them into the conclusion. The fallback now splits those trailing status sections out of the flat text into the same demoted meta block (`splitFlatCompletionReport` + the shared `appendCompletionMetaBlock`), with a single-line guard so conclusion prose containing "Next: …" is never mis-demoted.
+- **Completion-report structured payload survives reload (B-series follow-up).** Run-event storage compaction whitelisted event fields and dropped `detailStructured` + `failure`, so the meta demotion reverted to the flat render and the `codex_project_locked` "Force-release the stuck task" button disappeared after a reload. Both fields are now preserved through all three compaction sites (`sessionState.normalizeRunEvents`, `sessionState.compactRunEvents`, `storageDb.compactRunEventsForStorage`) — the IndexedDB path via a dedicated bounded structured compactor so the generic detail compactor can't redact the `{conclusion, body, meta[]}` shape to a hash summary.
+- **B1 — native host survives oversize frames.** `writeResponse` wraps `encodeMessage` in try/catch with a truncated-event fallback and a final `native_response_too_large` error, instead of throwing out of the stdout handler into an `uncaughtException` that exited the process mid-run.
+- **B4 — storage-quota fallback no longer corrupts task text.** `prepareCompactFallbackState` writes a `__codexOverleafCompactFallback`-tagged prefs-only blob (task / sessions / runs stripped) instead of redacted `[task omitted]` markers, and the loader returns prefs-only on that marker so the markers can never be re-persisted as real session data.
+- **B2 — cancel-during-write reports the truth.** The operation that was mid-write when cancel landed is reported with `changedDocument: true` and warning severity (the editor may already hold part of that write), distinct from the not-yet-started tail ops which stay `changedDocument: false`.
+- **B3 — file-tree op stops instead of stacking a partial change.** Once a tree-manager method has been invoked, a throw returns `file_tree_operation_unverified` rather than falling through to the next method and stacking a second partial mutation on inconsistent state.
+- **B7 — compile bridge fetch wrapper installs once.** The interceptor state lives on a page-window sentinel and bails when our wrapper is already current, so extension re-injection on upgrade no longer stacks fetch wrappers.
+
+### Security
+
+- **B5 — compile log no longer leaks to Codex verbatim.** `redactCompileLogText` strips Bearer / AWS / Google / Hugging Face / GitLab / Stripe / JWT secrets and local absolute paths (`/Users`, `/private/var`, `/var/folders`, `/tmp`, TeX-Live, Windows) from the compile log, errors, and warnings before they reach the Codex model.
+- **B6 — sensitive-content scan detects modern token formats.** Added AWS access-key (`AKIA…`), Google API-key (`AIza…`), Hugging Face (`hf_…`), GitLab (`glpat-…`), Stripe live-secret (`sk_live_…`), and JWT detectors, so these secrets are caught at the preflight gate instead of being mirrored to disk and read by Codex.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.4.0 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.4.0` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.4.0.zip`, `codex-overleaf-native-host-v1.4.0.tar.gz`, and `codex-overleaf-link-1.4.0.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.4.0 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.4.0 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.4.0 -- uninstall-native`.
+
 ## v1.3.9 - 2026-05-27
 
 Cancellation and concurrency hardening release. v1.3.9 makes the cancel button responsive sub-100 ms in every phase of a Codex run (Codex thinking, mid-writeback, post-write verification), adds a force-release recovery for stuck project locks, eliminates the cross-project write race introduced by long per-op pipelines, and ships a cleanup batch (debt registry, architecture budgets, extractFunction helper) that returned the codebase to a maintainable state after the v1.3.8 P0 churn.
