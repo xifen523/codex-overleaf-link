@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.4.1 - 2026-05-31
+
+Patch release. Fixes a cosmetic regression from the v1.4.0 timeline redesign, widens the local-path redaction layers to the canonical Unix top-level set so paths under /root /Volumes /etc /opt /usr /srv /mnt /media no longer leak, and makes the sensitive-content scan count every distinct secret. No writeback behavior changes; the native protocol stays `1`.
+
+### Fixed
+
+- **Jump-to-latest button never hid (v1.4.0 regression).** `.tl-jump-latest` declared `display: inline-flex` at id+class specificity, which out-specified the UA `[hidden]` rule, so the `button.hidden` toggle had no effect and the floating "↓ Latest" affordance stayed visible even at the bottom of the log. Added a `.tl-jump-latest[hidden] { display: none }` override so the button hides as intended.
+- **Sensitive-content scan under-counted repeated secret types.** The per-finding dedup key omitted the match offset, so multiple distinct secrets of the same type in one source (e.g. several keys in one `.env`) collapsed into a single finding — under-reporting the "found N item(s)" total and the confirm-dialog list. The dedup key now includes `match.index`, so each distinct occurrence is reported. The scan still fail-closes.
+
+### Security
+
+- **Local-path redaction widened to the canonical Unix top-level set.** Three redaction layers — the line-reference sanitizer (live run-event render + persisted detail), the storage/audit sanitizers, and the native-host compile-log redactor — only matched `/Users /home /private /var /tmp` and passed `/root /Volumes /etc /opt /usr /srv /mnt /media` through verbatim. All three now match the canonical `pathRedaction.js` UNIX_TOPLEVELS set, so absolute paths from Linux hosts and external volumes no longer leak into the run timeline, persisted history/audit records, or the Codex prompt. The compile-log redactor still maps `/usr/local/texlive` to its `<TEXLIVE_PATH>` placeholder (the TeX-specific rules run first).
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.4.1 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.4.1` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.4.1.zip`, `codex-overleaf-native-host-v1.4.1.tar.gz`, and `codex-overleaf-link-1.4.1.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.4.1 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.4.1 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.4.1 -- uninstall-native`.
+
 ## v1.4.0 - 2026-05-31
 
 Experience-and-hardening release. v1.4.0 redesigns the two surfaces the user lives in — the streaming run timeline and the Settings panel — to match the agent panels in VSCode Claude Code / Codex / Cursor, lands the seven BLOCKER fixes from the 10-agent security review (compile-log redaction, modern-token detection, oversize-frame survival, storage-quota corruption, cancel-during-write truthfulness, file-tree partial-mutation, single fetch wrapper), and closes the completion-report status/answer separation so run metadata never reads as part of Codex's answer — on a fresh run, after reload, or from a quota-compacted fallback. No core writeback behavior changes; the native protocol stays `1`.
