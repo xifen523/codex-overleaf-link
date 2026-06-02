@@ -1531,8 +1531,9 @@ test('panel.css ships the jump-to-latest button, dark scrollbar, and motion prim
   // button.hidden must actually hide it: the id+class display rule out-specifies
   // the UA [hidden] rule, so an explicit [hidden] override is required.
   assert.match(css, /\.tl-jump-latest\[hidden\]\s*\{\s*display:\s*none/);
-  // Dark scrollbar on the scroll container (was the light native default).
-  assert.match(css, /\.col-log[\s\S]*?scrollbar-color:\s*#3a3a3a/);
+  // Themed scrollbar on the scroll container (was the light native default);
+  // the thumb hue is now the border-strong token so it tracks dark/light.
+  assert.match(css, /\.col-log[\s\S]*?scrollbar-color:\s*var\(--tl-border-strong\)/);
   assert.match(css, /\.col-log::-webkit-scrollbar-thumb/);
   // Motion primitives + reduced-motion guard.
   assert.match(css, /@keyframes tl-fade-in/);
@@ -3533,6 +3534,7 @@ test('project custom instructions editor auto-saves on change and restores by pr
     ${extractFromContentScript( 'openCustomInstructionsSettings')}
     ${extractFromContentScript( 'closeCustomInstructionsSettings')}
     ${extractFromContentScript( 'setSettingsSaveStatus')}
+    function applyPanelTheme() {}
     ${extractFromContentScript( 'readPanelInputs')}
     ${extractFromContentScript( 'persistPanelInputs')}
     return {
@@ -3633,6 +3635,7 @@ test('persistPanelInputs save-status lifecycle: success path ends at settingsSav
     ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
     ${extractFromContentScript( 'clearProjectSettingsStatus')}
     ${extractFromContentScript( 'setSettingsSaveStatus')}
+    function applyPanelTheme() {}
     ${extractFromContentScript( 'readPanelInputs')}
     ${extractFromContentScript( 'persistPanelInputs')}
     return { persistPanelInputs };
@@ -3705,6 +3708,7 @@ test('persistPanelInputs save-status lifecycle: status ends at settingsSaved eve
     ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
     ${extractFromContentScript( 'clearProjectSettingsStatus')}
     ${extractFromContentScript( 'setSettingsSaveStatus')}
+    function applyPanelTheme() {}
     ${extractFromContentScript( 'readPanelInputs')}
     ${extractFromContentScript( 'persistPanelInputs')}
     return { persistPanelInputs };
@@ -4219,6 +4223,7 @@ test('experimental OT input persistence does not leak checked state after projec
     ${extractFromContentScript( 'isExperimentalOtEnabledForProject')}
     ${extractFromContentScript( 'setExperimentalOtEnabledForProject')}
     ${extractFromContentScript( 'syncExperimentalOtToggleForProject')}
+    function applyPanelTheme() {}
     ${extractFromContentScript( 'readPanelInputs')}
     return {
       checkbox: experimentalOtCheckbox,
@@ -4340,7 +4345,8 @@ test('line-reference buttons render with link-like visual affordance', () => {
   );
 
   assert.match(css, /#codex-overleaf-panel \.codex-line-reference\s*\{/);
-  assert.match(css, /\.codex-line-reference[\s\S]*color:\s*#4ea1ff/);
+  // The link hue is now the unified accent token (theme-aware) instead of a raw blue.
+  assert.match(css, /\.codex-line-reference[\s\S]*color:\s*var\(--tl-accent\)/);
   assert.match(css, /\.codex-line-reference[\s\S]*text-decoration:\s*underline/);
   assert.match(css, /\.codex-line-reference[\s\S]*cursor:\s*pointer/);
   assert.match(css, /\.codex-line-reference[\s\S]*background:\s*transparent/);

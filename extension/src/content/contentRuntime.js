@@ -879,6 +879,23 @@
     };
   }
 
+  // Theme: a global preference (dark / light / auto) applied to the panel root
+  // via themeController. 'auto' resolves through prefers-color-scheme; the
+  // disposer detaches the OS-change listener when switching away from auto.
+  let themeAutoDisposer = null;
+  function getThemePreference() {
+    return CodexOverleafTheme.normalizeThemePreference(state?.theme);
+  }
+  function applyPanelTheme(preference) {
+    const normalized = CodexOverleafTheme.normalizeThemePreference(preference);
+    CodexOverleafTheme.applyTheme(normalized, panel);
+    if (themeAutoDisposer) {
+      themeAutoDisposer();
+      themeAutoDisposer = null;
+    }
+    themeAutoDisposer = CodexOverleafTheme.watchAuto(normalized, panel);
+  }
+
   function getSkillLoadingSettings() {
     return {
       loadCodexLocalSkills: state?.loadCodexLocalSkills !== false,
@@ -931,7 +948,8 @@
   function syncProjectSettingsEditorForProject() {
     SettingsPanel.loadState(settingsPanelInstance, {
       governanceRules: getGovernanceRulesForCurrentProject(),
-      skillToggles: getSkillLoadingSettings()
+      skillToggles: getSkillLoadingSettings(),
+      theme: getThemePreference()
     });
     renderLocalSkillList();
   }
@@ -8306,6 +8324,14 @@
       const newSettings = readSkillLoadingSettingsFromSettings();
       const prevOverleafSkills = getSkillLoadingSettings().loadCodexOverleafSkills;
       setSkillLoadingSettings(newSettings);
+      // Theme is a global preference; read it from the settings select (which
+      // lives inside the panel, like the other settings inputs), persist it on
+      // state, and apply immediately. applyPanelTheme normalizes the value.
+      const themePref = panel?.querySelector('[data-theme-select]')?.value || 'dark';
+      if (state) {
+        state.theme = themePref;
+      }
+      applyPanelTheme(themePref);
       // Re-render skill list when master toggle changes so per-skill toggles update their disabled state.
       if (prevOverleafSkills !== getSkillLoadingSettings().loadCodexOverleafSkills) {
         renderLocalSkillList();
@@ -8718,6 +8744,7 @@
   }
 
   function applyStateToPanel() {
+    applyPanelTheme(getThemePreference());
     if (!modelSelectHasOption(state.model)) {
       renderModelOptions(getModelCatalog().FALLBACK_MODELS, state.model);
     }

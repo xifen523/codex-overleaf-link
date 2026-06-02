@@ -22,6 +22,7 @@
     loadCodexLocalSkills: true,
     loadCodexOverleafSkills: true,
     codexOverleafSkillEnabled: {},
+    theme: 'dark',
     panelWidth: 380,
     task: '',
     focusFiles: [],
@@ -124,6 +125,7 @@
     state.loadCodexLocalSkills = state.loadCodexLocalSkills !== false;
     state.loadCodexOverleafSkills = state.loadCodexOverleafSkills !== false;
     state.codexOverleafSkillEnabled = normalizeCodexOverleafSkillEnabled(state.codexOverleafSkillEnabled);
+    state.theme = ['dark', 'light', 'auto'].includes(state.theme) ? state.theme : 'dark';
     state.panelWidth = normalizePanelWidth(state.panelWidth);
     state.task = typeof state.task === 'string' ? state.task : '';
     state.model = typeof state.model === 'string' && state.model ? state.model : DEFAULT_PANEL_STATE.model;
@@ -840,6 +842,7 @@
       loadCodexLocalSkills: source.loadCodexLocalSkills !== false,
       loadCodexOverleafSkills: source.loadCodexOverleafSkills !== false,
       codexOverleafSkillEnabled: normalizeCodexOverleafSkillEnabled(source.codexOverleafSkillEnabled),
+      theme: ['dark', 'light', 'auto'].includes(source.theme) ? source.theme : 'dark',
       panelWidth: normalizePanelWidth(source.panelWidth),
       task: summarizeTextForStorage(active?.task || source.task || '', 'task'),
       focusFiles: normalizeFocusFiles(active?.focusFiles || source.focusFiles),

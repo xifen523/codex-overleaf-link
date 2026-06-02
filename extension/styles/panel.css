@@ -17,9 +17,9 @@
   box-sizing: border-box;
   width: var(--codex-overleaf-panel-width);
   height: 100vh;
-  border-left: 1px solid #2b2b2b;
-  background: #181818;
-  color: #cccccc;
+  border-left: 1px solid var(--tl-border);
+  background: var(--tl-surface-0);
+  color: var(--tl-fg-2);
   font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   overflow: hidden;
 }
@@ -70,7 +70,7 @@
 
 #codex-overleaf-panel .codex-panel-resize-handle:hover::after,
 :root.codex-overleaf-panel-resizing #codex-overleaf-panel .codex-panel-resize-handle::after {
-  background: #4dd0be;
+  background: var(--tl-accent);
 }
 
 #codex-overleaf-panel.is-open {
@@ -87,12 +87,20 @@
 #codex-overleaf-panel button {
   border: 0;
   background: transparent;
-  color: #cccccc;
+  color: var(--tl-fg-2);
   cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
 #codex-overleaf-panel button:hover {
-  background: #2a2d2e;
+  background: var(--tl-hover);
+}
+
+/* Keyboard-focus ring for every panel button (most had none). Additive outline,
+   so it composes with any button's own focus styling. */
+#codex-overleaf-panel button:focus-visible {
+  outline: 2px solid var(--tl-accent);
+  outline-offset: 1px;
 }
 
 #codex-overleaf-panel button:disabled {
@@ -105,7 +113,7 @@
   align-items: center;
   justify-content: space-between;
   min-height: 36px;
-  border-bottom: 1px solid #2b2b2b;
+  border-bottom: 1px solid var(--tl-border);
   padding: 0 8px 0 12px;
 }
 
@@ -113,8 +121,8 @@
   align-self: stretch;
   display: flex;
   align-items: center;
-  border-bottom: 1px solid #8ab4f8;
-  color: #cccccc;
+  border-bottom: 1px solid var(--tl-accent);
+  color: var(--tl-fg-2);
   font-size: 11px;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -134,18 +142,18 @@
   width: 26px;
   height: 26px;
   border-radius: 4px;
-  color: #a7a7a7;
+  color: var(--tl-fg-3);
 }
 
 #codex-overleaf-panel .codex-vscode-head-actions [data-diagnostics-menu][data-active="true"],
 #codex-overleaf-panel .codex-vscode-head-actions [data-custom-instructions-settings][data-active="true"] {
-  background: #2a2d2e;
-  color: #d4d4d4;
+  background: var(--tl-hover);
+  color: var(--tl-fg-1);
 }
 
 #codex-overleaf-panel .codex-vscode-head-actions [data-refresh][data-loading="true"] {
   animation: codex-refresh-spin 800ms linear infinite;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
 }
 
 #codex-overleaf-panel .codex-toast-region {
@@ -166,29 +174,29 @@
   grid-template-columns: minmax(0, 1fr) 22px;
   align-items: start;
   gap: 8px;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 5px;
-  background: #202222;
+  background: var(--tl-surface-2);
   box-shadow: none;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   padding: 7px 7px 7px 9px;
   pointer-events: auto;
 }
 
 #codex-overleaf-panel .codex-toast[data-status="completed"] {
-  border-color: #2f6f43;
+  border-color: var(--tl-ok);
 }
 
 #codex-overleaf-panel .codex-toast[data-status="warning"] {
-  border-color: #8a6a2a;
+  border-color: var(--tl-review);
 }
 
 #codex-overleaf-panel .codex-toast[data-status="failed"] {
-  border-color: #8a3a32;
+  border-color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .codex-toast-body {
-  color: #cccccc;
+  color: var(--tl-fg-2);
   font-size: 12px;
   line-height: 1.45;
   word-break: break-word;
@@ -198,7 +206,7 @@
   width: 22px;
   height: 22px;
   border-radius: 4px;
-  color: #a7a7a7;
+  color: var(--tl-fg-3);
 }
 
 @keyframes codex-refresh-spin {
@@ -213,9 +221,9 @@
   top: 30px;
   right: 0;
   width: 260px;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 6px;
-  background: #252526;
+  background: var(--tl-surface-2);
   box-shadow: 0 8px 22px rgba(0, 0, 0, 0.38);
   padding: 6px;
 }
@@ -226,8 +234,8 @@
 
 #codex-overleaf-panel .codex-diagnostics-hint {
   padding: 6px 8px 8px;
-  border-bottom: 1px solid #33373a;
-  color: #9da1a6;
+  border-bottom: 1px solid var(--tl-border-strong);
+  color: var(--tl-fg-3);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -239,33 +247,33 @@
   justify-content: flex-start;
   width: 100%;
   height: auto;
-  color: #cccccc;
+  color: var(--tl-fg-2);
   padding: 8px;
   text-align: left;
   white-space: normal;
 }
 
 #codex-overleaf-panel .codex-diagnostics-menu button span {
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   font-size: 12px;
   line-height: 1.3;
 }
 
 #codex-overleaf-panel .codex-diagnostics-menu button small {
   margin-top: 2px;
-  color: #8f9499;
+  color: var(--tl-fg-3);
   font-size: 11px;
   line-height: 1.3;
 }
 
 #codex-overleaf-panel .codex-diagnostics-ot-toggle {
-  border-bottom: 1px solid #33373a;
+  border-bottom: 1px solid var(--tl-border-strong);
   margin-bottom: 4px;
 }
 
 #codex-overleaf-panel .codex-diagnostics-ot-toggle[data-checked="true"] span,
 #codex-overleaf-panel .codex-diagnostics-ot-toggle[data-checked="true"] small {
-  color: #d7ba7d;
+  color: var(--tl-review);
 }
 
 #codex-overleaf-panel .codex-diagnostics-result {
@@ -276,9 +284,9 @@
   width: min(316px, calc(var(--codex-overleaf-panel-width) - 24px));
   max-height: min(520px, calc(100vh - 64px));
   overflow: auto;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 8px;
-  background: #1f1f1f;
+  background: var(--tl-surface-1);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.48);
 }
 
@@ -287,15 +295,15 @@
 }
 
 #codex-overleaf-panel .codex-diagnostics-result[data-status="completed"] {
-  border-color: #2f6f43;
+  border-color: var(--tl-ok);
 }
 
 #codex-overleaf-panel .codex-diagnostics-result[data-status="warning"] {
-  border-color: #8a6a2a;
+  border-color: var(--tl-review);
 }
 
 #codex-overleaf-panel .codex-diagnostics-result[data-status="failed"] {
-  border-color: #8a3a32;
+  border-color: var(--tl-fail);
 }
 
 /* View-state rules: hide session elements when in settings/skills view, and vice versa */
@@ -336,7 +344,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  background: #1f1f1f;
+  background: var(--tl-surface-1);
   padding: 12px;
   gap: 10px;
 }
@@ -349,7 +357,7 @@
 }
 
 #codex-overleaf-panel .codex-custom-instructions-title {
-  color: #f0f0f0;
+  color: var(--tl-fg-1);
   font-size: 14px;
   font-weight: 650;
   line-height: 1.35;
@@ -357,7 +365,7 @@
 
 #codex-overleaf-panel .codex-custom-instructions-subtitle {
   margin-top: 3px;
-  color: #9da1a6;
+  color: var(--tl-fg-3);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -377,10 +385,10 @@
   min-height: 132px;
   max-height: 132px;
   resize: none;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 6px;
-  background: #181818;
-  color: #d4d4d4;
+  background: var(--tl-surface-0);
+  color: var(--tl-fg-1);
   padding: 9px;
   outline: none;
   font-size: 12px;
@@ -388,26 +396,26 @@
 }
 
 #codex-overleaf-panel .codex-custom-instructions-input:focus {
-  border-color: #4dd0be;
+  border-color: var(--tl-accent);
 }
 
 #codex-overleaf-panel .codex-custom-instructions-input::placeholder {
-  color: #777d83;
+  color: var(--tl-fg-3);
 }
 
 #codex-overleaf-panel .codex-project-settings-scope {
   display: grid;
   gap: 10px;
-  border-top: 1px solid #2d2d30;
+  border-top: 1px solid var(--tl-border);
   padding-top: 12px;
 }
 
 #codex-overleaf-panel .codex-project-settings-scope--global {
-  border-top-color: #3a3d41;
+  border-top-color: var(--tl-border-strong);
 }
 
 #codex-overleaf-panel .codex-project-settings-scope-title {
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   font-size: 13px;
   font-weight: 650;
   line-height: 1.35;
@@ -418,10 +426,10 @@
   width: 100%;
   min-height: 72px;
   resize: vertical;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 6px;
-  background: #181818;
-  color: #d4d4d4;
+  background: var(--tl-surface-0);
+  color: var(--tl-fg-1);
   padding: 8px;
   font-size: 12px;
   line-height: 1.4;
@@ -434,7 +442,7 @@
   overflow: auto;
   margin-left: 8px;
   padding-left: 14px;
-  border-left: 2px solid #3a3d41;
+  border-left: 2px solid var(--tl-border-strong);
   margin-top: 2px;
 }
 
@@ -442,7 +450,7 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   font-size: 12px;
 }
 
@@ -473,17 +481,17 @@
 
 #codex-overleaf-panel .codex-project-settings-empty,
 #codex-overleaf-panel .codex-project-settings-status {
-  color: #9da1a6;
+  color: var(--tl-fg-3);
   font-size: 12px;
   line-height: 1.35;
 }
 
 #codex-overleaf-panel .codex-project-settings-status[data-status="failed"] {
-  color: #f2a19a;
+  color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .codex-project-settings-status[data-status="completed"] {
-  color: #9be9a8;
+  color: var(--tl-ok);
 }
 
 /* Save indicator — hidden at rest, flashes "✓ Saved" briefly when a field is
@@ -526,7 +534,7 @@
   height: 18px;
   margin: 0;
   border-radius: 9px;
-  background: #3a3d41;
+  background: var(--tl-border-strong);
   cursor: pointer;
   transition: background 120ms ease;
 }
@@ -539,21 +547,21 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #d4d4d4;
+  background: #ffffff;
   transition: transform 120ms ease;
 }
 
 #codex-overleaf-panel .codex-switch:checked {
-  background: #2f6f43;
+  background: var(--tl-ok);
 }
 
 #codex-overleaf-panel .codex-switch:checked::before {
   transform: translateX(14px);
-  background: #e8f5ec;
+  background: #ffffff;
 }
 
 #codex-overleaf-panel .codex-switch:focus-visible {
-  outline: 2px solid #4dd0be;
+  outline: 2px solid var(--tl-accent);
   outline-offset: 1px;
 }
 
@@ -568,7 +576,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   font-size: 12px;
   line-height: 1.35;
   cursor: pointer;
@@ -585,10 +593,10 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 6px;
-  background: #181818;
-  color: #d4d4d4;
+  background: var(--tl-surface-0);
+  color: var(--tl-fg-1);
   padding: 9px 10px;
   text-align: left;
   font-size: 12px;
@@ -596,7 +604,7 @@
 }
 
 #codex-overleaf-panel .codex-skills-entry:hover {
-  background: #232323;
+  background: var(--tl-surface-2);
 }
 
 #codex-overleaf-panel .codex-skills-entry-label {
@@ -606,13 +614,13 @@
 
 #codex-overleaf-panel .codex-skills-entry-summary {
   flex: 0 0 auto;
-  color: #9da1a6;
+  color: var(--tl-fg-3);
   font-size: 11px;
 }
 
 #codex-overleaf-panel .codex-skills-entry-chevron {
   flex: 0 0 auto;
-  color: #777d83;
+  color: var(--tl-fg-3);
   font-size: 14px;
 }
 
@@ -715,6 +723,23 @@
   margin-top: -5px;
 }
 
+/* Compact select control (theme picker) — tokenized so it themes too. */
+#codex-overleaf-panel .codex-set-select {
+  flex: 0 0 auto;
+  border: 1px solid var(--tl-border);
+  border-radius: var(--tl-r-sm);
+  background: var(--tl-surface-2);
+  color: var(--tl-fg-1);
+  padding: 3px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#codex-overleaf-panel .codex-set-select:focus-visible {
+  outline: 2px solid var(--tl-accent);
+  outline-offset: 1px;
+}
+
 #codex-overleaf-panel .codex-set-hairline {
   height: 1px;
   background: var(--tl-border);
@@ -744,8 +769,8 @@
 }
 
 #codex-overleaf-panel .codex-set-btn:hover {
-  background: #2c2c2c;
-  border-color: #3a3a3a;
+  background: var(--tl-hover);
+  border-color: var(--tl-border-strong);
   color: var(--tl-fg-1);
 }
 
@@ -784,7 +809,7 @@
 
 #codex-overleaf-panel .codex-skills-divider {
   height: 1px;
-  background: #2d2d30;
+  background: var(--tl-surface-2);
 }
 
 #codex-overleaf-panel .codex-diagnostics-result-head {
@@ -793,11 +818,11 @@
   justify-content: space-between;
   gap: 8px;
   padding: 12px 12px 8px;
-  border-bottom: 1px solid #2b2b2b;
+  border-bottom: 1px solid var(--tl-border);
 }
 
 #codex-overleaf-panel .codex-diagnostics-result-title {
-  color: #f0f0f0;
+  color: var(--tl-fg-1);
   font-size: 14px;
   font-weight: 650;
   line-height: 1.35;
@@ -805,7 +830,7 @@
 
 #codex-overleaf-panel .codex-diagnostics-result-subtitle {
   margin-top: 2px;
-  color: #9da1a6;
+  color: var(--tl-fg-3);
   font-size: 11px;
   line-height: 1.35;
 }
@@ -818,7 +843,7 @@
 
 #codex-overleaf-panel .codex-diagnostics-result-body {
   padding: 10px 12px 12px;
-  color: #cccccc;
+  color: var(--tl-fg-2);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -837,24 +862,24 @@
 }
 
 #codex-overleaf-panel .codex-diagnostics-next-step {
-  color: #b7d7ff;
+  color: var(--tl-accent);
 }
 
 #codex-overleaf-panel .codex-install-command {
   margin-top: 10px;
   padding: 9px;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 7px;
-  background: #171717;
+  background: var(--tl-surface-0);
 }
 
 #codex-overleaf-panel .codex-diagnostics-result[data-status="failed"] .codex-install-command {
-  border-color: #6f4f2f;
+  border-color: var(--tl-review);
 }
 
 #codex-overleaf-panel .codex-install-command-label {
   margin-bottom: 6px;
-  color: #9da1a6;
+  color: var(--tl-fg-3);
   font-size: 11px;
 }
 
@@ -864,8 +889,8 @@
   max-height: 90px;
   padding: 7px;
   border-radius: 6px;
-  background: #252525;
-  color: #d8dee9;
+  background: var(--tl-surface-2);
+  color: var(--tl-accent);
   white-space: pre-wrap;
   word-break: break-word;
   font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -874,16 +899,16 @@
 #codex-overleaf-panel .codex-install-command button {
   width: 100%;
   margin-top: 8px;
-  border: 1px solid #2f6f43;
+  border: 1px solid var(--tl-ok);
   border-radius: 6px;
-  background: #173f27;
-  color: #bdf4c8;
+  background: var(--tl-ok-wash);
+  color: var(--tl-ok);
   padding: 6px 8px;
   font-size: 12px;
 }
 
 #codex-overleaf-panel .codex-diagnostics-technical {
-  border-top: 1px solid #2b2b2b;
+  border-top: 1px solid var(--tl-border);
   padding: 8px 12px 10px;
 }
 
@@ -893,7 +918,7 @@
 
 #codex-overleaf-panel .codex-diagnostics-technical summary {
   cursor: pointer;
-  color: #9da1a6;
+  color: var(--tl-fg-3);
   font-size: 11px;
 }
 
@@ -901,7 +926,7 @@
   overflow: auto;
   max-height: 220px;
   margin: 8px 0 0;
-  color: #aeb4ba;
+  color: var(--tl-fg-2);
   white-space: pre-wrap;
   word-break: break-word;
   font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -925,9 +950,9 @@
   width: 100%;
   max-height: min(520px, calc(100vh - 28px));
   overflow: hidden;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 8px;
-  background: #1f1f1f;
+  background: var(--tl-surface-1);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.52);
 }
 
@@ -936,7 +961,7 @@
   align-items: center;
   gap: 10px;
   padding: 14px 14px 12px;
-  border-bottom: 1px solid #2b2b2b;
+  border-bottom: 1px solid var(--tl-border);
 }
 
 #codex-overleaf-panel .codex-plugin-confirm-icon {
@@ -946,7 +971,7 @@
 }
 
 #codex-overleaf-panel .codex-plugin-confirm-brand {
-  color: #8ab4f8;
+  color: var(--tl-accent);
   font-size: 11px;
   font-weight: 650;
   line-height: 1.2;
@@ -954,7 +979,7 @@
 
 #codex-overleaf-panel .codex-plugin-confirm-title {
   margin-top: 2px;
-  color: #f0f0f0;
+  color: var(--tl-fg-1);
   font-size: 14px;
   font-weight: 650;
   line-height: 1.35;
@@ -964,7 +989,7 @@
   max-height: 300px;
   overflow: auto;
   padding: 12px 14px;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   font-size: 12px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -976,32 +1001,32 @@
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 14px 14px;
-  border-top: 1px solid #2b2b2b;
+  border-top: 1px solid var(--tl-border);
 }
 
 #codex-overleaf-panel .codex-plugin-confirm-actions button {
   min-width: 72px;
   height: 30px;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 6px;
   padding: 0 12px;
   font-weight: 650;
 }
 
 #codex-overleaf-panel .codex-plugin-confirm-cancel {
-  background: #252526;
-  color: #cccccc;
+  background: var(--tl-surface-2);
+  color: var(--tl-fg-2);
 }
 
 #codex-overleaf-panel .codex-plugin-confirm-confirm {
-  border-color: #22715d;
-  background: #23856e;
+  border-color: var(--tl-ok);
+  background: var(--tl-ok);
   color: #ffffff;
 }
 
 #codex-overleaf-panel .codex-plugin-confirm-confirm[data-destructive="true"] {
-  border-color: #b84e46;
-  background: #8f2c25;
+  border-color: var(--tl-fail);
+  background: var(--tl-fail);
 }
 
 #codex-overleaf-panel .codex-vscode-main {
@@ -1017,7 +1042,7 @@
   flex: 0 0 auto;
   max-height: min(34vh, 220px);
   overflow-y: auto;
-  border-bottom: 1px solid #242424;
+  border-bottom: 1px solid var(--tl-border);
   padding-bottom: 8px;
 }
 
@@ -1026,7 +1051,7 @@
   align-items: center;
   justify-content: space-between;
   min-height: 24px;
-  color: #9d9d9d;
+  color: var(--tl-fg-3);
   font-size: 12px;
   font-weight: 600;
 }
@@ -1046,7 +1071,7 @@
 }
 
 #codex-overleaf-panel .codex-session-row[data-active="true"] {
-  background: #2a2d2e;
+  background: var(--tl-hover);
 }
 
 #codex-overleaf-panel .codex-session-row[data-running="true"] .codex-session-row-title::before {
@@ -1056,7 +1081,7 @@
   height: 8px;
   margin-right: 6px;
   border: 2px solid rgba(77, 208, 190, 0.25);
-  border-top-color: #4dd0be;
+  border-top-color: var(--tl-accent);
   border-radius: 50%;
   vertical-align: -1px;
   animation: codex-session-spin 800ms linear infinite;
@@ -1082,13 +1107,13 @@
 
 #codex-overleaf-panel .codex-session-row-title {
   overflow: hidden;
-  color: #c8c8c8;
+  color: var(--tl-fg-2);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 #codex-overleaf-panel .codex-session-row time {
-  color: #8a8a8a;
+  color: var(--tl-fg-3);
   font-size: 12px;
   white-space: nowrap;
 }
@@ -1097,10 +1122,10 @@
   grid-column: 1 / 2;
   min-width: 0;
   min-height: 26px;
-  border: 1px solid #3d5f58;
+  border: 1px solid var(--tl-ok);
   border-radius: 4px;
-  background: #1c2222;
-  color: #e8e8e8;
+  background: var(--tl-surface-1);
+  color: var(--tl-fg-1);
   font: inherit;
   padding: 3px 6px;
 }
@@ -1114,7 +1139,7 @@
   width: 22px;
   height: 22px;
   border-radius: 4px;
-  color: #858585;
+  color: var(--tl-fg-3);
   opacity: 0.45;
 }
 
@@ -1132,7 +1157,7 @@
 
 #codex-overleaf-panel .codex-session-rename:hover,
 #codex-overleaf-panel .codex-session-delete:hover {
-  color: #cccccc;
+  color: var(--tl-fg-2);
 }
 
 #codex-overleaf-panel .codex-session-delete:disabled {
@@ -1144,25 +1169,35 @@
   margin-top: 4px;
   min-height: 24px;
   border-radius: 4px;
-  color: #7aa2d8;
+  color: var(--tl-accent);
   padding: 2px 4px;
   text-align: left;
 }
 
 /* ---------------------------------------------------------------------------
-   Run-timeline design tokens. A 4-step text ladder (was 8 near-identical
-   grays) + surfaces + a single accent and semantic state colors. No existing
-   selector depends on these names; adding them is non-breaking and the
-   timeline rules below consume them. */
+   Panel design tokens (the theme system). A 4-step text ladder (was 8 near-
+   identical grays) + a 3-step surface stack + borders + a single accent and
+   semantic state colors. The dark values below are the baseline; the
+   [data-theme="light"] block remaps them for light mode. Theme selection is
+   driven by data-theme on the panel root (themeController.js resolves
+   dark/light/auto). The whole panel reads these tokens so a theme is just a
+   value swap — no selector depends on the literals. */
 #codex-overleaf-panel {
-  --tl-fg-1: #e4e4e4;   /* primary prose / answer */
-  --tl-fg-2: #b7b7b7;   /* activity titles / stream body */
-  --tl-fg-3: #8a8a8a;   /* meta / summary / checkpoints */
-  --tl-fg-4: #6b6b6b;   /* deep-muted / idle */
-  --tl-surface-1: #1e1e1e;
-  --tl-surface-2: #232323;
-  --tl-border: #2a2a2a;
+  --tl-fg-1: #e4e4e4;   /* primary prose / answer / strong labels */
+  --tl-fg-2: #b7b7b7;   /* body text / activity titles / controls */
+  --tl-fg-3: #8a8a8a;   /* meta / summaries / captions */
+  --tl-fg-4: #6b6b6b;   /* deep-muted / idle / placeholders */
+  --tl-surface-0: #181818;  /* outermost panel background */
+  --tl-surface-1: #1e1e1e;  /* primary content surface */
+  --tl-surface-2: #232323;  /* elevated surfaces / popovers / hover fills */
+  --tl-hover: #2a2d2e;      /* generic interactive hover fill */
+  --tl-border: #2a2a2a;        /* dividers / resting control borders */
+  --tl-border-strong: #3a3a3a; /* elevated popover / tray borders */
   --tl-accent: #6f9fd8;
+  --tl-accent-wash: rgba(111, 159, 216, 0.14); /* selected/active accent fill */
+  --tl-ok-wash: rgba(137, 209, 133, 0.14);
+  --tl-fail-wash: rgba(224, 121, 95, 0.16);
+  --tl-review-wash: rgba(215, 186, 125, 0.16);
   --tl-run: #4ec9b0;
   --tl-ok: #89d185;
   --tl-fail: #e0795f;
@@ -1171,13 +1206,43 @@
   --tl-r-md: 8px;
 }
 
+/* Light theme — remaps the token values for a light surface. Reached when
+   themeController sets data-theme="light" (explicit Light, or Auto resolving to
+   light via prefers-color-scheme). Dark needs no override (it is the baseline
+   above). State colors are darkened for AA contrast on light surfaces. */
+#codex-overleaf-panel[data-theme="light"] {
+  --tl-fg-1: #1f2328;
+  --tl-fg-2: #3d4651;
+  --tl-fg-3: #6a7280;
+  --tl-fg-4: #9aa3ad;
+  --tl-surface-0: #f3f4f6;
+  --tl-surface-1: #ffffff;
+  --tl-surface-2: #eef0f3;
+  --tl-hover: #e7eaee;
+  --tl-border: #d7dbe0;
+  --tl-border-strong: #c4c9d0;
+  --tl-accent: #2f6fb0;
+  --tl-accent-wash: rgba(47, 111, 176, 0.12);
+  --tl-ok-wash: rgba(46, 158, 84, 0.12);
+  --tl-fail-wash: rgba(192, 57, 43, 0.10);
+  --tl-review-wash: rgba(184, 134, 11, 0.12);
+  --tl-run: #1f9c86;
+  --tl-ok: #2e9e54;
+  --tl-fail: #c0392b;
+  --tl-review: #b8860b;
+}
+
 @keyframes tl-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes tl-pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(78, 201, 176, 0.45); }
   50%      { box-shadow: 0 0 0 3px rgba(78, 201, 176, 0.10); }
 }
 @media (prefers-reduced-motion: reduce) {
-  #codex-overleaf-panel * { animation: none !important; scroll-behavior: auto !important; }
+  #codex-overleaf-panel * {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 #codex-overleaf-panel .codex-thread-section {
@@ -1217,13 +1282,13 @@
 
 #codex-overleaf-panel .tl-jump-latest:hover {
   color: var(--tl-fg-1);
-  border-color: #3a3a3a;
+  border-color: var(--tl-border-strong);
 }
 
 #codex-overleaf-panel .codex-thread-title {
   min-height: 20px;
   overflow: hidden;
-  color: #9d9d9d;
+  color: var(--tl-fg-3);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1237,7 +1302,7 @@
   color: var(--tl-fg-2);
   scroll-behavior: smooth;
   scrollbar-width: thin;
-  scrollbar-color: #3a3a3a transparent;
+  scrollbar-color: var(--tl-border-strong) transparent;
   overflow-anchor: none;     /* the JS scroll engine owns follow behavior */
 }
 
@@ -1246,12 +1311,12 @@
 }
 
 #codex-overleaf-panel .col-log::-webkit-scrollbar-thumb {
-  background: #3a3a3a;
+  background: var(--tl-border-strong);
   border-radius: 4px;
 }
 
 #codex-overleaf-panel .col-log::-webkit-scrollbar-thumb:hover {
-  background: #4a4a4a;
+  background: var(--tl-border-strong);
 }
 
 #codex-overleaf-panel .col-log::-webkit-scrollbar-track {
@@ -1260,17 +1325,18 @@
 
 #codex-overleaf-panel .empty-runs {
   display: grid;
-  min-height: 180px;
+  min-height: 140px;
   place-content: center;
-  gap: 12px;
-  color: #7f7f7f;
+  gap: 8px;
+  color: var(--tl-fg-3);
   text-align: center;
+  animation: tl-fade-in 160ms ease-out;
 }
 
 #codex-overleaf-panel .codex-empty-icon {
   display: block;
-  width: 108px;
-  height: 108px;
+  width: 64px;
+  height: 64px;
   margin: 0 auto;
   object-fit: contain;
   filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.24));
@@ -1284,8 +1350,8 @@
 }
 
 #codex-overleaf-panel .log-line {
-  border-left: 2px solid #3a3a3a;
-  color: #a7a7a7;
+  border-left: 2px solid var(--tl-border-strong);
+  color: var(--tl-fg-3);
   padding: 4px 0 4px 8px;
 }
 
@@ -1297,7 +1363,7 @@
 }
 
 #codex-overleaf-panel .transcript-turn {
-  border-bottom: 1px solid #242424;
+  border-bottom: 1px solid var(--tl-border);
   padding: 8px 0 10px;
 }
 
@@ -1311,10 +1377,10 @@
 
 #codex-overleaf-panel .run-prompt {
   box-sizing: border-box;
-  border: 1px solid #2f3336;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 8px;
-  background: #202426;
-  color: #d4d4d4;
+  background: var(--tl-surface-1);
+  color: var(--tl-fg-1);
   padding: 7px 9px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -1326,7 +1392,7 @@
   gap: 8px;
   min-height: 22px;
   margin: 6px 0 2px;
-  color: #858585;
+  color: var(--tl-fg-3);
   font-size: 11px;
 }
 
@@ -1351,15 +1417,15 @@
 
 #codex-overleaf-panel .run-turn-meta [data-run-accept],
 #codex-overleaf-panel .run-turn-meta [data-run-accept-confirm] {
-  border: 1px solid #4c8fde;
-  background: #1f5fa8;
+  border: 1px solid var(--tl-accent);
+  background: var(--tl-accent);
   color: #ffffff;
   box-shadow: 0 0 0 1px rgba(76, 143, 222, 0.34), 0 4px 12px rgba(0, 0, 0, 0.24);
 }
 
 #codex-overleaf-panel .run-turn-meta [data-run-accept]:hover,
 #codex-overleaf-panel .run-turn-meta [data-run-accept-confirm]:hover {
-  background: #2b73c4;
+  background: var(--tl-accent);
 }
 
 #codex-overleaf-panel .run-turn-meta [data-run-accept]:disabled,
@@ -1368,20 +1434,20 @@
 }
 
 #codex-overleaf-panel .run-turn-meta [data-run-accept-cancel] {
-  border: 1px solid #3a3a3a;
-  background: #2a2a2a;
-  color: #d4d4d4;
+  border: 1px solid var(--tl-border-strong);
+  background: var(--tl-hover);
+  color: var(--tl-fg-1);
 }
 
 #codex-overleaf-panel .run-turn-meta [data-run-accept-cancel]:hover {
-  background: #383838;
+  background: var(--tl-border-strong);
 }
 
 #codex-overleaf-panel [data-run-undo] {
   min-height: 30px;
-  border: 1px solid #f0883e;
+  border: 1px solid var(--tl-review);
   border-radius: 4px;
-  background: #a14b00;
+  background: var(--tl-review);
   color: #ffffff;
   padding: 3px 11px;
   box-shadow: 0 0 0 1px rgba(240, 136, 62, 0.34), 0 4px 12px rgba(0, 0, 0, 0.24);
@@ -1390,7 +1456,7 @@
 }
 
 #codex-overleaf-panel [data-run-undo]:hover {
-  background: #c65d00;
+  background: var(--tl-review);
 }
 
 #codex-overleaf-panel [data-run-undo]:disabled {
@@ -1399,25 +1465,25 @@
 
 #codex-overleaf-panel .run-status {
   flex: 0 0 auto;
-  color: #7aa2d8 !important;
+  color: var(--tl-accent) !important;
   font-size: 11px !important;
   white-space: nowrap;
 }
 
 #codex-overleaf-panel .transcript-turn[data-status="running"] .run-status {
-  color: #4ec9b0 !important;
+  color: var(--tl-run) !important;
 }
 
 #codex-overleaf-panel .transcript-turn[data-status="failed"] .run-status {
-  color: #f48771 !important;
+  color: var(--tl-fail) !important;
 }
 
 #codex-overleaf-panel .transcript-turn[data-status="abandoned_after_navigation"] .run-status {
-  color: #f48771 !important;
+  color: var(--tl-fail) !important;
 }
 
 #codex-overleaf-panel .transcript-turn[data-status="needs_review_after_navigation"] .run-status {
-  color: #d7ba7d !important;
+  color: var(--tl-review) !important;
 }
 
 #codex-overleaf-panel .run-activity-list {
@@ -1480,7 +1546,7 @@
   grid-template-columns: minmax(0, 1fr);
   min-height: 18px;
   margin: 5px 0;
-  color: #8f8f8f;
+  color: var(--tl-fg-3);
 }
 
 #codex-overleaf-panel .run-activity[data-kind="checkpoint"] .run-activity-dot {
@@ -1491,7 +1557,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  color: #8f8f8f;
+  color: var(--tl-fg-3);
   font-size: 11px;
 }
 
@@ -1500,13 +1566,13 @@
   content: "";
   flex: 1;
   height: 1px;
-  background: #333333;
+  background: var(--tl-border);
 }
 
 #codex-overleaf-panel .run-activity-title {
   min-width: 0;
   overflow: hidden;
-  color: #cccccc;
+  color: var(--tl-fg-2);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1547,7 +1613,7 @@
 #codex-overleaf-panel .codex-line-reference {
   border: 0;
   background: transparent;
-  color: #4ea1ff;
+  color: var(--tl-accent);
   padding: 0;
   font: inherit;
   line-height: inherit;
@@ -1559,11 +1625,11 @@
 #codex-overleaf-panel .codex-line-reference:hover,
 #codex-overleaf-panel .codex-line-reference:focus-visible {
   background: transparent;
-  color: #8cc8ff;
+  color: var(--tl-accent);
 }
 
 #codex-overleaf-panel .codex-line-reference:focus-visible {
-  outline: 1px solid #4ea1ff;
+  outline: 1px solid var(--tl-accent);
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -1574,7 +1640,7 @@
 }
 
 #codex-overleaf-panel .codex-line-reference[data-status="failed"] {
-  color: #ff8a8a;
+  color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .run-process {
@@ -1654,7 +1720,7 @@
 
 #codex-overleaf-panel .run-final-answer {
   margin: 0;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   word-break: break-word;
   font-size: 13px;
   line-height: 1.52;
@@ -1665,7 +1731,7 @@
 }
 
 #codex-overleaf-panel .run-final-answer .run-final-heading {
-  color: #ededed;
+  color: var(--tl-fg-1);
   font-weight: 600;
 }
 
@@ -1692,7 +1758,7 @@
 }
 
 #codex-overleaf-panel .run-final-answer a {
-  color: #7aa2d8;
+  color: var(--tl-accent);
   text-decoration: none;
 }
 
@@ -1702,8 +1768,8 @@
 
 #codex-overleaf-panel .run-final-answer code {
   border-radius: 4px;
-  background: #252526;
-  color: #d7ba7d;
+  background: var(--tl-surface-2);
+  color: var(--tl-review);
   padding: 1px 4px;
   font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -1756,10 +1822,10 @@
 #codex-overleaf-panel .run-final-answer__recovery-action {
   margin: 12px 0 0;
   padding: 5px 10px;
-  background: #2a2d2e;
-  border: 1px solid #454545;
+  background: var(--tl-hover);
+  border: 1px solid var(--tl-border-strong);
   border-radius: 3px;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
@@ -1767,8 +1833,8 @@
 }
 
 #codex-overleaf-panel .run-final-answer__recovery-action:hover {
-  background: #353838;
-  border-color: #6a6a6a;
+  background: var(--tl-border-strong);
+  border-color: var(--tl-border-strong);
 }
 
 #codex-overleaf-panel .run-final-answer__recovery-action:disabled {
@@ -1780,8 +1846,8 @@
   flex: 0 0 auto;
   min-height: 18px;
   overflow: hidden;
-  border-top: 1px solid #2b2b2b;
-  color: #858585;
+  border-top: 1px solid var(--tl-border);
+  color: var(--tl-fg-3);
   padding: 4px 12px 0;
   font-size: 11px;
   text-overflow: ellipsis;
@@ -1789,26 +1855,42 @@
 }
 
 #codex-overleaf-panel .codex-probe-line[data-ok="true"] {
-  color: #89d185;
+  color: var(--tl-ok);
 }
 
 #codex-overleaf-panel .codex-composer {
   position: relative;
   flex: 0 0 auto;
   margin: 8px 8px 6px;
-  border: 1px solid #3c3c3c;
+  border: 1px solid var(--tl-border);
   border-radius: 8px;
-  background: #1e1e1e;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.02);
+  background: var(--tl-surface-1);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
 #codex-overleaf-panel .codex-composer:focus-within {
-  border-color: #007fd4;
+  border-color: var(--tl-accent);
+  box-shadow: 0 0 0 1px var(--tl-accent);
 }
 
 #codex-overleaf-panel .codex-composer[data-dragging-attachment="true"] {
-  border-color: #4ec9b0;
+  border-color: var(--tl-run);
   box-shadow: 0 0 0 1px rgba(78, 201, 176, 0.35);
+}
+
+/* First-run coach-mark pointing at the mode switch. JS sets its position
+   inline; this gives it a real callout surface (it previously rendered as
+   bare unstyled text floating over the composer). */
+#codex-overleaf-panel .codex-onboarding-tip {
+  background: var(--tl-surface-2);
+  border: 1px solid var(--tl-border-strong);
+  border-radius: var(--tl-r-md);
+  padding: 8px 10px;
+  color: var(--tl-fg-2);
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  animation: tl-fade-in 160ms ease-out;
 }
 
 #codex-overleaf-panel .codex-slash-menu {
@@ -1819,9 +1901,9 @@
   z-index: 2147483647;
   display: grid;
   gap: 2px;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 8px;
-  background: #252526;
+  background: var(--tl-surface-2);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
   padding: 5px;
 }
@@ -1837,19 +1919,19 @@
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   padding: 7px 8px;
   text-align: left;
 }
 
 #codex-overleaf-panel .codex-slash-menu button[data-active="true"],
 #codex-overleaf-panel .codex-slash-menu button:hover {
-  background: #094771;
+  background: var(--tl-accent-wash);
   color: #ffffff;
 }
 
 #codex-overleaf-panel .codex-slash-menu small {
-  color: #a6a6a6;
+  color: var(--tl-fg-3);
   font-size: 11px;
   line-height: 1.3;
 }
@@ -1861,10 +1943,10 @@
   gap: 7px;
   width: fit-content;
   max-width: 100%;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 999px;
-  background: #1f252b;
-  color: #d4d4d4;
+  background: var(--tl-surface-1);
+  color: var(--tl-fg-1);
   padding: 5px 7px;
   font-size: 12px;
   line-height: 1.2;
@@ -1875,7 +1957,7 @@
 }
 
 #codex-overleaf-panel .codex-composer-skill-icon {
-  color: #3794ff;
+  color: var(--tl-accent);
   font-size: 13px;
 }
 
@@ -1893,14 +1975,14 @@
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: #a6a6a6;
+  color: var(--tl-fg-3);
   padding: 0;
   font-size: 14px;
   line-height: 1;
 }
 
 #codex-overleaf-panel .codex-composer-skill-context button:hover {
-  background: #3a3d41;
+  background: var(--tl-hover);
   color: #ffffff;
 }
 
@@ -1913,12 +1995,12 @@
   outline: none;
   resize: vertical;
   background: transparent;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   padding: 10px 10px 6px;
 }
 
 #codex-overleaf-panel .codex-composer textarea::placeholder {
-  color: #6f6f6f;
+  color: var(--tl-fg-4);
 }
 
 #codex-overleaf-panel .codex-mode-row {
@@ -1926,39 +2008,52 @@
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 7px;
-  border-top: 1px solid #2b2b2b;
+  border-top: 1px solid var(--tl-border);
   padding: 5px 8px 0;
 }
 
 #codex-overleaf-panel .codex-mode-label {
-  color: #858585;
+  color: var(--tl-fg-3);
   font-size: 11px;
   white-space: nowrap;
 }
 
+/* Mode switch (Ask/Suggest/Auto) — a real segmented control: a bordered track
+   holding three choices. Inactive choices are muted; hover is a light fill
+   (distinct from the active accent-wash fill) so hover never reads as active. */
 #codex-overleaf-panel .codex-mode-switch {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--tl-border);
+  border-radius: var(--tl-r-sm);
+  background: var(--tl-surface-2);
 }
 
 #codex-overleaf-panel [data-mode-choice] {
   min-width: 0;
   min-height: 24px;
   overflow: hidden;
-  border-radius: 5px;
-  color: #bdbdbd;
+  border-radius: 4px;
+  color: var(--tl-fg-3);
   padding: 0 4px;
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+#codex-overleaf-panel [data-mode-choice]:not([data-active="true"]):hover {
+  background: var(--tl-hover);
+  color: var(--tl-fg-2);
 }
 
 #codex-overleaf-panel [data-mode-choice][data-active="true"] {
-  background: #2a2d2e;
-  color: #ffffff;
-  box-shadow: inset 0 0 0 1px #4ec9b0;
+  background: var(--tl-accent-wash);
+  color: var(--tl-fg-1);
+  box-shadow: inset 0 0 0 1px var(--tl-accent);
 }
 
 #codex-overleaf-panel .codex-context-summary {
@@ -1966,7 +2061,7 @@
   min-height: 26px;
   align-items: center;
   gap: 5px;
-  border-top: 1px solid #2b2b2b;
+  border-top: 1px solid var(--tl-border);
   padding: 4px 8px 0;
   overflow-x: auto;
 }
@@ -1977,7 +2072,7 @@
 
 #codex-overleaf-panel .codex-context-summary-label {
   flex: 0 0 auto;
-  color: #858585;
+  color: var(--tl-fg-3);
   font-size: 11px;
 }
 
@@ -1988,10 +2083,10 @@
   max-width: 142px;
   align-items: center;
   gap: 4px;
-  border: 1px solid #34383c;
+  border: 1px solid var(--tl-border);
   border-radius: 999px;
-  background: #252526;
-  color: #c8c8c8;
+  background: var(--tl-surface-2);
+  color: var(--tl-fg-2);
   padding: 2px 3px 2px 7px;
   font-size: 11px;
 }
@@ -2008,14 +2103,14 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  color: #9d9d9d;
+  color: var(--tl-fg-3);
   transition: opacity 120ms ease, background-color 120ms ease;
 }
 
 #codex-overleaf-panel .codex-context-summary-remove:hover,
 #codex-overleaf-panel .codex-context-summary-remove:focus-visible {
-  background: #3a3d41;
-  color: #f0f0f0;
+  background: var(--tl-hover);
+  color: var(--tl-fg-1);
 }
 
 #codex-overleaf-panel .codex-context-summary-tooltip {
@@ -2023,10 +2118,10 @@
   z-index: 6;
   box-sizing: border-box;
   padding: 6px 8px;
-  border: 1px solid #464b52;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 6px;
-  background: #1f1f1f;
-  color: #eeeeee;
+  background: var(--tl-surface-1);
+  color: var(--tl-fg-1);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38);
   font-size: 11px;
   line-height: 1.35;
@@ -2076,10 +2171,10 @@
   justify-content: center;
   gap: 4px;
   overflow: hidden;
-  border: 1px solid #363a3d;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 8px;
-  background: #1b1f20;
-  color: #c8c8c8;
+  background: var(--tl-surface-1);
+  color: var(--tl-fg-2);
   padding: 6px;
   font-size: 11px;
 }
@@ -2094,7 +2189,7 @@
   flex: 1 1 auto;
   object-fit: cover;
   border-radius: 5px;
-  background: #111111;
+  background: var(--tl-surface-0);
 }
 
 #codex-overleaf-panel .codex-attachment-file-icon {
@@ -2103,10 +2198,10 @@
   height: 40px;
   align-items: center;
   justify-content: center;
-  border: 1px solid #4c5155;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 5px;
-  background: #222527;
-  color: #d4d4d4;
+  background: var(--tl-surface-2);
+  color: var(--tl-fg-1);
   font-size: 10px;
   font-weight: 700;
 }
@@ -2127,7 +2222,7 @@
 }
 
 #codex-overleaf-panel .codex-attachment-preview-size {
-  color: #858585;
+  color: var(--tl-fg-3);
   font-size: 10px;
 }
 
@@ -2139,11 +2234,11 @@
   height: 18px;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.62);
-  color: #9d9d9d;
+  color: var(--tl-fg-3);
 }
 
 #codex-overleaf-panel .codex-attachment-preview-remove:hover {
-  background: #34383c;
+  background: var(--tl-hover);
   color: #ffffff;
 }
 
@@ -2170,7 +2265,7 @@
   max-height: calc(92vh - 48px);
   object-fit: contain;
   border-radius: 8px;
-  background: #111111;
+  background: var(--tl-surface-0);
 }
 
 #codex-overleaf-panel .codex-attachment-preview-dialog-close {
@@ -2185,7 +2280,7 @@
 }
 
 #codex-overleaf-panel .codex-attachment-preview-dialog-caption {
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   font-size: 12px;
   text-align: center;
 }
@@ -2207,7 +2302,7 @@
   justify-content: center;
   min-height: 26px;
   border-radius: 5px;
-  color: #bdbdbd;
+  color: var(--tl-fg-2);
 }
 
 #codex-overleaf-panel .codex-composer-toolbar button {
@@ -2233,7 +2328,7 @@
 
 #codex-overleaf-panel .codex-review-toggle:hover,
 #codex-overleaf-panel .codex-recompile-toggle:hover {
-  background: #2a2d2e;
+  background: var(--tl-hover);
 }
 
 #codex-overleaf-panel .codex-review-toggle input,
@@ -2254,13 +2349,13 @@
 
 #codex-overleaf-panel .codex-review-toggle:has(input:checked),
 #codex-overleaf-panel .codex-recompile-toggle:has(input:checked) {
-  color: #89d185;
+  color: var(--tl-ok);
   background: rgba(137, 209, 133, 0.08);
 }
 
 #codex-overleaf-panel .codex-review-toggle:has(input:focus-visible),
 #codex-overleaf-panel .codex-recompile-toggle:has(input:focus-visible) {
-  outline: 1px solid #007fd4;
+  outline: 1px solid var(--tl-accent);
   outline-offset: 2px;
 }
 
@@ -2284,7 +2379,7 @@
   background-repeat: no-repeat;
   background-position: right 4px center;
   background-size: 10px 10px;
-  color: #bdbdbd;
+  color: var(--tl-fg-2);
   gap: 5px;
   overflow: hidden;
   padding: 0 18px 0 6px;
@@ -2295,7 +2390,7 @@
 
 #codex-overleaf-panel .codex-model-config-button[data-active="true"],
 #codex-overleaf-panel .codex-model-config-button:hover {
-  background-color: #2a2d2e;
+  background-color: var(--tl-hover);
 }
 
 #codex-overleaf-panel .codex-model-config-button [data-model-display] {
@@ -2303,7 +2398,7 @@
   min-width: 0;
   max-width: 72px;
   overflow: hidden;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2313,7 +2408,7 @@
   flex: 0 0 auto;
   max-width: 42px;
   overflow: hidden;
-  color: #969696;
+  color: var(--tl-fg-3);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2321,7 +2416,7 @@
 
 #codex-overleaf-panel .codex-model-speed-indicator {
   flex: 0 0 auto;
-  color: #969696;
+  color: var(--tl-fg-3);
   font-size: 13px;
   line-height: 1;
 }
@@ -2334,9 +2429,9 @@
   width: min(244px, calc(var(--codex-overleaf-panel-width) - 16px));
   max-height: min(420px, calc(100vh - 180px));
   overflow: auto;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 8px;
-  background: #252526;
+  background: var(--tl-surface-2);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.46);
   padding: 6px;
 }
@@ -2353,7 +2448,7 @@
 #codex-overleaf-panel .codex-model-config-divider {
   height: 1px;
   margin: 6px 0;
-  background: #33373a;
+  background: var(--tl-surface-2);
 }
 
 #codex-overleaf-panel .codex-model-config-choice {
@@ -2364,14 +2459,14 @@
   min-height: 30px;
   gap: 10px;
   border-radius: 6px;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   padding: 0 8px 0 10px;
   text-align: left;
 }
 
 #codex-overleaf-panel .codex-model-config-choice:hover,
 #codex-overleaf-panel .codex-model-config-choice[data-active="true"] {
-  background: #303031;
+  background: var(--tl-hover);
 }
 
 #codex-overleaf-panel .codex-model-config-choice:disabled {
@@ -2387,7 +2482,7 @@
 
 #codex-overleaf-panel .codex-model-config-check {
   flex: 0 0 auto;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   opacity: 0;
 }
 
@@ -2402,17 +2497,24 @@
   min-width: 28px;
   padding: 0;
   border-radius: 999px;
-  background: #c8c8c8;
-  color: #181818;
+  background: var(--tl-accent);
+  color: #ffffff;
   font-weight: 600;
+  transition: background 120ms ease, filter 120ms ease;
 }
 
 #codex-overleaf-panel .codex-composer-toolbar [data-run]:hover {
-  background: #ffffff;
+  filter: brightness(1.1);
 }
 
 #codex-overleaf-panel[data-running="true"] .codex-composer-toolbar [data-run] {
   color: transparent;
+}
+
+/* While running, the button is the cancel control — hovering signals "stop". */
+#codex-overleaf-panel[data-running="true"] .codex-composer-toolbar [data-run]:hover {
+  background: var(--tl-fail);
+  filter: none;
 }
 
 #codex-overleaf-panel[data-running="true"] .codex-composer-toolbar [data-run]::after {
@@ -2423,8 +2525,8 @@
   box-sizing: border-box;
   width: 13px;
   height: 13px;
-  border: 2px solid rgba(24, 24, 24, 0.25);
-  border-top-color: #181818;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
   border-radius: 50%;
   animation: codex-run-spin 800ms linear infinite;
   transform: translate(-50%, -50%);
@@ -2438,12 +2540,12 @@
 
 #codex-overleaf-panel .codex-composer-toolbar [data-add-context][data-active="true"],
 #codex-overleaf-panel .codex-composer-toolbar [data-add-context][data-has-focus="true"] {
-  background: #2a2d2e;
-  color: #d4d4d4;
+  background: var(--tl-hover);
+  color: var(--tl-fg-1);
 }
 
 #codex-overleaf-panel .codex-composer-toolbar [data-add-context][data-has-focus="true"] {
-  color: #89d185;
+  color: var(--tl-ok);
 }
 
 #codex-overleaf-panel .codex-context-tray {
@@ -2452,9 +2554,9 @@
   bottom: calc(100% + 6px);
   left: 0;
   z-index: 2147483647;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 7px;
-  background: #252526;
+  background: var(--tl-surface-2);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
   padding: 7px 8px 8px;
 }
@@ -2468,7 +2570,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: #cccccc;
+  color: var(--tl-fg-2);
   font-size: 12px;
 }
 
@@ -2479,7 +2581,7 @@
   width: 22px;
   height: 22px;
   border-radius: 4px;
-  color: #9d9d9d;
+  color: var(--tl-fg-3);
 }
 
 #codex-overleaf-panel .codex-context-selection {
@@ -2491,10 +2593,10 @@
   max-width: 100%;
   align-items: center;
   gap: 6px;
-  border: 1px solid #34383c;
+  border: 1px solid var(--tl-border);
   border-radius: 999px;
-  background: #252526;
-  color: #c8c8c8;
+  background: var(--tl-surface-2);
+  color: var(--tl-fg-2);
   padding: 3px 7px;
   font-size: 11px;
 }
@@ -2510,7 +2612,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #4ec9b0;
+  background: var(--tl-accent);
 }
 
 #codex-overleaf-panel .codex-context-chip [data-context-clear] {
@@ -2520,12 +2622,12 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  color: #9d9d9d;
+  color: var(--tl-fg-3);
 }
 
 #codex-overleaf-panel .codex-context-status {
   margin-top: 6px;
-  color: #858585;
+  color: var(--tl-fg-3);
   font-size: 11px;
 }
 
@@ -2550,7 +2652,7 @@
 #codex-overleaf-panel .codex-context-folder-name {
   display: block;
   min-height: 20px;
-  color: #9d9d9d;
+  color: var(--tl-fg-3);
   cursor: pointer;
   font-size: 11px;
   line-height: 20px;
@@ -2563,7 +2665,7 @@
 
 #codex-overleaf-panel .codex-context-folder-name::before {
   content: "▸ ";
-  color: #6f6f6f;
+  color: var(--tl-fg-4);
 }
 
 #codex-overleaf-panel .codex-context-folder[open] > .codex-context-folder-name::before {
@@ -2579,19 +2681,19 @@
   gap: 8px;
   border: 1px solid transparent;
   border-radius: 5px;
-  background: #1b1b1b;
-  color: #cccccc;
+  background: var(--tl-surface-1);
+  color: var(--tl-fg-2);
   padding: 4px 7px;
   text-align: left;
 }
 
 #codex-overleaf-panel .codex-context-file:hover {
-  background: #2a2d2e;
+  background: var(--tl-hover);
 }
 
 #codex-overleaf-panel .codex-context-file[data-selected="true"] {
-  border-color: #4ec9b0;
-  background: #20302d;
+  border-color: var(--tl-accent);
+  background: var(--tl-ok-wash);
 }
 
 #codex-overleaf-panel .codex-context-file[data-selectable="false"] {
@@ -2600,7 +2702,7 @@
 }
 
 #codex-overleaf-panel .codex-context-file[data-selectable="false"]:hover {
-  background: #1b1b1b;
+  background: var(--tl-surface-1);
 }
 
 #codex-overleaf-panel .codex-context-file-name {
@@ -2613,7 +2715,7 @@
 
 #codex-overleaf-panel .codex-context-file-meta {
   flex: 0 0 auto;
-  color: #858585;
+  color: var(--tl-fg-3);
   font-size: 10px;
 }
 
@@ -2626,9 +2728,9 @@
 }
 
 #codex-overleaf-panel .codex-diff-file {
-  border: 1px solid #2f3336;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 6px;
-  background: #1e1e1e;
+  background: var(--tl-surface-1);
   overflow: hidden;
 }
 
@@ -2642,15 +2744,15 @@
   justify-content: space-between;
   gap: 6px;
   min-height: 28px;
-  border-bottom: 1px solid #2b2b2b;
-  background: #252526;
+  border-bottom: 1px solid var(--tl-border);
+  background: var(--tl-surface-2);
   padding: 4px 8px;
 }
 
 #codex-overleaf-panel .codex-diff-file-path {
   min-width: 0;
   overflow: hidden;
-  color: #d4d4d4;
+  color: var(--tl-fg-1);
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2664,47 +2766,47 @@
 
 #codex-overleaf-panel .codex-diff-file-actions button {
   min-height: 22px;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 4px;
-  background: #252526;
-  color: #cccccc;
+  background: var(--tl-surface-2);
+  color: var(--tl-fg-2);
   padding: 1px 7px;
   font-size: 11px;
 }
 
 #codex-overleaf-panel .codex-diff-readonly-label {
-  color: #89d185;
+  color: var(--tl-ok);
   font-size: 11px;
 }
 
 #codex-overleaf-panel .codex-diff-decision-label {
-  color: #89d185;
+  color: var(--tl-ok);
   font-size: 11px;
 }
 
 #codex-overleaf-panel .codex-diff-file-actions [data-diff-accept] {
-  border-color: #2d5a3e;
-  color: #89d185;
+  border-color: var(--tl-ok);
+  color: var(--tl-ok);
 }
 
 #codex-overleaf-panel .codex-diff-file-actions [data-diff-reject] {
-  border-color: #5a3430;
-  color: #f48771;
+  border-color: var(--tl-fail);
+  color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .codex-diff-file[data-decision="accepted"] .codex-diff-file-header,
 #codex-overleaf-panel .codex-diff-file[data-accepted="true"] .codex-diff-file-header {
-  background: #1d2d1f;
+  background: var(--tl-ok-wash);
 }
 
 #codex-overleaf-panel .codex-diff-file[data-decision="rejected"] .codex-diff-file-header,
 #codex-overleaf-panel .codex-diff-file[data-accepted="false"] .codex-diff-file-header {
-  background: #2d1d1c;
+  background: var(--tl-fail-wash);
   opacity: 0.6;
 }
 
 #codex-overleaf-panel .codex-diff-file[data-decision="rejected"] .codex-diff-decision-label {
-  color: #f48771;
+  color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .codex-diff-body {
@@ -2714,7 +2816,7 @@
 }
 
 #codex-overleaf-panel .codex-diff-hunk {
-  border-top: 1px solid #2b2b2b;
+  border-top: 1px solid var(--tl-border);
   padding: 2px 0;
 }
 
@@ -2728,7 +2830,7 @@
 }
 
 #codex-overleaf-panel .codex-diff-hunk[data-focused="true"] {
-  outline: 1px solid #4f9cff;
+  outline: 1px solid var(--tl-accent);
   outline-offset: -1px;
   background: rgba(79, 156, 255, 0.08);
 }
@@ -2750,41 +2852,41 @@
 
 #codex-overleaf-panel .codex-diff-hunk-actions button {
   min-height: 20px;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 4px;
-  background: #252526;
-  color: #cccccc;
+  background: var(--tl-surface-2);
+  color: var(--tl-fg-2);
   padding: 0 6px;
   font-size: 11px;
 }
 
 #codex-overleaf-panel .codex-diff-hunk-actions [data-diff-hunk-accept] {
-  border-color: #2d5a3e;
-  color: #89d185;
+  border-color: var(--tl-ok);
+  color: var(--tl-ok);
 }
 
 #codex-overleaf-panel .codex-diff-hunk-actions [data-diff-hunk-reject] {
-  border-color: #5a3430;
-  color: #f48771;
+  border-color: var(--tl-fail);
+  color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .codex-diff-hunk-status,
 #codex-overleaf-panel .codex-diff-hunk-jump-status,
 #codex-overleaf-panel .codex-diff-fallback-label {
-  color: #858585;
+  color: var(--tl-fg-3);
   font-size: 11px;
 }
 
 #codex-overleaf-panel .codex-diff-hunk[data-jump-status="failed"] .codex-diff-hunk-jump-status {
-  color: #f48771;
+  color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .codex-diff-hunk[data-decision="accepted"] .codex-diff-hunk-status {
-  color: #89d185;
+  color: var(--tl-ok);
 }
 
 #codex-overleaf-panel .codex-diff-hunk[data-decision="rejected"] .codex-diff-hunk-status {
-  color: #f48771;
+  color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .codex-diff-fallback-label {
@@ -2796,10 +2898,10 @@
   width: calc(100% - 12px);
   margin: 4px 6px;
   min-height: 22px;
-  border: 1px dashed #3a3d41;
+  border: 1px dashed var(--tl-border-strong);
   border-radius: 4px;
-  background: #202124;
-  color: #9cdcfe;
+  background: var(--tl-surface-1);
+  color: var(--tl-accent);
   font-size: 11px;
 }
 
@@ -2811,16 +2913,16 @@
 
 #codex-overleaf-panel .codex-diff-line[data-type="add"] {
   background: rgba(35, 134, 54, 0.15);
-  color: #89d185;
+  color: var(--tl-ok);
 }
 
 #codex-overleaf-panel .codex-diff-line[data-type="remove"] {
   background: rgba(248, 81, 73, 0.1);
-  color: #f48771;
+  color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .codex-diff-line[data-type="context"] {
-  color: #858585;
+  color: var(--tl-fg-3);
 }
 
 #codex-overleaf-panel .codex-diff-line::before {
@@ -2833,12 +2935,12 @@
 
 #codex-overleaf-panel .codex-diff-line[data-type="add"]::before {
   content: "+";
-  color: #89d185;
+  color: var(--tl-ok);
 }
 
 #codex-overleaf-panel .codex-diff-line[data-type="remove"]::before {
   content: "\2212";
-  color: #f48771;
+  color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .codex-diff-line[data-type="context"]::before {
@@ -2858,7 +2960,7 @@
   min-width: 0;
   margin-right: auto;
   overflow: hidden;
-  color: #858585;
+  color: var(--tl-fg-3);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2866,27 +2968,27 @@
 
 #codex-overleaf-panel .codex-diff-toolbar button {
   min-height: 26px;
-  border: 1px solid #3a3d41;
+  border: 1px solid var(--tl-border-strong);
   border-radius: 5px;
-  background: #252526;
-  color: #cccccc;
+  background: var(--tl-surface-2);
+  color: var(--tl-fg-2);
   padding: 2px 10px;
   font-size: 12px;
 }
 
 #codex-overleaf-panel .codex-diff-toolbar [data-diff-accept-all],
 #codex-overleaf-panel .codex-diff-toolbar [data-diff-apply-all] {
-  border-color: #2d5a3e;
-  background: #1d3d28;
-  color: #89d185;
+  border-color: var(--tl-ok);
+  background: var(--tl-ok-wash);
+  color: var(--tl-ok);
 }
 
 /* -----------------------------------------------------------------------
    Recent-projects variant (Welcome panel) — spec §5.3-§5.5, §5.8, §5.10.
    Palette reuses the per-project run-card tokens already defined above:
-   #4ec9b0 (running / accent), #89d185 (completed / accepted), #f48771
-   (failed), #d7ba7d (warning / needs-review), #6a6a6a (pending dot), and
-   the panel-wide neutrals (#1f1f1f / #252526 / #cccccc).
+   var(--tl-run) (running / accent), #89d185 (completed / accepted), #f48771
+   (failed), var(--tl-review) (warning / needs-review), #6a6a6a (pending dot), and
+   the panel-wide neutrals (#1f1f1f / var(--tl-surface-2) / #cccccc).
    -------------------------------------------------------------------- */
 
 /* When the panel root carries data-view="recent-projects", hide every
@@ -2919,18 +3021,18 @@
   flex-direction: column;
   gap: 4px;
   padding-bottom: 4px;
-  border-bottom: 1px solid #2b2b2b;
+  border-bottom: 1px solid var(--tl-border);
 }
 
 #codex-overleaf-panel .recent-projects-welcome-title {
-  color: #f0f0f0;
+  color: var(--tl-fg-1);
   font-size: 14px;
   font-weight: 650;
   letter-spacing: 0;
 }
 
 #codex-overleaf-panel .recent-projects-welcome-subtitle {
-  color: #9da1a6;
+  color: var(--tl-fg-3);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -2943,10 +3045,10 @@
 
 #codex-overleaf-panel .recent-projects-empty,
 #codex-overleaf-panel .recent-projects-degraded {
-  border: 1px dashed #3a3d41;
+  border: 1px dashed var(--tl-border-strong);
   border-radius: 6px;
-  background: #1f1f1f;
-  color: #9da1a6;
+  background: var(--tl-surface-1);
+  color: var(--tl-fg-3);
   font-size: 12px;
   line-height: 1.45;
   padding: 14px 12px;
@@ -2962,18 +3064,18 @@
   align-items: baseline;
   gap: 4px 12px;
   width: 100%;
-  border: 1px solid #2d2d30;
+  border: 1px solid var(--tl-border);
   border-radius: 6px;
-  background: #1f1f1f;
-  color: #cccccc;
+  background: var(--tl-surface-1);
+  color: var(--tl-fg-2);
   padding: 10px 12px;
   cursor: pointer;
   text-align: left;
 }
 
 #codex-overleaf-panel [data-recent-projects-row]:hover:not(:disabled) {
-  border-color: #3a3d41;
-  background: #232323;
+  border-color: var(--tl-border-strong);
+  background: var(--tl-surface-2);
 }
 
 #codex-overleaf-panel [data-recent-projects-row]:disabled,
@@ -2984,7 +3086,7 @@
 
 #codex-overleaf-panel .recent-projects-row-name {
   grid-area: name;
-  color: #f0f0f0;
+  color: var(--tl-fg-1);
   font-weight: 600;
   font-size: 13px;
   overflow: hidden;
@@ -2994,14 +3096,14 @@
 
 #codex-overleaf-panel .recent-projects-row-time {
   grid-area: time;
-  color: #8f9499;
+  color: var(--tl-fg-3);
   font-size: 11px;
   white-space: nowrap;
 }
 
 #codex-overleaf-panel .recent-projects-row-summary {
   grid-area: summary;
-  color: #cccccc;
+  color: var(--tl-fg-2);
   font-size: 12px;
   line-height: 1.4;
   word-break: break-word;
@@ -3013,7 +3115,7 @@
 
 #codex-overleaf-panel .recent-projects-row-warning {
   grid-area: badge;
-  color: #d7ba7d;
+  color: var(--tl-review);
   font-size: 11px;
   margin-top: 2px;
 }
@@ -3039,7 +3141,7 @@
 #codex-overleaf-panel .recent-projects-row-badge.badge-running {
   background: rgba(78, 201, 176, 0.12);
   border-color: rgba(78, 201, 176, 0.32);
-  color: #4ec9b0;
+  color: var(--tl-run);
 }
 
 #codex-overleaf-panel .recent-projects-row-badge.badge-accepted,
@@ -3047,27 +3149,27 @@
 #codex-overleaf-panel .recent-projects-row-badge.badge-background-completed {
   background: rgba(137, 209, 133, 0.12);
   border-color: rgba(137, 209, 133, 0.32);
-  color: #89d185;
+  color: var(--tl-ok);
 }
 
 #codex-overleaf-panel .recent-projects-row-badge.badge-rejected {
   background: rgba(143, 148, 153, 0.16);
   border-color: rgba(143, 148, 153, 0.32);
-  color: #b0b3b7;
+  color: var(--tl-fg-2);
 }
 
 #codex-overleaf-panel .recent-projects-row-badge.badge-needs-review,
 #codex-overleaf-panel .recent-projects-row-badge.badge-needs-review-after-navigation {
   background: rgba(215, 186, 125, 0.14);
   border-color: rgba(215, 186, 125, 0.34);
-  color: #d7ba7d;
+  color: var(--tl-review);
 }
 
 #codex-overleaf-panel .recent-projects-row-badge.badge-failed,
 #codex-overleaf-panel .recent-projects-row-badge.badge-abandoned-after-navigation {
   background: rgba(244, 135, 113, 0.14);
   border-color: rgba(244, 135, 113, 0.34);
-  color: #f48771;
+  color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .recent-projects-settings-entry {
@@ -3076,23 +3178,23 @@
   justify-content: space-between;
   margin-top: auto;
   padding: 10px 12px;
-  border: 1px solid #2d2d30;
+  border: 1px solid var(--tl-border);
   border-radius: 6px;
-  background: #1f1f1f;
-  color: #cccccc;
+  background: var(--tl-surface-1);
+  color: var(--tl-fg-2);
   font-size: 12px;
   cursor: pointer;
 }
 
 #codex-overleaf-panel .recent-projects-settings-entry:hover {
-  border-color: #3a3d41;
-  background: #232323;
+  border-color: var(--tl-border-strong);
+  background: var(--tl-surface-2);
 }
 
 #codex-overleaf-panel .recent-projects-settings-entry-label::after {
   content: "›";
   margin-left: 8px;
-  color: #8f9499;
+  color: var(--tl-fg-3);
 }
 
 /* Spec §5.9 — when the panel opens settings in account scope, hide the

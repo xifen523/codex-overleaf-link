@@ -62,6 +62,20 @@
         <div class="codex-project-settings-scope codex-project-settings-scope--global">
           <div class="codex-project-settings-scope-title codex-set-eyebrow" data-i18n="settingsScopeGlobalTitle">All projects</div>
           <details class="codex-set-group" open>
+            <summary class="codex-set-group-head"><span data-i18n="appearanceTitle">Appearance</span></summary>
+            <div class="codex-set-card">
+              <label class="codex-project-settings-row codex-project-settings-row--switch">
+                <span class="codex-project-settings-row-label" data-i18n="themeLabel">Theme</span>
+                <select class="codex-set-select" data-theme-select>
+                  <option value="dark" data-i18n="themeDark">Dark</option>
+                  <option value="light" data-i18n="themeLight">Light</option>
+                  <option value="auto" data-i18n="themeAuto">Follow system</option>
+                </select>
+              </label>
+              <p class="codex-set-row-help" data-i18n="themeHelp">Switch the Codex panel between dark, light, or following your operating system.</p>
+            </div>
+          </details>
+          <details class="codex-set-group" open>
             <summary class="codex-set-group-head"><span data-i18n="localSkillsTitle">Skills</span></summary>
             <div class="codex-set-card">
               <label class="codex-project-settings-row codex-project-settings-row--switch">
@@ -106,7 +120,7 @@
       flashSaved(instance);
     });
     // Governance and skill fields: auto-save on change and input for immediate response.
-    for (const selector of ['[data-governance-readonly-patterns]', '[data-governance-writable-patterns]', '[data-sensitive-check-enabled]', '[data-sensitive-confirm-allowed]', '[data-load-codex-local-skills]', '[data-load-codex-overleaf-skills]']) {
+    for (const selector of ['[data-governance-readonly-patterns]', '[data-governance-writable-patterns]', '[data-sensitive-check-enabled]', '[data-sensitive-confirm-allowed]', '[data-load-codex-local-skills]', '[data-load-codex-overleaf-skills]', '[data-theme-select]']) {
       const element = container.querySelector(selector);
       element?.addEventListener?.('change', event => {
         instance.callbacks.onInputChange?.(event);
@@ -197,6 +211,7 @@
       const toggles = state.skillToggles || {};
       setChecked(scope, '[data-load-codex-local-skills]', toggles.loadCodexLocalSkills !== false);
       setChecked(scope, '[data-load-codex-overleaf-skills]', toggles.loadCodexOverleafSkills !== false);
+      setValue(scope, '[data-theme-select]', state.theme || 'dark');
     }
   }
 
@@ -216,7 +231,8 @@
       skillToggles: {
         loadCodexLocalSkills: scope?.querySelector('[data-load-codex-local-skills]')?.checked !== false,
         loadCodexOverleafSkills: scope?.querySelector('[data-load-codex-overleaf-skills]')?.checked !== false
-      }
+      },
+      theme: scope?.querySelector('[data-theme-select]')?.value || 'dark'
     };
   }
 

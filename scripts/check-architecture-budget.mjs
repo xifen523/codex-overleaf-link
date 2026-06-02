@@ -26,13 +26,13 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // multi-week refactor (panel renderer, run controller, settings, skills,
     // recent-projects, writeback orchestration are all interleaved here).
     // Bumped 12300 → 12400 for the v1.3.9 cancel mechanism, then 12400 → 12600
-    // for the v1.3.10 streaming-timeline redesign (scroll engine: coalesced
-    // rAF write + jump-to-latest button; Option B: sticky current-step header
-    // with live elapsed + glyph status). This file is now well past healthy;
-    // the redesign reinforces the urgency of the deferred split (task #69) —
-    // the timeline render pipeline is a natural module to carve out first.
+    // for the v1.3.10 streaming-timeline redesign, then 12600 → 12700 for the
+    // v1.4.2 theme wiring (applyPanelTheme + global theme pref read/apply).
+    // This file is now well past healthy; the theme feature reinforces the
+    // urgency of the deferred split (task #69) — the timeline render pipeline
+    // is a natural module to carve out first.
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 12600
+    maxLines: 12700
   },
   {
     // Writeback router: large but cohesive. v1.3.9 added the cross-world
