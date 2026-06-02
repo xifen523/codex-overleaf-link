@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.4.2 - 2026-06-02
+
+Theme release. The Codex panel was hard-dark; v1.4.2 adds a theme you pick in Settings (All projects): **Dark** (default), **Light**, or **Follow system**. The panel is now token-driven, so a theme is just a value swap — and unifying the panel onto those tokens also lands a batch of cohesion polish. No functional change to runs or writeback; the native protocol stays `1`.
+
+### Added
+
+- **Panel theme switching (dark / light / follow-system).** A theme selector in the Settings "All projects" scope (English + 中文). The preference is global — one setting applies across every Overleaf project and survives reload — and is applied to the panel on open and on SPA navigation. **Follow system** tracks the OS `prefers-color-scheme` and flips live when you change your OS appearance. A new isolated `extension/src/content/themeController.js` resolves the preference (auto → dark/light), writes `data-theme` on the panel root, and watches the OS for changes.
+
+### Changed
+
+- **The panel is now token-driven (the foundation of theming).** The existing `--tl-*` design tokens (4-step text ladder, surfaces, border, accent, state colors) are extended with `--tl-surface-0`, `--tl-border-strong`, `--tl-hover`, and ok/fail/review wash tokens, and the panel's ad-hoc hex sprawl (~13 popover surfaces, ~25 borders, the gray ladder, five competing accent blues) is migrated onto them. `#codex-overleaf-panel[data-theme="light"]` then remaps the token values for a light surface (state colors darkened for WCAG-AA on light); dark is the baseline and needs no override.
+- **Cohesion polish folded into the tokenization.** The accent is unified to a single `--tl-accent` (teal reserved for the running state); the composer gains a real focus ring (and a no-op placebo shadow is removed); the Ask/Suggest/Auto mode switch becomes a proper segmented control with hover distinct from active; the send button is the accent primary with a stop-red hover while a run is in flight; the idle/empty state is calmer (smaller icon, entrance fade-in); the first-run onboarding tip gets real callout styling (it was unstyled floating text); panel buttons get a hover transition and a keyboard `:focus-visible` ring; and reduced-motion now also neutralizes transitions.
+- Architecture budget for `contentRuntime.js` raised for the theme wiring; the deferred `contentRuntime.js` module split remains tracked.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.4.2 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.4.2` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.4.2.zip`, `codex-overleaf-native-host-v1.4.2.tar.gz`, and `codex-overleaf-link-1.4.2.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.4.2 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.4.2 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.4.2 -- uninstall-native`.
+
 ## v1.4.1 - 2026-05-31
 
 Patch release. Fixes a cosmetic regression from the v1.4.0 timeline redesign, widens the local-path redaction layers to the canonical Unix top-level set so paths under /root /Volumes /etc /opt /usr /srv /mnt /media no longer leak, and makes the sensitive-content scan count every distinct secret. No writeback behavior changes; the native protocol stays `1`.
