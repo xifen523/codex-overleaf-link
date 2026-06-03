@@ -20,25 +20,33 @@ test('project snapshot action lives in the diagnostics menu instead of the heade
     'utf8'
   );
 
+  const settingsPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/settingsPanel.js'),
+    'utf8'
+  );
+
   assert.equal(panelSource.includes('data-snapshot'), false);
   assert.match(panelSource, /data-diagnostics-menu/);
   assert.match(panelSource, /data-diagnostics-native-env/);
   assert.match(panelSource, /data-diagnostics-page-state/);
   assert.match(panelSource, /data-diagnostics-snapshot/);
-  assert.match(panelSource, /data-experimental-ot-toggle/);
   assert.match(panelSource, /data-diagnostics-ot/);
-  assert.match(panelSource, /data-language-toggle/);
   assert.match(panelSource, /data-diagnostics-result/);
+  // v1.4.3: the menu is pure diagnostics — Run all + a health dot on the
+  // trigger; the OT toggle and language switch moved to Settings.
+  assert.match(panelSource, /data-diagnostics-run-all/);
+  assert.match(panelSource, /data-diagnostics-health-dot/);
+  assert.doesNotMatch(panelSource, /data-language-toggle/);
+  assert.doesNotMatch(panelSource, /Switch to Chinese/);
   assert.match(panelSource, /Use when Codex cannot run, write, or read files/);
   assert.match(panelSource, /Check Local Connection/);
   assert.match(panelSource, /Check Overleaf Write Access/);
   assert.match(panelSource, /Check Project Read/);
-  assert.match(panelSource, /<span data-i18n="experimentalOtMenuTitle">Experimental OT Mirror<\/span>/);
-  assert.doesNotMatch(panelSource, /Experimental OT Mirror\s*\/\s*实验性 OT Mirror/);
-  assert.doesNotMatch(panelSource, /Turn on\s*\/\s*开启/);
   assert.match(panelSource, /Check Experimental OT Mirror/);
-  assert.match(panelSource, /Switch to Chinese/);
-  assert.match(contentScript, /function toggleLanguage\(/);
+  // The experimental OT toggle + the language selector now live in Settings.
+  assert.match(settingsPanel, /data-experimental-ot-toggle/);
+  assert.match(settingsPanel, /<span data-i18n="experimentalOtMenuTitle">Experimental OT Mirror<\/span>/);
+  assert.match(settingsPanel, /data-language-select/);
   assert.match(contentScript, /function applyLocaleToPanel\(/);
   assert.match(contentScript, /function inspectNativeEnvironment\(/);
   assert.match(contentScript, /function inspectOtWarmMirrorDiagnostics\(/);
@@ -59,9 +67,9 @@ test('diagnostics render in a floating result panel instead of the task transcri
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
-  const nativeBody = contentScript.match(/async function inspectNativeEnvironment\(\) \{[\s\S]*?\n  function formatNativeEnvironmentResult/)?.[0] || '';
-  const pageBody = contentScript.match(/async function inspectPageStateDiagnostics\(\) \{[\s\S]*?\n  async function runTask/)?.[0] || '';
-  const snapshotBody = contentScript.match(/async function inspectProjectSnapshot\(\) \{[\s\S]*?\n  async function inspectNativeEnvironment/)?.[0] || '';
+  const nativeBody = extractFunction(contentScript, 'inspectNativeEnvironment');
+  const pageBody = extractFunction(contentScript, 'inspectPageStateDiagnostics');
+  const snapshotBody = extractFunction(contentScript, 'inspectProjectSnapshot');
 
   assert.doesNotMatch(nativeBody, /appendLog\(/);
   assert.doesNotMatch(pageBody, /appendLog\(/);
@@ -69,9 +77,12 @@ test('diagnostics render in a floating result panel instead of the task transcri
   assert.match(nativeBody, /showDiagnosticsLoading\(tr\('diagnosticsNativeTitle'\)/);
   assert.match(pageBody, /showDiagnosticsLoading\(tr\('diagnosticsPageTitle'\)/);
   assert.match(snapshotBody, /showDiagnosticsLoading\(tr\('diagnosticsSnapshotTitle'\)/);
-  assert.match(nativeBody, /showDiagnosticsResult\(formatNativeEnvironmentResult/);
-  assert.match(pageBody, /showDiagnosticsResult\(formatPageStateDiagnosticsResult/);
-  assert.match(snapshotBody, /showDiagnosticsResult\(formatProjectSnapshotDiagnosticsResult/);
+  // Each check builds its structured result via its formatter and renders it
+  // through showDiagnosticsResult (the collectOnly path returns it for Run all).
+  assert.match(nativeBody, /formatNativeEnvironmentResult/);
+  assert.match(pageBody, /formatPageStateDiagnosticsResult/);
+  assert.match(snapshotBody, /formatProjectSnapshotDiagnosticsResult/);
+  assert.match(nativeBody, /showDiagnosticsResult\(/);
 });
 
 test('diagnostics menu exports a content-redacted audit bundle', () => {
@@ -114,7 +125,7 @@ test('experimental OT diagnostics read metadata without draining project content
     'utf8'
   );
   const menuBody = diagnosticsPanel.match(/function bindStaticActions\(instance\) \{[\s\S]*?\n  \}/)?.[0] || '';
-  const inspectBody = contentScript.match(/async function inspectOtWarmMirrorDiagnostics\(\) \{[\s\S]*?\n  function formatOtDiagnosticsResult/)?.[0] || '';
+  const inspectBody = extractFunction(contentScript, 'inspectOtWarmMirrorDiagnostics');
   const formatBody = contentScript.match(/function formatOtDiagnosticsResult\(\{ otStatus, mirrorStatus \}\) \{[\s\S]*?\n  function /)?.[0] || '';
   const technicalBody = contentScript.match(/function formatOtDiagnosticsTechnicalDetails\(metadata = \{\}\) \{[\s\S]*?\n  function formatOtChannelCandidates/)?.[0] || '';
 
@@ -124,7 +135,10 @@ test('experimental OT diagnostics read metadata without draining project content
   assert.match(inspectBody, /callPageBridge\('getOtStatus'/);
   assert.match(inspectBody, /getMirrorFreshness\(\)/);
   assert.doesNotMatch(inspectBody, /drainOtEvents/);
-  assert.match(inspectBody, /showDiagnosticsResult\(formatOtDiagnosticsResult\(\{ otStatus, mirrorStatus \}\)\)/);
+  // The metadata result is built from formatOtDiagnosticsResult and rendered
+  // (or returned for Run all via collectOnly).
+  assert.match(inspectBody, /formatOtDiagnosticsResult\(\{ otStatus, mirrorStatus \}\)/);
+  assert.match(inspectBody, /showDiagnosticsResult\(result\)/);
   assert.match(inspectBody, /status:\s*'warning'/);
   assert.doesNotMatch(inspectBody, /'warnings:'/);
   assert.doesNotMatch(inspectBody, /warnings\.map/);

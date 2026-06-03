@@ -156,6 +156,81 @@
   color: var(--tl-fg-1);
 }
 
+/* Diagnostics trigger: a health dot whose color reflects the overall state, so
+   the button reads as "diagnostics" and surfaces problems without being opened. */
+#codex-overleaf-panel .codex-diagnostics-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#codex-overleaf-panel .codex-diagnostics-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--tl-fg-4);
+  box-shadow: 0 0 0 2px var(--tl-surface-1);
+}
+
+#codex-overleaf-panel .codex-diagnostics-dot[data-health="ok"] { background: var(--tl-ok); }
+#codex-overleaf-panel .codex-diagnostics-dot[data-health="warn"] { background: var(--tl-review); }
+#codex-overleaf-panel .codex-diagnostics-dot[data-health="fail"] { background: var(--tl-fail); }
+
+/* Run-all item + separator in the diagnostics menu. */
+#codex-overleaf-panel .codex-diagnostics-runall span {
+  color: var(--tl-fg-1);
+  font-weight: 600;
+}
+
+#codex-overleaf-panel .codex-diagnostics-menu-sep {
+  height: 1px;
+  background: var(--tl-border);
+  margin: 4px 0;
+}
+
+/* Aggregated health report: one scannable status row per check (Run all). */
+#codex-overleaf-panel .codex-diagnostics-checks {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+#codex-overleaf-panel .codex-diagnostics-check {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+#codex-overleaf-panel .codex-diagnostics-check-glyph::before {
+  content: "·";
+  color: var(--tl-fg-4);
+  font-weight: 700;
+}
+
+#codex-overleaf-panel .codex-diagnostics-check[data-status="ok"] .codex-diagnostics-check-glyph::before { content: "✓"; color: var(--tl-ok); }
+#codex-overleaf-panel .codex-diagnostics-check[data-status="warn"] .codex-diagnostics-check-glyph::before { content: "!"; color: var(--tl-review); }
+#codex-overleaf-panel .codex-diagnostics-check[data-status="fail"] .codex-diagnostics-check-glyph::before { content: "✕"; color: var(--tl-fail); }
+
+#codex-overleaf-panel .codex-diagnostics-check-title {
+  color: var(--tl-fg-1);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+#codex-overleaf-panel .codex-diagnostics-check-summary {
+  color: var(--tl-fg-3);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+#codex-overleaf-panel .codex-diagnostics-check-next {
+  color: var(--tl-accent);
+  font-size: 11px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
 #codex-overleaf-panel .codex-toast-region {
   display: grid;
   flex: 0 0 auto;

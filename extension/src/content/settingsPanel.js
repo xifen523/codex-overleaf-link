@@ -58,6 +58,16 @@
               <p class="codex-set-row-help" data-i18n="sensitiveConfirmHelp">Let you review and proceed when the scan flags content.</p>
             </div>
           </details>
+          <details class="codex-set-group">
+            <summary class="codex-set-group-head"><span data-i18n="experimentalTitle">Experimental</span></summary>
+            <div class="codex-set-card">
+              <input type="checkbox" data-experimental-ot hidden>
+              <button type="button" class="codex-diagnostics-ot-toggle" data-experimental-ot-toggle role="switch" aria-checked="false">
+                <span data-i18n="experimentalOtMenuTitle">Experimental OT Mirror</span>
+                <small data-experimental-ot-menu-status>OT: Off · Experimental: tracks the current editor and warms the local mirror; falls back when unsafe.</small>
+              </button>
+            </div>
+          </details>
         </div>
         <div class="codex-project-settings-scope codex-project-settings-scope--global">
           <div class="codex-project-settings-scope-title codex-set-eyebrow" data-i18n="settingsScopeGlobalTitle">All projects</div>
@@ -73,6 +83,14 @@
                 </select>
               </label>
               <p class="codex-set-row-help" data-i18n="themeHelp">Switch the Codex panel between dark, light, or following your operating system.</p>
+              <label class="codex-project-settings-row codex-project-settings-row--switch">
+                <span class="codex-project-settings-row-label" data-i18n="languageLabel">Language</span>
+                <select class="codex-set-select" data-language-select>
+                  <option value="en" data-i18n="languageEnglish">English</option>
+                  <option value="zh" data-i18n="languageChinese">中文</option>
+                </select>
+              </label>
+              <p class="codex-set-row-help" data-i18n="languageHelp">Panel display language.</p>
             </div>
           </details>
           <details class="codex-set-group" open>
@@ -113,6 +131,11 @@
     container.querySelector('[data-settings-back]')?.addEventListener('click', () => instance.callbacks.onBack?.());
     container.querySelector('[data-skills-back]')?.addEventListener('click', () => instance.callbacks.onSkillsBack?.());
     container.querySelector('[data-skills-entry]')?.addEventListener('click', () => instance.callbacks.onSkillsOpen?.());
+    // Experimental OT mirror toggle (relocated here from the diagnostics menu);
+    // its enable/disable flow stays in the runtime, wired through callbacks.
+    container.querySelector('[data-experimental-ot-toggle]')?.addEventListener('click', event => instance.callbacks.onOtToggleClick?.(event));
+    container.querySelector('[data-experimental-ot-toggle]')?.addEventListener('keydown', event => instance.callbacks.onOtToggleKeydown?.(event));
+    container.querySelector('[data-experimental-ot]')?.addEventListener('change', event => instance.callbacks.onOtCheckboxChange?.(event));
     // Personalization textarea: auto-save on change (the change event fires on blur — avoids per-keystroke saves).
     const customInstructionsInput = container.querySelector('[data-custom-instructions-input]');
     customInstructionsInput?.addEventListener('change', event => {
@@ -120,7 +143,7 @@
       flashSaved(instance);
     });
     // Governance and skill fields: auto-save on change and input for immediate response.
-    for (const selector of ['[data-governance-readonly-patterns]', '[data-governance-writable-patterns]', '[data-sensitive-check-enabled]', '[data-sensitive-confirm-allowed]', '[data-load-codex-local-skills]', '[data-load-codex-overleaf-skills]', '[data-theme-select]']) {
+    for (const selector of ['[data-governance-readonly-patterns]', '[data-governance-writable-patterns]', '[data-sensitive-check-enabled]', '[data-sensitive-confirm-allowed]', '[data-load-codex-local-skills]', '[data-load-codex-overleaf-skills]', '[data-theme-select]', '[data-language-select]']) {
       const element = container.querySelector(selector);
       element?.addEventListener?.('change', event => {
         instance.callbacks.onInputChange?.(event);
@@ -212,6 +235,7 @@
       setChecked(scope, '[data-load-codex-local-skills]', toggles.loadCodexLocalSkills !== false);
       setChecked(scope, '[data-load-codex-overleaf-skills]', toggles.loadCodexOverleafSkills !== false);
       setValue(scope, '[data-theme-select]', state.theme || 'dark');
+      setValue(scope, '[data-language-select]', state.language || 'en');
     }
   }
 
@@ -232,7 +256,8 @@
         loadCodexLocalSkills: scope?.querySelector('[data-load-codex-local-skills]')?.checked !== false,
         loadCodexOverleafSkills: scope?.querySelector('[data-load-codex-overleaf-skills]')?.checked !== false
       },
-      theme: scope?.querySelector('[data-theme-select]')?.value || 'dark'
+      theme: scope?.querySelector('[data-theme-select]')?.value || 'dark',
+      language: scope?.querySelector('[data-language-select]')?.value || 'en'
     };
   }
 

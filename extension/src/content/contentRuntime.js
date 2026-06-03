@@ -534,6 +534,10 @@
             closeContextTray();
             closeCustomInstructionsSettings();
           },
+          onRunAll: () => {
+            closeDiagnosticsMenu();
+            runAllDiagnostics();
+          },
           onNativeEnvironment: () => {
             closeDiagnosticsMenu();
             inspectNativeEnvironment();
@@ -553,11 +557,7 @@
           onExport: () => {
             closeDiagnosticsMenu();
             exportDiagnosticsBundle().catch(error => showPluginToast(tx(`Diagnostics export failed: ${error.message}`, `导出诊断信息失败：${error.message}`), { status: 'failed' }));
-          },
-          onLanguageToggle: () => toggleLanguage(),
-          onOtToggleClick: handleExperimentalOtToggleClick,
-          onOtToggleKeydown: handleExperimentalOtToggleKeydown,
-          onOtCheckboxChange: handleExperimentalOtToggleChange
+          }
         }
       });
 
@@ -570,7 +570,11 @@
           onBack: () => closeCustomInstructionsSettings(),
           onInputChange: () => persistPanelInputs(),
           onSkillsOpen: () => openSkillsView(),
-          onSkillsBack: () => closeSkillsView()
+          onSkillsBack: () => closeSkillsView(),
+          // Experimental OT mirror toggle moved here from the diagnostics menu.
+          onOtToggleClick: handleExperimentalOtToggleClick,
+          onOtToggleKeydown: handleExperimentalOtToggleKeydown,
+          onOtCheckboxChange: handleExperimentalOtToggleChange
         }
       });
 
@@ -949,7 +953,8 @@
     SettingsPanel.loadState(settingsPanelInstance, {
       governanceRules: getGovernanceRulesForCurrentProject(),
       skillToggles: getSkillLoadingSettings(),
-      theme: getThemePreference()
+      theme: getThemePreference(),
+      language: getLocale()
     });
     renderLocalSkillList();
   }
@@ -1067,15 +1072,6 @@
     await persistPanelInputs();
   }
 
-  async function toggleLanguage() {
-    state = normalizePanelState({
-      ...state,
-      locale: i18n?.getOppositeLocale?.(getLocale()) || 'zh'
-    });
-    closeDiagnosticsMenu();
-    applyLocaleToPanel();
-    await saveState();
-  }
 
   function applyLocaleToPanel() {
     if (!panel) {
@@ -1197,6 +1193,66 @@
 
   function showDiagnosticsResult(result = {}) {
     DiagnosticsPanel.showResult(diagnosticsPanelInstance, result);
+  }
+
+  // Push an overall health bucket (ok / warn / fail / unknown) to the
+  // diagnostics trigger's status dot.
+  function setDiagnosticsHealth(health) {
+    DiagnosticsPanel.updateStatus(diagnosticsPanelInstance, { health });
+  }
+
+  // Reduce a result status to a health bucket. 'completed' is a pass; a hard
+  // failure is fail; everything else (warning, partial, info) is attention.
+  function diagnosticsHealthBucket(status) {
+    if (status === 'completed') return 'ok';
+    if (status === 'failed') return 'fail';
+    return 'warn';
+  }
+
+  // Run every diagnostic check and render one aggregated, scannable health
+  // report (a status row per check) instead of four separate result screens.
+  // The overall bucket also updates the trigger dot.
+  async function runAllDiagnostics() {
+    showDiagnosticsLoading(tr('diagnosticsHealthTitle'), tr('diagnosticsRunningAll'));
+    const specs = [
+      { label: tr('diagnosticsNativeShort'), run: inspectNativeEnvironment },
+      { label: tr('diagnosticsPageShort'), run: inspectPageStateDiagnostics },
+      { label: tr('diagnosticsSnapshotShort'), run: inspectProjectSnapshot },
+      { label: tr('diagnosticsOtShort'), run: inspectOtWarmMirrorDiagnostics }
+    ];
+    const checks = [];
+    let worst = 'ok';
+    for (const spec of specs) {
+      let result;
+      try {
+        result = await spec.run({ collectOnly: true });
+      } catch (error) {
+        result = { status: 'failed', summary: tr('diagnosticsCheckErrored'), technical: error?.message || String(error) };
+      }
+      const bucket = diagnosticsHealthBucket(result?.status);
+      if (bucket === 'fail') {
+        worst = 'fail';
+      } else if (bucket === 'warn' && worst !== 'fail') {
+        worst = 'warn';
+      }
+      checks.push({
+        status: result?.status || 'info',
+        title: spec.label,
+        summary: result?.summary || result?.subtitle || '',
+        nextStep: bucket === 'ok' ? '' : (result?.nextStep || '')
+      });
+    }
+    const overallSubtitleKey = worst === 'ok'
+      ? 'diagnosticsHealthOk'
+      : worst === 'fail' ? 'diagnosticsHealthFail' : 'diagnosticsHealthWarn';
+    showDiagnosticsResult({
+      title: tr('diagnosticsHealthTitle'),
+      subtitle: tr(overallSubtitleKey),
+      status: worst === 'ok' ? 'completed' : worst === 'fail' ? 'failed' : 'warning',
+      checks,
+      technical: checks.map(check => `${check.title}: ${check.status}`).join('\n')
+    });
+    setDiagnosticsHealth(worst);
   }
 
 
@@ -1543,8 +1599,11 @@
     return contextTrayController.resetContextProject();
   }
 
-  async function inspectProjectSnapshot() {
-    showDiagnosticsLoading(tr('diagnosticsSnapshotTitle'), tr('diagnosticsSnapshotLoading'));
+  async function inspectProjectSnapshot(options = {}) {
+    if (!options.collectOnly) {
+      showDiagnosticsLoading(tr('diagnosticsSnapshotTitle'), tr('diagnosticsSnapshotLoading'));
+    }
+    let result;
     try {
       const project = await callPageBridge('getProjectSnapshot', {
         force: true,
@@ -1555,26 +1614,36 @@
         zipOnly: true,
         zipTimeoutMs: RUN_SNAPSHOT_ZIP_TIMEOUT_MS
       });
-      showDiagnosticsResult(formatProjectSnapshotDiagnosticsResult(project));
+      result = formatProjectSnapshotDiagnosticsResult(project);
     } catch (error) {
-      showDiagnosticsResult({
+      result = {
         title: tx('Project Read Failed', '项目读取失败'),
         subtitle: tx('The extension did not receive Overleaf project content.', '插件没有拿到 Overleaf 项目内容。'),
         status: 'failed',
         summary: tr('diagnosticsSnapshotErrorSummary'),
         nextStep: tx('Reload Overleaf, wait for the left file tree to finish loading, then retry.', '刷新 Overleaf 页面，等左侧文件树加载完成后重试。'),
         technical: error?.stack || error?.message || String(error)
-      });
+      };
     }
+    if (options.collectOnly) {
+      return result;
+    }
+    showDiagnosticsResult(result);
   }
 
-  async function inspectNativeEnvironment() {
-    showDiagnosticsLoading(tr('diagnosticsNativeTitle'), tr('diagnosticsNativeLoading'));
+  async function inspectNativeEnvironment(options = {}) {
+    if (!options.collectOnly) {
+      showDiagnosticsLoading(tr('diagnosticsNativeTitle'), tr('diagnosticsNativeLoading'));
+    }
     const params = CodexOverleafCompatibility?.buildBridgePingParams
       ? CodexOverleafCompatibility.buildBridgePingParams(getExtensionCompatibilityMetadata())
       : {};
     const response = await sendBackgroundNative({ method: 'bridge.ping', params });
-    showDiagnosticsResult(formatNativeEnvironmentResult(response));
+    const result = formatNativeEnvironmentResult(response);
+    if (options.collectOnly) {
+      return result;
+    }
+    showDiagnosticsResult(result);
   }
 
   function formatNativeEnvironmentResult(response) {
@@ -1762,27 +1831,36 @@
     }, null, 2);
   }
 
-  async function inspectPageStateDiagnostics() {
-    showDiagnosticsLoading(tr('diagnosticsPageTitle'), tr('diagnosticsPageLoading'));
+  async function inspectPageStateDiagnostics(options = {}) {
+    if (!options.collectOnly) {
+      showDiagnosticsLoading(tr('diagnosticsPageTitle'), tr('diagnosticsPageLoading'));
+    }
+    let result;
     try {
       const probe = await callPageBridge('probe', {
         manualOverride: state?.requireReviewing === false
       });
-      showDiagnosticsResult(formatPageStateDiagnosticsResult(probe));
+      result = formatPageStateDiagnosticsResult(probe);
     } catch (error) {
-      showDiagnosticsResult({
+      result = {
         title: tx('Overleaf Page Check Failed', 'Overleaf 页面检查失败'),
         subtitle: tx('The extension did not read the current page state.', '插件没有读到当前页面状态。'),
         status: 'failed',
         summary: tx('This usually means Overleaf is still loading, or the page script is temporarily unavailable.', '这通常表示 Overleaf 页面还在加载，或者页面脚本暂时不可用。'),
         nextStep: tx('Reload Overleaf, open the .tex file you want to work on, then try again.', '刷新 Overleaf 页面，点开要处理的 .tex 文件后再试。'),
         technical: error?.stack || error?.message || String(error)
-      });
+      };
     }
+    if (options.collectOnly) {
+      return result;
+    }
+    showDiagnosticsResult(result);
   }
 
-  async function inspectOtWarmMirrorDiagnostics() {
-    showDiagnosticsLoading(tr('diagnosticsOtTitle'), tr('diagnosticsLoading'));
+  async function inspectOtWarmMirrorDiagnostics(options = {}) {
+    if (!options.collectOnly) {
+      showDiagnosticsLoading(tr('diagnosticsOtTitle'), tr('diagnosticsLoading'));
+    }
     const projectId = getCurrentProjectId();
     let otStatus = null;
     let mirrorStatus = null;
@@ -1817,17 +1895,18 @@
       mirrorStatus = { lastOtErrorCode: 'mirror_status_failed' };
     }
 
-    if (!metadataWarning) {
-      showDiagnosticsResult(formatOtDiagnosticsResult({ otStatus, mirrorStatus }));
-      return;
+    const baseResult = formatOtDiagnosticsResult({ otStatus, mirrorStatus });
+    const result = metadataWarning
+      ? {
+          ...baseResult,
+          status: 'warning',
+          summary: `${baseResult.summary} ${tx('Some OT diagnostic metadata is unavailable.', '部分 OT 诊断元数据暂时不可用。')}`
+        }
+      : baseResult;
+    if (options.collectOnly) {
+      return result;
     }
-
-    const result = formatOtDiagnosticsResult({ otStatus, mirrorStatus });
-    showDiagnosticsResult({
-      ...result,
-      status: 'warning',
-      summary: `${result.summary} ${tx('Some OT diagnostic metadata is unavailable.', '部分 OT 诊断元数据暂时不可用。')}`
-    });
+    showDiagnosticsResult(result);
   }
 
   function formatOtDiagnosticsResult({ otStatus, mirrorStatus }) {
@@ -7527,14 +7606,19 @@
       const classification = getNativeCompatibilityClassification(compatibility);
       if (classification === 'compatible') {
         PanelRenderer.setBadge(panelRendererInstance.headerEl, { type: 'none' });
+        setDiagnosticsHealth('ok');
         return;
       }
+      // update-available reads as attention; anything else (incompatible /
+      // unsupported) reads as a hard problem on the diagnostics dot.
+      setDiagnosticsHealth(classification === 'update-available' ? 'warn' : 'fail');
       PanelRenderer.setBadge(panelRendererInstance.headerEl, {
         type: 'update',
         tooltip: tx('Native host update available', 'Native host 可更新'),
         onClick: () => showNativeUpdateGuidanceModal(compatibility)
       });
     } catch (_error) {
+      setDiagnosticsHealth('fail');
       PanelRenderer.setBadge(panelRendererInstance.headerEl, {
         type: 'update',
         tooltip: tx('Native host update available', 'Native host 可更新'),
@@ -8332,6 +8416,13 @@
         state.theme = themePref;
       }
       applyPanelTheme(themePref);
+      // Language is a global UI preference (moved here from the diagnostics
+      // menu); re-translate the panel when it changes.
+      const languagePref = panel?.querySelector('[data-language-select]')?.value;
+      if (languagePref && state && languagePref !== getLocale()) {
+        state.locale = i18n?.normalizeLocale?.(languagePref) || languagePref;
+        applyLocaleToPanel();
+      }
       // Re-render skill list when master toggle changes so per-skill toggles update their disabled state.
       if (prevOverleafSkills !== getSkillLoadingSettings().loadCodexOverleafSkills) {
         renderLocalSkillList();

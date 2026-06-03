@@ -15,14 +15,16 @@
 
     container.innerHTML = `
       <div class="codex-diagnostics-wrap">
-        <button type="button" data-diagnostics-menu title="Diagnostics" aria-label="Diagnostics" aria-expanded="false">⋯</button>
+        <button type="button" class="codex-diagnostics-trigger" data-diagnostics-menu title="Diagnostics" aria-label="Diagnostics" aria-expanded="false">
+          <span class="codex-diagnostics-dot" data-diagnostics-health-dot data-health="unknown"></span>
+        </button>
         <div class="codex-diagnostics-menu" data-diagnostics-popover hidden>
           <div class="codex-diagnostics-hint" data-i18n="diagnosticsHint">Use when Codex cannot run, write, or read files</div>
-          <input type="checkbox" data-experimental-ot hidden>
-          <button type="button" class="codex-diagnostics-ot-toggle" data-experimental-ot-toggle role="switch" aria-checked="false" title="Experimental read-only OT mirror warming. If unavailable or stale, Codex falls back to the normal project read path.">
-            <span data-i18n="experimentalOtMenuTitle">Experimental OT Mirror</span>
-            <small data-experimental-ot-menu-status>OT: Off · Experimental: tracks the current editor and warms the local mirror; falls back when unsafe.</small>
+          <button type="button" class="codex-diagnostics-runall" data-diagnostics-run-all>
+            <span data-i18n="diagnosticsRunAllTitle">Run all checks</span>
+            <small data-i18n="diagnosticsRunAllSubtitle">Connection, write access, project read, OT mirror</small>
           </button>
+          <div class="codex-diagnostics-menu-sep"></div>
           <button type="button" data-diagnostics-native-env>
             <span data-i18n="diagnosticsNativeTitle">Check Local Connection</span>
             <small data-i18n="diagnosticsNativeSubtitle">Codex, Native Host, LaTeX tools</small>
@@ -42,10 +44,6 @@
           <button type="button" data-diagnostics-export>
             <span data-i18n="diagnosticsExportTitle">Export Diagnostics</span>
             <small data-i18n="diagnosticsExportSubtitle">Redacted audit and environment bundle</small>
-          </button>
-          <button type="button" data-language-toggle>
-            <span data-i18n="switchLanguage">Switch to Chinese</span>
-            <small data-i18n="switchLanguageHint">Change panel language</small>
           </button>
         </div>
         <section class="codex-diagnostics-result" data-diagnostics-result hidden>
@@ -80,16 +78,13 @@
   function bindStaticActions(instance) {
     const root = instance.container;
     root.querySelector('[data-diagnostics-menu]')?.addEventListener('click', () => toggleMenu(instance));
+    root.querySelector('[data-diagnostics-run-all]')?.addEventListener('click', () => instance.callbacks.onRunAll?.());
     root.querySelector('[data-diagnostics-native-env]')?.addEventListener('click', () => instance.callbacks.onNativeEnvironment?.());
     root.querySelector('[data-diagnostics-page-state]')?.addEventListener('click', () => instance.callbacks.onPageState?.());
     root.querySelector('[data-diagnostics-snapshot]')?.addEventListener('click', () => instance.callbacks.onSnapshot?.());
     root.querySelector('[data-diagnostics-ot]')?.addEventListener('click', () => instance.callbacks.onOtDiagnostics?.());
     root.querySelector('[data-diagnostics-export]')?.addEventListener('click', () => instance.callbacks.onExport?.());
-    root.querySelector('[data-language-toggle]')?.addEventListener('click', () => instance.callbacks.onLanguageToggle?.());
     root.querySelector('[data-diagnostics-result-close]')?.addEventListener('click', () => closeResult(instance));
-    root.querySelector('[data-experimental-ot-toggle]')?.addEventListener('click', event => instance.callbacks.onOtToggleClick?.(event));
-    root.querySelector('[data-experimental-ot-toggle]')?.addEventListener('keydown', event => instance.callbacks.onOtToggleKeydown?.(event));
-    root.querySelector('[data-experimental-ot]')?.addEventListener('change', event => instance.callbacks.onOtCheckboxChange?.(event));
   }
 
   function toggleMenu(target, forceOpen) {
@@ -152,7 +147,15 @@
 
     const body = root.querySelector('[data-diagnostics-result-body]');
     body.textContent = '';
-    appendParagraph(body, result.summary || t(instance, 'diagnosticsNoResult'));
+    if (result.summary) {
+      appendParagraph(body, result.summary);
+    }
+    // Aggregated health report: one status row per check (Run all checks).
+    if (Array.isArray(result.checks) && result.checks.length) {
+      renderCheckRows(body, result.checks);
+    } else if (!result.summary) {
+      appendParagraph(body, t(instance, 'diagnosticsNoResult'));
+    }
     if (Array.isArray(result.bullets) && result.bullets.length) {
       const list = document.createElement('ul');
       for (const item of result.bullets) {
@@ -214,6 +217,56 @@
     container.append(paragraph);
   }
 
+  // Map a result status to a coarse health bucket used for the row glyph + the
+  // overall dot. 'completed' reads as a pass; anything not-ok is attention.
+  function healthBucket(status) {
+    if (status === 'completed' || status === 'ok') return 'ok';
+    if (status === 'warning' || status === 'warn') return 'warn';
+    if (status === 'failed' || status === 'fail') return 'fail';
+    return 'info';
+  }
+
+  // Render the aggregated report as one scannable row per check: a status glyph
+  // (via CSS [data-status]), a plain-language title + summary, and an optional
+  // actionable next step.
+  function renderCheckRows(container, checks) {
+    const list = document.createElement('div');
+    list.className = 'codex-diagnostics-checks';
+    for (const check of checks) {
+      if (!check) continue;
+      const row = document.createElement('div');
+      row.className = 'codex-diagnostics-check';
+      row.dataset.status = healthBucket(check.status);
+
+      const glyph = document.createElement('span');
+      glyph.className = 'codex-diagnostics-check-glyph';
+      glyph.setAttribute('aria-hidden', 'true');
+
+      const textWrap = document.createElement('div');
+      textWrap.className = 'codex-diagnostics-check-text';
+      const title = document.createElement('div');
+      title.className = 'codex-diagnostics-check-title';
+      title.textContent = check.title || '';
+      textWrap.append(title);
+      if (check.summary) {
+        const summary = document.createElement('div');
+        summary.className = 'codex-diagnostics-check-summary';
+        summary.textContent = check.summary;
+        textWrap.append(summary);
+      }
+      if (check.nextStep) {
+        const next = document.createElement('div');
+        next.className = 'codex-diagnostics-check-next';
+        next.textContent = `→ ${check.nextStep}`;
+        textWrap.append(next);
+      }
+
+      row.append(glyph, textWrap);
+      list.append(row);
+    }
+    container.append(list);
+  }
+
   function installDismiss(instance) {
     if (instance.dismissInstalled) {
       return;
@@ -228,13 +281,22 @@
     }, true);
   }
 
+  // Drive the trigger's health dot. `health` is one of ok / warn / fail /
+  // unknown; the dot colors via [data-health] in CSS so the button signals the
+  // overall state without being opened. Driven by the native-compatibility
+  // status, and refreshed by a Run-all diagnostics pass.
+  const HEALTH_STATES = ['ok', 'warn', 'fail', 'unknown'];
   function updateStatus(target, status = {}) {
     const instance = target?._instance || target;
-    const ot = status.ot || {};
-    const toggle = instance?.container?.querySelector('[data-experimental-ot-toggle]');
-    if (toggle && Object.prototype.hasOwnProperty.call(ot, 'enabled')) {
-      toggle.setAttribute('aria-checked', ot.enabled ? 'true' : 'false');
+    if (!Object.prototype.hasOwnProperty.call(status, 'health')) {
+      return;
     }
+    const dot = instance?.container?.querySelector('[data-diagnostics-health-dot]');
+    if (!dot) {
+      return;
+    }
+    const health = HEALTH_STATES.indexOf(status.health) !== -1 ? status.health : 'unknown';
+    dot.dataset.health = health;
   }
 
   function t(instance, key, params) {
