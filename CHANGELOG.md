@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.4.3 - 2026-06-03
+
+Diagnostics release. The header `⋯` menu had become a grab-bag — diagnostic checks mixed with an experimental feature toggle and a language switch. v1.4.3 makes it a focused diagnostics panel: settings moved to Settings, the trigger reads as a health indicator, and results are friendlier. No functional change to runs or writeback; the native protocol stays `1`.
+
+### Changed
+
+- **The diagnostics menu is now purely diagnostics.** The Experimental OT Mirror toggle and the language switch moved out of the `⋯` menu into Settings — the OT toggle to a new **Experimental** group under "This project", the language selector to **Appearance** under "All projects" (next to Theme). The menu now holds only the checks plus a new **Run all checks**.
+- **The trigger is a health indicator, not a `⋯`.** It shows a status dot that turns green / amber / red from the native-host compatibility state (and after a Run-all pass), so the panel surfaces a problem without being opened.
+- **Friendlier diagnostics feedback.** Running all checks produces one scannable health report — a status row per check (pass / attention / problem) with a plain-language summary and, when relevant, an actionable next step — instead of four separate result screens. Raw output stays tucked under "Technical details". The report reuses the run-timeline tokens and glyph language.
+- Architecture budget for `contentRuntime.js` raised for the run-all aggregation + health wiring; the deferred `contentRuntime.js` module split remains tracked.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.4.3 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.4.3` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.4.3.zip`, `codex-overleaf-native-host-v1.4.3.tar.gz`, and `codex-overleaf-link-1.4.3.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.4.3 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.4.3 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.4.3 -- uninstall-native`.
+
 ## v1.4.2 - 2026-06-02
 
 Theme release. The Codex panel was hard-dark; v1.4.2 adds a theme you pick in Settings (All projects): **Dark** (default), **Light**, or **Follow system**. The panel is now token-driven, so a theme is just a value swap — and unifying the panel onto those tokens also lands a batch of cohesion polish. No functional change to runs or writeback; the native protocol stays `1`.
