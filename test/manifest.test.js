@@ -23,12 +23,12 @@ const {
 } = require('../native-host/src/nativeHostPlatform');
 const extensionManifest = require('../extension/manifest.json');
 
-test('release metadata is prepared for v1.4.3', () => {
-  assert.equal(packageJson.version, '1.4.3');
+test('release metadata is prepared for v1.4.4', () => {
+  assert.equal(packageJson.version, '1.4.4');
   assert.equal(extensionManifest.version, packageJson.version);
 });
 
-test('release docs carry exact v1.4.3 badge and changelog heading', () => {
+test('release docs carry exact v1.4.4 badge and changelog heading', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
   const changelog = fs.readFileSync(path.join(__dirname, '../CHANGELOG.md'), 'utf8');
   const escapedVersion = packageJson.version.replace(/\./g, '\\.');

@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.4.4 - 2026-06-03
+
+Session-management release. Managing Codex sessions was awkward from the main panel — delete/rename were reachable only from the small hover-revealed per-row controls, the session you actually work in had no controls and could even be blank, and a hidden data-loss path could evict real history. v1.4.4 makes session management work from the main interface and fixes that bug. No change to runs or writeback; the native protocol stays `1`.
+
+### Added
+
+- **Active-session header bar.** The thread-title line is now a bar: the active session's title on the left, inline **rename** (✎) and **delete** (×) on the right — so the session you're working in can be renamed or deleted in place. Both reuse the existing delete/rename paths (no session-model change). The header always shows a title, falling back to the New Session placeholder for an empty session that has no list row (previously it was blank and unmanageable).
+- **Keyboard navigation in the session list.** Up/Down move between sessions, Enter switches, Delete removes the focused session.
+
+### Fixed
+
+- **Ghost-session data loss.** "New Session" reused an empty, idle active session instead of minting a new one, and a normalize-time prune drops inactive empty sessions (the active one is always kept). Empty sessions are invisible in the list yet still consume the storage cap, so the old behavior could silently evict real run history. The header rename was also hardened so renaming an empty session (or a no-op blur) can never promote the placeholder / auto-derived title into a pinned manual title — which would have re-created the ghost and frozen an English label across locales.
+- **Friendlier, more honest delete flow.** Deleting an empty session skips the destructive confirm (nothing to lose) and shows a brief toast; deleting the only session now reads as **Reset** (it actually starts a fresh session) instead of "Delete"; deleting the sole empty session is correctly disabled rather than a dead click; running sessions stay protected.
+
+### Changed
+
+- **Session-list polish.** Per-row delete/rename are now visible at rest (were hover-only / the rename pencil fully hidden) with a distinct red × hover; the list head reads **Sessions** (was "Tasks") and the header new-session glyph changed `✎` → `+` so it no longer collides with the per-row rename `✎`; **View all** stays expanded across re-renders; and an empty list shows a short hint instead of a blank gap.
+- Architecture budget for `contentRuntime.js` raised for the header bar + inline rename/delete; the deferred `contentRuntime.js` module split remains tracked.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.4.4 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.4.4` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.4.4.zip`, `codex-overleaf-native-host-v1.4.4.tar.gz`, and `codex-overleaf-link-1.4.4.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.4.4 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.4.4 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.4.4 -- uninstall-native`.
+
 ## v1.4.3 - 2026-06-03
 
 Diagnostics release. The header `⋯` menu had become a grab-bag — diagnostic checks mixed with an experimental feature toggle and a language switch. v1.4.3 makes it a focused diagnostics panel: settings moved to Settings, the trigger reads as a health indicator, and results are friendlier. No functional change to runs or writeback; the native protocol stays `1`.
