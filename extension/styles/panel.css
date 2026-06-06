@@ -1209,35 +1209,50 @@
   display: none;
 }
 
+/* Row controls are visible at rest (was hover-only / rename fully hidden), so
+   delete + rename are discoverable on touch / keyboard / no-hover. */
 #codex-overleaf-panel .codex-session-rename,
 #codex-overleaf-panel .codex-session-delete {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 4px;
   color: var(--tl-fg-3);
-  opacity: 0.45;
+  opacity: 0.7;
 }
 
 #codex-overleaf-panel .codex-session-rename {
   font-size: 12px;
-  opacity: 0;
 }
 
 #codex-overleaf-panel .codex-session-row:hover .codex-session-rename,
 #codex-overleaf-panel .codex-session-rename:focus-visible,
 #codex-overleaf-panel .codex-session-row:hover .codex-session-delete,
-#codex-overleaf-panel .codex-session-delete:focus-visible {
+#codex-overleaf-panel .codex-session-delete:focus-visible,
+#codex-overleaf-panel .codex-session-row[data-active="true"] .codex-session-rename,
+#codex-overleaf-panel .codex-session-row[data-active="true"] .codex-session-delete {
   opacity: 1;
 }
 
-#codex-overleaf-panel .codex-session-rename:hover,
+#codex-overleaf-panel .codex-session-rename:hover {
+  color: var(--tl-fg-1);
+}
+
+/* Destructive control gets a distinct red hover so it can't be mistaken for the
+   rename pencil beside it. */
 #codex-overleaf-panel .codex-session-delete:hover {
-  color: var(--tl-fg-2);
+  color: var(--tl-fail);
 }
 
 #codex-overleaf-panel .codex-session-delete:disabled {
   cursor: not-allowed;
   opacity: 0.25;
+}
+
+#codex-overleaf-panel .codex-session-empty-hint {
+  padding: 6px 6px 8px;
+  color: var(--tl-fg-4);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 #codex-overleaf-panel .codex-view-all {
@@ -1360,13 +1375,74 @@
   border-color: var(--tl-border-strong);
 }
 
+/* Active-session bar: the title on the left, rename + delete on the right, so
+   the session you are working in can be renamed/deleted in place. */
 #codex-overleaf-panel .codex-thread-title {
-  min-height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  font-size: 12px;
+}
+
+#codex-overleaf-panel .codex-thread-title-text {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   color: var(--tl-fg-3);
-  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+#codex-overleaf-panel .codex-thread-title-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  height: 22px;
+  border: 1px solid var(--tl-accent);
+  border-radius: var(--tl-r-sm);
+  background: var(--tl-surface-1);
+  color: var(--tl-fg-1);
+  padding: 0 6px;
+  font-size: 12px;
+  outline: none;
+}
+
+#codex-overleaf-panel .codex-thread-title-input[hidden] {
+  display: none;
+}
+
+#codex-overleaf-panel .codex-thread-title-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+#codex-overleaf-panel .codex-thread-title[data-editing="true"] .codex-thread-title-actions {
+  display: none;
+}
+
+#codex-overleaf-panel .codex-thread-title-action {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--tl-r-sm);
+  color: var(--tl-fg-4);
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+#codex-overleaf-panel .codex-thread-title-action:hover {
+  color: var(--tl-fg-1);
+  opacity: 1;
+}
+
+#codex-overleaf-panel .codex-thread-title-action--delete:hover {
+  color: var(--tl-fail);
+}
+
+#codex-overleaf-panel .codex-thread-title-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
 }
 
 #codex-overleaf-panel .col-log {

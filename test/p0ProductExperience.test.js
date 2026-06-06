@@ -1613,7 +1613,7 @@ test('running Codex tasks only lock the running session, not the whole session l
   const startNewBody = contentScript.match(/async function startNewSession\(\) \{[\s\S]*?\n  async function switchSession/)?.[0] || '';
   const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
   const setRunningBody = contentScript.match(/function setRunning\(running\) \{[\s\S]*?\n  function startRunView/)?.[0] || '';
-  const sessionListBody = contentScript.match(/function renderSessionList\(\{ showAll = false \} = \{\}\) \{[\s\S]*?\n  function renderRunHistory/)?.[0] || '';
+  const sessionListBody = contentScript.match(/function renderSessionList\(options = \{\}\) \{[\s\S]*?\n  function renderRunHistory/)?.[0] || '';
 
   assert.doesNotMatch(startNewBody, /Finish the current Codex task before starting a new session/);
   assert.doesNotMatch(setRunningBody, /\[data-new-session\]'\)\.disabled = running/);
@@ -1681,7 +1681,10 @@ test('session titles auto-name once and can be manually renamed inline', () => {
   assert.match(sessionPanel, /codex-session-rename/);
   assert.match(sessionPanel, /codex-session-title-input/);
   assert.match(sessionPanel, /function beginRename/);
-  assert.match(contentScript, /cleanTitle \? 'manual' : 'auto'/);
+  // A real custom title pins to 'manual'; an empty value, the New Session
+  // placeholder, or the auto-derived title stay 'auto' (so renaming an empty
+  // session can't resurrect a ghost).
+  assert.match(contentScript, /titleSource: isCustom \? 'manual' : 'auto'/);
   assert.match(css, /\.codex-session-rename/);
   assert.match(css, /\.codex-session-title-input/);
 });

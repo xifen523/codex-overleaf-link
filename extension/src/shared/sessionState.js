@@ -134,8 +134,22 @@
     state.runs = normalizeRuns(state.runs, localizedOptions);
     state.sessions = normalizeSessions(state, input, localizedOptions);
     state.activeSessionId = resolveActiveSessionId(state.sessions, input.activeSessionId);
+    state.sessions = pruneHiddenEmptySessions(state.sessions, state.activeSessionId);
 
     return mirrorActiveSession(state);
+  }
+
+  // Drop empty (non-displayable) sessions that are not the active one. Empty
+  // sessions never appear in the list yet still consume the storage cap, so they
+  // would otherwise accumulate and evict real history. The active session is
+  // always kept (even when empty) so the user is never left with nothing.
+  function pruneHiddenEmptySessions(sessions, activeSessionId) {
+    if (!Array.isArray(sessions) || sessions.length <= 1) {
+      return sessions;
+    }
+    const kept = sessions.filter(session =>
+      session.id === activeSessionId || isDisplayableSession(session));
+    return kept.length ? kept : sessions;
   }
 
   function normalizeSessions(state, input, options = {}) {

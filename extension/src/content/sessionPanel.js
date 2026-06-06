@@ -25,7 +25,7 @@
     container.innerHTML = `
       <section class="codex-task-section">
         <div class="codex-section-head">
-          <span data-i18n="tasks">Tasks</span>
+          <span data-i18n="sessionsHead">Sessions</span>
           <span data-session-count></span>
         </div>
         <div class="codex-session-list" data-session-list></div>
@@ -54,7 +54,12 @@
     instance.sessions = Array.isArray(sessions) ? sessions : [];
     instance.activeSessionId = activeSessionId || null;
     instance.pinnedSessionIds = updateOptions.pinnedSessionIds || instance.pinnedSessionIds || [];
-    instance.showAll = updateOptions.showAll === true;
+    // Preserve the expanded ("View all") state across re-renders (delete, rename,
+    // a composer keystroke, a run start) — only change it when a caller passes an
+    // explicit value. Previously every update snapped the list back to 3 rows.
+    if (updateOptions.showAll !== undefined) {
+      instance.showAll = updateOptions.showAll === true;
+    }
     render(instance);
   }
 
@@ -72,6 +77,12 @@
     }
 
     list.replaceChildren();
+    if (!visibleSessions.length) {
+      const hint = document.createElement('div');
+      hint.className = 'codex-session-empty-hint';
+      hint.textContent = t(instance, 'sessionListEmpty');
+      list.append(hint);
+    }
     for (const session of visibleSessions) {
       list.append(renderSessionRow(instance, session));
     }
@@ -134,6 +145,20 @@
     titleNode.textContent = displayTitle;
     timeNode.textContent = instance.formatSessionTime(session.updatedAt || session.createdAt);
     switchButton.addEventListener('click', () => instance.callbacks.onSelect?.(session.id));
+    // Keyboard nav: Up/Down move focus between rows, Enter/Space switch (native
+    // button activation -> onSelect), Delete/Backspace delete the focused row.
+    switchButton.addEventListener('keydown', event => {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const switches = Array.from(instance.container.querySelectorAll('.codex-session-switch'));
+        const index = switches.indexOf(switchButton);
+        const next = event.key === 'ArrowDown' ? switches[index + 1] : switches[index - 1];
+        next?.focus();
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && !deleteButton.disabled) {
+        event.preventDefault();
+        instance.callbacks.onDelete?.(session.id);
+      }
+    });
     renameButton.addEventListener('click', event => {
       event.stopPropagation();
       beginRename(instance, row, session);

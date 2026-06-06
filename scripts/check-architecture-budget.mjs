@@ -25,15 +25,14 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // Elephant. 12341 lines is unhealthy but a real split needs its own
     // multi-week refactor (panel renderer, run controller, settings, skills,
     // recent-projects, writeback orchestration are all interleaved here).
-    // Bumped 12300 → 12400 for the v1.3.9 cancel mechanism, then 12400 → 12600
-    // for the v1.3.10 streaming-timeline redesign, 12600 → 12700 for the v1.4.2
-    // theme wiring, then 12700 → 12780 for the v1.4.3 diagnostics reframe
-    // (run-all aggregation + health-dot + collectOnly check refactor).
-    // This file is now well past healthy; the theme feature reinforces the
-    // urgency of the deferred split (task #69) — the timeline render pipeline
-    // is a natural module to carve out first.
+    // Bumped 12300 → 12400 (v1.3.9 cancel), 12400 → 12600 (v1.3.10 timeline),
+    // 12600 → 12700 (v1.4.2 theme), 12700 → 12780 (v1.4.3 diagnostics run-all),
+    // then 12780 → 12850 (v1.4.4 session-management: header bar + inline
+    // rename/delete). This file is well past healthy; each bump reinforces the
+    // urgency of the deferred split (task #69) — the timeline render pipeline is
+    // a natural module to carve out first.
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 12780
+    maxLines: 12850
   },
   {
     // Writeback router: large but cohesive. v1.3.9 added the cross-world

@@ -522,6 +522,7 @@
         }
       });
       panel = panelRendererInstance.panelEl;
+      bindActiveSessionHeader();
       refreshNativeCompatibilityBadge();
       scheduleFirstUseOnboardingTip();
 
@@ -8887,13 +8888,114 @@
   }
 
   function applySessionLabel() {
-    const label = panel.querySelector('[data-session-label]');
+    const textNode = panel.querySelector('[data-session-label-text]');
+    const deleteButton = panel.querySelector('[data-session-delete]');
+    const renameButton = panel.querySelector('[data-session-rename]');
+    const renameInput = panel.querySelector('[data-session-rename-input]');
     const active = getActiveSession(state);
-    label.textContent = active && isDisplayableSession(active) ? getSessionDisplayTitle(active) : '';
+    if (textNode) {
+      // Always show a title — fall back to the New Session placeholder for an
+      // empty active session (which has no list row), so the session you are in
+      // is never blank and unmanageable from the header.
+      textNode.textContent = active && isDisplayableSession(active)
+        ? getSessionDisplayTitle(active)
+        : tr('newSessionFallback');
+    }
+    if (deleteButton) {
+      const running = active ? isSessionRunning(active) : false;
+      // Deleting the sole empty session is a documented no-op (it would just
+      // mint another empty), so disable it rather than leave a dead click.
+      const soleEmpty = Boolean(active) && !isDisplayableSession(active) && (state?.sessions || []).length <= 1;
+      deleteButton.disabled = !active || running || soleEmpty;
+      deleteButton.title = running ? tr('deleteRunningSession') : tr('deleteSession');
+      deleteButton.setAttribute('aria-label', running ? tr('deleteRunningSession') : tr('deleteSession'));
+    }
+    if (renameButton) {
+      renameButton.title = tr('renameSession');
+      renameButton.setAttribute('aria-label', tr('renameSession'));
+    }
+    renameInput?.setAttribute('aria-label', tr('renameSession'));
+  }
+
+  // Wire the active-session header bar once (rename + delete act on the active
+  // session, reusing the same paths as the per-row controls).
+  function bindActiveSessionHeader() {
+    panel.querySelector('[data-session-delete]')?.addEventListener('click', event => {
+      event.stopPropagation();
+      if (state?.activeSessionId) {
+        deleteSessionWithConfirm(state.activeSessionId);
+      }
+    });
+    panel.querySelector('[data-session-rename]')?.addEventListener('click', event => {
+      event.stopPropagation();
+      beginActiveSessionRename();
+    });
+  }
+
+  // Inline-rename the active session from the header bar (mirrors the per-row
+  // rename: Enter / blur commits, Escape cancels).
+  function beginActiveSessionRename() {
+    const active = getActiveSession(state);
+    const wrap = panel.querySelector('[data-session-label]');
+    const textNode = panel.querySelector('[data-session-label-text]');
+    const input = panel.querySelector('[data-session-rename-input]');
+    if (!active || !wrap || !textNode || !input) {
+      return;
+    }
+    let settled = false;
+    wrap.dataset.editing = 'true';
+    // Seed the box from a real title only; an empty/auto session opens blank so
+    // accepting the default does not commit the placeholder as a manual title.
+    const seed = isDisplayableSession(active) ? getSessionDisplayTitle(active) : '';
+    input.value = seed;
+    input.hidden = false;
+    textNode.hidden = true;
+    input.focus();
+    input.select();
+    const cleanup = () => {
+      input.removeEventListener('keydown', onKeydown);
+      input.removeEventListener('blur', onBlur);
+    };
+    const finish = commit => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      input.hidden = true;
+      textNode.hidden = false;
+      delete wrap.dataset.editing;
+      // Treat an unchanged value (incl. a no-op blur) as a cancel so it never
+      // rewrites the title source.
+      if (commit && input.value.trim() !== seed.trim()) {
+        commitSessionRename(active.id, input.value);
+      }
+    };
+    const onKeydown = event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      }
+    };
+    const onBlur = () => finish(true);
+    input.addEventListener('keydown', onKeydown);
+    input.addEventListener('blur', onBlur);
   }
 
   async function startNewSession() {
     readPanelInputs();
+    // Reuse an already-empty, idle active session instead of minting a ghost.
+    // Empty sessions are invisible in the list yet still consume the storage cap
+    // (slice(-20) / maxSessions), so spamming "New Session" could silently evict
+    // real history. Only mint when the current session holds real work.
+    const active = getActiveSession(state);
+    if (active && !isDisplayableSession(active) && !isSessionRunning(active)) {
+      panel.querySelector('[data-task]')?.focus();
+      return;
+    }
     const session = createSession({
       mode: state.mode,
       model: state.model,
@@ -8908,6 +9010,7 @@
     });
     await saveState();
     applyStateToPanel();
+    panel.querySelector('[data-task]')?.focus();
   }
 
   async function switchSession(sessionId) {
@@ -8927,14 +9030,36 @@
       return;
     }
 
+    const remaining = (state.sessions || []).filter(session => session.id !== sessionId);
+
+    // An empty (non-displayable) session has no task/runs/history and no native
+    // thread, so deleting it is a lossless local action — skip the destructive
+    // modal. Deleting the sole empty session would just mint another empty, so
+    // it is a no-op.
+    if (!isDisplayableSession(target)) {
+      if (!remaining.length) {
+        return;
+      }
+      state = deleteSession(state, sessionId);
+      await saveState();
+      applyStateToPanel();
+      showPluginToast(tr('deleteSessionDeletedToast'), { status: 'info' });
+      return;
+    }
+
+    // Deleting the only session is really a reset (deleteSession mints a fresh
+    // empty replacement), so use honest copy for that case.
+    const lastSession = remaining.length === 0;
     const approved = await showPluginConfirm({
-      title: tr('deleteSessionTitle'),
-      message: [
-        getSessionDisplayTitle(target),
-        '',
-        tr('deleteSessionMessage')
-      ].join('\n'),
-      confirmLabel: tr('deleteSessionConfirm'),
+      title: lastSession ? tr('resetSessionTitle') : tr('deleteSessionTitle'),
+      message: lastSession
+        ? tr('resetSessionMessage')
+        : [
+          getSessionDisplayTitle(target),
+          '',
+          tr('deleteSessionMessage')
+        ].join('\n'),
+      confirmLabel: lastSession ? tr('resetSessionConfirm') : tr('deleteSessionConfirm'),
       cancelLabel: tr('confirmDefaultCancel'),
       destructive: true
     });
@@ -9379,11 +9504,14 @@
     return values.filter((value, index) => values.indexOf(value) === index);
   }
 
-  function renderSessionList({ showAll = false } = {}) {
-    SessionPanel.update(sessionPanelInstance, state?.sessions || [], state?.activeSessionId || null, {
-      showAll,
-      pinnedSessionIds: getRunningSessionIds()
-    });
+  function renderSessionList(options = {}) {
+    // Omit showAll unless a caller explicitly sets it, so the panel keeps its own
+    // expanded/collapsed state across re-renders (see sessionPanel.update).
+    const updateOptions = { pinnedSessionIds: getRunningSessionIds() };
+    if (options.showAll !== undefined) {
+      updateOptions.showAll = options.showAll;
+    }
+    SessionPanel.update(sessionPanelInstance, state?.sessions || [], state?.activeSessionId || null, updateOptions);
   }
 
   function getSessionDisplayTitle(session) {
@@ -9398,11 +9526,18 @@
       return;
     }
     const cleanTitle = String(title || '').replace(/\s+/g, ' ').trim();
-    const titleSource = cleanTitle ? 'manual' : 'auto';
+    const derived = deriveSessionTitle(session.runs, session.task);
+    // Only a value that is genuinely a custom title becomes a pinned manual
+    // title. An empty value, the localized New Session placeholder, or the
+    // auto-derived title itself all stay 'auto' — otherwise renaming an empty
+    // session would promote the placeholder into a real title (resurrecting the
+    // ghost the prune/reuse-guard eliminate) and a no-op blur would freeze an
+    // auto title.
+    const isCustom = Boolean(cleanTitle) && cleanTitle !== tr('newSessionFallback') && cleanTitle !== derived;
     replaceSessionInState({
       ...session,
-      title: cleanTitle || deriveSessionTitle(session.runs, session.task),
-      titleSource,
+      title: isCustom ? cleanTitle : derived,
+      titleSource: isCustom ? 'manual' : 'auto',
       updatedAt: new Date().toISOString()
     });
     await saveState();
