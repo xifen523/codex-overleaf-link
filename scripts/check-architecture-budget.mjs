@@ -62,8 +62,9 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
   {
     // Carved from contentRuntime in v1.4.7: the session lifecycle + list
     // surface (create/switch/rename/delete, header bar, running guards).
+    // Raised 400 -> 460 in v1.5.0 for the header session dropdown switcher.
     path: 'extension/src/content/sessionManager.js',
-    maxLines: 400
+    maxLines: 460
   },
   {
     // Carved from contentRuntime in v1.4.7: apply-result / failure-reason
