@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.5.3 - 2026-06-03
+
+Patch release — dead dashboard entries can now be removed. The native protocol stays `1`.
+
+### Fixed
+
+- **"Project link unavailable" rows are no longer stuck.** These dead dashboard entries are backed by session records with an empty/garbage project id, so they could not be opened — and the v1.5.2 expand/delete tools deliberately skipped them. They now carry a × cleanup action: after a destructive-confirm, all of that entry's session records are deleted (account-scoped, full-scan matched since an undefined project id is not indexed) with best-effort native history clearing per record, and the row disappears. The per-project panel-state blob is deliberately left untouched for these entries — an empty project id would map onto the global legacy storage key.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.5.3 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.5.3` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.5.3.zip`, `codex-overleaf-native-host-v1.5.3.tar.gz`, and `codex-overleaf-link-1.5.3.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.5.3 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.5.3 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.5.3 -- uninstall-native`.
+
 ## v1.5.2 - 2026-06-03
 
 Feature release — manage sessions from the `/project` dashboard. The native protocol stays `1`.
