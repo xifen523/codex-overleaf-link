@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.4.9 - 2026-06-03
+
+Maintenance release — structural debt, phase 5: the final planned carve. No user-visible behavior changes; the native protocol stays `1`.
+
+### Changed
+
+- **`contentRuntime.js` carved down 9,573 → 8,791 lines** (cumulative since the split began: 12,837 → 8,791, **−32%**). The experimental OT warm-mirror glue moved verbatim into `otWarmMirror.js` (new): the per-project enable toggle flow, the poll/flush timers and patch queue, mirror prefetch, warm-start resolution, and the OT status display. The OT/prefetch state moved with the code that owns it; the runtime reads it through exported accessors and clears it on project navigation via two small APIs (`clearMirrorPrefetchTimer` / `releaseOtWarmMirrorProject`). The diagnostics controller now sources its OT getters from the module.
+- **Architecture ceiling lowered again, 9,600 → 8,800.** This completes the planned split (task #69): what remains in `contentRuntime.js` is the genuinely cohesive run-orchestration core (run task, writeback application, result handling) plus the wiring that composes the ten carved modules.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.4.9 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.4.9` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.4.9.zip`, `codex-overleaf-native-host-v1.4.9.tar.gz`, and `codex-overleaf-link-1.4.9.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.4.9 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.4.9 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.4.9 -- uninstall-native`.
+
 ## v1.4.8 - 2026-06-03
 
 Maintenance release — structural debt, phase 4. Continues the `contentRuntime.js` split. No user-visible behavior changes; the native protocol stays `1`.
