@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.4.6 - 2026-06-03
+
+Maintenance release — structural debt, phase 2. Continues the `contentRuntime.js` split begun in v1.4.5 and consolidates the test-sandbox boilerplate that made each refactor expensive. No user-visible behavior changes; the native protocol stays `1`.
+
+### Changed
+
+- **`contentRuntime.js` carved down 11,742 → 10,965 lines.** The run-timeline render pipeline moved verbatim into `runTimelineView.js` (new): the scroll engine + jump-to-latest button, the live-elapsed tick and collapsed-header summary, run-card / stream-event / activity rendering, the completion report, and the run-card Undo/Accept controls. Runtime collaborators are factory-injected; mutable runtime state is read through lazy getters; the view-local scroll/timer state moved with the code that owns it (the runtime re-arms auto-follow through a small `resetAutoFollow()` API).
+- **Architecture ceiling lowered again, 11,850 → 11,000** (cumulative since the split began: 12,850 → 11,000), with `runTimelineView.js` under its own 950-line budget.
+- **Test-sandbox stub registry (task #68).** The `Function(...)` sandboxes in the p0 suite each hand-declared 10–30 no-op runtime stubs, so every new runtime collaborator had to be patched into each sandbox individually. A shared registry (`test/_helpers/runtimeSandbox.js`) now emits the defaults — one place to stub the next dependency — and the seven heaviest harnesses were migrated to it.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.4.6 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.4.6` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.4.6.zip`, `codex-overleaf-native-host-v1.4.6.tar.gz`, and `codex-overleaf-link-1.4.6.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.4.6 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.4.6 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.4.6 -- uninstall-native`.
+
 ## v1.4.5 - 2026-06-03
 
 Maintenance release — structural debt, phase 1. `contentRuntime.js` had grown to ~12,800 lines against a ceiling that five consecutive releases had to raise; this release lands the first real split and **lowers** the ceiling to lock the gain. No user-visible behavior changes; the native protocol stays `1`.
