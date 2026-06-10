@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.5.2 - 2026-06-03
+
+Feature release — manage sessions from the `/project` dashboard. The native protocol stays `1`.
+
+### Added
+
+- **Per-project session management on the dashboard.** Each project row on the recent-projects view (overleaf.com/project) now has an expand toggle (▾) that lists that project's sessions — newest first, running sessions marked and protected — with per-session **delete** and **inline rename**, no need to enter the project. Delete mirrors the in-project flow exactly: confirmation modal, panel-state writeback through the same normalize/compact pipeline `saveState` uses, IndexedDB record removal, native `codex.history.clearPlugin`, and the same success/skip/failure toasts. Rename routes through a new shared `renameSession` helper so the placeholder/derived-title ghost guard is a single source of truth for both the in-panel header rename and the dashboard.
+- Known limitation: if the same project is open in another tab, that tab's in-memory state wins on its next save; the session record removal still holds.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.5.2 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.5.2` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.5.2.zip`, `codex-overleaf-native-host-v1.5.2.tar.gz`, and `codex-overleaf-link-1.5.2.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.5.2 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.5.2 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.5.2 -- uninstall-native`.
+
 ## v1.5.1 - 2026-06-03
 
 Critical hotfix — the panel did not mount at all in the browser on v1.4.6 through v1.5.0.
