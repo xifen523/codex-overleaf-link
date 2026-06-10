@@ -32,9 +32,10 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // v1.4.5 carved the markdown/assistant-text renderer + the diagnostics
     // controller (12850 → 11850); v1.4.6 carved the run-timeline render
     // pipeline (11850 → 11000); v1.4.7 carved session management + the
-    // apply-result formatters (11000 → 10450).
+    // apply-result formatters (11000 → 10450); v1.4.8 carved the model picker
+    // + the recent-projects dashboard (10450 → 9600).
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 10450
+    maxLines: 9600
   },
   {
     // Carved from contentRuntime in v1.4.5: markdown/inline rendering, the
@@ -66,6 +67,18 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // formatters (skipped details, bilingual apply/bridge reasons).
     path: 'extension/src/content/applyResultFormatters.js',
     maxLines: 450
+  },
+  {
+    // Carved from contentRuntime in v1.4.8: model/reasoning/speed catalog,
+    // discovery, selects, and the config popover.
+    path: 'extension/src/content/modelPicker.js',
+    maxLines: 550
+  },
+  {
+    // Carved from contentRuntime in v1.4.8: the cross-project recent-projects
+    // dashboard (name cache, welcome/empty/degraded states, row rendering).
+    path: 'extension/src/content/recentProjects.js',
+    maxLines: 520
   },
   {
     // Writeback router: large but cohesive. v1.3.9 added the cross-world

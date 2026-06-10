@@ -14,24 +14,30 @@ test('composer discovers model options through the native codex.models endpoint'
     path.join(__dirname, '../extension/src/shared/i18n.js'),
     'utf8'
   );
+  // v1.4.8: the model picker lives in modelPicker.js; the runtime keeps the
+  // loadModelOptions().catch caller in init().
+  const modelPicker = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/modelPicker.js'),
+    'utf8'
+  );
 
-  assert.match(contentScript, /let modelDiscovery\s*=\s*\{\s*status:\s*'fallback'/);
+  assert.match(modelPicker, /let modelDiscovery\s*=\s*\{\s*status:\s*'fallback'/);
   assert.match(contentScript, /loadModelOptions\(\)\.catch/);
-  assert.match(contentScript, /async function loadModelOptions\(\)/);
-  assert.match(contentScript, /method:\s*'codex\.models'/);
-  assert.match(contentScript, /const modelCatalog = getModelCatalog\(\)/);
-  assert.match(contentScript, /modelCatalog\.FALLBACK_MODELS/);
-  assert.match(contentScript, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel:\s*currentSelectedModel\s*\}\)/);
-  assert.match(contentScript, /function renderModelOptions\(models,\s*selectedModel\)/);
-  assert.match(contentScript, /function renderSpeedOptions\(/);
-  assert.match(contentScript, /function renderModelConfigChoices\(/);
-  assert.match(contentScript, /data-speed/);
-  assert.match(contentScript, /model\.speedTiers/);
-  assert.match(contentScript, /document\.createElement\('option'\)/);
-  assert.match(contentScript, /document\.createElement\('button'\)/);
-  assert.match(contentScript, /option\.textContent\s*=\s*model\.label/);
-  assert.match(contentScript, /const sourceTitle = tr\('modelDisplayTitle'/);
-  assert.match(contentScript, /modelDisplay\.title = sourceTitle/);
+  assert.match(modelPicker, /async function loadModelOptions\(\)/);
+  assert.match(modelPicker, /method:\s*'codex\.models'/);
+  assert.match(modelPicker, /const modelCatalog = getModelCatalog\(\)/);
+  assert.match(modelPicker, /modelCatalog\.FALLBACK_MODELS/);
+  assert.match(modelPicker, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel:\s*currentSelectedModel\s*\}\)/);
+  assert.match(modelPicker, /function renderModelOptions\(models,\s*selectedModel\)/);
+  assert.match(modelPicker, /function renderSpeedOptions\(/);
+  assert.match(modelPicker, /function renderModelConfigChoices\(/);
+  assert.match(modelPicker, /data-speed/);
+  assert.match(modelPicker, /model\.speedTiers/);
+  assert.match(modelPicker, /document\.createElement\('option'\)/);
+  assert.match(modelPicker, /document\.createElement\('button'\)/);
+  assert.match(modelPicker, /option\.textContent\s*=\s*model\.label/);
+  assert.match(modelPicker, /const sourceTitle = tr\('modelDisplayTitle'/);
+  assert.match(modelPicker, /modelDisplay\.title = sourceTitle/);
   assert.match(i18n, /modelSourceFallback:\s*'fallback'/);
   assert.match(i18n, /modelSourceDiscovered:\s*'discovered'/);
   assert.match(i18n, /modelDisplayTitle:\s*'\{label\} - Model list: \{source\}'/);
@@ -39,7 +45,7 @@ test('composer discovers model options through the native codex.models endpoint'
 
 test('composer preserves user model changes made while native discovery is pending', () => {
   const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+    path.join(__dirname, '../extension/src/content/modelPicker.js'),
     'utf8'
   );
   const loadModelOptions = extractFunction(contentScript, 'loadModelOptions');
