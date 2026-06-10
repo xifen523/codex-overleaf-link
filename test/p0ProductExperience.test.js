@@ -4,6 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { extractFunction } = require('./_helpers/extractFunction');
 const { getContentScriptSource, extractFromContentScript } = require('./_helpers/contentScriptSource');
+const { runtimeStubs } = require('./_helpers/runtimeSandbox');
 const vm = require('node:vm');
 
 const ReviewHunks = require('../extension/src/content/reviewHunks');
@@ -3496,14 +3497,7 @@ test('project custom instructions editor auto-saves on change and restores by pr
       setView(v) { panel.dataset.view = v; }
     };
     function getCurrentProjectId() { return currentProjectId; }
-    function closeDiagnosticsMenu() {}
-    function closeDiagnosticsResult() {}
-    function closeModelConfigPopover() {}
-    function closeContextTray() {}
-    function syncProjectSettingsEditorForProject() {}
-    function refreshLocalSkills() { return Promise.resolve(); }
-    function setGovernanceRulesForCurrentProject() {}
-    function readGovernanceRulesFromSettings() { return {}; }
+    let lastExperimentalOtProjectId = '';
     function getSkillLoadingSettings() {
       return {
         loadCodexLocalSkills: state.loadCodexLocalSkills !== false,
@@ -3515,29 +3509,11 @@ test('project custom instructions editor auto-saves on change and restores by pr
         state = { ...state, ...settings };
       }
     }
-    function readSkillLoadingSettingsFromSettings() { return {}; }
-    function renderLocalSkillList() {}
-    function updateSkillsEntrySummary() {}
-    function syncExperimentalOtToggleForProject() {}
-    let lastExperimentalOtProjectId = '';
-    function setExperimentalOtEnabledForProject() {}
-    function updateActiveSession(s) { return s; }
-    function readSelectedModelInput() { return ''; }
-    function readSelectedSpeedInput() { return 'standard'; }
-    function getRenderedModelEntries() { return []; }
-    function renderSpeedOptions() {}
-    function renderModelConfigChoices() {}
-    function updateModelDisplay() {}
-    function syncModeControls() {}
-    function applySessionLabel() {}
-    function renderSessionList() {}
-    function tr(key) { return key; }
     async function saveState() { savedCount++; }
     // Stub the route-aware branch of closeCustomInstructionsSettings; this
     // settings-persistence test pins the in-project flow.
     const window = { location: { pathname: '/project/' + 'a'.repeat(24) } };
-    function isProjectEditorRoute() { return true; }
-    function renderRecentProjectsVariant() { return Promise.resolve(); }
+    ${runtimeStubs({ omit: ['getSkillLoadingSettings', 'setSkillLoadingSettings', 'saveState'] })}
     ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
     ${extractFromContentScript( 'getCustomInstructionsForCurrentProject')}
     ${extractFromContentScript( 'setCustomInstructionsForProject')}
@@ -3546,7 +3522,6 @@ test('project custom instructions editor auto-saves on change and restores by pr
     ${extractFromContentScript( 'openCustomInstructionsSettings')}
     ${extractFromContentScript( 'closeCustomInstructionsSettings')}
     ${extractFromContentScript( 'setSettingsSaveStatus')}
-    function applyPanelTheme() {}
     ${extractFromContentScript( 'readPanelInputs')}
     ${extractFromContentScript( 'persistPanelInputs')}
     return {
@@ -3617,37 +3592,14 @@ test('persistPanelInputs save-status lifecycle: success path ends at settingsSav
       querySelectorAll() { return []; }
     };
     function getCurrentProjectId() { return currentProjectId; }
-    function setGovernanceRulesForCurrentProject() {}
-    function readGovernanceRulesFromSettings() { return {}; }
-    function getSkillLoadingSettings() {
-      return { loadCodexLocalSkills: true, loadCodexOverleafSkills: true };
-    }
-    function setSkillLoadingSettings() {}
-    function readSkillLoadingSettingsFromSettings() { return {}; }
-    function renderLocalSkillList() {}
-    function updateSkillsEntrySummary() {}
-    function syncExperimentalOtToggleForProject() {}
     let lastExperimentalOtProjectId = '';
-    function setExperimentalOtEnabledForProject() {}
-    function updateActiveSession(s) { return s; }
-    function readSelectedModelInput() { return ''; }
-    function readSelectedSpeedInput() { return 'standard'; }
-    function getRenderedModelEntries() { return []; }
-    function renderSpeedOptions() {}
-    function renderModelConfigChoices() {}
-    function updateModelDisplay() {}
-    function syncModeControls() {}
-    function applySessionLabel() {}
-    function renderSessionList() {}
-    function tr(key) { return key; }
-    async function saveState() {}
+    ${runtimeStubs()}
     ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
     ${extractFromContentScript( 'getCustomInstructionsForCurrentProject')}
     ${extractFromContentScript( 'setCustomInstructionsForProject')}
     ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
     ${extractFromContentScript( 'clearProjectSettingsStatus')}
     ${extractFromContentScript( 'setSettingsSaveStatus')}
-    function applyPanelTheme() {}
     ${extractFromContentScript( 'readPanelInputs')}
     ${extractFromContentScript( 'persistPanelInputs')}
     return { persistPanelInputs };
@@ -3690,37 +3642,15 @@ test('persistPanelInputs save-status lifecycle: status ends at settingsSaved eve
       querySelectorAll() { return []; }
     };
     function getCurrentProjectId() { return currentProjectId; }
-    function setGovernanceRulesForCurrentProject() {}
-    function readGovernanceRulesFromSettings() { return {}; }
-    function getSkillLoadingSettings() {
-      return { loadCodexLocalSkills: true, loadCodexOverleafSkills: true };
-    }
-    function setSkillLoadingSettings() {}
-    function readSkillLoadingSettingsFromSettings() { return {}; }
-    function renderLocalSkillList() {}
-    function updateSkillsEntrySummary() {}
-    function syncExperimentalOtToggleForProject() {}
     let lastExperimentalOtProjectId = '';
-    function setExperimentalOtEnabledForProject() {}
-    function updateActiveSession(s) { return s; }
-    function readSelectedModelInput() { return ''; }
-    function readSelectedSpeedInput() { return 'standard'; }
-    function getRenderedModelEntries() { return []; }
-    function renderSpeedOptions() {}
-    function renderModelConfigChoices() {}
-    function updateModelDisplay() {}
-    function syncModeControls() {}
-    function applySessionLabel() {}
-    function renderSessionList() {}
-    function tr(key) { return key; }
     async function saveState() { throw new Error('storage quota exceeded'); }
+    ${runtimeStubs({ omit: ['saveState'] })}
     ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
     ${extractFromContentScript( 'getCustomInstructionsForCurrentProject')}
     ${extractFromContentScript( 'setCustomInstructionsForProject')}
     ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
     ${extractFromContentScript( 'clearProjectSettingsStatus')}
     ${extractFromContentScript( 'setSettingsSaveStatus')}
-    function applyPanelTheme() {}
     ${extractFromContentScript( 'readPanelInputs')}
     ${extractFromContentScript( 'persistPanelInputs')}
     return { persistPanelInputs };
@@ -3785,18 +3715,10 @@ test('project settings gear toggles the settings panel closed when already open'
     };
     const panelRendererInstance = null;
     function getCurrentProjectId() { return currentProjectId; }
-    function closeDiagnosticsMenu() {}
-    function closeDiagnosticsResult() {}
-    function closeModelConfigPopover() {}
-    function closeContextTray() {}
-    function syncProjectSettingsEditorForProject() {}
-    function refreshLocalSkills() { return Promise.resolve(); }
-    function tr(key) { return key; }
     // Stub the route-aware branch of closeCustomInstructionsSettings; this
     // toggle test pins the in-project flow (per-project session view).
     const window = { location: { pathname: '/project/' + 'a'.repeat(24) } };
-    function isProjectEditorRoute() { return true; }
-    function renderRecentProjectsVariant() { return Promise.resolve(); }
+    ${runtimeStubs()}
     ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
     ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
     ${extractFromContentScript( 'clearProjectSettingsStatus')}
@@ -3885,25 +3807,13 @@ test('project settings transient status is cleared when reopening the panel', ()
     };
     const panelRendererInstance = null;
     function getCurrentProjectId() { return currentProjectId; }
-    function closeDiagnosticsMenu() {}
-    function closeDiagnosticsResult() {}
-    function closeModelConfigPopover() {}
-    function closeContextTray() {}
-    function closeSlashMenu() {}
-    function tx(english) { return english; }
-    function tr(key) { return key; }
-    function syncProjectSettingsEditorForProject() {}
-    function refreshLocalSkills() { return Promise.resolve(); }
-    // The transient-status test pins the in-project flow; stub the route check
-    // to true so closeCustomInstructionsSettings exercises the per-project
-    // setView('session') branch (the original behaviour this test pre-dates
-    // the route-aware fix). The off-route branch is covered by its own test
-    // ('closeCustomInstructionsSettings branches on isProjectEditorRoute …').
-    // window is referenced by the route check; supply a stub location so the
-    // sandbox does not blow up on window.location dereferences.
+    // The transient-status test pins the in-project flow (registry stubs keep
+    // isProjectEditorRoute true so closeCustomInstructionsSettings exercises
+    // the per-project setView('session') branch; the off-route branch has its
+    // own test). window is referenced by the route check; supply a stub
+    // location so the sandbox does not blow up on window.location derefs.
     const window = { location: { pathname: '/project/' + 'a'.repeat(24) } };
-    function isProjectEditorRoute() { return true; }
-    function renderRecentProjectsVariant() { return Promise.resolve(); }
+    ${runtimeStubs()}
     ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
     ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
     ${extractFromContentScript( 'setProjectSettingsStatus')}
@@ -3968,8 +3878,7 @@ test('mirror prefetch state sync preserves unsaved custom instructions for same 
       clearTimeout() {}
     };
     function getCurrentProjectId() { return currentProjectId; }
-    function tr(key) { return key; }
-    function syncOtWarmMirrorStateForProject() {}
+    ${runtimeStubs()}
     ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
     ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
     ${extractFromContentScript( 'syncMirrorPrefetchStateForProject')}
@@ -4230,12 +4139,18 @@ test('experimental OT input persistence does not leak checked state after projec
     function readSelectedModelInput() { return state.model; }
     function readSelectedSpeedInput() { return state.speedTier; }
     function updateOtStatusDisplay(status) { currentOtStatus = status; }
-    function updateExperimentalOtToggleControl() {}
+    ${runtimeStubs({ omit: [
+      'updateActiveSession',
+      'readSelectedModelInput',
+      'readSelectedSpeedInput',
+      'updateOtStatusDisplay',
+      'setExperimentalOtEnabledForProject',
+      'syncExperimentalOtToggleForProject'
+    ] })}
     ${extractFromContentScript( 'normalizeExperimentalOtByProject')}
     ${extractFromContentScript( 'isExperimentalOtEnabledForProject')}
     ${extractFromContentScript( 'setExperimentalOtEnabledForProject')}
     ${extractFromContentScript( 'syncExperimentalOtToggleForProject')}
-    function applyPanelTheme() {}
     ${extractFromContentScript( 'readPanelInputs')}
     return {
       checkbox: experimentalOtCheckbox,
