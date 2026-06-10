@@ -1375,7 +1375,9 @@ test('composer clears the submitted task as soon as Codex accepts the run', () =
 
 test('deleting a UI session also clears plugin-isolated Codex history', () => {
   const contentScript = getContentScriptSource();
-  const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
+  // v1.4.7: deleteSessionWithConfirm lives in sessionManager.js; extract it
+  // precisely instead of slicing to a runtime-side anchor.
+  const deleteBody = extractFromContentScript('deleteSessionWithConfirm');
 
   assert.match(deleteBody, /codex\.history\.clearPlugin/);
   assert.match(deleteBody, /threadId:\s*target\.codexThreadId/);
@@ -1399,7 +1401,9 @@ test('session deletion status uses plugin toast instead of task transcript space
     'utf8'
   );
   const contentSurface = `${contentScript}\n${sessionPanel}\n${panelRenderer}`;
-  const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
+  // v1.4.7: deleteSessionWithConfirm lives in sessionManager.js; extract it
+  // precisely instead of slicing to a runtime-side anchor.
+  const deleteBody = extractFromContentScript('deleteSessionWithConfirm');
   const plainLogBody = contentScript.match(/function appendPlainLog\(text\) \{[\s\S]*?\n  function updateProbeNotice/)?.[0] || '';
   const toastCss = css.match(/#codex-overleaf-panel \.codex-toast-region \{[\s\S]*?\n\}/)?.[0] || '';
   const taskSectionIndex = contentSurface.indexOf('<section class="codex-task-section">');
@@ -1621,7 +1625,9 @@ test('running Codex tasks only lock the running session, not the whole session l
     'utf8'
   );
   const startNewBody = contentScript.match(/async function startNewSession\(\) \{[\s\S]*?\n  async function switchSession/)?.[0] || '';
-  const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
+  // v1.4.7: deleteSessionWithConfirm lives in sessionManager.js; extract it
+  // precisely instead of slicing to a runtime-side anchor.
+  const deleteBody = extractFromContentScript('deleteSessionWithConfirm');
   const setRunningBody = contentScript.match(/function setRunning\(running\) \{[\s\S]*?\n  function startRunView/)?.[0] || '';
   // v1.4.6: renderRunHistory moved into runTimelineView.js, so the slice ends
   // at the next function that stayed in the runtime.
@@ -2719,13 +2725,11 @@ test('tracked-change undo page bridge calls have enough time to reject many chan
 test('partial writeback report tells the user what already changed and how to recover', () => {
   const contentScript = getContentScriptSource();
   const appendApplyResultBody = contentScript.match(/function appendApplyResult\(result\) \{[\s\S]*?\n  function formatOperationType/)?.[0] || '';
-  const partialWarningIndex = contentScript.indexOf('function appendPartialWritebackWarning');
-  const appendApplyIndex = contentScript.indexOf('function appendApplyResult');
-
+  // v1.4.7: appendApplyResult moved into applyResultFormatters.js while the
+  // partial-writeback warning stayed in the runtime, so cross-file index
+  // ordering is meaningless; the structural contract is that the warning is
+  // its own function, not nested inside appendApplyResult.
   assert.match(contentScript, /function appendPartialWritebackWarning\(/);
-  assert.ok(partialWarningIndex > -1);
-  assert.ok(appendApplyIndex > -1);
-  assert.ok(partialWarningIndex < appendApplyIndex);
   assert.doesNotMatch(appendApplyResultBody, /function appendPartialWritebackWarning/);
   assert.match(contentScript, /部分写入已完成/);
   assert.match(contentScript, /写入被跳过/);

@@ -355,6 +355,51 @@
     configureUndoButton,
     configureAcceptButton
   } = runTimelineView;
+  const sessionManager = window.CodexOverleafSessionManager.create({
+    tr,
+    showPluginConfirm,
+    showPluginToast,
+    sendBackgroundNative,
+    saveState,
+    saveStateSoon,
+    readPanelInputs,
+    applyStateToPanel,
+    getPanel: () => panel,
+    getState: () => state,
+    setState: next => { state = next; },
+    getSessionPanelInstance: () => sessionPanelInstance
+  });
+  const {
+    applySessionLabel,
+    bindActiveSessionHeader,
+    startNewSession,
+    switchSession,
+    deleteSessionWithConfirm,
+    renderSessionList,
+    commitSessionRename,
+    getRunningSessionIds,
+    isSessionRunning,
+    findSessionById,
+    replaceSessionInState,
+    updateSessionById
+  } = sessionManager;
+  const applyResultFormatters = window.CodexOverleafApplyResultFormatters.create({
+    getLocale,
+    tr,
+    tx,
+    getAppliedEntries,
+    getSkippedEntries,
+    appendRunEvent
+  });
+  const {
+    appendApplyResult,
+    failureReasonI18nLookup,
+    formatApplyResultReason,
+    formatBridgeResultReason,
+    localizeVisibleReason,
+    formatOperationType,
+    formatOperationFiles
+  } = applyResultFormatters;
 
   let mirrorPrefetchState = {
     inFlight: null,
@@ -8260,209 +8305,6 @@
     return Array.from(modelSelect?.options || []).some(option => option.value === selectedId);
   }
 
-  function applySessionLabel() {
-    const textNode = panel.querySelector('[data-session-label-text]');
-    const deleteButton = panel.querySelector('[data-session-delete]');
-    const renameButton = panel.querySelector('[data-session-rename]');
-    const renameInput = panel.querySelector('[data-session-rename-input]');
-    const active = getActiveSession(state);
-    if (textNode) {
-      // Always show a title — fall back to the New Session placeholder for an
-      // empty active session (which has no list row), so the session you are in
-      // is never blank and unmanageable from the header.
-      textNode.textContent = active && isDisplayableSession(active)
-        ? getSessionDisplayTitle(active)
-        : tr('newSessionFallback');
-    }
-    if (deleteButton) {
-      const running = active ? isSessionRunning(active) : false;
-      // Deleting the sole empty session is a documented no-op (it would just
-      // mint another empty), so disable it rather than leave a dead click.
-      const soleEmpty = Boolean(active) && !isDisplayableSession(active) && (state?.sessions || []).length <= 1;
-      deleteButton.disabled = !active || running || soleEmpty;
-      deleteButton.title = running ? tr('deleteRunningSession') : tr('deleteSession');
-      deleteButton.setAttribute('aria-label', running ? tr('deleteRunningSession') : tr('deleteSession'));
-    }
-    if (renameButton) {
-      renameButton.title = tr('renameSession');
-      renameButton.setAttribute('aria-label', tr('renameSession'));
-    }
-    renameInput?.setAttribute('aria-label', tr('renameSession'));
-  }
-
-  // Wire the active-session header bar once (rename + delete act on the active
-  // session, reusing the same paths as the per-row controls).
-  function bindActiveSessionHeader() {
-    panel.querySelector('[data-session-delete]')?.addEventListener('click', event => {
-      event.stopPropagation();
-      if (state?.activeSessionId) {
-        deleteSessionWithConfirm(state.activeSessionId);
-      }
-    });
-    panel.querySelector('[data-session-rename]')?.addEventListener('click', event => {
-      event.stopPropagation();
-      beginActiveSessionRename();
-    });
-  }
-
-  // Inline-rename the active session from the header bar (mirrors the per-row
-  // rename: Enter / blur commits, Escape cancels).
-  function beginActiveSessionRename() {
-    const active = getActiveSession(state);
-    const wrap = panel.querySelector('[data-session-label]');
-    const textNode = panel.querySelector('[data-session-label-text]');
-    const input = panel.querySelector('[data-session-rename-input]');
-    if (!active || !wrap || !textNode || !input) {
-      return;
-    }
-    let settled = false;
-    wrap.dataset.editing = 'true';
-    // Seed the box from a real title only; an empty/auto session opens blank so
-    // accepting the default does not commit the placeholder as a manual title.
-    const seed = isDisplayableSession(active) ? getSessionDisplayTitle(active) : '';
-    input.value = seed;
-    input.hidden = false;
-    textNode.hidden = true;
-    input.focus();
-    input.select();
-    const cleanup = () => {
-      input.removeEventListener('keydown', onKeydown);
-      input.removeEventListener('blur', onBlur);
-    };
-    const finish = commit => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      input.hidden = true;
-      textNode.hidden = false;
-      delete wrap.dataset.editing;
-      // Treat an unchanged value (incl. a no-op blur) as a cancel so it never
-      // rewrites the title source.
-      if (commit && input.value.trim() !== seed.trim()) {
-        commitSessionRename(active.id, input.value);
-      }
-    };
-    const onKeydown = event => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        finish(true);
-      } else if (event.key === 'Escape') {
-        event.preventDefault();
-        finish(false);
-      }
-    };
-    const onBlur = () => finish(true);
-    input.addEventListener('keydown', onKeydown);
-    input.addEventListener('blur', onBlur);
-  }
-
-  async function startNewSession() {
-    readPanelInputs();
-    // Reuse an already-empty, idle active session instead of minting a ghost.
-    // Empty sessions are invisible in the list yet still consume the storage cap
-    // (slice(-20) / maxSessions), so spamming "New Session" could silently evict
-    // real history. Only mint when the current session holds real work.
-    const active = getActiveSession(state);
-    if (active && !isDisplayableSession(active) && !isSessionRunning(active)) {
-      panel.querySelector('[data-task]')?.focus();
-      return;
-    }
-    const session = createSession({
-      mode: state.mode,
-      model: state.model,
-      reasoningEffort: state.reasoningEffort,
-      speedTier: state.speedTier,
-      requireReviewing: state.requireReviewing
-    });
-    state = normalizePanelState({
-      ...state,
-      sessions: [...(state.sessions || []), session].slice(-20),
-      activeSessionId: session.id
-    });
-    await saveState();
-    applyStateToPanel();
-    panel.querySelector('[data-task]')?.focus();
-  }
-
-  async function switchSession(sessionId) {
-    readPanelInputs();
-    state = setActiveSession(state, sessionId);
-    await saveState();
-    applyStateToPanel();
-  }
-
-  async function deleteSessionWithConfirm(sessionId) {
-    const target = (state.sessions || []).find(session => session.id === sessionId);
-    if (!target) {
-      return;
-    }
-    if (isSessionRunning(target)) {
-      showPluginToast(tr('deleteSessionRunningToast'), { status: 'warning' });
-      return;
-    }
-
-    const remaining = (state.sessions || []).filter(session => session.id !== sessionId);
-
-    // An empty (non-displayable) session has no task/runs/history and no native
-    // thread, so deleting it is a lossless local action — skip the destructive
-    // modal. Deleting the sole empty session would just mint another empty, so
-    // it is a no-op.
-    if (!isDisplayableSession(target)) {
-      if (!remaining.length) {
-        return;
-      }
-      state = deleteSession(state, sessionId);
-      await saveState();
-      applyStateToPanel();
-      showPluginToast(tr('deleteSessionDeletedToast'), { status: 'info' });
-      return;
-    }
-
-    // Deleting the only session is really a reset (deleteSession mints a fresh
-    // empty replacement), so use honest copy for that case.
-    const lastSession = remaining.length === 0;
-    const approved = await showPluginConfirm({
-      title: lastSession ? tr('resetSessionTitle') : tr('deleteSessionTitle'),
-      message: lastSession
-        ? tr('resetSessionMessage')
-        : [
-          getSessionDisplayTitle(target),
-          '',
-          tr('deleteSessionMessage')
-        ].join('\n'),
-      confirmLabel: lastSession ? tr('resetSessionConfirm') : tr('deleteSessionConfirm'),
-      cancelLabel: tr('confirmDefaultCancel'),
-      destructive: true
-    });
-    if (!approved) {
-      return;
-    }
-
-    state = deleteSession(state, sessionId);
-    await saveState();
-    applyStateToPanel();
-
-    try {
-      const response = await sendBackgroundNative({
-        method: 'codex.history.clearPlugin',
-        params: {
-          sessionId,
-          threadId: target.codexThreadId || ''
-        }
-      });
-      if (!response?.ok) {
-        showPluginToast(tr('deleteSessionHistoryFailedToast', { message: response?.error?.message || 'native host did not return success' }), { status: 'warning', sticky: true });
-      } else if (response.result?.skipped) {
-        showPluginToast(tr('deleteSessionNoThreadToast'), { status: 'info' });
-      } else {
-        showPluginToast(tr('deleteSessionDoneToast'), { status: 'completed' });
-      }
-    } catch (error) {
-      showPluginToast(tr('deleteSessionHistoryFailedToast', { message: error.message }), { status: 'warning', sticky: true });
-    }
-  }
 
   function setRunning(running) {
     const runButton = panel.querySelector('[data-run]');
@@ -8813,46 +8655,6 @@
     return values.filter((value, index) => values.indexOf(value) === index);
   }
 
-  function renderSessionList(options = {}) {
-    // Omit showAll unless a caller explicitly sets it, so the panel keeps its own
-    // expanded/collapsed state across re-renders (see sessionPanel.update).
-    const updateOptions = { pinnedSessionIds: getRunningSessionIds() };
-    if (options.showAll !== undefined) {
-      updateOptions.showAll = options.showAll;
-    }
-    SessionPanel.update(sessionPanelInstance, state?.sessions || [], state?.activeSessionId || null, updateOptions);
-  }
-
-  function getSessionDisplayTitle(session) {
-    return SessionPanel.getDisplayTitle(sessionPanelInstance, session);
-  }
-
-
-
-  async function commitSessionRename(sessionId, title) {
-    const session = findSessionById(sessionId);
-    if (!session) {
-      return;
-    }
-    const cleanTitle = String(title || '').replace(/\s+/g, ' ').trim();
-    const derived = deriveSessionTitle(session.runs, session.task);
-    // Only a value that is genuinely a custom title becomes a pinned manual
-    // title. An empty value, the localized New Session placeholder, or the
-    // auto-derived title itself all stay 'auto' — otherwise renaming an empty
-    // session would promote the placeholder into a real title (resurrecting the
-    // ghost the prune/reuse-guard eliminate) and a no-op blur would freeze an
-    // auto title.
-    const isCustom = Boolean(cleanTitle) && cleanTitle !== tr('newSessionFallback') && cleanTitle !== derived;
-    replaceSessionInState({
-      ...session,
-      title: isCustom ? cleanTitle : derived,
-      titleSource: isCustom ? 'manual' : 'auto',
-      updatedAt: new Date().toISOString()
-    });
-    await saveState();
-    applySessionLabel();
-    renderSessionList();
-  }
 
 
 
@@ -8871,15 +8673,6 @@
 
 
 
-  function getRunningSessionIds() {
-    return (state.sessions || [])
-      .filter(isSessionRunning)
-      .map(session => session.id);
-  }
-
-  function isSessionRunning(session) {
-    return Boolean((session?.runs || []).some(run => run.status === 'running'));
-  }
 
 
   function getCurrentProjectReferenceFiles() {
@@ -10066,34 +9859,6 @@
       || null;
   }
 
-  function findSessionById(sessionId) {
-    if (!sessionId) {
-      return null;
-    }
-    return (state.sessions || []).find(session => session.id === sessionId)
-      || (state.session?.id === sessionId ? state.session : null);
-  }
-
-  function replaceSessionInState(session) {
-    if (!session?.id) {
-      return;
-    }
-    state = normalizePanelState({
-      ...state,
-      sessions: (state.sessions || []).map(item => item.id === session.id ? session : item)
-    });
-  }
-
-  function updateSessionById(sessionId, patch = {}) {
-    const session = findSessionById(sessionId);
-    if (!session) {
-      return;
-    }
-    replaceSessionInState({
-      ...session,
-      ...patch
-    });
-  }
 
   function createRunId() {
     return `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -10421,352 +10186,6 @@
     return tx('Nothing was written in this run. Review the skipped reasons, fix them, and retry.', '这轮没有任何内容写入。请查看跳过原因，处理后重试。');
   }
 
-  function appendApplyResult(result) {
-    if (!result) {
-      return;
-    }
-    const appliedEntries = getAppliedEntries(result);
-    const skippedEntries = getSkippedEntries(result);
-    const applied = appliedEntries.length;
-    const skipped = skippedEntries.length;
-    const skippedFailures = skippedEntries
-      .map(item => normalizeSkippedFailure(item))
-      .filter(Boolean);
-    const primaryFailure = pickPrimarySkippedFailure(skippedFailures);
-    const detail = {
-      [tx('Written', '已写入')]: appliedEntries.map(item => ({
-        [tr('detailAction')]: formatOperationType(item.operation?.type),
-        [tr('detailFile')]: item.operation?.path,
-        [tx('Status', '状态')]: item.result?.status
-      })),
-      [tr('detailSkipped')]: skippedEntries.map(item => buildSkippedDetail(item))
-    };
-    if (primaryFailure && primaryFailure.nextAction) {
-      detail[tr('detailNext')] = primaryFailure.nextAction;
-    }
-    appendRunEvent({
-      title: tx(`Write result: wrote ${applied} item(s), skipped ${skipped}`, `写入结果：已写入 ${applied} 项，跳过 ${skipped} 项`),
-      status: skipped ? 'failed' : 'completed',
-      detail
-    });
-  }
-
-  /**
-   * Build the per-skipped-entry detail block surfaced in the run-card expand
-   * view. Includes the canonical FailureReason fields (Reason/Stage/Code/Next)
-   * when the normalizer can produce a usable record, falling back to the
-   * legacy parenthesized reason otherwise.
-   */
-  function buildSkippedDetail(item) {
-    const operation = item?.operation || {};
-    const base = {
-      [tr('detailAction')]: formatOperationType(operation.type),
-      [tr('detailFile')]: operation.path,
-      [tr('detailReason')]: formatApplyResultReason(item)
-    };
-    const failure = normalizeSkippedFailure(item);
-    if (failure) {
-      base[tx('Stage', '阶段')] = failure.stage;
-      base[tx('Code', '代码')] = failure.code;
-      if (failure.nextAction) {
-        base[tr('detailNext')] = failure.nextAction;
-      }
-    }
-    return base;
-  }
-
-  /**
-   * Normalize a skipped writeback item into a localized FailureReason. Returns
-   * null when the FailureReasons module is unavailable so callers fall back to
-   * legacy rendering.
-   */
-  function normalizeSkippedFailure(item) {
-    if (!FailureReasons || !FailureReasons.normalizeFailureReason) return null;
-    const failure = FailureReasons.normalizeFailureReason(item?.result, item?.operation || {}, { locale: getLocale() });
-    if (!failure || !failure.code) return null;
-    const localized = FailureReasons.localizeFailureReason
-      ? FailureReasons.localizeFailureReason(failure, getLocale(), failureReasonI18nLookup)
-      : { userMessage: failure.userMessage, nextAction: failure.nextAction };
-    return Object.assign({}, failure, {
-      userMessage: localized.userMessage || failure.userMessage,
-      nextAction: localized.nextAction || failure.nextAction
-    });
-  }
-
-  function pickPrimarySkippedFailure(failures) {
-    if (!FailureReasons || !FailureReasons.selectPrimaryFailure) return null;
-    return FailureReasons.selectPrimaryFailure(failures);
-  }
-
-  function failureReasonI18nLookup(key) {
-    if (!i18n || !i18n.t) return undefined;
-    const localized = i18n.t(getLocale(), key);
-    // i18n.t returns the key itself on miss; treat that as a miss so the
-    // catalog fallback wins for codes without bespoke localization.
-    return localized && localized !== key ? localized : undefined;
-  }
-
-  /**
-   * Compact one-liner for toasts, collapsed run-card rows, and single-line
-   * debug logs: `<code>: <userMessage truncated to one line>`. Returns ''
-   * when the failure or its userMessage is missing.
-   * @param {{ code?: string, userMessage?: string } | null} failure
-   * @param {number} [maxLength=140]
-   * @returns {string}
-   */
-  function formatFailureReasonOneLiner(failure, maxLength) {
-    if (!failure || !failure.code || !failure.userMessage) return '';
-    const limit = Number.isFinite(maxLength) ? Math.max(40, Math.floor(maxLength)) : 140;
-    const flat = String(failure.userMessage).replace(/\s+/g, ' ').trim();
-    const codePrefix = `${failure.code}: `;
-    const remaining = Math.max(20, limit - codePrefix.length);
-    const truncated = flat.length > remaining ? `${flat.slice(0, remaining - 1).trimEnd()}…` : flat;
-    return `${codePrefix}${truncated}`;
-  }
-
-  function formatApplyResultReason(item = {}) {
-    const result = item.result || {};
-    const operation = item.operation || {};
-    const key = result.reasonKey || '';
-    const code = result.code || '';
-    const filePath = result.reasonParams?.filePath || operation.path || operation.from || operation.to || '';
-    const withDebug = reason => appendApplyResultDebug(reason, result);
-    if (key === 'missingBaseFile' || code === 'missing_base_file') {
-      const target = filePath || tx('this file', '这个文件');
-      return withDebug(tx(
-        `${target} was not read when the task started. Codex did not overwrite it; refresh the project content and retry.`,
-        `${target} 在任务开始时没有被 Codex 读到。Codex 没有覆盖它；请刷新项目内容后重试。`
-      ));
-    }
-    if (key === 'staleSnapshot' || code === 'stale_snapshot') {
-      const target = filePath || tx('this file', '这个文件');
-      return withDebug(tx(
-        `${target} changed while Codex was working, so Codex did not overwrite it. Review the diff and retry.`,
-        `${target} 在任务执行期间被你或协作者改过，Codex 没有覆盖它。请查看差异后重试。`
-      ));
-    }
-    if (key === 'stalePatchLocation') {
-      return withDebug(tx(
-        'The edit location no longer matches the current Overleaf content, so nothing was written. Rerun the task.',
-        'Codex 要修改的位置已经无法和当前 Overleaf 内容对齐，所以没有写入。请重新运行任务。'
-      ));
-    }
-    if (key === 'stalePatchConflict' || code === 'stale_patch_range') {
-      return withDebug(tx(
-        'The exact edit location was changed by you or a collaborator, so Codex did not overwrite it. Review the diff and retry.',
-        'Codex 要修改的具体位置已经被你或协作者改过，所以没有覆盖它。请查看差异后重试。'
-      ));
-    }
-    if (code === 'stale_patch') {
-      return withDebug(tx(
-        'This exact text changed since Codex read it, so nothing was written. Rerun after Codex reads the latest Overleaf content.',
-        '这处内容已经和 Codex 读取时不同，所以没有写入。请重新运行，让 Codex 先读取你的最新 Overleaf 内容。'
-      ));
-    }
-    if (code === 'invalid_patch') {
-      return withDebug(tx(
-        'Codex produced an invalid local edit range, so nothing was written.',
-        'Codex 生成的局部写入范围无效，所以没有写入。'
-      ));
-    }
-    if (code === 'write_verification_failed') {
-      return withDebug(tx(
-        'After writing, the editor content did not match Codex\'s expected result, so the write was not marked successful. Reload Overleaf and retry.',
-        '写入后读回内容和 Codex 预期不一致，已停止把这次操作标记为成功。请刷新 Overleaf 后重试。'
-      ));
-    }
-    if (code === 'file_tree_verification_failed') {
-      return tx(
-        'Overleaf did not confirm the file-tree operation, so Codex did not mark it successful.',
-        'Overleaf 文件树操作没有被确认，Codex 已停止把这次操作标记为成功。'
-      );
-    }
-    if (code === 'path_exists_in_snapshot') {
-      const target = filePath || tx('this file', '这个文件');
-      return tx(
-        `${target} already existed when the task started. Codex did not overwrite it; edit the file instead or choose another filename.`,
-        `${target} 在任务开始前已经存在。Codex 没有覆盖它；请改用修改文件或换一个文件名。`
-      );
-    }
-    if (code === 'path_created_since_snapshot') {
-      const target = filePath || tx('this file', '这个文件');
-      return tx(
-        `${target} was created by you or a collaborator while Codex was working, so Codex did not overwrite it. Review the diff and retry.`,
-        `${target} 在任务执行期间被你或协作者新建了，Codex 没有覆盖它。请查看差异后重试。`
-      );
-    }
-    return withDebug(localizeVisibleReason(result.reason || result.error || result.code || tr('unknownReason')));
-  }
-
-  function appendApplyResultDebug(reason, result = {}) {
-    const debug = result.debug || result.diagnostics;
-    const text = formatApplyResultDebug(debug);
-    return text ? `${reason} [debug: ${text}]` : reason;
-  }
-
-  function formatApplyResultDebug(debug) {
-    if (!debug || typeof debug !== 'object') {
-      return '';
-    }
-    const parts = [];
-    const add = (key, value) => {
-      if (value === undefined || value === null || value === '') {
-        return;
-      }
-      parts.push(`${key}=${String(value)}`);
-    };
-    add('stage', debug.stage);
-    add('rev', debug.revision);
-    add('op', debug.operationPath);
-    add('active', debug.activePath);
-    add('initial', debug.initialActivePath);
-    add('last', debug.lastActivePath);
-    add('currentLen', debug.current?.length);
-    add('currentNorm', debug.current?.normalizedLength);
-    add('currentHash', debug.current?.hash);
-    add('baseKnown', debug.baseKnown);
-    add('baseLen', debug.base?.length);
-    add('baseNorm', debug.base?.normalizedLength);
-    add('baseHash', debug.base?.hash);
-    add('elapsed', debug.elapsedMs);
-    add('opened', debug.openedMethod);
-    return parts.join(', ');
-  }
-
-  function formatBridgeResultReason(result = {}, fallbackPath = '') {
-    const code = result.code || '';
-    const path = result.path || fallbackPath || '';
-    if (getLocale() !== 'en') {
-      return localizeVisibleReason(result.reason || result.error || result.code || tr('unknownReason'));
-    }
-    if (code === 'missing_tracked_changes') {
-      return 'No matching Overleaf tracked-change records were found for this run, so Codex did not undo with text patches.';
-    }
-    if (code === 'tracked_change_file_open_failed') {
-      return path
-        ? `Could not open ${path} to find this run's tracked changes. Handle them manually in the Overleaf review tools.`
-        : 'Could not open the file to find this run\'s tracked changes. Handle them manually in the Overleaf review tools.';
-    }
-    if (code === 'tracked_change_not_found') {
-      return 'No matching tracked changes were found on the Overleaf page for this run.';
-    }
-    if (code === 'tracked_change_reject_control_not_found') {
-      return path
-        ? `Some tracked changes in ${path} remain, but the matching Reject button was not found. Reject them manually in Overleaf.`
-        : 'Some tracked changes remain, but the matching Reject button was not found. Reject them manually in Overleaf.';
-    }
-    if (code === 'tracked_change_reject_not_confirmed') {
-      return 'Codex clicked Reject, but Overleaf still shows this tracked change. Reject it manually in the Overleaf review panel.';
-    }
-    if (code === 'tracked_change_accept_control_not_found') {
-      return path
-        ? `Some tracked changes in ${path} remain, but the matching Accept button was not found. Accept them manually in Overleaf.`
-        : 'Some tracked changes remain, but the matching Accept button was not found. Accept them manually in Overleaf.';
-    }
-    if (code === 'tracked_change_accept_not_confirmed') {
-      return 'Codex clicked Accept, but Overleaf still shows this tracked change. Accept it manually in the Overleaf review panel.';
-    }
-    if (code === 'tracked_change_editor_undo_open_failed') {
-      return path ? `Could not open ${path} for Overleaf native undo.` : 'Could not open the file for Overleaf native undo.';
-    }
-    if (code === 'tracked_change_editor_undo_current_mismatch') {
-      return path
-        ? `${path} no longer matches this run's written content, so Codex did not use Overleaf native undo.`
-        : 'The current content no longer matches this run\'s written content, so Codex did not use Overleaf native undo.';
-    }
-    if (code === 'editor_undo_control_not_found') {
-      return path
-        ? `Could not find Overleaf's editor Undo button to undo this run in ${path}.`
-        : 'Could not find Overleaf\'s editor Undo button to undo this run.';
-    }
-    if (code === 'editor_undo_no_progress') {
-      return path
-        ? `Codex clicked Overleaf Undo, but ${path} did not change.`
-        : 'Codex clicked Overleaf Undo, but the file did not change.';
-    }
-    if (code === 'editor_undo_max_iterations') {
-      return path
-        ? `${path} did not return to its pre-run content after repeated Overleaf native undo steps. Codex stopped to avoid undoing other edits.`
-        : 'The file did not return to its pre-run content after repeated Overleaf native undo steps. Codex stopped to avoid undoing other edits.';
-    }
-    if (code === 'tracked_change_undo_max_iterations') {
-      return path
-        ? `${path} still has tracked changes left. Codex stopped to avoid rejecting unrelated edits.`
-        : 'Tracked changes are still left. Codex stopped to avoid rejecting unrelated edits.';
-    }
-    if (code === 'tracked_change_undo_verify_open_failed') {
-      return path
-        ? `Could not open ${path} after undo to verify content. Reload Overleaf and check manually.`
-        : 'Could not open the file after undo to verify content. Reload Overleaf and check manually.';
-    }
-    if (code === 'tracked_change_undo_verify_failed') {
-      return path
-        ? `${path} did not return to its pre-run content after rejecting tracked changes. Check this run's changes in the Overleaf review panel.`
-        : 'The file did not return to its pre-run content after rejecting tracked changes. Check this run\'s changes in the Overleaf review panel.';
-    }
-    return localizeVisibleReason(result.reason || result.error || result.code || tr('unknownReason'));
-  }
-
-  function localizeVisibleReason(reason) {
-    const text = String(reason || '').trim();
-    if (!text || getLocale() !== 'en') {
-      return text;
-    }
-    let match = text.match(/^(.+?) 在任务开始时没有被 Codex 读到。Codex 没有覆盖它；请刷新项目内容后重试。$/);
-    if (match) {
-      return `${match[1]} was not read when the task started. Codex did not overwrite it; refresh the project content and retry.`;
-    }
-    match = text.match(/^(.+?) 在任务执行期间被你或协作者改过，Codex 没有覆盖它。请查看差异后重试。$/);
-    if (match) {
-      return `${match[1]} changed while Codex was working, so Codex did not overwrite it. Review the diff and retry.`;
-    }
-    if (text.includes('Codex 要修改的位置已经无法和当前 Overleaf 内容对齐')) {
-      return 'The edit location no longer matches the current Overleaf content, so nothing was written. Rerun the task.';
-    }
-    if (text.includes('Codex 要修改的具体位置已经被你或协作者改过')) {
-      return 'The exact edit location was changed by you or a collaborator, so Codex did not overwrite it. Review the diff and retry.';
-    }
-    const patchMatch = text.match(/^同步本地 Codex workspace 中的局部文件改动（(\d+) 处）。$/);
-    if (patchMatch) {
-      const count = Number(patchMatch[1]) || 0;
-      return `Synced ${count} local Codex workspace edit${count === 1 ? '' : 's'}.`;
-    }
-    if (text === '本地 Codex workspace 删除了这个文件。') {
-      return 'Local Codex workspace deleted this file.';
-    }
-    if (text === '同步本地 Codex workspace 中的文件内容。') {
-      return 'Synced file content from the local Codex workspace.';
-    }
-    if (text === '同步本地 Codex workspace 中的新文件。') {
-      return 'Synced a new file from the local Codex workspace.';
-    }
-    return text;
-  }
-
-  function formatOperationType(type) {
-    const labels = {
-      edit: tr('operationEdit'),
-      create: tr('operationCreate'),
-      rename: tr('operationRename'),
-      move: tr('operationMove'),
-      delete: tr('operationDelete')
-    };
-    return labels[type] || type || tr('operationUnknown');
-  }
-
-  function formatOperationFiles(operations = []) {
-    const files = [];
-    const seen = new Set();
-    for (const operation of operations || []) {
-      const path = operation?.path || operation?.from || operation?.to;
-      if (!path || seen.has(path)) {
-        continue;
-      }
-      seen.add(path);
-      files.push(path);
-    }
-    return files.length ? files.join(', ') : tr('noneValue');
-  }
 
   function appendLog(text) {
     if (currentRunView) {

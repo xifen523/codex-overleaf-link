@@ -29,7 +29,8 @@ test('normalizePanelState never prunes the sole session', () => {
 });
 
 test('startNewSession reuses an empty idle active session instead of minting a ghost', () => {
-  const src = repo('extension/src/content/contentRuntime.js');
+  // v1.4.7: the session lifecycle lives in sessionManager.js.
+  const src = repo('extension/src/content/sessionManager.js');
   const body = extractFunction(src, 'startNewSession');
   assert.match(body, /!isDisplayableSession\(active\)\s*&&\s*!isSessionRunning\(active\)/);
   assert.match(body, /\[data-task\]'\)\?\.focus\(\)/);
@@ -37,7 +38,7 @@ test('startNewSession reuses an empty idle active session instead of minting a g
 
 test('the active-session header bar exposes inline rename + delete', () => {
   const renderer = repo('extension/src/content/panelRenderer.js');
-  const runtime = repo('extension/src/content/contentRuntime.js');
+  const runtime = repo('extension/src/content/sessionManager.js');
   // markup
   assert.match(renderer, /data-session-label-text/);
   assert.match(renderer, /data-session-rename-input/);
@@ -46,7 +47,7 @@ test('the active-session header bar exposes inline rename + delete', () => {
   // wiring + flow
   assert.match(runtime, /function bindActiveSessionHeader\(/);
   assert.match(runtime, /function beginActiveSessionRename\(/);
-  assert.match(runtime, /deleteSessionWithConfirm\(state\.activeSessionId\)/);
+  assert.match(runtime, /deleteSessionWithConfirm\(getState\(\)\.activeSessionId\)/);
   // header never blank: empty active falls back to the placeholder
   const label = extractFunction(runtime, 'applySessionLabel');
   assert.match(label, /newSessionFallback/);
@@ -54,7 +55,7 @@ test('the active-session header bar exposes inline rename + delete', () => {
 });
 
 test('deleting an empty session skips the modal; deleting the only session reads as Reset', () => {
-  const runtime = repo('extension/src/content/contentRuntime.js');
+  const runtime = repo('extension/src/content/sessionManager.js');
   const body = extractFunction(runtime, 'deleteSessionWithConfirm');
   assert.match(body, /!isDisplayableSession\(target\)/, 'empty sessions take a skip-modal branch');
   assert.match(body, /deleteSessionDeletedToast/);
@@ -67,7 +68,7 @@ test('the session list keeps its expanded state across re-renders', () => {
   const sessionPanel = repo('extension/src/content/sessionPanel.js');
   const update = extractFunction(sessionPanel, 'update');
   assert.match(update, /if \(updateOptions\.showAll !== undefined\)/, 'showAll only changes when explicitly provided');
-  const runtime = repo('extension/src/content/contentRuntime.js');
+  const runtime = repo('extension/src/content/sessionManager.js');
   const renderList = extractFunction(runtime, 'renderSessionList');
   assert.match(renderList, /if \(options\.showAll !== undefined\)/);
 });
@@ -84,7 +85,7 @@ test('renaming never promotes the placeholder/auto-derived title to a manual gho
   // Adversarial-review regression: header-renaming an empty session must not
   // commit the localized "New Session" placeholder as a manual title (which
   // would resurrect the ghost the prune/reuse-guard eliminate).
-  const runtime = repo('extension/src/content/contentRuntime.js');
+  const runtime = repo('extension/src/content/sessionManager.js');
   const commit = extractFunction(runtime, 'commitSessionRename');
   assert.match(commit, /cleanTitle !== tr\('newSessionFallback'\)/);
   assert.match(commit, /cleanTitle !== derived/);
@@ -95,7 +96,7 @@ test('renaming never promotes the placeholder/auto-derived title to a manual gho
 });
 
 test('header delete is disabled for the sole empty session + rename control is localized', () => {
-  const runtime = repo('extension/src/content/contentRuntime.js');
+  const runtime = repo('extension/src/content/sessionManager.js');
   const label = extractFunction(runtime, 'applySessionLabel');
   assert.match(label, /soleEmpty/);
   assert.match(label, /\.length <= 1/);

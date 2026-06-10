@@ -31,9 +31,10 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // underway and the ceiling LOWERS with each phase to lock the gain:
     // v1.4.5 carved the markdown/assistant-text renderer + the diagnostics
     // controller (12850 → 11850); v1.4.6 carved the run-timeline render
-    // pipeline (11850 → 11000). Next natural carve: session management.
+    // pipeline (11850 → 11000); v1.4.7 carved session management + the
+    // apply-result formatters (11000 → 10450).
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 11000
+    maxLines: 10450
   },
   {
     // Carved from contentRuntime in v1.4.5: markdown/inline rendering, the
@@ -53,6 +54,18 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // Undo/Accept controls).
     path: 'extension/src/content/runTimelineView.js',
     maxLines: 950
+  },
+  {
+    // Carved from contentRuntime in v1.4.7: the session lifecycle + list
+    // surface (create/switch/rename/delete, header bar, running guards).
+    path: 'extension/src/content/sessionManager.js',
+    maxLines: 400
+  },
+  {
+    // Carved from contentRuntime in v1.4.7: apply-result / failure-reason
+    // formatters (skipped details, bilingual apply/bridge reasons).
+    path: 'extension/src/content/applyResultFormatters.js',
+    maxLines: 450
   },
   {
     // Writeback router: large but cohesive. v1.3.9 added the cross-world

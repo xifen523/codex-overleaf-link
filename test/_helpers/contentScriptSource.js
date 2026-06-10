@@ -16,6 +16,8 @@ const CONTENT_SOURCE_PATHS = [
   path.join(CONTENT_DIR, 'markdownText.js'),
   path.join(CONTENT_DIR, 'diagnosticsController.js'),
   path.join(CONTENT_DIR, 'runTimelineView.js'),
+  path.join(CONTENT_DIR, 'sessionManager.js'),
+  path.join(CONTENT_DIR, 'applyResultFormatters.js'),
   CONTENT_SCRIPT_PATH
 ];
 
