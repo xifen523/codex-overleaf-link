@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.5.1 - 2026-06-03
+
+Critical hotfix — the panel did not mount at all in the browser on v1.4.6 through v1.5.0.
+
+### Fixed
+
+- **Panel never mounted (regression since v1.4.6).** The structural-split releases left the module-composition wiring (`const { scrollLogToBottom, ... } = runTimelineView`, and seven sibling blocks) *after* the controller creations that consume those exports by value, so `init()` died in the temporal dead zone before the panel could mount. The wiring (plus the four shared consts it passes by value) now runs at the top of `init()`, before any consumer. The whole test suite stayed green across four releases because no test executed the load path — see below.
+
+### Added
+
+- **Load-order smoke test.** `test/contentScriptLoadOrder.test.js` loads every manifest content script in order inside a minimal DOM/chrome sandbox and runs the real `init()` end to end (panel mount included), failing on any load-order / TDZ / missing-global regression in the composition path. It fails on v1.4.6–v1.5.0 and passes on this release.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.5.1 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.5.1` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.5.1.zip`, `codex-overleaf-native-host-v1.5.1.tar.gz`, and `codex-overleaf-link-1.5.1.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.5.1 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.5.1 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.5.1 -- uninstall-native`.
+
 ## v1.5.0 - 2026-06-03
 
 Feature release — the session switcher comes to the header, plus composer polish. The native protocol stays `1`.
