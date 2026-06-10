@@ -1623,7 +1623,9 @@ test('running Codex tasks only lock the running session, not the whole session l
   const startNewBody = contentScript.match(/async function startNewSession\(\) \{[\s\S]*?\n  async function switchSession/)?.[0] || '';
   const deleteBody = contentScript.match(/async function deleteSessionWithConfirm\(sessionId\) \{[\s\S]*?\n  function setRunning/)?.[0] || '';
   const setRunningBody = contentScript.match(/function setRunning\(running\) \{[\s\S]*?\n  function startRunView/)?.[0] || '';
-  const sessionListBody = contentScript.match(/function renderSessionList\(options = \{\}\) \{[\s\S]*?\n  function renderRunHistory/)?.[0] || '';
+  // v1.4.6: renderRunHistory moved into runTimelineView.js, so the slice ends
+  // at the next function that stayed in the runtime.
+  const sessionListBody = contentScript.match(/function renderSessionList\(options = \{\}\) \{[\s\S]*?\n  function getSessionDisplayTitle/)?.[0] || '';
 
   assert.doesNotMatch(startNewBody, /Finish the current Codex task before starting a new session/);
   assert.doesNotMatch(setRunningBody, /\[data-new-session\]'\)\.disabled = running/);

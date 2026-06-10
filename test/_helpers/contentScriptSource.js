@@ -15,6 +15,7 @@ const CONTENT_SCRIPT_PATH = path.join(CONTENT_DIR, 'contentRuntime.js');
 const CONTENT_SOURCE_PATHS = [
   path.join(CONTENT_DIR, 'markdownText.js'),
   path.join(CONTENT_DIR, 'diagnosticsController.js'),
+  path.join(CONTENT_DIR, 'runTimelineView.js'),
   CONTENT_SCRIPT_PATH
 ];
 
