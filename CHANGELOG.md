@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.5.0 - 2026-06-03
+
+Feature release — the session switcher comes to the header, plus composer polish. The native protocol stays `1`.
+
+### Added
+
+- **Header session dropdown.** The active-session title is now a switcher: click it to list every saved session (newest first, active highlighted, running marked with a spinner), switch with one click, or start a **+ New Session** from the same menu. Escape or clicking anywhere else closes it; the embedded Sessions list below stays as the always-visible overview. Inline rename/delete on the header keep working as before.
+- **Empty-timeline hint.** The idle panel now teaches the two composer affordances: "Type @ to add files, / to run commands."
+
+### Changed
+
+- **Model picker reads as a control.** The model/reasoning selector rests as a quiet pill (subtle surface + reserved border) instead of looking like static text, with a thin separator between the model and reasoning labels.
+- Release flow now leans on the existing tag-triggered CI pipeline (3-OS test matrix → npm publish with provenance → GitHub release); local builds remain a pre-flight check.
+
+### Fixed
+
+- Run teardown paths that bypass the normal finish flow now stop the live-elapsed ticker explicitly (it previously self-healed within one tick).
+- Settings panel teardown clears its transient Saved-flash timer; dead `tl-pulse` keyframes removed from the stylesheet.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.5.0 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.5.0` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.5.0.zip`, `codex-overleaf-native-host-v1.5.0.tar.gz`, and `codex-overleaf-link-1.5.0.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.5.0 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.5.0 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.5.0 -- uninstall-native`.
+
 ## v1.4.9 - 2026-06-03
 
 Maintenance release — structural debt, phase 5: the final planned carve. No user-visible behavior changes; the native protocol stays `1`.
