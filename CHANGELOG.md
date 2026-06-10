@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.4.7 - 2026-06-03
+
+Maintenance release — structural debt, phase 3. Continues the `contentRuntime.js` split. No user-visible behavior changes; the native protocol stays `1`.
+
+### Changed
+
+- **`contentRuntime.js` carved down 10,965 → 10,384 lines** (cumulative since the split began: 12,837 → 10,384). Two more cohesive clusters moved verbatim into focused modules wired back through factory injection:
+  - `sessionManager.js` (new): the session lifecycle + list surface — create/switch/rename/delete, the active-session header bar, running guards, and the find/replace state helpers. Session mutations are immutable-update: the module rebuilds panel state through the shared `sessionState` helpers and hands it back to the runtime via an injected `setState`.
+  - `applyResultFormatters.js` (new): the apply-result / failure-reason formatters — skipped-change details and the bilingual apply/bridge reason texts.
+- **Architecture ceiling lowered again, 11,000 → 10,450**, with the two new modules under their own 400/450-line budgets.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.4.7 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.4.7` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.4.7.zip`, `codex-overleaf-native-host-v1.4.7.tar.gz`, and `codex-overleaf-link-1.4.7.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.4.7 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.4.7 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.4.7 -- uninstall-native`.
+
 ## v1.4.6 - 2026-06-03
 
 Maintenance release — structural debt, phase 2. Continues the `contentRuntime.js` split begun in v1.4.5 and consolidates the test-sandbox boilerplate that made each refactor expensive. No user-visible behavior changes; the native protocol stays `1`.
