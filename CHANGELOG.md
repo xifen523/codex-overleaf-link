@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.4.5 - 2026-06-03
+
+Maintenance release — structural debt, phase 1. `contentRuntime.js` had grown to ~12,800 lines against a ceiling that five consecutive releases had to raise; this release lands the first real split and **lowers** the ceiling to lock the gain. No user-visible behavior changes; the native protocol stays `1`.
+
+### Changed
+
+- **`contentRuntime.js` carved down 12,837 → 11,742 lines.** Two cohesive clusters moved verbatim into focused modules wired back through factory injection, so every existing call site (and the behavior) is unchanged:
+  - `markdownText.js` (new): block + inline markdown rendering, the assistant-visible sanitizers, and line-reference resolution/jump buttons.
+  - `diagnosticsController.js` (new): the diagnostics check runners, Run-all aggregation, and result formatters behind the diagnostics menu.
+- **Architecture ceiling lowered 12,850 → 11,850** for `contentRuntime.js` (after five consecutive raises), with the two new modules under their own 700-line budgets — future growth must justify itself in the diff again.
+- Source-contract tests now treat the runtime + its carved modules as one logical source (`test/_helpers/contentScriptSource.js` concatenates them), so the function-level test contracts keep holding wherever code lives.
+- Closed the remaining `typeof` audit (task #70) by policy: the survivors are feature-detection on foreign Overleaf DOM/editor objects — the legitimate category the v1.3.9 cleanup deliberately kept; no DI guards remain.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.4.5 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.4.5` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.4.5.zip`, `codex-overleaf-native-host-v1.4.5.tar.gz`, and `codex-overleaf-link-1.4.5.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.4.5 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.4.5 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.4.5 -- uninstall-native`.
+
 ## v1.4.4 - 2026-06-03
 
 Session-management release. Managing Codex sessions was awkward from the main panel — delete/rename were reachable only from the small hover-revealed per-row controls, the session you actually work in had no controls and could even be blank, and a hidden data-loss path could evict real history. v1.4.4 makes session management work from the main interface and fixes that bug. No change to runs or writeback; the native protocol stays `1`.
