@@ -8,10 +8,11 @@ const repo = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 
 test('model picker rests as a quiet pill with a model/reasoning separator', () => {
   const css = repo('extension/styles/panel.css');
-  const rest = css.match(/#codex-overleaf-panel \.codex-model-config-button \{[\s\S]*?\n\}/g) || [];
+  // \r?\n: Windows checkouts may materialize CRLF line endings.
+  const rest = css.match(/#codex-overleaf-panel \.codex-model-config-button \{[\s\S]*?\r?\n\}/g) || [];
   assert.ok(rest.some(block => /background-color: var\(--tl-surface-2\)/.test(block)
     && /border: 1px solid transparent/.test(block)), 'resting pill: surface bg + reserved border');
-  assert.match(css, /\.codex-model-config-button\[data-active="true"\],\n#codex-overleaf-panel \.codex-model-config-button:hover \{[^}]*border-color: var\(--tl-border\)/);
+  assert.match(css, /\.codex-model-config-button\[data-active="true"\],\r?\n#codex-overleaf-panel \.codex-model-config-button:hover \{[^}]*border-color: var\(--tl-border\)/);
   assert.match(css, /\[data-reasoning-display\] \{[^}]*border-left: 1px solid var\(--tl-border\)/);
 });
 
