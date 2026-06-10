@@ -285,7 +285,10 @@
       icon.src = chrome.runtime.getURL('assets/icons/codex-overleaf-icon.png');
       const label = document.createElement('div');
       label.textContent = tr('emptyRunLabel');
-      empty.append(icon, label);
+      const hint = document.createElement('div');
+      hint.className = 'empty-runs-hint';
+      hint.textContent = tr('emptyRunsHint');
+      empty.append(icon, label, hint);
       log.append(empty);
       return;
     }

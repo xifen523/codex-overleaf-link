@@ -432,9 +432,11 @@
     getPanel: () => panel,
     getState: () => state,
     setState: next => { state = next; },
-    getSessionPanelInstance: () => sessionPanelInstance
+    getSessionPanelInstance: () => sessionPanelInstance,
+    formatSessionTime
   });
   const {
+    closeSessionMenu,
     applySessionLabel,
     bindActiveSessionHeader,
     startNewSession,
@@ -2210,6 +2212,7 @@
     } finally {
       setRunning(false);
       nativeChannel.clearActiveRequest();
+      stopRunElapsedTick();
       currentRunView = null;
       runCancellationRequested = false;
       if (isExperimentalOtEnabled()) {
@@ -2455,6 +2458,7 @@
     runTask().catch(error => {
       setRunning(false);
       nativeChannel.clearActiveRequest();
+      stopRunElapsedTick();
       currentRunView = null;
       console.error('[codex-overleaf] failed to start task', error);
       appendPlainLog(tx(`Could not start Codex task: ${error.message}`, `无法启动 Codex 任务：${error.message}`));

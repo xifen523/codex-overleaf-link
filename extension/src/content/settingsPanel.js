@@ -337,6 +337,10 @@
   }
 
   function destroy(instance) {
+    if (instance._savedFlashTimer) {
+      clearTimeout(instance._savedFlashTimer);
+      instance._savedFlashTimer = null;
+    }
     instance.container.textContent = '';
   }
 

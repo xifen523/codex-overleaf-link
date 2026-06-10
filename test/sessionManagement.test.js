@@ -105,10 +105,48 @@ test('header delete is disabled for the sole empty session + rename control is l
 
 test('session-management i18n is available in English and Chinese', () => {
   const I18n = require('../extension/src/shared/i18n');
-  for (const key of ['sessionsHead', 'sessionListEmpty', 'deleteSessionDeletedToast', 'resetSessionTitle', 'resetSessionMessage', 'resetSessionConfirm']) {
+  for (const key of ['sessionsHead', 'sessionListEmpty', 'deleteSessionDeletedToast', 'resetSessionTitle', 'resetSessionMessage', 'resetSessionConfirm', 'sessionMenuOpen']) {
     assert.notEqual(I18n.t('en', key), key, `missing English ${key}`);
     assert.notEqual(I18n.t('zh', key), key, `missing Chinese ${key}`);
   }
+});
+
+test('the header title is a session dropdown: list, switch, and New session in place', () => {
+  const renderer = repo('extension/src/content/panelRenderer.js');
+  assert.match(renderer, /data-session-menu-trigger/);
+  assert.match(renderer, /data-session-menu\b/);
+  assert.match(renderer, /codex-thread-title-chevron/);
+
+  const manager = repo('extension/src/content/sessionManager.js');
+  assert.match(manager, /function toggleSessionMenu\(/);
+  assert.match(manager, /function closeSessionMenu\(/);
+  const render = extractFunction(manager, 'renderSessionMenu');
+  // every saved (displayable) session, newest first, active + running marked
+  assert.match(render, /filter\(isDisplayableSession\)/);
+  assert.match(render, /sort\(/);
+  assert.match(render, /dataset\.active = session\.id === state\?\.activeSessionId/);
+  assert.match(render, /dataset\.running = isSessionRunning\(session\)/);
+  assert.match(render, /formatSessionTime\(session\.updatedAt \|\| session\.createdAt\)/);
+  // row click switches (no-op for the active row); footer mints a new session
+  assert.match(render, /switchSession\(session\.id\)/);
+  assert.match(render, /startNewSession\(\)/);
+  assert.match(render, /tr\('newSession'\)/);
+  // outside-click dismiss uses the capture phase so panel click-stoppers
+  // cannot swallow it; Escape closes too
+  const bindBody = extractFunction(manager, 'bindActiveSessionHeader');
+  assert.match(bindBody, /document\.addEventListener\('click',[\s\S]*?, true\)/);
+  assert.match(bindBody, /event\.key === 'Escape'/);
+  // renaming hides the trigger while the input is showing
+  const begin = extractFunction(manager, 'beginActiveSessionRename');
+  assert.match(begin, /trigger\.hidden = true/);
+  // trigger is localized like the rest of the header bar
+  const label = extractFunction(manager, 'applySessionLabel');
+  assert.match(label, /tr\('sessionMenuOpen'\)/);
+
+  const css = repo('extension/styles/panel.css');
+  assert.match(css, /\.codex-session-menu \{/);
+  assert.match(css, /\.codex-session-menu-item\[data-active="true"\]/);
+  assert.match(css, /\.codex-thread-title-trigger/);
 });
 
 test('panel.css styles the active-session bar and visible row controls', () => {

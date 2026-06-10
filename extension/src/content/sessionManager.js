@@ -31,10 +31,16 @@
       getPanel,
       getState,
       setState,
-      getSessionPanelInstance
+      getSessionPanelInstance,
+      formatSessionTime
     } = deps;
 
   function applySessionLabel() {
+    const trigger = getPanel().querySelector('[data-session-menu-trigger]');
+    if (trigger) {
+      trigger.title = tr('sessionMenuOpen');
+      trigger.setAttribute('aria-label', tr('sessionMenuOpen'));
+    }
     const textNode = getPanel().querySelector('[data-session-label-text]');
     const deleteButton = getPanel().querySelector('[data-session-delete]');
     const renameButton = getPanel().querySelector('[data-session-rename]');
@@ -77,6 +83,95 @@
       event.stopPropagation();
       beginActiveSessionRename();
     });
+    getPanel().querySelector('[data-session-menu-trigger]')?.addEventListener('click', event => {
+      event.stopPropagation();
+      toggleSessionMenu();
+    });
+    // Close the dropdown on any click outside it (capture phase, so the
+    // panel's own click-stoppers don't swallow the dismiss — same pattern as
+    // the diagnostics menu) and on Escape.
+    document.addEventListener('click', event => {
+      const menu = getPanel()?.querySelector('[data-session-menu]');
+      if (!menu || menu.hidden) {
+        return;
+      }
+      const trigger = getPanel()?.querySelector('[data-session-menu-trigger]');
+      if (menu.contains(event.target) || trigger?.contains(event.target)) {
+        return;
+      }
+      closeSessionMenu();
+    }, true);
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        closeSessionMenu();
+      }
+    }, true);
+  }
+
+  // Header session dropdown: lists every saved session where the user works,
+  // switches on click, and offers New session — the embedded list below stays
+  // as the always-visible overview.
+  function toggleSessionMenu() {
+    const menu = getPanel()?.querySelector('[data-session-menu]');
+    if (!menu) {
+      return;
+    }
+    if (menu.hidden) {
+      renderSessionMenu(menu);
+    }
+    menu.hidden = !menu.hidden;
+    getPanel()?.querySelector('[data-session-menu-trigger]')
+      ?.setAttribute('aria-expanded', menu.hidden ? 'false' : 'true');
+  }
+
+  function closeSessionMenu() {
+    const menu = getPanel()?.querySelector('[data-session-menu]');
+    if (!menu || menu.hidden) {
+      return;
+    }
+    menu.hidden = true;
+    getPanel()?.querySelector('[data-session-menu-trigger]')?.setAttribute('aria-expanded', 'false');
+  }
+
+  function renderSessionMenu(menu) {
+    menu.replaceChildren();
+    const state = getState();
+    const sessions = (state?.sessions || [])
+      .filter(isDisplayableSession)
+      .slice()
+      .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
+    for (const session of sessions) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'codex-session-menu-item';
+      row.dataset.active = session.id === state?.activeSessionId ? 'true' : 'false';
+      row.dataset.running = isSessionRunning(session) ? 'true' : 'false';
+      const title = document.createElement('span');
+      title.className = 'codex-session-menu-item-title';
+      title.textContent = getSessionDisplayTitle(session);
+      const time = document.createElement('time');
+      time.className = 'codex-session-menu-item-time';
+      time.textContent = formatSessionTime(session.updatedAt || session.createdAt);
+      row.append(title, time);
+      row.addEventListener('click', event => {
+        event.stopPropagation();
+        closeSessionMenu();
+        if (session.id !== getState()?.activeSessionId) {
+          switchSession(session.id);
+        }
+      });
+      menu.append(row);
+    }
+    const create = document.createElement('button');
+    create.type = 'button';
+    create.className = 'codex-session-menu-new';
+    create.textContent = `+ ${tr('newSession')}`;
+    create.addEventListener('click', event => {
+      event.stopPropagation();
+      closeSessionMenu();
+      startNewSession();
+    });
+    menu.append(create);
   }
 
   // Inline-rename the active session from the header bar (mirrors the per-row
@@ -84,11 +179,13 @@
   function beginActiveSessionRename() {
     const active = getActiveSession(getState());
     const wrap = getPanel().querySelector('[data-session-label]');
+    const trigger = getPanel().querySelector('[data-session-menu-trigger]');
     const textNode = getPanel().querySelector('[data-session-label-text]');
     const input = getPanel().querySelector('[data-session-rename-input]');
     if (!active || !wrap || !textNode || !input) {
       return;
     }
+    closeSessionMenu();
     let settled = false;
     wrap.dataset.editing = 'true';
     // Seed the box from a real title only; an empty/auto session opens blank so
@@ -97,6 +194,9 @@
     input.value = seed;
     input.hidden = false;
     textNode.hidden = true;
+    if (trigger) {
+      trigger.hidden = true;
+    }
     input.focus();
     input.select();
     const cleanup = () => {
@@ -111,6 +211,9 @@
       cleanup();
       input.hidden = true;
       textNode.hidden = false;
+      if (trigger) {
+        trigger.hidden = false;
+      }
       delete wrap.dataset.editing;
       // Treat an unchanged value (incl. a no-op blur) as a cancel so it never
       // rewrites the title source.
@@ -316,6 +419,7 @@
   }
 
     return {
+      closeSessionMenu,
       applySessionLabel,
       bindActiveSessionHeader,
       startNewSession,
