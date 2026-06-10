@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.4.8 - 2026-06-03
+
+Maintenance release — structural debt, phase 4. Continues the `contentRuntime.js` split. No user-visible behavior changes; the native protocol stays `1`.
+
+### Changed
+
+- **`contentRuntime.js` carved down 10,384 → 9,573 lines** (cumulative since the split began: 12,837 → 9,573, −25%). Two more cohesive clusters moved verbatim into focused modules wired back through factory injection:
+  - `modelPicker.js` (new): the model/reasoning/speed catalog, native discovery, the selects, and the config popover. The model-discovery status lives with the code that maintains it; the runtime reads it for the diagnostics bundle through `getModelDiscovery()`.
+  - `recentProjects.js` (new): the cross-project recent-projects dashboard — the account-scoped project-name cache + DOM enrichment, the welcome/empty/degraded states, row rendering, and the variant switchers.
+- **Architecture ceiling lowered again, 10,450 → 9,600**, with the two new modules under their own 550/520-line budgets.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.4.8 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.4.8` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.4.8.zip`, `codex-overleaf-native-host-v1.4.8.tar.gz`, and `codex-overleaf-link-1.4.8.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.4.8 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.4.8 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.4.8 -- uninstall-native`.
+
 ## v1.4.7 - 2026-06-03
 
 Maintenance release — structural debt, phase 3. Continues the `contentRuntime.js` split. No user-visible behavior changes; the native protocol stays `1`.
