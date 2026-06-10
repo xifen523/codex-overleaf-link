@@ -33,9 +33,12 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // controller (12850 → 11850); v1.4.6 carved the run-timeline render
     // pipeline (11850 → 11000); v1.4.7 carved session management + the
     // apply-result formatters (11000 → 10450); v1.4.8 carved the model picker
-    // + the recent-projects dashboard (10450 → 9600).
+    // + the recent-projects dashboard (10450 → 9600); v1.4.9 carved the OT
+    // warm-mirror glue (9600 → 8800). The split stops here: what remains is
+    // the genuinely cohesive run-orchestration core.
+    // + the recent-projects dashboard.
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 9600
+    maxLines: 8800
   },
   {
     // Carved from contentRuntime in v1.4.5: markdown/inline rendering, the
@@ -79,6 +82,12 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // dashboard (name cache, welcome/empty/degraded states, row rendering).
     path: 'extension/src/content/recentProjects.js',
     maxLines: 520
+  },
+  {
+    // Carved from contentRuntime in v1.4.9: the experimental OT warm-mirror
+    // glue (toggle flow, poll/flush timers, prefetch, warm-start, status).
+    path: 'extension/src/content/otWarmMirror.js',
+    maxLines: 1000
   },
   {
     // Writeback router: large but cohesive. v1.3.9 added the cross-world

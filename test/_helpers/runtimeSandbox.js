@@ -71,7 +71,10 @@ const RUNTIME_STUBS = {
   // backing locals themselves, so the defaults resolve them when present)
   getPanel: "function getPanel() { return typeof panel !== 'undefined' ? panel : null; }",
   getState: "function getState() { return typeof state !== 'undefined' ? state : null; }",
+  setState: "function setState(next) { if (typeof state !== 'undefined') { state = next; } }",
   getCurrentRunView: "function getCurrentRunView() { return typeof currentRunView !== 'undefined' ? currentRunView : null; }",
+  getCurrentOtStatus: "function getCurrentOtStatus() { return typeof currentOtStatus !== 'undefined' ? currentOtStatus : 'off'; }",
+  getLastExperimentalOtProjectId: "function getLastExperimentalOtProjectId() { return typeof lastExperimentalOtProjectId !== 'undefined' ? lastExperimentalOtProjectId : ''; }",
   stopRunElapsedTick: 'function stopRunElapsedTick() {}'
 };
 

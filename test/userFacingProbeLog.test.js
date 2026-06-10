@@ -130,8 +130,10 @@ test('probe status line shows OT state only when the experimental mirror is enab
   assert.match(contentScript, /function appendOtStatusToProbeStatus\(/);
   assert.match(statusBody, /appendOtStatusToProbeStatus\(/);
   assert.match(contentScript, /isExperimentalOtEnabled\(\)/);
-  assert.match(contentScript, /formatOtStatusLabel\(currentOtStatus\)/);
-  assert.match(contentScript, /OT \$\{formatOtStatusLabel\(currentOtStatus\)\}/);
+  // v1.4.9: the OT status lives in otWarmMirror.js; the probe suffix reads it
+  // through the exported getter.
+  assert.match(contentScript, /formatOtStatusLabel\(getCurrentOtStatus\(\)\)/);
+  assert.match(contentScript, /OT \$\{formatOtStatusLabel\(getCurrentOtStatus\(\)\)\}/);
 });
 
 test('probe footer readiness follows current mode instead of requiring Reviewing for ask mode', () => {

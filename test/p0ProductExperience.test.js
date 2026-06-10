@@ -1274,7 +1274,7 @@ test('experimental OT warm mirror polls page OT events and patches the native mi
   assert.match(contentScript, /CodexOverleafOtWarmMirrorController/);
   assert.match(contentScript, /function scheduleOtEventPolling/);
   assert.match(contentScript, /function clearOtEventPolling/);
-  assert.match(pollBody, /otWarmMirrorController\.shouldPauseOtWarmMirror\(\{\s*running:\s*Boolean\(currentRunView\)\s*\}\)/);
+  assert.match(pollBody, /otWarmMirrorController\.shouldPauseOtWarmMirror\(\{\s*running:\s*Boolean\(getCurrentRunView\(\)\)\s*\}\)/);
   assert.match(pollBody, /callPageBridge\('getOtStatus'/);
   assert.match(pollBody, /callPageBridge\('drainOtEvents'/);
   assert.match(pollBody, /queueOtPatchEvents/);

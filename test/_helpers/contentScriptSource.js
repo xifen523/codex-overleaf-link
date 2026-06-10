@@ -20,6 +20,7 @@ const CONTENT_SOURCE_PATHS = [
   path.join(CONTENT_DIR, 'applyResultFormatters.js'),
   path.join(CONTENT_DIR, 'modelPicker.js'),
   path.join(CONTENT_DIR, 'recentProjects.js'),
+  path.join(CONTENT_DIR, 'otWarmMirror.js'),
   CONTENT_SCRIPT_PATH
 ];
 
