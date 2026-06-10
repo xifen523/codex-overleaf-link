@@ -27,12 +27,26 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // recent-projects, writeback orchestration are all interleaved here).
     // Bumped 12300 → 12400 (v1.3.9 cancel), 12400 → 12600 (v1.3.10 timeline),
     // 12600 → 12700 (v1.4.2 theme), 12700 → 12780 (v1.4.3 diagnostics run-all),
-    // then 12780 → 12850 (v1.4.4 session-management: header bar + inline
-    // rename/delete). This file is well past healthy; each bump reinforces the
-    // urgency of the deferred split (task #69) — the timeline render pipeline is
-    // a natural module to carve out first.
+    // 12780 → 12850 (v1.4.4 session management). v1.4.5 began the actual split
+    // (task #69 phase 1): the markdown/assistant-text renderer and the
+    // diagnostics controller carved out into sibling modules, and the ceiling
+    // LOWERED 12850 → 11850 to lock the gain — future growth must justify
+    // raising it again. Next natural carves: the run-timeline render pipeline,
+    // then session management.
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 12850
+    maxLines: 11850
+  },
+  {
+    // Carved from contentRuntime in v1.4.5: markdown/inline rendering, the
+    // assistant-visible sanitizers, and line-reference resolution/buttons.
+    path: 'extension/src/content/markdownText.js',
+    maxLines: 700
+  },
+  {
+    // Carved from contentRuntime in v1.4.5: the diagnostics check runners
+    // (inspect*) and result formatters behind the diagnostics menu.
+    path: 'extension/src/content/diagnosticsController.js',
+    maxLines: 700
   },
   {
     // Writeback router: large but cohesive. v1.3.9 added the cross-world

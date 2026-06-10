@@ -139,12 +139,21 @@ function loadMarkdownRendererHarness(projectFiles = [], options = {}) {
   const document = createMinimalDocument();
   const pageBridgeCalls = [];
   const toasts = [];
-  const start = contentScript.indexOf('function getCurrentProjectReferenceFiles');
+  // v1.4.5: the markdown cluster lives in markdownText.js while the project
+  // reference-file helpers stayed in contentRuntime, so the region is
+  // assembled from each function's real home instead of one contiguous slice.
+  const markdownSource = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/markdownText.js'),
+    'utf8'
+  );
+  const start = markdownSource.indexOf('function renderMarkdownInlineText');
   assert.notEqual(start, -1, 'line-reference renderer helpers should exist');
-  const endFunction = extractFromContentScript( 'normalizeInlineOrderedLists');
-  const end = contentScript.indexOf(endFunction) + endFunction.length;
+  const endFunction = extractFunction(markdownSource, 'normalizeInlineOrderedLists');
+  const end = markdownSource.indexOf(endFunction) + endFunction.length;
   const markdownRegion = [
-    contentScript.slice(start, end),
+    extractFromContentScript( 'getCurrentProjectReferenceFiles'),
+    extractFromContentScript( 'captureProjectReferenceFiles'),
+    markdownSource.slice(start, end),
     extractFromContentScript( 'isMarkdownHeadingLine'),
     extractFromContentScript( 'isMarkdownListLine'),
     extractFromContentScript( 'isMarkdownOrderedListLine'),

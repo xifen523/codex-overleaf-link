@@ -25,8 +25,10 @@ test('diagnostics trigger shows a health dot driven by native compatibility', ()
 });
 
 test('Run all diagnostics aggregates every check into one report', () => {
-  const runtime = repo('extension/src/content/contentRuntime.js');
-  const runAll = extractFunction(runtime, 'runAllDiagnostics');
+  // v1.4.5: the diagnostics controller (runAllDiagnostics + the inspect*
+  // checks) was carved out of contentRuntime into its own module.
+  const controller = repo('extension/src/content/diagnosticsController.js');
+  const runAll = extractFunction(controller, 'runAllDiagnostics');
 
   assert.match(runAll, /collectOnly: true/, 'checks run in collect-only mode');
   for (const fn of ['inspectNativeEnvironment', 'inspectPageStateDiagnostics', 'inspectProjectSnapshot', 'inspectOtWarmMirrorDiagnostics']) {

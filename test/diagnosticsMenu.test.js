@@ -24,6 +24,12 @@ test('project snapshot action lives in the diagnostics menu instead of the heade
     path.join(__dirname, '../extension/src/content/settingsPanel.js'),
     'utf8'
   );
+  // v1.4.5: the check runners + result formatters were carved out of
+  // contentRuntime into the diagnostics controller module.
+  const diagnosticsController = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/diagnosticsController.js'),
+    'utf8'
+  );
 
   assert.equal(panelSource.includes('data-snapshot'), false);
   assert.match(panelSource, /data-diagnostics-menu/);
@@ -48,28 +54,28 @@ test('project snapshot action lives in the diagnostics menu instead of the heade
   assert.match(settingsPanel, /<span data-i18n="experimentalOtMenuTitle">Experimental OT Mirror<\/span>/);
   assert.match(settingsPanel, /data-language-select/);
   assert.match(contentScript, /function applyLocaleToPanel\(/);
-  assert.match(contentScript, /function inspectNativeEnvironment\(/);
-  assert.match(contentScript, /function inspectOtWarmMirrorDiagnostics\(/);
-  assert.match(contentScript, /function formatOtDiagnosticsResult\(/);
-  assert.match(contentScript, /function formatNativeEnvironmentResult\(/);
+  assert.match(diagnosticsController, /function inspectNativeEnvironment\(/);
+  assert.match(diagnosticsController, /function inspectOtWarmMirrorDiagnostics\(/);
+  assert.match(diagnosticsController, /function formatOtDiagnosticsResult\(/);
+  assert.match(diagnosticsController, /function formatNativeEnvironmentResult\(/);
   assert.match(contentScript, /function toggleDiagnosticsMenu\(/);
   assert.match(contentScript, /function closeDiagnosticsMenu\(/);
   assert.match(contentScript, /function showDiagnosticsResult\(/);
-  assert.match(contentScript, /function inspectProjectSnapshot\(/);
-  assert.match(contentScript, /allowEditorNavigation:\s*false/);
+  assert.match(diagnosticsController, /function inspectProjectSnapshot\(/);
+  assert.match(diagnosticsController, /allowEditorNavigation:\s*false/);
   assert.match(css, /\.codex-diagnostics-menu/);
   assert.match(css, /\.codex-diagnostics-result/);
   assert.match(css, /\.codex-diagnostics-technical/);
 });
 
 test('diagnostics render in a floating result panel instead of the task transcript', () => {
-  const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+  const diagnosticsController = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/diagnosticsController.js'),
     'utf8'
   );
-  const nativeBody = extractFunction(contentScript, 'inspectNativeEnvironment');
-  const pageBody = extractFunction(contentScript, 'inspectPageStateDiagnostics');
-  const snapshotBody = extractFunction(contentScript, 'inspectProjectSnapshot');
+  const nativeBody = extractFunction(diagnosticsController, 'inspectNativeEnvironment');
+  const pageBody = extractFunction(diagnosticsController, 'inspectPageStateDiagnostics');
+  const snapshotBody = extractFunction(diagnosticsController, 'inspectProjectSnapshot');
 
   assert.doesNotMatch(nativeBody, /appendLog\(/);
   assert.doesNotMatch(pageBody, /appendLog\(/);
@@ -124,10 +130,14 @@ test('experimental OT diagnostics read metadata without draining project content
     path.join(__dirname, '../extension/src/content/diagnosticsPanel.js'),
     'utf8'
   );
+  const diagnosticsController = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/diagnosticsController.js'),
+    'utf8'
+  );
   const menuBody = diagnosticsPanel.match(/function bindStaticActions\(instance\) \{[\s\S]*?\n  \}/)?.[0] || '';
-  const inspectBody = extractFunction(contentScript, 'inspectOtWarmMirrorDiagnostics');
-  const formatBody = contentScript.match(/function formatOtDiagnosticsResult\(\{ otStatus, mirrorStatus \}\) \{[\s\S]*?\n  function /)?.[0] || '';
-  const technicalBody = contentScript.match(/function formatOtDiagnosticsTechnicalDetails\(metadata = \{\}\) \{[\s\S]*?\n  function formatOtChannelCandidates/)?.[0] || '';
+  const inspectBody = extractFunction(diagnosticsController, 'inspectOtWarmMirrorDiagnostics');
+  const formatBody = diagnosticsController.match(/function formatOtDiagnosticsResult\(\{ otStatus, mirrorStatus \}\) \{[\s\S]*?\n  function /)?.[0] || '';
+  const technicalBody = diagnosticsController.match(/function formatOtDiagnosticsTechnicalDetails\(metadata = \{\}\) \{[\s\S]*?\n  function formatOtChannelCandidates/)?.[0] || '';
 
   assert.match(menuBody, /\[data-diagnostics-ot\]/);
   assert.match(menuBody, /onOtDiagnostics/);
@@ -225,8 +235,8 @@ test('experimental OT diagnostics i18n is available in English and Chinese', () 
 });
 
 test('diagnostic summaries use natural language while raw details stay collapsed', () => {
-  const contentScript = fs.readFileSync(
-    path.join(__dirname, '../extension/src/content/contentRuntime.js'),
+  const diagnosticsController = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/diagnosticsController.js'),
     'utf8'
   );
   const diagnosticsPanel = fs.readFileSync(
@@ -234,12 +244,12 @@ test('diagnostic summaries use natural language while raw details stay collapsed
     'utf8'
   );
 
-  assert.match(contentScript, /Codex 已连接，本机 LaTeX 工具可用/);
-  assert.match(contentScript, /插件没有连上本机服务/);
-  assert.match(contentScript, /当前 Overleaf 文件可以读取和写入/);
-  assert.match(contentScript, /插件没有确认当前编辑器可以写入/);
-  assert.match(contentScript, /插件已读到完整 Overleaf 项目/);
-  assert.match(contentScript, /没有读到完整的 Overleaf 项目/);
+  assert.match(diagnosticsController, /Codex 已连接，本机 LaTeX 工具可用/);
+  assert.match(diagnosticsController, /插件没有连上本机服务/);
+  assert.match(diagnosticsController, /当前 Overleaf 文件可以读取和写入/);
+  assert.match(diagnosticsController, /插件没有确认当前编辑器可以写入/);
+  assert.match(diagnosticsController, /插件已读到完整 Overleaf 项目/);
+  assert.match(diagnosticsController, /没有读到完整的 Overleaf 项目/);
   assert.match(diagnosticsPanel, /<summary data-i18n="technicalDetails">Technical Details<\/summary>/);
 });
 
@@ -262,8 +272,12 @@ test('panel native diagnostics sends compatibility metadata and evaluates mismat
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
-  const inspectBody = extractFunction(contentScript, 'inspectNativeEnvironment');
-  const formatBody = extractFunction(contentScript, 'formatNativeEnvironmentResult');
+  const diagnosticsController = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/diagnosticsController.js'),
+    'utf8'
+  );
+  const inspectBody = extractFunction(diagnosticsController, 'inspectNativeEnvironment');
+  const formatBody = extractFunction(diagnosticsController, 'formatNativeEnvironmentResult');
 
   assert.match(contentScript, /CodexOverleafCompatibility/);
   assert.match(inspectBody, /CodexOverleafCompatibility\.buildBridgePingParams/);
@@ -273,10 +287,10 @@ test('panel native diagnostics sends compatibility metadata and evaluates mismat
     formatBody.indexOf('evaluateNativeCompatibility') < formatBody.indexOf('const environment'),
     'native compatibility must be evaluated before formatting Codex/LaTeX environment details'
   );
-  assert.match(contentScript, /native_too_old/);
-  assert.match(contentScript, /protocol_unsupported/);
-  assert.match(contentScript, /extension_too_old/);
-  assert.match(contentScript, /installCommand:\s*compatibility\.installCommand/);
-  assert.match(contentScript, /Native Host Update Required/);
-  assert.match(contentScript, /Protocol Mismatch/);
+  assert.match(diagnosticsController, /native_too_old/);
+  assert.match(diagnosticsController, /protocol_unsupported/);
+  assert.match(diagnosticsController, /extension_too_old/);
+  assert.match(diagnosticsController, /installCommand:\s*compatibility\.installCommand/);
+  assert.match(diagnosticsController, /Native Host Update Required/);
+  assert.match(diagnosticsController, /Protocol Mismatch/);
 });
