@@ -83,8 +83,10 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
   {
     // Carved from contentRuntime in v1.4.8: the cross-project recent-projects
     // dashboard (name cache, welcome/empty/degraded states, row rendering).
+    // Raised 520 -> 800 in v1.5.2 for per-project session management (expand
+    // row to list/rename/delete sessions without entering the project).
     path: 'extension/src/content/recentProjects.js',
-    maxLines: 520
+    maxLines: 800
   },
   {
     // Carved from contentRuntime in v1.4.9: the experimental OT warm-mirror

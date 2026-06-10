@@ -406,6 +406,10 @@
     applyStateToPanel,
     getPanel: () => panel,
     getCachedAccountScopeId: () => cachedAccountScopeId,
+    showPluginConfirm,
+    showPluginToast,
+    sendBackgroundNative,
+    PANEL_STATE_BASE_KEY: LEGACY_STORAGE_KEY,
     PROJECT_EDITOR_RESERVED_IDS,
     STATUS_BADGE_CLASS
   });

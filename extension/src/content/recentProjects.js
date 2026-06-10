@@ -16,6 +16,10 @@
       applyStateToPanel,
       getPanel,
       getCachedAccountScopeId,
+      showPluginConfirm,
+      showPluginToast,
+      sendBackgroundNative,
+      PANEL_STATE_BASE_KEY,
       PROJECT_EDITOR_RESERVED_IDS,
       STATUS_BADGE_CLASS
     } = deps;
@@ -349,7 +353,287 @@
     } else {
       el.appendChild(textNode(tr('recentProjects_row_projectLinkUnavailable'), 'recent-projects-row-warning'));
     }
-    return el;
+    if (!valid) {
+      return el;
+    }
+    // Wrap the row with an expand toggle + a lazily-populated session list so
+    // sessions can be managed (delete/rename) without entering the project.
+    var wrap = document.createElement('div');
+    wrap.className = 'recent-projects-row-wrap';
+    wrap.setAttribute('data-project-row-wrap', projectId);
+    var expand = document.createElement('button');
+    expand.type = 'button';
+    expand.className = 'recent-projects-row-expand';
+    expand.setAttribute('data-row-expand', '');
+    expand.setAttribute('aria-expanded', 'false');
+    expand.title = tr('recentProjects_sessions_toggle');
+    expand.setAttribute('aria-label', tr('recentProjects_sessions_toggle'));
+    expand.textContent = '▾';
+    var head = document.createElement('div');
+    head.className = 'recent-projects-row-head';
+    head.appendChild(el);
+    head.appendChild(expand);
+    var sessionsEl = document.createElement('div');
+    sessionsEl.className = 'recent-projects-sessions';
+    sessionsEl.setAttribute('data-project-sessions', '');
+    sessionsEl.hidden = true;
+    expand.addEventListener('click', function () {
+      toggleProjectSessions(wrap, projectId);
+    });
+    wrap.appendChild(head);
+    wrap.appendChild(sessionsEl);
+    return wrap;
+  }
+
+  function toggleProjectSessions(wrap, projectId) {
+    var sessionsEl = wrap.querySelector('[data-project-sessions]');
+    var expand = wrap.querySelector('[data-row-expand]');
+    if (!sessionsEl || !expand) {
+      return;
+    }
+    var opening = sessionsEl.hidden;
+    sessionsEl.hidden = !opening;
+    expand.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    wrap.setAttribute('data-expanded', opening ? 'true' : 'false');
+    if (opening) {
+      renderProjectSessions(sessionsEl, projectId).catch(function () { /* swallow */ });
+    }
+  }
+
+  function sessionRecordDisplayTitle(record) {
+    var SessionState = window.CodexOverleafSessionState;
+    if (record && typeof record.title === 'string' && record.title.trim()) {
+      return record.title.trim();
+    }
+    var derived = SessionState ? SessionState.deriveSessionTitle(record && record.runs, record && record.task) : '';
+    return derived || tr('newSessionFallback');
+  }
+
+  async function loadProjectSessionRecords(projectId) {
+    var StorageDb = window.CodexOverleafStorageDb;
+    if (!StorageDb) {
+      return [];
+    }
+    var records = await StorageDb.getAllByIndex('sessions', 'projectId', projectId);
+    var scope = getCachedAccountScopeId();
+    return (records || [])
+      .filter(function (record) { return record && (!scope || record.accountScopeId === scope); })
+      .sort(function (a, b) {
+        return String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
+      });
+  }
+
+  async function renderProjectSessions(sessionsEl, projectId) {
+    var StorageDb = window.CodexOverleafStorageDb;
+    sessionsEl.innerHTML = '';
+    var records = [];
+    try {
+      records = await loadProjectSessionRecords(projectId);
+    } catch (_error) {
+      records = [];
+    }
+    if (!records.length) {
+      sessionsEl.appendChild(textNode(tr('recentProjects_sessions_empty'), 'recent-projects-sessions-empty'));
+      return;
+    }
+    for (var i = 0; i < records.length; i++) {
+      sessionsEl.appendChild(renderProjectSessionRow(sessionsEl, projectId, records[i]));
+    }
+  }
+
+  function renderProjectSessionRow(sessionsEl, projectId, record) {
+    var StorageDb = window.CodexOverleafStorageDb;
+    var running = Boolean(StorageDb) && StorageDb.derivePrimaryStatusBadge(record) === 'running';
+    var row = document.createElement('div');
+    row.className = 'recent-projects-session-row';
+    row.setAttribute('data-project-session-row', record.id);
+    if (running) {
+      row.setAttribute('data-running', 'true');
+    }
+    var title = textNode(sessionRecordDisplayTitle(record), 'recent-projects-session-title');
+    var time = textNode(formatRelativeTime(record.updatedAt || record.createdAt), 'recent-projects-session-time');
+    var rename = document.createElement('button');
+    rename.type = 'button';
+    rename.className = 'recent-projects-session-action';
+    rename.setAttribute('data-session-rename-dash', '');
+    rename.title = tr('renameSession');
+    rename.setAttribute('aria-label', tr('renameSession'));
+    rename.textContent = '✎';
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'recent-projects-session-action recent-projects-session-action--delete';
+    del.setAttribute('data-session-delete-dash', '');
+    del.title = tr('deleteSession');
+    del.setAttribute('aria-label', tr('deleteSession'));
+    del.textContent = '×';
+    if (running) {
+      rename.disabled = true;
+      del.disabled = true;
+      del.title = tr('deleteSessionRunningToast');
+    }
+    rename.addEventListener('click', function () {
+      beginDashboardSessionRename(sessionsEl, projectId, record, row, title);
+    });
+    del.addEventListener('click', function () {
+      deleteDashboardSession(sessionsEl, projectId, record).catch(function () { /* swallow */ });
+    });
+    row.appendChild(title);
+    row.appendChild(time);
+    row.appendChild(rename);
+    row.appendChild(del);
+    return row;
+  }
+
+  function projectPanelStateKey(projectId) {
+    var StorageKeys = window.CodexOverleafStorageKeys;
+    return StorageKeys.getProjectStorageKey(PANEL_STATE_BASE_KEY, 'https://www.overleaf.com/project/' + projectId);
+  }
+
+  // Apply `mutate(normalizedState) -> nextState` to the project's stored panel
+  // state and write it back compacted — the same normalize/prepare pipeline
+  // saveState uses, so opening the project later sees a coherent state.
+  // NOTE: if the project is open in another tab, that tab's in-memory state
+  // wins on its next save; the IndexedDB record mutation below still holds.
+  async function mutateProjectPanelState(projectId, mutate) {
+    var SessionState = window.CodexOverleafSessionState;
+    var key = projectPanelStateKey(projectId);
+    var stored = await chrome.storage.local.get(key);
+    var blob = stored && stored[key];
+    if (!blob || !SessionState) {
+      return false;
+    }
+    var nextState = mutate(SessionState.normalizePanelState(blob));
+    var payload = {};
+    payload[key] = SessionState.prepareStateForStorage(nextState);
+    await chrome.storage.local.set(payload);
+    return true;
+  }
+
+  async function deleteDashboardSession(sessionsEl, projectId, record) {
+    var StorageDb = window.CodexOverleafStorageDb;
+    var SessionState = window.CodexOverleafSessionState;
+    if (StorageDb && StorageDb.derivePrimaryStatusBadge(record) === 'running') {
+      showPluginToast(tr('deleteSessionRunningToast'), { status: 'warning' });
+      return;
+    }
+    var approved = await showPluginConfirm({
+      title: tr('deleteSessionTitle'),
+      message: [sessionRecordDisplayTitle(record), '', tr('deleteSessionMessage')].join('\n'),
+      confirmLabel: tr('deleteSessionConfirm'),
+      cancelLabel: tr('confirmDefaultCancel'),
+      destructive: true
+    });
+    if (!approved) {
+      return;
+    }
+    try {
+      await mutateProjectPanelState(projectId, function (state) {
+        return SessionState.deleteSession(state, record.id);
+      });
+    } catch (_error) { /* storage blob may be absent; record removal still proceeds */ }
+    try {
+      if (StorageDb) {
+        await StorageDb.deleteRecord('sessions', record.id);
+      }
+    } catch (_error) { /* swallow */ }
+    try {
+      var response = await sendBackgroundNative({
+        method: 'codex.history.clearPlugin',
+        params: {
+          sessionId: record.id,
+          threadId: record.codexThreadId || ''
+        }
+      });
+      if (!response || !response.ok) {
+        showPluginToast(tr('deleteSessionHistoryFailedToast', { message: (response && response.error && response.error.message) || 'native host did not return success' }), { status: 'warning', sticky: true });
+      } else if (response.result && response.result.skipped) {
+        showPluginToast(tr('deleteSessionNoThreadToast'), { status: 'info' });
+      } else {
+        showPluginToast(tr('deleteSessionDoneToast'), { status: 'completed' });
+      }
+    } catch (error) {
+      showPluginToast(tr('deleteSessionHistoryFailedToast', { message: error.message }), { status: 'warning', sticky: true });
+    }
+    // Re-render the whole variant so the row summary/badge reflect the
+    // deletion, then restore this project's expanded session list.
+    await renderRecentProjectsVariant({ expandProjectId: projectId });
+  }
+
+  function beginDashboardSessionRename(sessionsEl, projectId, record, row, titleEl) {
+    var SessionState = window.CodexOverleafSessionState;
+    var StorageDb = window.CodexOverleafStorageDb;
+    if (row.querySelector('input')) {
+      return;
+    }
+    var seed = (record.titleSource === 'manual' && record.title) ? record.title : '';
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 80;
+    input.className = 'recent-projects-session-rename-input';
+    input.value = seed;
+    titleEl.hidden = true;
+    row.insertBefore(input, titleEl);
+    input.focus();
+    input.select();
+    var settled = false;
+    var finish = function (commit) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      var nextRaw = input.value;
+      input.remove();
+      titleEl.hidden = false;
+      // Unchanged input is a cancel: never rewrites the title source.
+      if (!commit || nextRaw.trim() === seed.trim()) {
+        return;
+      }
+      commitDashboardSessionRename(sessionsEl, projectId, record, nextRaw).catch(function () { /* swallow */ });
+    };
+    input.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener('blur', function () { finish(true); });
+  }
+
+  async function commitDashboardSessionRename(sessionsEl, projectId, record, rawTitle) {
+    var SessionState = window.CodexOverleafSessionState;
+    var StorageDb = window.CodexOverleafStorageDb;
+    if (!SessionState) {
+      return;
+    }
+    // Single source of truth for the ghost guard: the shared renameSession
+    // helper decides manual vs auto exactly like the in-panel rename.
+    var renamed = SessionState.renameSession(
+      SessionState.normalizePanelState({ sessions: [record], activeSessionId: record.id }),
+      record.id,
+      rawTitle,
+      { placeholderTitle: tr('newSessionFallback') }
+    );
+    var next = (renamed.sessions || []).find(function (session) { return session.id === record.id; });
+    if (!next) {
+      return;
+    }
+    try {
+      await mutateProjectPanelState(projectId, function (state) {
+        return SessionState.renameSession(state, record.id, rawTitle, { placeholderTitle: tr('newSessionFallback') });
+      });
+    } catch (_error) { /* blob may be absent; record update still proceeds */ }
+    try {
+      if (StorageDb) {
+        await StorageDb.putRecord('sessions', StorageDb.buildSessionRecord(Object.assign({}, record, {
+          title: next.title,
+          titleSource: next.titleSource
+        })));
+      }
+    } catch (_error) { /* swallow */ }
+    await renderProjectSessions(sessionsEl, projectId);
   }
 
   function ensureRecentProjectsRoot() {
@@ -371,7 +655,7 @@
     return rootEl;
   }
 
-  async function renderRecentProjectsVariant() {
+  async function renderRecentProjectsVariant(options) {
     if (!getPanel()) {
       return;
     }
@@ -427,6 +711,13 @@
       }
     }
     rootEl.appendChild(renderSettingsEntry({ scope: 'account' }));
+    var expandProjectId = options && options.expandProjectId;
+    if (expandProjectId) {
+      var wrap = listContainer.querySelector('[data-project-row-wrap="' + expandProjectId + '"]');
+      if (wrap) {
+        toggleProjectSessions(wrap, expandProjectId);
+      }
+    }
     opportunisticEnrichmentFromDom().catch(function () { /* swallow */ });
   }
 

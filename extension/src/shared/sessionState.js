@@ -440,6 +440,31 @@
     return sanitizeAutoTitle(firstRunTask);
   }
 
+  // Rename a session with the placeholder/derived-title ghost guard (mirrors
+  // the in-panel header rename): committing the localized "New Session"
+  // placeholder or the auto-derived title must NOT promote the session to a
+  // manual title — that would resurrect the empty-session ghosts the
+  // normalize-prune eliminates and freeze one locale's literal as the title.
+  function renameSession(state, sessionId, rawTitle, options = {}) {
+    const sessions = Array.isArray(state?.sessions) ? state.sessions : [];
+    const target = sessions.find(session => session && session.id === sessionId);
+    if (!target) {
+      return normalizePanelState(state);
+    }
+    const cleanTitle = String(rawTitle || '').trim().slice(0, 80);
+    const derived = deriveSessionTitle(target.runs, target.task);
+    const placeholder = String(options.placeholderTitle || '').trim();
+    const isCustom = Boolean(cleanTitle)
+      && (!placeholder || cleanTitle !== placeholder)
+      && cleanTitle !== derived;
+    return normalizePanelState({
+      ...state,
+      sessions: sessions.map(session => (session && session.id === sessionId
+        ? { ...session, title: isCustom ? cleanTitle : derived, titleSource: isCustom ? 'manual' : 'auto' }
+        : session))
+    });
+  }
+
   function normalizeTitleSource(value, rawTitle, derivedTitle) {
     if (VALID_TITLE_SOURCES.has(value)) {
       return value;
@@ -1403,6 +1428,7 @@
     isDisplayableSession,
       normalizePanelState,
       deriveSessionTitle,
+    renameSession,
       recordSessionResult,
     selectVisibleSessionsForList,
     setActiveSession,

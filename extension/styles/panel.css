@@ -3312,6 +3312,133 @@
   padding: 14px 12px;
 }
 
+/* Dashboard per-project session management: expand a row to list, rename, or
+   delete that project's sessions without entering it. */
+#codex-overleaf-panel .recent-projects-row-wrap {
+  display: grid;
+  gap: 0;
+}
+
+#codex-overleaf-panel .recent-projects-row-head {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+#codex-overleaf-panel .recent-projects-row-head [data-recent-projects-row] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#codex-overleaf-panel .recent-projects-row-expand {
+  flex: 0 0 auto;
+  width: 26px;
+  border-radius: var(--tl-r-sm);
+  color: var(--tl-fg-4);
+  font-size: 10px;
+}
+
+#codex-overleaf-panel .recent-projects-row-expand:hover {
+  background: var(--tl-hover);
+  color: var(--tl-fg-2);
+}
+
+#codex-overleaf-panel .recent-projects-row-wrap[data-expanded="true"] .recent-projects-row-expand {
+  color: var(--tl-accent);
+  transform: rotate(180deg);
+}
+
+#codex-overleaf-panel .recent-projects-sessions {
+  display: grid;
+  gap: 2px;
+  border-left: 2px solid var(--tl-border);
+  margin: 2px 0 6px 10px;
+  padding-left: 8px;
+}
+
+#codex-overleaf-panel .recent-projects-sessions-empty {
+  color: var(--tl-fg-4);
+  font-size: 11px;
+  padding: 4px 2px;
+}
+
+#codex-overleaf-panel .recent-projects-session-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border-radius: var(--tl-r-sm);
+  padding: 3px 4px;
+}
+
+#codex-overleaf-panel .recent-projects-session-row:hover {
+  background: var(--tl-hover);
+}
+
+#codex-overleaf-panel .recent-projects-session-row[data-running="true"] .recent-projects-session-title::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border: 2px solid rgba(78, 201, 176, 0.25);
+  border-top-color: var(--tl-run);
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: codex-session-spin 800ms linear infinite;
+}
+
+#codex-overleaf-panel .recent-projects-session-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tl-fg-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .recent-projects-session-time {
+  flex: 0 0 auto;
+  color: var(--tl-fg-4);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+#codex-overleaf-panel .recent-projects-session-action {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--tl-r-sm);
+  color: var(--tl-fg-3);
+  opacity: 0.75;
+}
+
+#codex-overleaf-panel .recent-projects-session-action:hover {
+  background: var(--tl-hover);
+  opacity: 1;
+}
+
+#codex-overleaf-panel .recent-projects-session-action--delete:hover {
+  color: var(--tl-fail);
+}
+
+#codex-overleaf-panel .recent-projects-session-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+#codex-overleaf-panel .recent-projects-session-rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--tl-accent);
+  border-radius: var(--tl-r-sm);
+  background: var(--tl-surface-0);
+  color: var(--tl-fg-1);
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
 #codex-overleaf-panel [data-recent-projects-row] {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
