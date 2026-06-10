@@ -37,8 +37,10 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // warm-mirror glue (9600 → 8800). The split stops here: what remains is
     // the genuinely cohesive run-orchestration core.
     // + the recent-projects dashboard.
+    // 8800 -> 8850 in v1.5.1: the hotfix moved the module-composition wiring
+    // above its consumers and documents the hoisted-safe zone (+13 lines).
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 8800
+    maxLines: 8850
   },
   {
     // Carved from contentRuntime in v1.4.5: markdown/inline rendering, the

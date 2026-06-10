@@ -114,6 +114,313 @@
   const SensitiveScan = window.CodexOverleafSensitiveScan;
   const AuditRecords = window.CodexOverleafAuditRecords;
   const FailureReasons = window.CodexOverleafFailureReasons;
+
+  // Module composition (hoisted-safe zone). These wiring blocks MUST run
+  // before any controller below consumes their destructured exports by
+  // value (v1.5.1 regression fix: the v1.4.6-v1.5.0 carves left them after
+  // the controller creations, so init() died in the TDZ and the panel never
+  // mounted). Function declarations hoist; mutable state is passed as lazy
+  // getters; the four shared consts above the wiring are passed by value.
+  // The three stable trackedChangeStatus values are `pending`, `accepted`, and
+  // `rejected`; `accepted` and `rejected` are terminal. Kept in sync with
+  // sessionState.js. A run is in the tracked-change lifecycle when it carries
+  // one of these values or still holds tracked-change refs.
+  const TERMINAL_TRACKED_CHANGE_STATUS = new Set(['accepted', 'rejected']);
+
+  // The UI-local in-flight lock for tracked-change accept/reject. Never written
+  // to trackedChangeStatus and never persisted — it lives only on the controller.
+  const trackedChangeInFlight = new Map();
+
+  // Reserved sub-routes under /project that are NOT project editor URLs.
+  // The 24-hex regex already excludes them, but this is a belt-and-suspenders
+  // guard in case Overleaf ever introduces non-ObjectId sub-routes that bypass
+  // the regex.
+  const PROJECT_EDITOR_RESERVED_IDS = new Set(['new', 'upload', 'import']);
+
+  // Status-badge palette is governed by spec §5.10 — ten values mapped to
+  // CSS classes that reuse the per-project run-card palette tokens.
+  const STATUS_BADGE_CLASS = {
+    pending: 'badge-pending',
+    accepted: 'badge-accepted',
+    rejected: 'badge-rejected',
+    needs_review: 'badge-needs-review',
+    running: 'badge-running',
+    completed: 'badge-completed',
+    failed: 'badge-failed',
+    background_completed: 'badge-background-completed',
+    needs_review_after_navigation: 'badge-needs-review-after-navigation',
+    abandoned_after_navigation: 'badge-abandoned-after-navigation'
+  };
+
+  // Carved modules (v1.4.5 structural-debt phase 1). Factory-injected with the
+  // runtime collaborators they need; the destructured consts keep every
+  // existing call site unchanged. Function declarations hoist, so passing them
+  // here is safe; mutable state is handed over as lazy getters.
+  const markdownText = window.CodexOverleafMarkdownText.create({
+    tx,
+    callPageBridge,
+    getCurrentProjectReferenceFiles,
+    showPluginToast
+  });
+  const {
+    renderMarkdownInlineText,
+    renderMarkdownBlockText,
+    sanitizeAssistantVisibleText,
+    sanitizeAssistantVisibleValue,
+    buildMarkdownInlineNodes,
+    normalizeReferencePathForRuntime,
+    hasUnsafeRuntimePathSegments
+  } = markdownText;
+
+  const otWarmMirror = window.CodexOverleafOtWarmMirror.create({
+    tr,
+    tx,
+    closeDiagnosticsMenu,
+    syncCustomInstructionsEditorForProject,
+    throwIfRunCancellationRequested,
+    showPluginConfirm,
+    showPluginToast,
+    getCurrentProjectId,
+    updateProbeStatusOtSuffix,
+    sanitizeRunProjectSnapshot,
+    getMirrorFreshness,
+    buildSnapshotFileOverlays,
+    normalizeSnapshotPath,
+    formatProjectSnapshotUserLog,
+    formatProjectSnapshotWarning,
+    getProjectSnapshotWarnings,
+    sendBackgroundNative,
+    callPageBridge,
+    saveStateSoon,
+    finishRunView,
+    appendRunEvent,
+    appendCompletionReport,
+    appendLog,
+    appendPlainLog,
+    getPanel: () => panel,
+    getState: () => state,
+    setState: next => { state = next; },
+    getCurrentRunView: () => currentRunView,
+    RUN_SNAPSHOT_ZIP_TIMEOUT_MS
+  });
+  const {
+    getCurrentOtStatus,
+    getOtWarmMirrorState,
+    getLastExperimentalOtProjectId,
+    clearMirrorPrefetchTimer,
+    releaseOtWarmMirrorProject,
+    isExperimentalOtEnabled,
+    setExperimentalOtEnabledForProject,
+    normalizeExperimentalOtByProject,
+    syncExperimentalOtToggleForProject,
+    handleExperimentalOtToggleClick,
+    handleExperimentalOtToggleKeydown,
+    handleExperimentalOtToggleChange,
+    syncOtWarmMirrorController,
+    readOtBridgeStatus,
+    clearOtEventPolling,
+    canPollOtWarmMirror,
+    pauseOtWarmMirror,
+    resumeOtWarmMirror,
+    updateOtStatusDisplay,
+    formatOtStatusLabel,
+    updateExperimentalOtMenuStatus,
+    normalizeOtStatus,
+    scheduleMirrorPrefetch,
+    settleMirrorPrefetchBeforeRun,
+    resolveWarmRunStart,
+    prepareMirrorStaleRetry
+  } = otWarmMirror;
+
+  const diagnosticsController = window.CodexOverleafDiagnosticsController.create({
+    tr,
+    tx,
+    getExtensionCompatibilityMetadata,
+    showDiagnosticsLoading,
+    showDiagnosticsResult,
+    setDiagnosticsHealth,
+    sendBackgroundNative,
+    callPageBridge,
+    getState: () => state,
+    getCurrentOtStatus,
+    getOtWarmMirrorState,
+    otWarmMirrorController,
+    getActiveFocusFiles,
+    getCurrentProjectId,
+    isExperimentalOtEnabled,
+    readOtBridgeStatus,
+    formatOtStatusLabel,
+    normalizeOtStatus,
+    formatProbeStatusBar,
+    getProbeRunReadiness,
+    getMirrorFreshness,
+    formatProjectSnapshotLog,
+    formatProjectSnapshotWarning,
+    getProjectSnapshotWarnings,
+    isTextSnapshotFile,
+    INSTALL_COMMAND,
+    RUN_SNAPSHOT_ZIP_TIMEOUT_MS
+  });
+  const {
+    runAllDiagnostics,
+    inspectProjectSnapshot,
+    inspectNativeEnvironment,
+    inspectPageStateDiagnostics,
+    inspectOtWarmMirrorDiagnostics,
+    fallbackNativeCompatibility,
+    getNativeCompatibilityClassification,
+    isNativeCompatibilityCompatible
+  } = diagnosticsController;
+
+  const runTimelineView = window.CodexOverleafRunTimelineView.create({
+    tr,
+    tx,
+    getLocale,
+    formatElapsed,
+    findRunRecord,
+    forceCancelStuckTaskForCurrentProject,
+    formatEventDetail,
+    formatEventTime,
+    renderAttachmentPreviewList,
+    formatModeLabel,
+    undoRun,
+    acceptRun,
+    getRunUndoCount,
+    cssEscape,
+    renderMarkdownInlineText,
+    renderMarkdownBlockText,
+    sanitizeAssistantVisibleText,
+    sanitizeAssistantVisibleValue,
+    buildMarkdownInlineNodes,
+    getPanel: () => panel,
+    getState: () => state,
+    getCurrentRunView: () => currentRunView,
+    trackedChangeInFlight
+  });
+  const {
+    resetAutoFollow,
+    bindLogAutoFollow,
+    bumpUnreadIfDetached,
+    scrollLogToBottom,
+    collapseRunProcess,
+    startRunElapsedTick,
+    stopRunElapsedTick,
+    formatProcessedSummary,
+    renderRunHistory,
+    renderRunCard,
+    getRunStatusText,
+    renderRunEvent,
+    upsertStreamEvent,
+    appendEventTechnicalDetail,
+    renderCompletionReport,
+    isTrackedChangeLifecycleRun,
+    configureUndoButton,
+    configureAcceptButton
+  } = runTimelineView;
+
+  const sessionManager = window.CodexOverleafSessionManager.create({
+    tr,
+    showPluginConfirm,
+    showPluginToast,
+    sendBackgroundNative,
+    saveState,
+    saveStateSoon,
+    readPanelInputs,
+    applyStateToPanel,
+    getPanel: () => panel,
+    getState: () => state,
+    setState: next => { state = next; },
+    getSessionPanelInstance: () => sessionPanelInstance,
+    formatSessionTime
+  });
+  const {
+    closeSessionMenu,
+    applySessionLabel,
+    bindActiveSessionHeader,
+    startNewSession,
+    switchSession,
+    deleteSessionWithConfirm,
+    renderSessionList,
+    commitSessionRename,
+    getRunningSessionIds,
+    isSessionRunning,
+    findSessionById,
+    replaceSessionInState,
+    updateSessionById
+  } = sessionManager;
+
+  const applyResultFormatters = window.CodexOverleafApplyResultFormatters.create({
+    getLocale,
+    tr,
+    tx,
+    getAppliedEntries,
+    getSkippedEntries,
+    appendRunEvent
+  });
+  const {
+    appendApplyResult,
+    failureReasonI18nLookup,
+    formatApplyResultReason,
+    formatBridgeResultReason,
+    localizeVisibleReason,
+    formatOperationType,
+    formatOperationFiles
+  } = applyResultFormatters;
+
+  const modelPicker = window.CodexOverleafModelPicker.create({
+    tr,
+    tx,
+    getLocale,
+    sendBackgroundNative,
+    readSelectedSpeedInput,
+    getRenderedModelEntries,
+    persistPanelInputs,
+    closeDiagnosticsMenu,
+    closeCustomInstructionsSettings,
+    closeContextTray,
+    closeSlashMenu,
+    getPanel: () => panel,
+    getState: () => state
+  });
+  const {
+    getModelDiscovery,
+    toggleModelConfigPopover,
+    closeModelConfigPopover,
+    handleModelConfigChoiceClick,
+    loadModelOptions,
+    applyFallbackModelOptions,
+    getModelCatalog,
+    renderModelOptions,
+    renderSpeedOptions,
+    renderModelConfigChoices,
+    resolveSelectedModel,
+    normalizeModelOptionId,
+    updateModelDisplay
+  } = modelPicker;
+
+  const recentProjects = window.CodexOverleafRecentProjects.create({
+    tr,
+    tx,
+    openCustomInstructionsSettings,
+    enterProject,
+    applyStateToPanel,
+    getPanel: () => panel,
+    getCachedAccountScopeId: () => cachedAccountScopeId,
+    PROJECT_EDITOR_RESERVED_IDS,
+    STATUS_BADGE_CLASS
+  });
+  const {
+    loadProjectNameCacheFromStorage,
+    rememberCurrentProjectName,
+    formatRelativeTime,
+    textNode,
+    renderStatusBadge,
+    isValidProjectId,
+    openProjectFromRow,
+    renderRecentProjectRow,
+    renderRecentProjectsVariant,
+    renderPerProjectVariant
+  } = recentProjects;
   const MAX_COMPOSER_ATTACHMENT_BYTES = 12 * 1024 * 1024;
   const MAX_COMPOSER_ATTACHMENT_TOTAL_BYTES = 32 * 1024 * 1024;
   const MAX_COMPOSER_ATTACHMENTS = 8;
@@ -225,302 +532,8 @@
   let renderedSlashCommands = new Map();
   let customInstructionsEditorProjectId = '';
   let customInstructionsEditorValue = '';
-  // The three stable trackedChangeStatus values are `pending`, `accepted`, and
-  // `rejected`; `accepted` and `rejected` are terminal. Kept in sync with
-  // sessionState.js. A run is in the tracked-change lifecycle when it carries
-  // one of these values or still holds tracked-change refs.
-  const TERMINAL_TRACKED_CHANGE_STATUS = new Set(['accepted', 'rejected']);
-
-  // The UI-local in-flight lock for tracked-change accept/reject. Never written
-  // to trackedChangeStatus and never persisted — it lives only on the controller.
-  const trackedChangeInFlight = new Map();
-
-  // Reserved sub-routes under /project that are NOT project editor URLs.
-  // The 24-hex regex already excludes them, but this is a belt-and-suspenders
-  // guard in case Overleaf ever introduces non-ObjectId sub-routes that bypass
-  // the regex.
-  const PROJECT_EDITOR_RESERVED_IDS = new Set(['new', 'upload', 'import']);
-
-  // Status-badge palette is governed by spec §5.10 — ten values mapped to
-  // CSS classes that reuse the per-project run-card palette tokens.
-  const STATUS_BADGE_CLASS = {
-    pending: 'badge-pending',
-    accepted: 'badge-accepted',
-    rejected: 'badge-rejected',
-    needs_review: 'badge-needs-review',
-    running: 'badge-running',
-    completed: 'badge-completed',
-    failed: 'badge-failed',
-    background_completed: 'badge-background-completed',
-    needs_review_after_navigation: 'badge-needs-review-after-navigation',
-    abandoned_after_navigation: 'badge-abandoned-after-navigation'
-  };
-
   let runCancellationRequested = false;
   let activePluginConfirmResolve = null;
-  // Carved modules (v1.4.5 structural-debt phase 1). Factory-injected with the
-  // runtime collaborators they need; the destructured consts keep every
-  // existing call site unchanged. Function declarations hoist, so passing them
-  // here is safe; mutable state is handed over as lazy getters.
-  const markdownText = window.CodexOverleafMarkdownText.create({
-    tx,
-    callPageBridge,
-    getCurrentProjectReferenceFiles,
-    showPluginToast
-  });
-  const {
-    renderMarkdownInlineText,
-    renderMarkdownBlockText,
-    sanitizeAssistantVisibleText,
-    sanitizeAssistantVisibleValue,
-    buildMarkdownInlineNodes,
-    normalizeReferencePathForRuntime,
-    hasUnsafeRuntimePathSegments
-  } = markdownText;
-  const otWarmMirror = window.CodexOverleafOtWarmMirror.create({
-    tr,
-    tx,
-    closeDiagnosticsMenu,
-    syncCustomInstructionsEditorForProject,
-    throwIfRunCancellationRequested,
-    showPluginConfirm,
-    showPluginToast,
-    getCurrentProjectId,
-    updateProbeStatusOtSuffix,
-    sanitizeRunProjectSnapshot,
-    getMirrorFreshness,
-    buildSnapshotFileOverlays,
-    normalizeSnapshotPath,
-    formatProjectSnapshotUserLog,
-    formatProjectSnapshotWarning,
-    getProjectSnapshotWarnings,
-    sendBackgroundNative,
-    callPageBridge,
-    saveStateSoon,
-    finishRunView,
-    appendRunEvent,
-    appendCompletionReport,
-    appendLog,
-    appendPlainLog,
-    getPanel: () => panel,
-    getState: () => state,
-    setState: next => { state = next; },
-    getCurrentRunView: () => currentRunView,
-    RUN_SNAPSHOT_ZIP_TIMEOUT_MS
-  });
-  const {
-    getCurrentOtStatus,
-    getOtWarmMirrorState,
-    getLastExperimentalOtProjectId,
-    clearMirrorPrefetchTimer,
-    releaseOtWarmMirrorProject,
-    isExperimentalOtEnabled,
-    setExperimentalOtEnabledForProject,
-    normalizeExperimentalOtByProject,
-    syncExperimentalOtToggleForProject,
-    handleExperimentalOtToggleClick,
-    handleExperimentalOtToggleKeydown,
-    handleExperimentalOtToggleChange,
-    syncOtWarmMirrorController,
-    readOtBridgeStatus,
-    clearOtEventPolling,
-    canPollOtWarmMirror,
-    pauseOtWarmMirror,
-    resumeOtWarmMirror,
-    updateOtStatusDisplay,
-    formatOtStatusLabel,
-    updateExperimentalOtMenuStatus,
-    normalizeOtStatus,
-    scheduleMirrorPrefetch,
-    settleMirrorPrefetchBeforeRun,
-    resolveWarmRunStart,
-    prepareMirrorStaleRetry
-  } = otWarmMirror;
-  const diagnosticsController = window.CodexOverleafDiagnosticsController.create({
-    tr,
-    tx,
-    getExtensionCompatibilityMetadata,
-    showDiagnosticsLoading,
-    showDiagnosticsResult,
-    setDiagnosticsHealth,
-    sendBackgroundNative,
-    callPageBridge,
-    getState: () => state,
-    getCurrentOtStatus,
-    getOtWarmMirrorState,
-    otWarmMirrorController,
-    getActiveFocusFiles,
-    getCurrentProjectId,
-    isExperimentalOtEnabled,
-    readOtBridgeStatus,
-    formatOtStatusLabel,
-    normalizeOtStatus,
-    formatProbeStatusBar,
-    getProbeRunReadiness,
-    getMirrorFreshness,
-    formatProjectSnapshotLog,
-    formatProjectSnapshotWarning,
-    getProjectSnapshotWarnings,
-    isTextSnapshotFile,
-    INSTALL_COMMAND,
-    RUN_SNAPSHOT_ZIP_TIMEOUT_MS
-  });
-  const {
-    runAllDiagnostics,
-    inspectProjectSnapshot,
-    inspectNativeEnvironment,
-    inspectPageStateDiagnostics,
-    inspectOtWarmMirrorDiagnostics,
-    fallbackNativeCompatibility,
-    getNativeCompatibilityClassification,
-    isNativeCompatibilityCompatible
-  } = diagnosticsController;
-  const runTimelineView = window.CodexOverleafRunTimelineView.create({
-    tr,
-    tx,
-    getLocale,
-    formatElapsed,
-    findRunRecord,
-    forceCancelStuckTaskForCurrentProject,
-    formatEventDetail,
-    formatEventTime,
-    renderAttachmentPreviewList,
-    formatModeLabel,
-    undoRun,
-    acceptRun,
-    getRunUndoCount,
-    cssEscape,
-    renderMarkdownInlineText,
-    renderMarkdownBlockText,
-    sanitizeAssistantVisibleText,
-    sanitizeAssistantVisibleValue,
-    buildMarkdownInlineNodes,
-    getPanel: () => panel,
-    getState: () => state,
-    getCurrentRunView: () => currentRunView,
-    trackedChangeInFlight
-  });
-  const {
-    resetAutoFollow,
-    bindLogAutoFollow,
-    bumpUnreadIfDetached,
-    scrollLogToBottom,
-    collapseRunProcess,
-    startRunElapsedTick,
-    stopRunElapsedTick,
-    formatProcessedSummary,
-    renderRunHistory,
-    renderRunCard,
-    getRunStatusText,
-    renderRunEvent,
-    upsertStreamEvent,
-    appendEventTechnicalDetail,
-    renderCompletionReport,
-    isTrackedChangeLifecycleRun,
-    configureUndoButton,
-    configureAcceptButton
-  } = runTimelineView;
-  const sessionManager = window.CodexOverleafSessionManager.create({
-    tr,
-    showPluginConfirm,
-    showPluginToast,
-    sendBackgroundNative,
-    saveState,
-    saveStateSoon,
-    readPanelInputs,
-    applyStateToPanel,
-    getPanel: () => panel,
-    getState: () => state,
-    setState: next => { state = next; },
-    getSessionPanelInstance: () => sessionPanelInstance,
-    formatSessionTime
-  });
-  const {
-    closeSessionMenu,
-    applySessionLabel,
-    bindActiveSessionHeader,
-    startNewSession,
-    switchSession,
-    deleteSessionWithConfirm,
-    renderSessionList,
-    commitSessionRename,
-    getRunningSessionIds,
-    isSessionRunning,
-    findSessionById,
-    replaceSessionInState,
-    updateSessionById
-  } = sessionManager;
-  const applyResultFormatters = window.CodexOverleafApplyResultFormatters.create({
-    getLocale,
-    tr,
-    tx,
-    getAppliedEntries,
-    getSkippedEntries,
-    appendRunEvent
-  });
-  const {
-    appendApplyResult,
-    failureReasonI18nLookup,
-    formatApplyResultReason,
-    formatBridgeResultReason,
-    localizeVisibleReason,
-    formatOperationType,
-    formatOperationFiles
-  } = applyResultFormatters;
-  const modelPicker = window.CodexOverleafModelPicker.create({
-    tr,
-    tx,
-    getLocale,
-    sendBackgroundNative,
-    readSelectedSpeedInput,
-    getRenderedModelEntries,
-    persistPanelInputs,
-    closeDiagnosticsMenu,
-    closeCustomInstructionsSettings,
-    closeContextTray,
-    closeSlashMenu,
-    getPanel: () => panel,
-    getState: () => state
-  });
-  const {
-    getModelDiscovery,
-    toggleModelConfigPopover,
-    closeModelConfigPopover,
-    handleModelConfigChoiceClick,
-    loadModelOptions,
-    applyFallbackModelOptions,
-    getModelCatalog,
-    renderModelOptions,
-    renderSpeedOptions,
-    renderModelConfigChoices,
-    resolveSelectedModel,
-    normalizeModelOptionId,
-    updateModelDisplay
-  } = modelPicker;
-  const recentProjects = window.CodexOverleafRecentProjects.create({
-    tr,
-    tx,
-    openCustomInstructionsSettings,
-    enterProject,
-    applyStateToPanel,
-    getPanel: () => panel,
-    getCachedAccountScopeId: () => cachedAccountScopeId,
-    PROJECT_EDITOR_RESERVED_IDS,
-    STATUS_BADGE_CLASS
-  });
-  const {
-    loadProjectNameCacheFromStorage,
-    rememberCurrentProjectName,
-    formatRelativeTime,
-    textNode,
-    renderStatusBadge,
-    isValidProjectId,
-    openProjectFromRow,
-    renderRecentProjectRow,
-    renderRecentProjectsVariant,
-    renderPerProjectVariant
-  } = recentProjects;
-
   root[RUNTIME_INSTALLED_FLAG] = true;
   root[RUNTIME_STATE_KEY] = { ok: true, alreadyInstalled: false };
 
