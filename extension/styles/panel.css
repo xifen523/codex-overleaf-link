@@ -3330,6 +3330,19 @@
   min-width: 0;
 }
 
+#codex-overleaf-panel .recent-projects-row-cleanup {
+  flex: 0 0 auto;
+  width: 26px;
+  border-radius: var(--tl-r-sm);
+  color: var(--tl-fg-4);
+  font-size: 13px;
+}
+
+#codex-overleaf-panel .recent-projects-row-cleanup:hover {
+  background: var(--tl-hover);
+  color: var(--tl-fail);
+}
+
 #codex-overleaf-panel .recent-projects-row-expand {
   flex: 0 0 auto;
   width: 26px;

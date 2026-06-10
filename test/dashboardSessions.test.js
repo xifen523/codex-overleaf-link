@@ -91,6 +91,33 @@ test('dashboard rename reuses the shared ghost guard and treats unchanged input 
   assert.match(commit, /buildSessionRecord\(/, 'IndexedDB record renormalized via buildSessionRecord');
 });
 
+test('dead project-link-unavailable rows get a cleanup action', () => {
+  const src = repo('extension/src/content/recentProjects.js');
+  assert.match(src, /data-row-cleanup/);
+  const cleanup = extractFunction(src, 'cleanupDeadProjectEntry');
+  // destructive confirm with honest copy
+  assert.match(cleanup, /recentProjects_cleanup_title/);
+  assert.match(cleanup, /recentProjects_cleanup_confirm/);
+  assert.match(cleanup, /destructive: true/);
+  // full-scan matching (undefined projectId is not indexed) + account scope
+  assert.match(cleanup, /getAllSessions\(\)/);
+  assert.match(cleanup, /record\.accountScopeId === scope/);
+  assert.match(cleanup, /String\(record\.projectId \|\| ''\) === wanted/);
+  assert.match(cleanup, /deleteRecord\('sessions', records\[i\]\.id\)/);
+  assert.match(cleanup, /codex\.history\.clearPlugin/);
+  // the panel-state blob is deliberately untouched: an empty projectId would
+  // map getProjectStorageKey onto the global legacy key
+  assert.doesNotMatch(cleanup, /mutateProjectPanelState/);
+  assert.match(cleanup, /renderRecentProjectsVariant\(\)/);
+  const I18n = require('../extension/src/shared/i18n');
+  for (const key of ['recentProjects_cleanup', 'recentProjects_cleanup_title', 'recentProjects_cleanup_message', 'recentProjects_cleanup_confirm', 'recentProjects_cleanup_done']) {
+    assert.notEqual(I18n.t('en', key), key, `missing English ${key}`);
+    assert.notEqual(I18n.t('zh', key), key, `missing Chinese ${key}`);
+  }
+  const css = repo('extension/styles/panel.css');
+  assert.match(css, /\.recent-projects-row-cleanup:hover\s*\{[^}]*var\(--tl-fail\)/);
+});
+
 test('dashboard session management i18n + CSS are present', () => {
   const I18n = require('../extension/src/shared/i18n');
   for (const key of ['recentProjects_sessions_empty', 'recentProjects_sessions_toggle']) {

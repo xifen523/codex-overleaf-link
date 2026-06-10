@@ -354,7 +354,27 @@
       el.appendChild(textNode(tr('recentProjects_row_projectLinkUnavailable'), 'recent-projects-row-warning'));
     }
     if (!valid) {
-      return el;
+      // Dead entry: the session records behind it carry an empty/garbage
+      // projectId, so it can never be opened or expanded. Offer a cleanup
+      // action that removes those records (and with them, this row).
+      var deadWrap = document.createElement('div');
+      deadWrap.className = 'recent-projects-row-wrap';
+      var deadHead = document.createElement('div');
+      deadHead.className = 'recent-projects-row-head';
+      var cleanup = document.createElement('button');
+      cleanup.type = 'button';
+      cleanup.className = 'recent-projects-row-cleanup';
+      cleanup.setAttribute('data-row-cleanup', '');
+      cleanup.title = tr('recentProjects_cleanup');
+      cleanup.setAttribute('aria-label', tr('recentProjects_cleanup'));
+      cleanup.textContent = '×';
+      cleanup.addEventListener('click', function () {
+        cleanupDeadProjectEntry(projectId).catch(function () { /* swallow */ });
+      });
+      deadHead.appendChild(el);
+      deadHead.appendChild(cleanup);
+      deadWrap.appendChild(deadHead);
+      return deadWrap;
     }
     // Wrap the row with an expand toggle + a lazily-populated session list so
     // sessions can be managed (delete/rename) without entering the project.
@@ -482,6 +502,59 @@
     row.appendChild(rename);
     row.appendChild(del);
     return row;
+  }
+
+  // Remove every session record behind a dead (invalid-projectId) dashboard
+  // entry. Matching is done over a full scan instead of the projectId index:
+  // records with an undefined projectId are not indexed at all. The panel
+  // panel-state blob is deliberately left alone — an empty projectId would
+  // map getProjectStorageKey onto the global legacy key.
+  async function cleanupDeadProjectEntry(projectId) {
+    var StorageDb = window.CodexOverleafStorageDb;
+    if (!StorageDb) {
+      return;
+    }
+    var approved = await showPluginConfirm({
+      title: tr('recentProjects_cleanup_title'),
+      message: tr('recentProjects_cleanup_message'),
+      confirmLabel: tr('recentProjects_cleanup_confirm'),
+      cancelLabel: tr('confirmDefaultCancel'),
+      destructive: true
+    });
+    if (!approved) {
+      return;
+    }
+    var scope = getCachedAccountScopeId();
+    var wanted = String(projectId || '');
+    var all = [];
+    try {
+      all = await StorageDb.getAllSessions();
+    } catch (_error) {
+      all = [];
+    }
+    var records = (all || []).filter(function (record) {
+      return record
+        && (!scope || record.accountScopeId === scope)
+        && String(record.projectId || '') === wanted;
+    });
+    var removed = 0;
+    for (var i = 0; i < records.length; i++) {
+      try {
+        await StorageDb.deleteRecord('sessions', records[i].id);
+        removed++;
+      } catch (_error) { /* keep going */ }
+      try {
+        await sendBackgroundNative({
+          method: 'codex.history.clearPlugin',
+          params: {
+            sessionId: records[i].id,
+            threadId: records[i].codexThreadId || ''
+          }
+        });
+      } catch (_error) { /* best effort: the records are already gone locally */ }
+    }
+    showPluginToast(tr('recentProjects_cleanup_done', { count: String(removed) }), { status: 'info' });
+    await renderRecentProjectsVariant();
   }
 
   function projectPanelStateKey(projectId) {
