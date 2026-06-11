@@ -80,9 +80,6 @@ function createSubagentBroker(options = {}) {
     accepting = true;
     writeBrokerFile('ready');
     pollTimer = setInterval(pollOnce, limits.pollIntervalMs);
-    if (pollTimer.unref) {
-      pollTimer.unref();
-    }
     if (parentSignal) {
       parentSignal.addEventListener('abort', onParentAbort, { once: true });
     }
@@ -285,9 +282,6 @@ function createSubagentBroker(options = {}) {
       timedOut = true;
       controller.abort(new Error('subagent timeout'));
     }, limits.perWorkerTimeoutMs);
-    if (deadlineTimer.unref) {
-      deadlineTimer.unref();
-    }
 
     emit('codex.subagent.started', job.title || job.id, {
       jobId: job.id,
@@ -483,10 +477,7 @@ function createSubagentBroker(options = {}) {
     accepting = false;
     if (drain && running.size) {
       const grace = new Promise(resolve => {
-        const timer = setTimeout(resolve, limits.drainGraceMs);
-        if (timer.unref) {
-          timer.unref();
-        }
+        setTimeout(resolve, limits.drainGraceMs);
       });
       await Promise.race([
         Promise.allSettled([...running.values()].map(worker => worker.promise)),
