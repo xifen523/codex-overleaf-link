@@ -1,0 +1,9 @@
+# Force LF on checkout everywhere (incl. Windows CI): source-contract tests
+# match exact source text and have twice been broken by CRLF materialization
+# (v1.5.0 model-pill CSS regexes, v1.6.0 skill/runner contracts).
+* text=auto eol=lf
+# PowerShell prefers CRLF.
+*.ps1 text eol=crlf
+# Binaries.
+*.png binary
+*.jpg binary
