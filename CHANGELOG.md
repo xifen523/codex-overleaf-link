@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.6.0 - 2026-06-03
+
+Feature release — **parallel subagents (experimental)**. The native protocol stays `1`; the feature is fully off unless the new official skill is enabled for a project.
+
+### Added
+
+- **Parallel subagents via the `parallel-subagents` official skill.** When the skill is enabled (Settings → Skills, per project) and a task decomposes into independent slices over separate files — the canonical case: polish one chapter per agent — the model writes job files into a workspace queue (`.codex-overleaf-subagents/`) and the native host **broker** runs real parallel Codex workers for it: fresh sandbox per worker (no nesting — a sandboxed model cannot spawn processes itself), same project mirror, at most 3 concurrent, each bounded by a wall-clock deadline and a 15-minute all-waves budget.
+- **Safety model**: jobs must own disjoint file sets (validated before admission); files changed during a wave that no job owns are reported as wave-level ownership violations and **hard-blocked from Overleaf writeback** (demoted to the unsupported-changes report — this holds even when Reviewing is off and writes would otherwise land directly). Cancel kills every worker and marks the mirror dirty so partial edits are deterministically discarded. Workers inherit the parent's skills except `parallel-subagents` itself (no recursive fan-out). Queue/result/log files never enter writeback or the diagnostics bundle.
+- **Timeline**: bilingual one-line lifecycle events per subagent (queued / started with slot count / completed with duration / failed / violation warnings / drained); full worker output stays in the queue's result files for the parent to integrate.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.6.0 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.6.0` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.6.0.zip`, `codex-overleaf-native-host-v1.6.0.tar.gz`, and `codex-overleaf-link-1.6.0.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.6.0 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.6.0 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.6.0 -- uninstall-native`.
+
 ## v1.5.3 - 2026-06-03
 
 Patch release — dead dashboard entries can now be removed. The native protocol stays `1`.
