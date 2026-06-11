@@ -93,6 +93,16 @@ test('the broker gate survives reloads and stale queues cannot mislead the model
   assert.match(listBlock, /ensureDefaultCodexOverleafSkills\(\{ env \}\)/);
 });
 
+test('skipped writeback rows surface the navigation debug payload', () => {
+  const formatters = repo('extension/src/content/applyResultFormatters.js');
+  const detail = extractFunction(formatters, 'buildSkippedDetail');
+  assert.match(detail, /formatApplyResultDebug\(item\?\.result\?\.debug \|\| item\?\.result\?\.diagnostics\)/);
+  // and the switch gate accepts a target-base match / refuses known-base drift
+  const router = repo('extension/src/page/writebackRouter.js');
+  assert.match(router, /\|\| baseMatches\n/);
+  assert.match(router, /!baseComparison\.known && contentChangedFromPrevious && settledLongEnough/);
+});
+
 test('codex.subagent.* events map to bilingual timeline lines', () => {
   const transcript = require('../extension/src/shared/agentTranscript');
   const map = (event, locale) => transcript.mapAgentEventToActivity(event, { locale });

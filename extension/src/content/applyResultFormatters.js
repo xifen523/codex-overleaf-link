@@ -69,6 +69,13 @@
         base[tr('detailNext')] = failure.nextAction;
       }
     }
+    // Always surface the writeback debug payload (signatures, active paths,
+    // open diagnostics) on skipped rows — without it a navigation-stage skip
+    // is undiagnosable from the UI (v1.6 lesson).
+    const debugText = formatApplyResultDebug(item?.result?.debug || item?.result?.diagnostics);
+    if (debugText) {
+      base[tx('Debug', '调试')] = debugText;
+    }
     return base;
   }
 

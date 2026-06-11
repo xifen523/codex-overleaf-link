@@ -112,6 +112,144 @@ test('writeback router refuses cross-file patch writes when the editor document 
   assert.equal(sourceEdited, false);
 });
 
+test('switch confirms via target-base match even when editor identity never changes', async () => {
+  // v1.6 fix: identity comparison is fragile against newer Overleaf view
+  // lifecycles; an editor that loads the target file's exact base content is
+  // the strongest proof the switch landed.
+  const files = new Map([
+    ['main.tex', 'root body'],
+    ['example/test2.tex', 'placeholder body']
+  ]);
+  let selectedPath = 'main.tex';
+  let editorPath = 'main.tex';
+  const router = writebackRouter.create({
+    activeEditorIdentityChanged: () => false,
+    compileBridge: { markSourceEdited() {} },
+    getActiveEditorIdentity: () => ({ type: 'codemirror-view', doc: 'doc' }),
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    normalizeTextPatches,
+    readActiveEditorText: () => files.get(editorPath) || '',
+    replaceActiveEditorPatches(patches) {
+      const text = files.get(editorPath) || '';
+      const next = patches.slice().sort((left, right) => right.from - left.from).reduce((value, patch) => {
+        return value.slice(0, patch.from) + patch.insert + value.slice(patch.to);
+      }, text);
+      files.set(editorPath, next);
+      return { ok: true, method: 'codemirror-view-patch' };
+    },
+    treeOperations: {
+      contentSignature(content) {
+        const text = String(content || '');
+        return `${text.length}:${text.slice(0, 80)}:${text.slice(-80)}`;
+      },
+      getActiveFilePath: () => selectedPath,
+      openFileByPath(path) {
+        selectedPath = path;
+        editorPath = path; // editor follows the switch (content loads)
+        return Promise.resolve({ ok: true, method: 'dom-click' });
+      },
+      waitForActiveEditorText(path) {
+        return Promise.resolve({ ok: true, path, text: files.get(editorPath) || '' });
+      }
+    },
+    window: {
+      CodexOverleafStaleGuard: staleGuard,
+      setTimeout,
+      clearTimeout
+    }
+  });
+
+  const result = await router.applyOperations({
+    baseFiles: [
+      { path: 'main.tex', content: 'root body' },
+      { path: 'example/test2.tex', content: 'placeholder body' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'example/test2.tex',
+        patches: [
+          { from: 0, to: 0, expected: '', insert: 'polished ' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result.skipped?.[0]?.result || {}));
+  assert.equal(result.applied.length, 1);
+  assert.equal(files.get('example/test2.tex'), 'polished placeholder body');
+});
+
+test('known-base mismatch still refuses the switch even when content changed', async () => {
+  // Safety lock for acceptor 4: when the target's base IS known, content must
+  // match it — content merely "different from the previous doc" is not
+  // sufficient, because a weakly-anchored patch (expected:'') would anchor
+  // trivially into a wrong-but-different document.
+  const files = new Map([
+    ['main.tex', 'root body'],
+    ['example/test.tex', 'drifted content not matching base exactly\n']
+  ]);
+  let selectedPath = 'main.tex';
+  let editorPath = 'main.tex';
+  const router = writebackRouter.create({
+    activeEditorIdentityChanged: () => false,
+    compileBridge: { markSourceEdited() {} },
+    getActiveEditorIdentity: () => ({ type: 'codemirror-view', doc: 'doc' }),
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    normalizeTextPatches,
+    readActiveEditorText: () => files.get(editorPath) || '',
+    replaceActiveEditorPatches(patches) {
+      const text = files.get(editorPath) || '';
+      const next = patches.slice().sort((left, right) => right.from - left.from).reduce((value, patch) => {
+        return value.slice(0, patch.from) + patch.insert + value.slice(patch.to);
+      }, text);
+      files.set(editorPath, next);
+      return { ok: true, method: 'codemirror-view-patch' };
+    },
+    treeOperations: {
+      contentSignature(content) {
+        const text = String(content || '');
+        return `${text.length}:${text.slice(0, 80)}:${text.slice(-80)}`;
+      },
+      getActiveFilePath: () => selectedPath,
+      openFileByPath(path) {
+        selectedPath = path;
+        editorPath = path;
+        return Promise.resolve({ ok: true, method: 'dom-click' });
+      },
+      waitForActiveEditorText(path) {
+        return Promise.resolve({ ok: true, path, text: files.get(editorPath) || '' });
+      }
+    },
+    window: {
+      CodexOverleafStaleGuard: staleGuard,
+      setTimeout,
+      clearTimeout
+    }
+  });
+
+  const result = await router.applyOperations({
+    baseFiles: [
+      { path: 'main.tex', content: 'root body' },
+      // base differs from what the editor shows -> the switch gate accepts
+      // via content-changed, then the STALE GUARD refuses the write.
+      { path: 'example/test.tex', content: 'expected base content\n' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'example/test.tex',
+        patches: [
+          { from: 0, to: 0, expected: '', insert: 'x' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.skipped[0].result.code, 'editor_document_not_switched');
+});
+
 test('writeback router force-reopens a selected target when the editor is still on another document', async () => {
   const files = new Map([
     ['main.tex', 'root body'],

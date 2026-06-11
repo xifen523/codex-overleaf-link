@@ -2278,13 +2278,29 @@
       const baseComparison = compareEditorTextToBase(filePath, lastText, baseFileLookup);
       const baseMatches = baseComparison.matches;
       const settledLongEnough = Date.now() - startedAt >= minSettleMs;
+      const contentChangedFromPrevious = !options.previousSignature
+        || contentSignature(lastText) !== options.previousSignature;
+      // Switch confirmation must not depend on any single fragile signal
+      // (v1.6: identity comparison proved unreliable against newer Overleaf
+      // view lifecycles, which made every write to a non-active file time
+      // out as target_editor_not_ready). Acceptors, strongest first:
+      //   1. editor identity visibly changed (fast path when it works);
+      //   2. the editor shows EXACTLY the target file's expected base —
+      //      the strongest possible proof the right document is loaded;
+      //   3. same-file reopen settled with unchanged content;
+      //   4. base UNKNOWN only: the content moved off the previous document
+      //      and the settle window elapsed. When the base IS known, content
+      //      must match it (acceptor 2) — a weakly-anchored patch (e.g. an
+      //      insert into an empty file, expected:'') would otherwise anchor
+      //      trivially into a wrong-but-different document.
       const switchConfirmed = identityChanged
+        || baseMatches
         || (options.initialActivePath === filePath
           && options.previousSignature
           && contentSignature(lastText) === options.previousSignature
-          && settledLongEnough);
-      const contentNoLongerLooksLikePreviousDocument = !options.previousSignature
-        || contentSignature(lastText) !== options.previousSignature
+          && settledLongEnough)
+        || (!baseComparison.known && contentChangedFromPrevious && settledLongEnough);
+      const contentNoLongerLooksLikePreviousDocument = contentChangedFromPrevious
         || baseMatches
         || options.initialActivePath === filePath;
       if (activeFileMatches && switchConfirmed && settledLongEnough && contentNoLongerLooksLikePreviousDocument) {
