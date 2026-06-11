@@ -909,9 +909,35 @@
       renderRunHistory();
       renderContextSelection();
       scheduleMirrorPrefetch({ reason: 'cold-start', delayMs: 2500 });
+      primeCodexOverleafSkillsCatalog().catch(() => { /* non-blocking */ });
     }
 
     PanelRenderer.setVisible(panel, true);
+  }
+
+  // One-shot catalog prime: the parallel-subagents broker gate reads
+  // state.codexOverleafSkills at run time. The catalog persists once filled
+  // (v1.6.1), but states saved by older builds have it stripped — without
+  // this prime, the gate stays silently off until the user happens to open
+  // the Skills page. Fire-and-forget on panel open; only fetches when the
+  // catalog is empty.
+  async function primeCodexOverleafSkillsCatalog() {
+    if (Array.isArray(state?.codexOverleafSkills) && state.codexOverleafSkills.length) {
+      return;
+    }
+    if (getSkillLoadingSettings().loadCodexOverleafSkills === false) {
+      return;
+    }
+    const response = await sendBackgroundNative({
+      method: 'skills.list',
+      params: { scope: 'codex-overleaf' }
+    });
+    const skills = Array.isArray(response?.result?.skills) ? response.result.skills : [];
+    if (!response?.ok || !skills.length) {
+      return;
+    }
+    state = { ...state, codexOverleafSkills: skills };
+    saveStateSoon();
   }
 
   function closePanel() {

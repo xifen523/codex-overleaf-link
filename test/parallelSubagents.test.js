@@ -93,6 +93,15 @@ test('the broker gate survives reloads and stale queues cannot mislead the model
   assert.match(listBlock, /ensureDefaultCodexOverleafSkills\(\{ env \}\)/);
 });
 
+test('panel open primes the skills catalog so the broker gate works without visiting Skills', () => {
+  const runtime = repo('extension/src/content/contentRuntime.js');
+  const prime = extractFunction(runtime, 'primeCodexOverleafSkillsCatalog');
+  assert.match(prime, /state\?\.codexOverleafSkills.*state\.codexOverleafSkills\.length/s);
+  assert.match(prime, /scope: 'codex-overleaf'/);
+  assert.match(prime, /saveStateSoon\(\)/);
+  assert.match(runtime, /primeCodexOverleafSkillsCatalog\(\)\.catch/);
+});
+
 test('skipped writeback rows surface the navigation debug payload', () => {
   const formatters = repo('extension/src/content/applyResultFormatters.js');
   const detail = extractFunction(formatters, 'buildSkippedDetail');
