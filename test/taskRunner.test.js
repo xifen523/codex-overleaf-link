@@ -294,10 +294,14 @@ test('skills.install, skills.list, and skills.remove manage Codex Overleaf plugi
     }, env);
 
     assert.equal(list.ok, true);
+    // v1.6.1: listing installs/restores the official skills first, so the
+    // catalog always contains them alongside user-installed ones.
     assert.deepEqual(list.result.skills.map(skill => [skill.id, skill.scope]), [
-      ['overleaf-style', 'codex-overleaf']
+      ['annotated-rewrite', 'codex-overleaf'],
+      ['overleaf-style', 'codex-overleaf'],
+      ['parallel-subagents', 'codex-overleaf']
     ]);
-    assert.equal(list.result.skills[0].title, 'Overleaf Style');
+    assert.equal(list.result.skills.find(skill => skill.id === 'overleaf-style').title, 'Overleaf Style');
 
     const remove = await handleRequest({
       id: 'plugin-skill-remove',

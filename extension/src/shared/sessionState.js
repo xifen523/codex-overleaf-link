@@ -852,6 +852,16 @@
     return compact;
   }
 
+  function compactCodexOverleafSkillsForStorage(skills) {
+    return (Array.isArray(skills) ? skills : [])
+      .slice(0, 32)
+      .map(skill => ({
+        id: String(skill?.id || '').trim().slice(0, 64),
+        name: String(skill?.name || '').trim().slice(0, 80)
+      }))
+      .filter(skill => skill.id);
+  }
+
   function compactPanelStateForStorage(input, limits) {
     const source = {
       ...DEFAULT_PANEL_STATE,
@@ -869,6 +879,11 @@
     const active = compactSessions.find(session => session.id === resolvedActiveId) || compactSessions[0] || null;
 
     return {
+      // The Codex-Overleaf skills catalog must survive reloads: the parallel-
+      // subagents broker gate reads it at run time, and before v1.6.1 it was
+      // stripped here — so the gate silently died after any reload until the
+      // Skills page was reopened.
+      codexOverleafSkills: compactCodexOverleafSkillsForStorage(source.codexOverleafSkills),
       mode: VALID_MODES.has(active?.mode) ? active.mode : normalizeMode(source.mode),
       model: normalizeTextField(active?.model || source.model || DEFAULT_PANEL_STATE.model, 80),
       reasoningEffort: VALID_REASONING.has(active?.reasoningEffort)

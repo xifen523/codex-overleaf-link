@@ -291,6 +291,12 @@ function handleSkillsList(request, env) {
   try {
     const { CODEX_OVERLEAF_SKILL_SCOPE, listCodexOverleafSkills, listProjectSkills } = require('./localSkills');
     if (request.params?.scope === CODEX_OVERLEAF_SKILL_SCOPE) {
+      // Install/restore official skills before listing so newly shipped ones
+      // (e.g. parallel-subagents) appear in the Skills UI right after a
+      // runtime update instead of only after the next codex run (v1.6.1).
+      try {
+        require('./codexHome').ensureDefaultCodexOverleafSkills({ env });
+      } catch (_error) { /* listing still proceeds */ }
       return okResponse(request.id, listCodexOverleafSkills({ env }));
     }
     return okResponse(request.id, listProjectSkills({

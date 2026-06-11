@@ -70,6 +70,29 @@ test('the subagent queue directory never enters the mirror scan', () => {
   assert.match(mirror, /module\.exports = \{\n  SUBAGENT_QUEUE_DIR,/);
 });
 
+test('the broker gate survives reloads and stale queues cannot mislead the model', () => {
+  // Fix 1 (v1.6.1): the skills catalog the gate reads persists through the
+  // storage compactor — before this, any reload silently disabled the gate
+  // until the Skills page was reopened.
+  const SessionState = require('../extension/src/shared/sessionState');
+  const prepared = SessionState.prepareStateForStorage({
+    sessions: [],
+    activeSessionId: '',
+    codexOverleafSkills: [{ id: 'parallel-subagents', name: 'Parallel Subagents' }]
+  });
+  assert.deepEqual(prepared.codexOverleafSkills, [{ id: 'parallel-subagents', name: 'Parallel Subagents' }]);
+  // Fix 2 (v1.6.1): an unbrokered run removes any stale queue dir so the
+  // model never reads a leftover closed handshake.
+  const runner = repo('native-host/src/codexSessionRunner.js');
+  const elseBlock = runner.match(/\} else if \(!skillInstallTurn\) \{[\s\S]*?\n  \}/)?.[0] || '';
+  assert.match(elseBlock, /fs\.rmSync\(path\.join\(mirror\.workspacePath, SUBAGENT_QUEUE_DIR\), \{ recursive: true, force: true \}\)/);
+  // Fix 3 (v1.6.1): skills.list installs/restores official skills first so a
+  // freshly shipped skill is visible in the UI before any codex run.
+  const runtime = repo('native-host/src/taskRunnerRuntime.js');
+  const listBlock = runtime.match(/function handleSkillsList\([\s\S]*?\n\}/)?.[0] || '';
+  assert.match(listBlock, /ensureDefaultCodexOverleafSkills\(\{ env \}\)/);
+});
+
 test('codex.subagent.* events map to bilingual timeline lines', () => {
   const transcript = require('../extension/src/shared/agentTranscript');
   const map = (event, locale) => transcript.mapAgentEventToActivity(event, { locale });

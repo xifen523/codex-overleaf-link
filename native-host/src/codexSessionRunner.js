@@ -3,7 +3,7 @@
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const { collectMirrorChangesDetailed, getProjectMirror, markMirrorDirty, syncOverleafToMirror } = require('./mirrorWorkspace');
+const { SUBAGENT_QUEUE_DIR, collectMirrorChangesDetailed, getProjectMirror, markMirrorDirty, syncOverleafToMirror } = require('./mirrorWorkspace');
 const { computeLineDiff } = require('./diffEngine');
 const { computeTextPatches } = require('./textPatch');
 const { buildCodexHomeEnv } = require('./codexHome');
@@ -126,6 +126,11 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     : null;
   if (subagentBroker) {
     subagentBroker.start();
+  } else if (!skillInstallTurn) {
+    // No broker this run: remove any stale queue from a previous brokered run
+    // so the model never reads a leftover closed handshake and reports the
+    // feature as half-available (v1.6.1 — observed in E2E).
+    fs.rmSync(path.join(mirror.workspacePath, SUBAGENT_QUEUE_DIR), { recursive: true, force: true });
   }
   let runnerResult;
   try {
