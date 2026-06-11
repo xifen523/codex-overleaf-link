@@ -17,6 +17,9 @@ const {
   loadSelectedCodexOverleafSkill,
   loadSelectedProjectSkills
 } = require('./localSkills');
+const { createSubagentBroker } = require('./subagentBroker');
+
+const PARALLEL_SUBAGENTS_SKILL_ID = 'parallel-subagents';
 
 const TURN_ATTACHMENTS_DIR = '.codex-overleaf-attachments';
 const MAX_TURN_ATTACHMENT_BYTES = 12 * 1024 * 1024;
@@ -80,27 +83,87 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     fs.mkdirSync(runnerWorkspacePath, { recursive: true });
   }
   const runner = executeCodex || runCodexAppServerSession;
-  const runnerResult = await runner({
-    workspacePath: runnerWorkspacePath,
-    task: buildCodexTurnPrompt(params, mirror, projectLocalSkills, turnAttachments, codexSkillInvocationContext),
-    userTask: String(params.task || ''),
-    session: params.session || null,
-    threadId: params.threadId || '',
-    mode: params.mode || 'auto',
-    model: params.model || '',
-    reasoningEffort: params.reasoningEffort || '',
-    speedTier: normalizeSpeedTier(params.speedTier),
-    loadCodexLocalSkills: skillLoading.loadCodexLocalSkills,
-    loadCodexOverleafSkills: skillLoading.loadCodexOverleafSkills,
-    skillInvocation: effectiveSkillInvocation,
-    installCodexOverleafSkillsTarget: skillInstallTurn,
-    projectLocalSkills: null,
-    sandboxMode: settings.sandboxMode,
-    approvalPolicy: settings.approvalPolicy,
-    env,
-    emit,
-    signal
-  });
+  // Parallel-subagents broker (v1.6): activated solely by the official skill
+  // being enabled for this run. Workers are sibling Codex runs spawned by the
+  // host (fresh sandbox — never nested), confined to the same mirror; the
+  // broker enforces file ownership and wall-clock deadlines (spec §5-§7).
+  const subagentBroker = !skillInstallTurn
+    && skillLoading.loadCodexOverleafSkills !== false
+    && Array.isArray(params.enabledCodexOverleafSkillIds)
+    && params.enabledCodexOverleafSkillIds.includes(PARALLEL_SUBAGENTS_SKILL_ID)
+    ? createSubagentBroker({
+      workspacePath: mirror.workspacePath,
+      signal,
+      emit: (type, title, detail, status) => emitCodexEvent(emit, type, title, detail, status),
+      onMirrorDirty: () => markMirrorDirty({ projectId, rootDir, reason: 'subagent_run_cancelled' }),
+      runWorkerTask: ({ jobId, prompt, signal: workerSignal }) => runner({
+        workspacePath: mirror.workspacePath,
+        task: prompt,
+        userTask: `subagent:${jobId}`,
+        session: null,
+        threadId: '',
+        mode: params.mode || 'auto',
+        model: params.model || '',
+        reasoningEffort: params.reasoningEffort || '',
+        speedTier: normalizeSpeedTier(params.speedTier),
+        loadCodexLocalSkills: skillLoading.loadCodexLocalSkills,
+        loadCodexOverleafSkills: skillLoading.loadCodexOverleafSkills,
+        skillInvocation: null,
+        installCodexOverleafSkillsTarget: false,
+        projectLocalSkills: null,
+        // Recursion guard (spec S6): workers inherit skills EXCEPT the
+        // fan-out skill itself, stripped per worker app-server process.
+        disableCodexOverleafSkillIds: [PARALLEL_SUBAGENTS_SKILL_ID],
+        sandboxMode: settings.sandboxMode,
+        approvalPolicy: settings.approvalPolicy,
+        env,
+        // Worker raw events stay out of the parent timeline (spec §8);
+        // lifecycle events come from the broker, full text from result files.
+        emit: () => {},
+        signal: workerSignal
+      })
+    })
+    : null;
+  if (subagentBroker) {
+    subagentBroker.start();
+  }
+  let runnerResult;
+  try {
+    runnerResult = await runner({
+      workspacePath: runnerWorkspacePath,
+      task: buildCodexTurnPrompt(params, mirror, projectLocalSkills, turnAttachments, codexSkillInvocationContext),
+      userTask: String(params.task || ''),
+      session: params.session || null,
+      threadId: params.threadId || '',
+      mode: params.mode || 'auto',
+      model: params.model || '',
+      reasoningEffort: params.reasoningEffort || '',
+      speedTier: normalizeSpeedTier(params.speedTier),
+      loadCodexLocalSkills: skillLoading.loadCodexLocalSkills,
+      loadCodexOverleafSkills: skillLoading.loadCodexOverleafSkills,
+      skillInvocation: effectiveSkillInvocation,
+      installCodexOverleafSkillsTarget: skillInstallTurn,
+      projectLocalSkills: null,
+      sandboxMode: settings.sandboxMode,
+      approvalPolicy: settings.approvalPolicy,
+      env,
+      emit,
+      // While subagent workers are active, the parent idle watchdog resets
+      // instead of failing the run (spec P2-7 fix).
+      hasExternalActivity: subagentBroker ? () => subagentBroker.hasActiveWorkers() : undefined,
+      signal
+    });
+  } catch (error) {
+    if (subagentBroker) {
+      await subagentBroker.stop({ drain: false });
+    }
+    throw error;
+  }
+  // Parent turn finished: drain remaining workers so their edits are part of
+  // the single mirror diff below, then close the queue.
+  if (subagentBroker) {
+    await subagentBroker.stop({ drain: true });
+  }
   throwIfAborted(signal);
 
   if (skillInstallTurn) {
@@ -124,11 +187,27 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     focusFiles: params.focusFiles || params.session?.focusFiles,
     restrictToFocusFiles: params.restrictToFocusFiles
   });
-  const rawSyncChanges = filteredChanges.changes;
+  let rawSyncChanges = filteredChanges.changes;
   const unsupportedChanges = [
     ...(collected.unsupportedChanges || []),
     ...filteredChanges.unsupportedChanges
   ];
+  // Spec S8: ownership violations hard-block writeback. Changes on violated
+  // paths are demoted to unsupportedChanges (surfaced, never auto-applied) —
+  // this must hold even when requireReviewing is off and ordinary
+  // syncChanges would write directly.
+  const subagentViolationPaths = subagentBroker ? subagentBroker.getViolationPaths() : null;
+  if (subagentViolationPaths && subagentViolationPaths.size) {
+    const blocked = rawSyncChanges.filter(change => subagentViolationPaths.has(change.path));
+    rawSyncChanges = rawSyncChanges.filter(change => !subagentViolationPaths.has(change.path));
+    for (const change of blocked) {
+      unsupportedChanges.push({
+        type: 'unsupported-local-file',
+        path: change.path,
+        reason: 'subagent_unauthorized_edit'
+      });
+    }
+  }
   if (rawSyncChanges.length || unsupportedChanges.length) {
     markMirrorDirty({
       projectId,
@@ -548,6 +627,40 @@ async function applyCodexSkillIsolation({ input = {}, childEnv = process.env, re
   return { disabled };
 }
 
+// Recursion guard (spec S6): disable specific Codex-Overleaf skills for one
+// app-server child process — used to strip `parallel-subagents` from worker
+// runs so an inheriting worker cannot discover the queue and fan out again.
+// Skill directories are named by skill id (<root>/<id>/SKILL.md).
+async function applyWorkerSkillStrip({ input = {}, request } = {}) {
+  const ids = Array.isArray(input.disableCodexOverleafSkillIds)
+    ? input.disableCodexOverleafSkillIds.filter(Boolean)
+    : [];
+  if (!ids.length || typeof request !== 'function') {
+    return { disabled: [] };
+  }
+  const listResult = await request('skills/list', {
+    cwd: input.workspacePath,
+    includeDisabled: true
+  });
+  const disabled = [];
+  for (const skill of flattenCodexSkillsList(listResult)) {
+    if (skill?.enabled === false) {
+      continue;
+    }
+    const skillDirName = path.basename(path.dirname(String(skill?.path || '')));
+    if (!ids.includes(skillDirName)) {
+      continue;
+    }
+    const params = buildSkillDisableParams(skill);
+    if (!params) {
+      continue;
+    }
+    await request('skills/config/write', params);
+    disabled.push(skillDirName);
+  }
+  return { disabled };
+}
+
 function flattenCodexSkillsList(listResult = {}) {
   const data = Array.isArray(listResult?.data) ? listResult.data : [];
   return data.flatMap(entry => Array.isArray(entry?.skills) ? entry.skills : []);
@@ -692,6 +805,13 @@ function runCodexAppServerSession(input) {
     });
     const idleTimeoutMs = parseOptionalPositiveInteger(childEnv.CODEX_OVERLEAF_CODEX_IDLE_TIMEOUT_MS) || 600000;
     const idleWatchdog = createCodexIdleWatchdog(idleTimeoutMs, ms => {
+      // While the subagent broker reports active workers the parent may be
+      // legitimately quiet (waiting on results); reset instead of failing
+      // (spec P2-7). The broker's own wall-clock deadlines bound the wait.
+      if (input.hasExternalActivity?.()) {
+        idleWatchdog.reset();
+        return;
+      }
       fail(new Error(`Codex app-server produced no events for ${ms}ms (idle watchdog); the run was aborted to release the project lock.`));
     });
     const onAbort = () => {
@@ -739,6 +859,10 @@ function runCodexAppServerSession(input) {
         childEnv,
         request,
         emit: input.emit
+      });
+      await applyWorkerSkillStrip({
+        input,
+        request
       });
 
       if (input.threadId) {

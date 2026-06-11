@@ -135,6 +135,10 @@
       };
     }
 
+    if (type.indexOf('codex.subagent.') === 0) {
+      return mapSubagentEvent(event, type, locale);
+    }
+
     if (type === 'codex.exec.started') {
       return {
         kind: 'activity',
@@ -200,6 +204,81 @@
       status: event.status || 'running',
       technicalDetail: normalizeRawEvent(event)
     };
+  }
+
+  // Parallel-subagents lifecycle (v1.6): one human-readable line per state
+  // change; worker raw output never streams here (it lives in the queue's
+  // result files), so these lines plus the collapsed technical detail are the
+  // whole timeline footprint of a fan-out.
+  function mapSubagentEvent(event, type, locale) {
+    const detail = event.detail || {};
+    const label = String(event.title || detail.jobId || '').slice(0, 80);
+    const base = {
+      kind: 'activity',
+      visible: true,
+      technicalDetail: normalizeRawEvent(event)
+    };
+    if (type === 'codex.subagent.queued') {
+      return { ...base, status: 'running', title: textFor(locale, `↳ 子代理「${label}」已排队。`, `↳ Subagent "${label}" queued.`) };
+    }
+    if (type === 'codex.subagent.started') {
+      const active = Number(detail.activeWorkers) || 0;
+      const max = Number(detail.maxWorkers) || 0;
+      const slots = active && max ? `${active}/${max}` : '';
+      return {
+        ...base,
+        status: 'running',
+        title: slots
+          ? textFor(locale, `↳ 子代理「${label}」开始（${slots} 并行）。`, `↳ Subagent "${label}" started (${slots} parallel).`)
+          : textFor(locale, `↳ 子代理「${label}」开始。`, `↳ Subagent "${label}" started.`)
+      };
+    }
+    if (type === 'codex.subagent.completed') {
+      const seconds = Math.round((Number(detail.durationMs) || 0) / 1000);
+      return {
+        ...base,
+        status: 'completed',
+        title: seconds
+          ? textFor(locale, `↳ 子代理「${label}」完成（${seconds}s）。`, `↳ Subagent "${label}" completed (${seconds}s).`)
+          : textFor(locale, `↳ 子代理「${label}」完成。`, `↳ Subagent "${label}" completed.`)
+      };
+    }
+    if (type === 'codex.subagent.failed') {
+      const status = String(detail.status || 'failed');
+      const reason = String(detail.reason || '').slice(0, 120);
+      const zhStatus = status === 'timeout' ? '超时' : status === 'cancelled' ? '被取消' : '失败';
+      const enStatus = status === 'timeout' ? 'timed out' : status === 'cancelled' ? 'was cancelled' : 'failed';
+      return {
+        ...base,
+        status: 'warning',
+        title: reason
+          ? textFor(locale, `↳ 子代理「${label}」${zhStatus}：${reason}`, `↳ Subagent "${label}" ${enStatus}: ${reason}`)
+          : textFor(locale, `↳ 子代理「${label}」${zhStatus}。`, `↳ Subagent "${label}" ${enStatus}.`)
+      };
+    }
+    if (type === 'codex.subagent.rejected') {
+      const reason = String(detail.reason || 'rejected');
+      return {
+        ...base,
+        status: 'warning',
+        title: textFor(locale, `↳ 子代理任务「${label}」被拒绝（${reason}）。`, `↳ Subagent job "${label}" was rejected (${reason}).`)
+      };
+    }
+    if (type === 'codex.subagent.violation') {
+      return {
+        ...base,
+        status: 'warning',
+        title: textFor(locale, `⚠ 子代理波次改动了未授权文件 ${label}，该文件的改动将不会写回 Overleaf。`, `⚠ A subagent wave changed unowned file ${label}; its changes will NOT be written back to Overleaf.`)
+      };
+    }
+    if (type === 'codex.subagent.drained') {
+      return {
+        ...base,
+        status: 'completed',
+        title: textFor(locale, '↳ 子代理已全部收尾。', '↳ All subagents drained.')
+      };
+    }
+    return { ...base, status: event.status || 'running', title: label };
   }
 
   function mapCodexSessionEvent(event, locale) {

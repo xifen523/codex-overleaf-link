@@ -308,7 +308,8 @@ test('plugin Codex home reports skipped links while preserving copied auth/confi
     assert.deepEqual(prepared.linked, []);
     assert.deepEqual(prepared.skippedLinks.map(link => [link.name, link.reason]), [
       ['skills/user-skill', 'EPERM'],
-      ['skills/annotated-rewrite', 'EPERM']
+      ['skills/annotated-rewrite', 'EPERM'],
+      ['skills/parallel-subagents', 'EPERM']
     ]);
   } finally {
     fs.symlinkSync = originalSymlinkSync;
@@ -335,12 +336,14 @@ test('Windows plugin Codex directory links request junction semantics', () => {
     }, { platform: 'win32' });
 
     assert.deepEqual(prepared.linked, ['skills']);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 3);
     assert.equal(calls[0].source, path.join(userCodexHome, 'skills', 'user-skill'));
     assert.equal(calls[0].target, path.join(pluginHome, 'skills', 'user-skill'));
     assert.equal(calls[0].type, 'junction');
     assert.equal(calls[1].target, path.join(pluginHome, 'skills', 'annotated-rewrite'));
     assert.equal(calls[1].type, 'junction');
+    assert.equal(calls[2].target, path.join(pluginHome, 'skills', 'parallel-subagents'));
+    assert.equal(calls[2].type, 'junction');
   } finally {
     fs.symlinkSync = originalSymlinkSync;
     fs.rmSync(home, { recursive: true, force: true });

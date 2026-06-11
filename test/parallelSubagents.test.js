@@ -1,0 +1,95 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const { extractFunction } = require('./_helpers/extractFunction');
+
+const repo = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+
+test('parallel-subagents ships as a registered official skill with the full protocol taught', () => {
+  const registry = repo('native-host/src/localSkills.js');
+  assert.match(registry, /OFFICIAL_CODEX_OVERLEAF_SKILL_IDS = \['annotated-rewrite', 'parallel-subagents'\]/);
+  const skill = repo('native-host/src/skills/parallel-subagents/SKILL.md');
+  assert.match(skill, /name: parallel-subagents/);
+  // handshake, atomic write, disjoint ownership, wave discipline, poll loop,
+  // sequential fallback — the load-bearing teachings
+  assert.match(skill, /\.codex-overleaf-subagents\/broker\.json/);
+  assert.match(skill, /mv \.codex-overleaf-subagents\/jobs\/\.tmp-/);
+  assert.match(skill, /no file may appear\nin two jobs/i);
+  assert.match(skill, /never split one file/);
+  assert.match(skill, /do \*\*not\*\* edit project files yourself/);
+  assert.match(skill, /sleep 10/);
+  assert.match(skill, /missing or its\n`status` is not `ready`/);
+});
+
+test('runner gates the broker on the enabled skill id and wires lifecycle hooks', () => {
+  const runner = repo('native-host/src/codexSessionRunner.js');
+  assert.match(runner, /params\.enabledCodexOverleafSkillIds\.includes\(PARALLEL_SUBAGENTS_SKILL_ID\)/);
+  // cancel semantics: partial worker edits are discarded via the dirty mark
+  assert.match(runner, /onMirrorDirty: \(\) => markMirrorDirty\(\{ projectId, rootDir, reason: 'subagent_run_cancelled' \}\)/);
+  // parent finished -> drain before the single mirror diff; errors -> hard stop
+  assert.match(runner, /await subagentBroker\.stop\(\{ drain: true \}\);/);
+  assert.match(runner, /await subagentBroker\.stop\(\{ drain: false \}\);/);
+  // idle watchdog floor while workers are active
+  assert.match(runner, /hasExternalActivity: subagentBroker \? \(\) => subagentBroker\.hasActiveWorkers\(\) : undefined/);
+  const watchdogBlock = runner.match(/const idleWatchdog = createCodexIdleWatchdog\(idleTimeoutMs,[\s\S]*?\}\);/)?.[0] || '';
+  assert.match(watchdogBlock, /input\.hasExternalActivity\?\.\(\)/);
+  assert.match(watchdogBlock, /idleWatchdog\.reset\(\);/);
+});
+
+test('workers inherit the parent run shape minus the fan-out skill and the timeline', () => {
+  const runner = repo('native-host/src/codexSessionRunner.js');
+  const workerBlock = runner.match(/runWorkerTask: \(\{ jobId, prompt, signal: workerSignal \}\) => runner\(\{[\s\S]*?\}\)\n    \}\)/)?.[0] || '';
+  assert.match(workerBlock, /task: prompt/);
+  assert.match(workerBlock, /threadId: ''/);
+  assert.match(workerBlock, /disableCodexOverleafSkillIds: \[PARALLEL_SUBAGENTS_SKILL_ID\]/);
+  assert.match(workerBlock, /emit: \(\) => \{\}/);
+  assert.match(workerBlock, /signal: workerSignal/);
+  // the strip helper disables by skill-directory name through the per-child
+  // skills/config/write rail
+  const strip = extractFunction(runner, 'applyWorkerSkillStrip');
+  assert.match(strip, /skills\/list/);
+  assert.match(strip, /path\.basename\(path\.dirname\(/);
+  assert.match(strip, /skills\/config\/write/);
+});
+
+test('ownership violations are demoted from syncChanges to unsupportedChanges (S8)', () => {
+  const runner = repo('native-host/src/codexSessionRunner.js');
+  assert.match(runner, /getViolationPaths\(\)/);
+  assert.match(runner, /reason: 'subagent_unauthorized_edit'/);
+  const block = runner.match(/const subagentViolationPaths[\s\S]*?\n  \}/)?.[0] || '';
+  assert.match(block, /rawSyncChanges = rawSyncChanges\.filter\(change => !subagentViolationPaths\.has\(change\.path\)\)/);
+  assert.match(block, /unsupportedChanges\.push\(/);
+});
+
+test('the subagent queue directory never enters the mirror scan', () => {
+  const mirror = repo('native-host/src/mirrorWorkspace.js');
+  assert.match(mirror, /const SUBAGENT_QUEUE_DIR = '\.codex-overleaf-subagents';/);
+  const walkGuard = mirror.match(/entry\.name === '\.DS_Store'[^\n]*/)?.[0] || '';
+  assert.match(walkGuard, /SUBAGENT_QUEUE_DIR/);
+  assert.match(mirror, /module\.exports = \{\n  SUBAGENT_QUEUE_DIR,/);
+});
+
+test('codex.subagent.* events map to bilingual timeline lines', () => {
+  const transcript = require('../extension/src/shared/agentTranscript');
+  const map = (event, locale) => transcript.mapAgentEventToActivity(event, { locale });
+  const started = map({ type: 'codex.subagent.started', title: 'Polish ch3', detail: { activeWorkers: 2, maxWorkers: 3 } }, 'zh');
+  assert.match(started.title, /子代理「Polish ch3」开始（2\/3 并行）/);
+  assert.equal(started.status, 'running');
+  const completed = map({ type: 'codex.subagent.completed', title: 'Polish ch3', detail: { durationMs: 84000 } }, 'en');
+  assert.match(completed.title, /Subagent "Polish ch3" completed \(84s\)/);
+  const timeoutLine = map({ type: 'codex.subagent.failed', title: 'ch2', detail: { status: 'timeout' } }, 'en');
+  assert.match(timeoutLine.title, /timed out/);
+  assert.equal(timeoutLine.status, 'warning');
+  const violation = map({ type: 'codex.subagent.violation', title: 'main.tex', detail: {} }, 'zh');
+  assert.match(violation.title, /未授权文件 main\.tex/);
+  assert.match(violation.title, /不会写回 Overleaf/);
+  const rejected = map({ type: 'codex.subagent.rejected', title: 'bad', detail: { reason: 'file_conflict' } }, 'en');
+  assert.match(rejected.title, /rejected \(file_conflict\)/);
+  const drained = map({ type: 'codex.subagent.drained', title: '', detail: {} }, 'zh');
+  assert.match(drained.title, /子代理已全部收尾/);
+  for (const line of [started, completed, timeoutLine, violation, rejected, drained]) {
+    assert.equal(line.visible, true);
+    assert.ok(line.technicalDetail, 'raw event preserved as collapsed technical detail');
+  }
+});

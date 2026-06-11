@@ -114,6 +114,12 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     maxLines: 1500
   },
   {
+    // v1.6: parallel-subagents broker (file job queue, worker pool, wave
+    // ownership attribution).
+    path: 'native-host/src/subagentBroker.js',
+    maxLines: 620
+  },
+  {
     path: 'native-host/src/taskRunner.js',
     maxLines: 1000
   }

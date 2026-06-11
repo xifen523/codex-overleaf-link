@@ -11,6 +11,10 @@ const NATIVE_OUTPUT_LIMIT_BYTES = 1024 * 1024;
 const SAFE_INLINE_BINARY_CHANGE_BYTES = 512 * 1024;
 const SAFE_NATIVE_RESPONSE_PAYLOAD_BYTES = NATIVE_OUTPUT_LIMIT_BYTES - (64 * 1024);
 const TURN_ATTACHMENTS_DIR = '.codex-overleaf-attachments';
+// Control plane for the parallel-subagents broker (v1.6). Lives inside the
+// workspace so the sandboxed model can write jobs, but is excluded from the
+// mirror scan so queue/result/log files can never enter Overleaf writeback.
+const SUBAGENT_QUEUE_DIR = '.codex-overleaf-subagents';
 
 function getProjectMirror(projectId, options = {}) {
   const rootDir = path.resolve(options.rootDir || getDefaultMirrorRoot(options));
@@ -521,7 +525,7 @@ function listWorkspaceFiles(workspacePath) {
 
   function walk(dir, prefix) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.name === '.DS_Store' || entry.name === TURN_ATTACHMENTS_DIR) {
+      if (entry.name === '.DS_Store' || entry.name === TURN_ATTACHMENTS_DIR || entry.name === SUBAGENT_QUEUE_DIR) {
         continue;
       }
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
@@ -1004,6 +1008,7 @@ function verifyWorkspaceMatchesBaseline(workspacePath, baselineFiles = []) {
 }
 
 module.exports = {
+  SUBAGENT_QUEUE_DIR,
   NATIVE_OUTPUT_LIMIT_BYTES,
   SAFE_INLINE_BINARY_CHANGE_BYTES,
   SAFE_NATIVE_RESPONSE_PAYLOAD_BYTES,
