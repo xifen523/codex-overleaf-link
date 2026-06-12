@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.6.1 - 2026-06-03
+
+Feature patch — **single-file fan-out** for parallel subagents, two safe modes. The native protocol stays `1`.
+
+### Added
+
+- **One `.tex` file can now fan out too — pick a mode.** Concurrent writes to the same file remain forbidden (whole-file writes race and silently drop each other's edits); both modes work around the physics:
+  - **Mode A — serialized scoped jobs (simple).** Jobs may now share a file: the broker admits them and the scheduler runs them strictly one at a time (FIFO with skip — jobs on other files keep running in parallel). Each job's prompt states its exact section scope; temporal exclusivity makes prompt-scoped same-file delegation safe with zero slicing or assembly work. The old `file_conflict` rejection is retired.
+  - **Mode B — scatter–gather slices (true parallelism).** The lead extracts each independent section verbatim into a slice file under the queue's `work/` scratch zone, workers polish their slices in parallel (slice paths are the only ownable queue subpath; the control plane — jobs/results/logs/broker.json — remains forbidden), and the lead reassembles the original file with per-slice boundary verification. Slices never sync to Overleaf; only the lead's reassembled edits to the real file do.
+- **Explicit-scope iron rule.** Every job's task must state its exact working scope — file(s) + what is in scope, or for slices the section title plus its exact first and last source lines — and scopes must never overlap. If a boundary cannot be stated precisely, the lead does that slice itself.
+
+### Release
+
+- Release metadata alignment: bumped the package, lockfile, extension manifest, compatibility target, README release commands / badges, and release tracking metadata for the v1.6.1 release.
+- Bumped package, extension manifest, compatibility target, README release commands, and release tracking metadata to `1.6.1` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.6.1.zip`, `codex-overleaf-native-host-v1.6.1.tar.gz`, and `codex-overleaf-link-1.6.1.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.6.1 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.6.1 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.6.1 -- uninstall-native`.
+
 ## v1.6.0 - 2026-06-03
 
 Feature release — **parallel subagents (experimental)**. The native protocol stays `1`; the feature is fully off unless the new official skill is enabled for a project.
