@@ -16,8 +16,22 @@ test('parallel-subagents ships as a registered official skill with the full prot
   assert.match(skill, /\.codex-overleaf-subagents\/broker\.json/);
   assert.match(skill, /mv \.codex-overleaf-subagents\/jobs\/\.tmp-/);
   assert.match(skill, /no file may appear\r?\nin two jobs/i);
-  assert.match(skill, /never split one file/);
+  // v1.6.1: single-file fan-out via scatter-gather slices + the explicit
+  // scope iron rule (exact boundaries, no overlap)
+  assert.match(skill, /Mode A — serialized scoped jobs/);
+  assert.match(skill, /Mode B — scatter-gather slices/);
+  assert.match(skill, /run them one at a time|runs them one at a time/);
+  assert.match(skill, /\.codex-overleaf-subagents\/work\//);
+  assert.match(skill, /verify each slice still starts with its/);
+  assert.match(skill, /scopes MUST NOT\r?\noverlap/);
+  assert.match(skill, /quote\r?\n  the slice's exact first and last source lines/);
   assert.match(skill, /do \*\*not\*\* edit project files yourself/);
+  // broker side: the work/ scratch zone is ownable, the control plane is not
+  const broker = repo('native-host/src/subagentBroker.js');
+  assert.match(broker, /segments\[1\] === 'work' && segments\.length >= 3/);
+  // overlapping jobs serialize instead of rejecting
+  assert.match(broker, /queued\.findIndex\(id => !jobs\.get\(id\)\.job\.files\.some\(file => runningFiles\.has\(file\)\)\)/);
+  assert.doesNotMatch(broker, /file_conflict/);
   assert.match(skill, /sleep 10/);
   assert.match(skill, /missing or its\r?\n`status` is not `ready`/);
 });
@@ -126,8 +140,8 @@ test('codex.subagent.* events map to bilingual timeline lines', () => {
   const violation = map({ type: 'codex.subagent.violation', title: 'main.tex', detail: {} }, 'zh');
   assert.match(violation.title, /未授权文件 main\.tex/);
   assert.match(violation.title, /不会写回 Overleaf/);
-  const rejected = map({ type: 'codex.subagent.rejected', title: 'bad', detail: { reason: 'file_conflict' } }, 'en');
-  assert.match(rejected.title, /rejected \(file_conflict\)/);
+  const rejected = map({ type: 'codex.subagent.rejected', title: 'bad', detail: { reason: 'insufficient_time' } }, 'en');
+  assert.match(rejected.title, /rejected \(insufficient_time\)/);
   const drained = map({ type: 'codex.subagent.drained', title: '', detail: {} }, 'zh');
   assert.match(drained.title, /子代理已全部收尾/);
   for (const line of [started, completed, timeoutLine, violation, rejected, drained]) {

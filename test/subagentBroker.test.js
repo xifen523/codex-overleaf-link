@@ -90,7 +90,7 @@ test('accepted job runs, edits its owned file, and lands a completed result', as
   // worker prompt carries the ownership envelope
   assert.match(prompts[0], /modify ONLY these files: sections\/ch1\.tex/);
   assert.match(prompts[0], /must not modify them: main\.tex/);
-  assert.match(prompts[0], /Do not touch \.codex-overleaf-subagents\//);
+  assert.match(prompts[0], /Inside \.codex-overleaf-subagents\/ you may touch ONLY the slice files listed above/);
   assert.deepEqual(events.map(e => e.type), ['codex.subagent.queued', 'codex.subagent.started', 'codex.subagent.completed']);
   // no torn temp files left behind
   assert.equal(fs.readdirSync(path.join(queue(dir), 'results')).filter(n => n.startsWith('.tmp-')).length, 0);
@@ -109,10 +109,7 @@ test('validation rejects bad ids, garbage json, unsafe paths, missing files, con
   writeJob(dir, { id: 'BAD ID', task: 't', files: ['main.tex'] });
   writeJob(dir, { id: 'esc', task: 't', files: ['../outside.tex'] });
   writeJob(dir, { id: 'ghost', task: 't', files: ['nope.tex'] });
-  // intake order is alphabetical over jobs/, so 'aa-ok' is admitted before
-  // 'clash' contends for the same file
   writeJob(dir, { id: 'aa-ok', task: 't', files: ['sections/ch1.tex'] });
-  writeJob(dir, { id: 'clash', task: 't', files: ['sections/ch1.tex'] });
   writeJob(dir, { id: 'ok-b', task: 't', files: ['sections/ch2.tex'] });
   writeJob(dir, { id: 'zz-over', task: 't', files: ['main.tex'] });
   await waitFor(() => readResult(dir, 'zz-over'));
@@ -120,8 +117,6 @@ test('validation rejects bad ids, garbage json, unsafe paths, missing files, con
   assert.equal(readResult(dir, 'BAD ID')?.reason ?? 'invalid_id', 'invalid_id');
   assert.equal(readResult(dir, 'esc').reason, 'unsafe_path');
   assert.equal(readResult(dir, 'ghost').reason, 'missing_file');
-  assert.equal(readResult(dir, 'clash').reason, 'file_conflict');
-  assert.equal(readResult(dir, 'clash').conflictsWith, 'aa-ok');
   assert.equal(readResult(dir, 'zz-over').reason, 'too_many_jobs');
   await broker.stop({ drain: false });
 });
@@ -252,6 +247,103 @@ test('unowned changes during a wave become wave-level violations with suspects',
   assert.deepEqual(violation.suspects, ['ch1', 'parent'], 'wave-level attribution: suspects, not a named actor');
   assert.ok(events.some(e => e.type === 'codex.subagent.violation'));
   await broker.stop();
+});
+
+test('same-file jobs are serialized: admitted, never concurrent, both complete', async () => {
+  const dir = makeWorkspace();
+  let activeOnCh1 = 0;
+  let peakOnCh1 = 0;
+  const order = [];
+  const broker = createSubagentBroker({
+    workspacePath: dir,
+    runWorkerTask: abortableWorker(async ({ jobId }) => {
+      order.push(jobId);
+      activeOnCh1 += 1;
+      peakOnCh1 = Math.max(peakOnCh1, activeOnCh1);
+      await new Promise(resolve => setTimeout(resolve, 25));
+      activeOnCh1 -= 1;
+      return { assistantMessage: `done ${jobId}` };
+    }),
+    limits: { ...TINY, maxWorkers: 3, perWorkerTimeoutMs: 5000, brokerBudgetMs: 60000 }
+  });
+  broker.start();
+  writeJob(dir, { id: 'sec-a', title: 'Section A', task: 'polish ONLY section A of ch1', files: ['sections/ch1.tex'] });
+  writeJob(dir, { id: 'sec-b', title: 'Section B', task: 'polish ONLY section B of ch1', files: ['sections/ch1.tex'] });
+  await waitFor(() => readResult(dir, 'sec-a')?.status === 'completed' && readResult(dir, 'sec-b')?.status === 'completed');
+  assert.equal(peakOnCh1, 1, 'same-file jobs must never overlap in time');
+  assert.deepEqual(order, ['sec-a', 'sec-b'], 'FIFO order preserved for the contended file');
+  await broker.stop();
+});
+
+test('an overlapping job waits while disjoint jobs still run in parallel', async () => {
+  const dir = makeWorkspace();
+  const running = new Set();
+  let sawParallelDisjoint = false;
+  const broker = createSubagentBroker({
+    workspacePath: dir,
+    runWorkerTask: abortableWorker(async ({ jobId }) => {
+      running.add(jobId);
+      if (running.has('a-ch1') && running.has('b-ch2')) {
+        sawParallelDisjoint = true;
+      }
+      assert.equal(running.has('c-ch1-again') && running.has('a-ch1'), false, 'overlap must serialize');
+      await new Promise(resolve => setTimeout(resolve, 30));
+      running.delete(jobId);
+      return { assistantMessage: 'ok' };
+    }),
+    limits: { ...TINY, maxWorkers: 3, perWorkerTimeoutMs: 5000, brokerBudgetMs: 60000 }
+  });
+  broker.start();
+  writeJob(dir, { id: 'a-ch1', task: 't', files: ['sections/ch1.tex'] });
+  writeJob(dir, { id: 'b-ch2', task: 't', files: ['sections/ch2.tex'] });
+  writeJob(dir, { id: 'c-ch1-again', task: 't', files: ['sections/ch1.tex'] });
+  await waitFor(() => ['a-ch1', 'b-ch2', 'c-ch1-again'].every(id => readResult(dir, id)?.status === 'completed'));
+  assert.equal(sawParallelDisjoint, true, 'disjoint files still parallelize');
+  await broker.stop();
+});
+
+test('single-file fan-out: jobs may own slice files in the work/ scratch zone', async () => {
+  const dir = makeWorkspace();
+  const events = [];
+  const broker = createSubagentBroker({
+    workspacePath: dir,
+    emit: (type) => events.push(type),
+    runWorkerTask: abortableWorker(async ({ prompt }) => {
+      fs.writeFileSync(path.join(queue(dir), 'work', 'sec2.tex'), 'polished slice');
+      return { assistantMessage: `prompt saw: ${prompt.includes('.codex-overleaf-subagents/work/sec2.tex')}` };
+    }),
+    limits: TINY
+  });
+  broker.start();
+  // the lead scatters a slice into the broker-provisioned work/ zone...
+  fs.writeFileSync(path.join(queue(dir), 'work', 'sec2.tex'), 'original section two text');
+  // ...and a job that owns ONLY that slice
+  writeJob(dir, { id: 'sec2', title: 'Polish section 2', task: 'polish the slice in place', files: ['.codex-overleaf-subagents/work/sec2.tex'], readOnlyContext: ['main.tex'] });
+  await waitFor(() => readResult(dir, 'sec2')?.status === 'completed');
+  const result = readResult(dir, 'sec2');
+  assert.deepEqual(result.changedFiles, ['.codex-overleaf-subagents/work/sec2.tex']);
+  assert.match(result.summary, /prompt saw: true/);
+  // a mid-wave scratch write is NOT a violation: the queue zone never syncs
+  assert.equal(broker.getViolationPaths().size, 0);
+  await broker.stop();
+});
+
+test('queue control-plane paths are never ownable (only work/ slices are)', async () => {
+  const dir = makeWorkspace();
+  const broker = createSubagentBroker({
+    workspacePath: dir,
+    runWorkerTask: abortableWorker(async () => ({ assistantMessage: 'ok' })),
+    limits: TINY
+  });
+  broker.start();
+  writeJob(dir, { id: 'steal-jobs', task: 't', files: ['.codex-overleaf-subagents/jobs/x.json'] });
+  writeJob(dir, { id: 'steal-broker', task: 't', files: ['.codex-overleaf-subagents/broker.json'] });
+  writeJob(dir, { id: 'steal-results', task: 't', files: ['.codex-overleaf-subagents/results/r.json'] });
+  await waitFor(() => readResult(dir, 'steal-jobs') && readResult(dir, 'steal-broker') && readResult(dir, 'steal-results'));
+  assert.equal(readResult(dir, 'steal-jobs').reason, 'unsafe_path');
+  assert.equal(readResult(dir, 'steal-broker').reason, 'unsafe_path');
+  assert.equal(readResult(dir, 'steal-results').reason, 'unsafe_path');
+  await broker.stop({ drain: false });
 });
 
 test('audit summary captures jobs, statuses, and violations without task text', async () => {

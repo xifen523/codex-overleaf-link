@@ -76,6 +76,7 @@ function createSubagentBroker(options = {}) {
     fs.mkdirSync(jobsDir, { recursive: true });
     fs.mkdirSync(resultsDir, { recursive: true });
     fs.mkdirSync(logsDir, { recursive: true });
+    fs.mkdirSync(path.join(queueRoot, 'work'), { recursive: true });
     startedAt = Date.now();
     accepting = true;
     writeBrokerFile('ready');
@@ -194,15 +195,10 @@ function createSubagentBroker(options = {}) {
       }
       owned.push(safe);
     }
-    for (const [otherId, entry] of jobs) {
-      if (entry.status === 'rejected') {
-        continue;
-      }
-      const overlap = entry.job.files.find(file => owned.includes(file));
-      if (overlap) {
-        return { reason: 'file_conflict', path: overlap, conflictsWith: otherId };
-      }
-    }
+    // Overlapping ownership no longer rejects: same-file jobs are admitted
+    // and SERIALIZED by the scheduler (fillSlots never runs two jobs whose
+    // files intersect). Prompt-scoped same-file delegation is then safe —
+    // the physical lost-update race only exists under concurrency (v1.6.1).
     // Wave-aware admission: the parent turn has no default absolute deadline,
     // so the broker enforces its own wall-clock envelope across ALL waves.
     const projectedWaves = Math.ceil((queued.length + running.size + 1) / limits.maxWorkers);
@@ -229,6 +225,13 @@ function createSubagentBroker(options = {}) {
       return null;
     }
     if (segments[0] === SUBAGENT_QUEUE_DIR) {
+      // The queue control plane (jobs/results/logs/broker.json) is never
+      // ownable — but the work/ scratch zone IS: single-file fan-out slices
+      // live there (v1.6.1 scatter-gather), excluded from writeback by the
+      // mirror-scan rule yet fully owned/hashed like any other job file.
+      if (segments[1] === 'work' && segments.length >= 3) {
+        return segments.join('/');
+      }
       return null;
     }
     return segments.join('/');
@@ -252,7 +255,20 @@ function createSubagentBroker(options = {}) {
 
   function fillSlots() {
     while (accepting && !cancelled && queued.length && running.size < limits.maxWorkers) {
-      const jobId = queued.shift();
+      const runningFiles = new Set();
+      for (const id of running.keys()) {
+        for (const file of jobs.get(id).job.files) {
+          runningFiles.add(file);
+        }
+      }
+      // FIFO with skip: pick the first queued job whose ownership does not
+      // intersect any running job's files — overlapping jobs wait their turn
+      // (temporal exclusivity replaces the old overlap rejection).
+      const index = queued.findIndex(id => !jobs.get(id).job.files.some(file => runningFiles.has(file)));
+      if (index === -1) {
+        return;
+      }
+      const [jobId] = queued.splice(index, 1);
       startWorker(jobs.get(jobId));
     }
   }
@@ -408,6 +424,10 @@ function createSubagentBroker(options = {}) {
         return;
       }
       for (const entry of entries) {
+        // The whole queue zone (incl. the work/ slice scratch) stays out of
+        // wave hashing: scratch can never reach Overleaf, same-wave slices
+        // are all in the owned union anyway, and a lead staggering slice
+        // creation mid-wave must not read as a violation (v1.6.1).
         if (entry.name === '.DS_Store' || entry.name === SUBAGENT_QUEUE_DIR || entry.name === '.codex-overleaf-attachments') {
           continue;
         }
@@ -446,7 +466,7 @@ function createSubagentBroker(options = {}) {
       'You are a subagent working on one slice of a larger task.',
       'HARD CONSTRAINTS:',
       `- You may modify ONLY these files: ${job.files.join(', ')}.`,
-      readOnly + '- Do not modify, create, or delete any other file. Do not touch .codex-overleaf-subagents/.',
+      readOnly + '- Do not modify, create, or delete any other file. Inside .codex-overleaf-subagents/ you may touch ONLY the slice files listed above (if any).',
       '- Work fully autonomously; nobody can answer questions.',
       '',
       job.task
