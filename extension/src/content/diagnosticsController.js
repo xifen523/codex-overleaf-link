@@ -360,6 +360,27 @@
     if (!options.collectOnly) {
       showDiagnosticsLoading(tr('diagnosticsOtTitle'), tr('diagnosticsLoading'));
     }
+    // OT warm mirror is experimental and off by default. When it is disabled
+    // there is nothing live to probe, so report a clean, healthy "disabled"
+    // state instead of querying (then warning about) absent OT metadata — or
+    // degrading to the generic "could not run" error if a probe throws. A
+    // turned-off feature must never read as a failure.
+    if (!isExperimentalOtEnabled()) {
+      const disabledResult = {
+        title: tr('diagnosticsOtTitle'),
+        subtitle: tr('diagnosticsOtSubtitle'),
+        status: 'completed',
+        summary: tr('diagnosticsOtSummaryDisabled'),
+        bullets: [],
+        nextStep: '',
+        technical: ''
+      };
+      if (options.collectOnly) {
+        return disabledResult;
+      }
+      showDiagnosticsResult(disabledResult);
+      return;
+    }
     const projectId = getCurrentProjectId();
     let otStatus = null;
     let mirrorStatus = null;
@@ -413,8 +434,9 @@
     const statusValue = normalizeOtStatus(otStatus ? readOtBridgeStatus(otStatus) : getCurrentOtStatus());
     const queuedEventCount = normalizeOtDiagnosticsCount(otStatus?.queuedEventCount);
     const lastEventAt = formatOtDiagnosticValue(otStatus?.lastEventAt, tr('noneValue'));
-    const lastOtPatchAt = formatOtDiagnosticValue(mirrorStatus?.lastOtPatchAt || getOtWarmMirrorState().lastPatchAt, tr('noneValue'));
-    const lastOtErrorCode = formatOtDiagnosticValue(mirrorStatus?.lastOtErrorCode || getOtWarmMirrorState().lastErrorCode, tr('noneValue'));
+    const warmMirrorState = getOtWarmMirrorState() || {};
+    const lastOtPatchAt = formatOtDiagnosticValue(mirrorStatus?.lastOtPatchAt || warmMirrorState.lastPatchAt, tr('noneValue'));
+    const lastOtErrorCode = formatOtDiagnosticValue(mirrorStatus?.lastOtErrorCode || warmMirrorState.lastErrorCode, tr('noneValue'));
     const lastErrorCode = formatOtDiagnosticValue(otStatus?.lastErrorCode || otStatus?.reason || otStatus?.error, tr('noneValue'));
     const channelCandidates = formatOtChannelCandidates(otStatus?.channelCandidates);
     const otFreshFileCount = normalizeOtDiagnosticsCount(

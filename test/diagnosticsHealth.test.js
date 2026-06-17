@@ -24,6 +24,19 @@ test('diagnostics trigger shows a health dot driven by native compatibility', ()
   assert.match(css, /\.codex-diagnostics-dot\[data-health="fail"\]/);
 });
 
+test('a disabled OT warm mirror reports as a clean "disabled" state, never "could not run" (v1.6.2)', () => {
+  const controller = repo('extension/src/content/diagnosticsController.js');
+  const fn = extractFunction(controller, 'inspectOtWarmMirrorDiagnostics');
+  // OT off must short-circuit BEFORE probing getOtStatus/mirror (whose
+  // failures would warn) and before formatOtDiagnosticsResult (whose throw the
+  // aggregate wrapper would render as the generic diagnosticsCheckErrored).
+  assert.match(fn, /if \(!isExperimentalOtEnabled\(\)\)/);
+  const head = fn.slice(0, fn.indexOf('getCurrentProjectId'));
+  assert.match(head, /!isExperimentalOtEnabled\(\)/, 'the disabled short-circuit precedes any probe');
+  assert.match(head, /diagnosticsOtSummaryDisabled/, 'disabled OT uses the plain disabled summary');
+  assert.match(head, /status: 'completed'/, 'a turned-off feature reports healthy, not warning/error');
+});
+
 test('Run all diagnostics aggregates every check into one report', () => {
   // v1.4.5: the diagnostics controller (runAllDiagnostics + the inspect*
   // checks) was carved out of contentRuntime into its own module.

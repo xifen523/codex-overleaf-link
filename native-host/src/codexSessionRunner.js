@@ -3,6 +3,7 @@
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { version: PACKAGE_VERSION } = require('../../package.json');
 const { SUBAGENT_QUEUE_DIR, collectMirrorChangesDetailed, getProjectMirror, markMirrorDirty, syncOverleafToMirror } = require('./mirrorWorkspace');
 const { computeLineDiff } = require('./diffEngine');
 const { computeTextPatches } = require('./textPatch');
@@ -854,7 +855,7 @@ function runCodexAppServerSession(input) {
       await request('initialize', {
         clientInfo: {
           name: 'codex-overleaf-link',
-          version: '0.1.0'
+          version: PACKAGE_VERSION
         },
         capabilities: null
       });

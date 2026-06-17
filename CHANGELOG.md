@@ -10,6 +10,8 @@ Quality patch — correctness, safety, and localization fixes for the parallel-s
 - **A subagent's partial edits never reach Overleaf.** If a worker is force-stopped mid-edit at drain time, its half-written files are now withheld from writeback (treated like an ownership violation) instead of being synced as-is.
 - **The "Force-release the stuck task" button tells the truth.** It previously reported success unconditionally; it now reports the real outcome and re-enables itself for a retry when the release did not go through.
 - **No wasted save-verify on zero-write runs.** A run where every operation was skipped no longer blocks ~5s probing save-state nor emits a misleading "could not verify saved" warning; the probe gates on the count of applied writes.
+- **A disabled OT warm mirror no longer looks like an error.** With the experimental OT feature off, diagnostics now report a clean "disabled" state instead of degrading to a generic "This check could not run" — an off feature is healthy, not failing.
+- **Native host client version is synced.** The version the native host reports to the Codex app-server now tracks the package version instead of a hardcoded `0.1.0`.
 
 ### Changed
 
