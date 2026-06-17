@@ -286,6 +286,7 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   const packageManager = Object.hasOwn(overrides, 'packageManager') ? overrides.packageManager : 'npm@11.11.0';
   const lockfileVersion = Object.hasOwn(overrides, 'lockfileVersion') ? overrides.lockfileVersion : 3;
   const manifestVersion = Object.hasOwn(overrides, 'manifestVersion') ? overrides.manifestVersion : packageVersion;
+  const buildTargetVersion = Object.hasOwn(overrides, 'buildTargetVersion') ? overrides.buildTargetVersion : packageVersion;
   const readmeVersion = Object.hasOwn(overrides, 'readmeVersion') ? overrides.readmeVersion : packageVersion;
   const changelogVersion = Object.hasOwn(overrides, 'changelogVersion') ? overrides.changelogVersion : packageVersion;
   const changelogDate = overrides.changelogDate || '2026-05-06';
@@ -331,6 +332,11 @@ function writeReleaseFixture(rootDir, overrides = {}) {
     path.join(rootDir, 'extension/manifest.json'),
     `${JSON.stringify({ version: manifestVersion }, null, 2)}\n`
   );
+  fs.mkdirSync(path.join(rootDir, 'extension/src/shared'), { recursive: true });
+  fs.writeFileSync(
+    path.join(rootDir, 'extension/src/shared/compatibility.js'),
+    `const BUILD_TARGET_VERSION = '${buildTargetVersion}';\nmodule.exports = { BUILD_TARGET_VERSION };\n`
+  );
   fs.writeFileSync(
     path.join(rootDir, 'README.md'),
     overrides.readmeText || [
@@ -351,10 +357,10 @@ function writeReleaseFixture(rootDir, overrides = {}) {
 test('CHANGELOG documents the current release metadata alignment in release tooling format', async () => {
   const version = readJson(path.join(repoRoot, 'package.json')).version;
   const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
-  const heading = `## v${version} - 2026-06-03`;
+  const heading = `## v${version} - 2026-06-17`;
   const start = changelog.indexOf(heading);
   assert.notEqual(start, -1, `CHANGELOG.md should contain ${heading}`);
-  assert.equal(changelog.includes(`## [${version}] - 2026-06-03`), false);
+  assert.equal(changelog.includes(`## [${version}] - 2026-06-17`), false);
   assert.equal(changelog.indexOf(heading, start + heading.length), -1, 'CHANGELOG.md should not duplicate the current release heading');
 
   const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
@@ -413,7 +419,7 @@ test('release workflow grants publish permission and builds/verifies artifacts b
   assert.match(workflow, /npm publish --access public --provenance/);
   assertContainsInOrder(workflow, [
     'run: npm test',
-    'run: npm run verify:release',
+    'npm run verify:release -- --release-date',
     'name: Verify release tag matches package version',
     'name: Build release artifacts',
     'name: Verify release artifact contents',
@@ -432,7 +438,7 @@ test('release workflow fails early when tag and package version differ', () => {
   assert.match(workflow, /Release tag \$\{GITHUB_REF_NAME\} does not match package version \$\{expected_tag\}\./);
   assert.match(workflow, /echo "PACKAGE_VERSION=\$\{package_version\}" >> "\$\{GITHUB_ENV\}"/);
   assertContainsInOrder(workflow, [
-    'run: npm run verify:release',
+    'npm run verify:release -- --release-date',
     'name: Verify release tag matches package version',
     'name: Build release artifacts',
     'name: Verify release artifact contents',
@@ -594,6 +600,27 @@ test('release verifier follows package metadata and requires Windows installer s
 
     assert.ok(errors.some((error) => /package\.json must define a release version/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /install\.ps1 is required/i.test(error)), errors.join('\n'));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('release verifier catches BUILD_TARGET_VERSION mismatch (v1.6.2 single-source gate)', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-buildtarget-'));
+  try {
+    writeReleaseFixture(tempDir, { packageVersion: '1.2.3', buildTargetVersion: '1.2.2' });
+    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
+    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+
+    const errors = collectReleaseVerificationErrors({
+      rootDir: tempDir,
+      releaseDate: '2026-05-06'
+    });
+
+    assert.ok(
+      errors.some((error) => /BUILD_TARGET_VERSION .*1\.2\.2.*package\.json version .*1\.2\.3/i.test(error)),
+      errors.join('\n')
+    );
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

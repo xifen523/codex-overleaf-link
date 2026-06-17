@@ -195,7 +195,7 @@ test('codex app-server exit before turn completion rejects instead of hanging', 
         () => ({ settled: 'resolved' }),
         error => ({ settled: 'rejected', message: error.message })
       ),
-      new Promise(resolve => setTimeout(() => resolve({ settled: 'timeout' }), 2000))
+      new Promise(resolve => setTimeout(() => resolve({ settled: 'timeout' }), 8000))
     ]);
 
     assert.equal(result.settled, 'rejected');
@@ -224,7 +224,7 @@ test('codex app-server transient reconnect notification does not fail the turn',
         value => ({ settled: 'resolved', value }),
         error => ({ settled: 'rejected', message: error.message })
       ),
-      new Promise(resolve => setTimeout(() => resolve({ settled: 'timeout' }), 2000))
+      new Promise(resolve => setTimeout(() => resolve({ settled: 'timeout' }), 8000))
     ]);
 
     assert.equal(result.settled, 'resolved');

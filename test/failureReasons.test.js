@@ -256,6 +256,29 @@ test('localizeFailureReason interpolates {file}, {activeFile}, {operationType}',
   assert.equal(localized.userMessage, 'op=edit file=main.tex active=other.tex');
 });
 
+test('1.6.2 localizes partial-write + cancel failure reasons in both locales (no English fallback for zh)', () => {
+  const i18n = require('../extension/src/shared/i18n.js');
+  // Mirror how the app feeds i18n into localizeFailureReason: t() echoes the
+  // key on a miss, so treat key-equals-value as undefined.
+  const lookupFor = locale => key => {
+    const value = i18n.t(locale, key);
+    return value === key ? undefined : value;
+  };
+  const zh = localizeFailureReason(
+    { code: 'partial_write_needs_review', userMessage: 'EN fallback', nextAction: 'EN next' },
+    'zh', lookupFor('zh'));
+  assert.match(zh.userMessage, /部分操作已写入 Overleaf/);
+  assert.match(zh.nextAction, /撤销已写入部分/, 'zh next-step references the localized Undo button name');
+  const zhCancel = localizeFailureReason(
+    { code: 'codex_run_cancelled', userMessage: 'EN', nextAction: 'EN' },
+    'zh', lookupFor('zh'));
+  assert.match(zhCancel.userMessage, /本地 Codex 任务已取消/);
+  const en = localizeFailureReason(
+    { code: 'partial_write_needs_review', userMessage: 'X', nextAction: 'Y' },
+    'en', lookupFor('en'));
+  assert.match(en.userMessage, /Some operations wrote to Overleaf/);
+});
+
 test('localizeFailureReason interpolates missing fields as empty strings', () => {
   const lookup = key => key === 'failureReason_x_user' ? 'file={file}' : undefined;
   const localized = localizeFailureReason({

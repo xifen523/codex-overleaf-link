@@ -46,6 +46,7 @@ export function collectReleaseVerificationErrors(options = {}) {
   const manifest = readJsonFile(rootDir, 'extension/manifest.json', errors);
   const readme = readTextFile(rootDir, 'README.md', errors);
   const changelog = readTextFile(rootDir, 'CHANGELOG.md', errors);
+  const compatibility = readTextFile(rootDir, 'extension/src/shared/compatibility.js', errors);
 
   if (errors.length > 0) {
     return errors;
@@ -61,6 +62,20 @@ export function collectReleaseVerificationErrors(options = {}) {
     errors.push(
       `extension/manifest.json version ${formatValue(manifest.version)} must match package.json version ${version}.`
     );
+  }
+
+  // The runtime compatibility BUILD_TARGET_VERSION is the one version surface
+  // the release gate previously did not check (only unit tests did), so a
+  // partial bump could pass `verify:release`. Make the gate single-source.
+  if (version) {
+    const buildTargetMatch = compatibility.match(/BUILD_TARGET_VERSION\s*=\s*['"]([^'"]+)['"]/);
+    if (!buildTargetMatch) {
+      errors.push('extension/src/shared/compatibility.js must define BUILD_TARGET_VERSION.');
+    } else if (buildTargetMatch[1] !== version) {
+      errors.push(
+        `extension/src/shared/compatibility.js BUILD_TARGET_VERSION ${formatValue(buildTargetMatch[1])} must match package.json version ${version}.`
+      );
+    }
   }
 
   if (version) {

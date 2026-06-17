@@ -442,15 +442,6 @@
     return row;
   }
 
-  function appendEventTechnicalDetail(view, event) {
-    void view;
-    void event;
-  }
-
-  function hasEventTechnicalDetail(event) {
-    return hasNonEmptyDetail(event?.detail) || hasNonEmptyDetail(event?.technicalDetail);
-  }
-
   function hasNonEmptyDetail(value) {
     if (value === undefined || value === null || value === '') {
       return false;
@@ -646,8 +637,19 @@
       event.stopPropagation();
       button.disabled = true;
       button.textContent = tx('Releasing…', '正在释放…');
-      forceCancelStuckTaskForCurrentProject().finally(() => {
-        button.textContent = tx('Force-released — you can retry the run.', '已释放，可以重试本轮任务。');
+      forceCancelStuckTaskForCurrentProject().then(result => {
+        if (result?.ok) {
+          button.textContent = tx('Force-released — you can retry the run.', '已释放，可以重试本轮任务。');
+          return;
+        }
+        // The helper resolves (never throws) with a non-ok result when the
+        // request was not delivered. Report the real outcome instead of a
+        // blanket success, and re-enable the button so the user can retry.
+        button.disabled = false;
+        button.textContent = tx('Release failed — refresh the tab, then try again.', '释放失败，请刷新页面后重试。');
+      }).catch(() => {
+        button.disabled = false;
+        button.textContent = tx('Release failed — refresh the tab, then try again.', '释放失败，请刷新页面后重试。');
       });
     });
     report.append(button);
@@ -883,7 +885,6 @@
       getRunStatusText,
       renderRunEvent,
       upsertStreamEvent,
-      appendEventTechnicalDetail,
       renderCompletionReport,
       isTrackedChangeLifecycleRun,
       configureUndoButton,

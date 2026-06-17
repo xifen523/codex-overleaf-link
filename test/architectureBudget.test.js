@@ -37,7 +37,7 @@ test('architecture budget tracks v1.0 final split targets for the largest files'
       ['extension/src/page/treeOperations.js', 1650],
       ['extension/src/shared/storageDb.js', 1350],
       ['native-host/src/codexSessionRunner.js', 1500],
-      ['native-host/src/subagentBroker.js', 620],
+      ['native-host/src/subagentBroker.js', 640],
       ['native-host/src/taskRunner.js', 1000]
     ]
   );

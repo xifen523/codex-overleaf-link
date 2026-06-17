@@ -115,9 +115,11 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
   },
   {
     // v1.6: parallel-subagents broker (file job queue, worker pool, wave
-    // ownership attribution).
+    // ownership attribution). 620 -> 640 in v1.6.2 for the liveness hardening
+    // (queued-job settle on stop, bounded final settle, fillSlots start guard,
+    // drain partial-edit withholding, grace-timer cleanup).
     path: 'native-host/src/subagentBroker.js',
-    maxLines: 620
+    maxLines: 640
   },
   {
     path: 'native-host/src/taskRunner.js',

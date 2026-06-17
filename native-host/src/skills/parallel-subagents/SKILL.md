@@ -78,11 +78,18 @@ Rules:
 ## 4. Poll for results
 
 ```bash
+tries=0
 while [ "$(ls .codex-overleaf-subagents/results/*.json 2>/dev/null | wc -l)" -lt <jobCount> ]; do
   sleep 10
+  tries=$((tries + 1))
+  if [ "$tries" -ge 60 ]; then break; fi   # ~10 min cap: never poll forever
   ls .codex-overleaf-subagents/results/ 2>/dev/null
 done
 ```
+
+If the loop hits the cap, a result never arrived (e.g. a lost or duplicate
+`id`). Do not keep waiting: read whatever results exist and finish the
+remaining slices yourself inline.
 
 Then read each `results/<id>.json` (`status`: completed | failed | rejected |
 timeout | cancelled; `summary`; `changedFiles`) and, when you need the full

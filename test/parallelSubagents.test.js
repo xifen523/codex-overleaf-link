@@ -29,9 +29,10 @@ test('parallel-subagents ships as a registered official skill with the full prot
   // broker side: the work/ scratch zone is ownable, the control plane is not
   const broker = repo('native-host/src/subagentBroker.js');
   assert.match(broker, /segments\[1\] === 'work' && segments\.length >= 3/);
-  // overlapping jobs serialize instead of rejecting
-  assert.match(broker, /queued\.findIndex\(id => !jobs\.get\(id\)\.job\.files\.some\(file => runningFiles\.has\(file\)\)\)/);
-  assert.doesNotMatch(broker, /file_conflict/);
+  // Note: overlap-serialization (not file_conflict rejection) is locked
+  // behaviorally by subagentBroker.test.js ('same-file jobs are serialized' /
+  // 'an overlapping job waits while disjoint jobs still run'), so no brittle
+  // char-for-char grep of the fillSlots scheduler lives here.
   assert.match(skill, /sleep 10/);
   assert.match(skill, /missing or its\r?\n`status` is not `ready`/);
 });
@@ -53,7 +54,7 @@ test('runner gates the broker on the enabled skill id and wires lifecycle hooks'
 
 test('workers inherit the parent run shape minus the fan-out skill and the timeline', () => {
   const runner = repo('native-host/src/codexSessionRunner.js');
-  const workerBlock = runner.match(/runWorkerTask: \(\{ jobId, prompt, signal: workerSignal \}\) => runner\(\{[\s\S]*?\}\)\r?\n    \}\)/)?.[0] || '';
+  const workerBlock = runner.match(/runWorkerTask: \(\{ jobId, prompt, signal: workerSignal \}\) => runner\(\{[\s\S]*?\}\)\r?\n\s*\}\)/)?.[0] || '';
   assert.match(workerBlock, /task: prompt/);
   assert.match(workerBlock, /threadId: ''/);
   assert.match(workerBlock, /disableCodexOverleafSkillIds: \[PARALLEL_SUBAGENTS_SKILL_ID\]/);
@@ -138,12 +139,13 @@ test('codex.subagent.* events map to bilingual timeline lines', () => {
   assert.match(timeoutLine.title, /timed out/);
   assert.equal(timeoutLine.status, 'warning');
   const violation = map({ type: 'codex.subagent.violation', title: 'main.tex', detail: {} }, 'zh');
-  assert.match(violation.title, /未授权文件 main\.tex/);
-  assert.match(violation.title, /不会写回 Overleaf/);
+  assert.match(violation.title, /未分配给它的文件 main\.tex/);
+  assert.match(violation.title, /未写回 Overleaf/);
+  assert.match(violation.title, /请重新运行/);
   const rejected = map({ type: 'codex.subagent.rejected', title: 'bad', detail: { reason: 'insufficient_time' } }, 'en');
   assert.match(rejected.title, /rejected \(insufficient_time\)/);
   const drained = map({ type: 'codex.subagent.drained', title: '', detail: {} }, 'zh');
-  assert.match(drained.title, /子代理已全部收尾/);
+  assert.match(drained.title, /子代理已全部完成/);
   for (const line of [started, completed, timeoutLine, violation, rejected, drained]) {
     assert.equal(line.visible, true);
     assert.ok(line.technicalDetail, 'raw event preserved as collapsed technical detail');

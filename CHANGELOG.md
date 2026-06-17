@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.6.2 - 2026-06-17
+
+Quality patch — correctness, safety, and localization fixes for the parallel-subagents and writeback paths. The native protocol stays `1`.
+
+### Fixed
+
+- **Undo survives a cancel during post-write bookkeeping.** When a writeback's edits had already landed in Overleaf, cancelling during the follow-up save-verify or mirror refresh discarded the "Undo written parts" checkpoint, leaving real changes with no one-click revert. The undo checkpoint is now recorded the moment writes land, before any cancellable await — matching the manual-confirm path.
+- **A subagent's partial edits never reach Overleaf.** If a worker is force-stopped mid-edit at drain time, its half-written files are now withheld from writeback (treated like an ownership violation) instead of being synced as-is.
+- **The "Force-release the stuck task" button tells the truth.** It previously reported success unconditionally; it now reports the real outcome and re-enables itself for a retry when the release did not go through.
+- **No wasted save-verify on zero-write runs.** A run where every operation was skipped no longer blocks ~5s probing save-state nor emits a misleading "could not verify saved" warning; the probe gates on the count of applied writes.
+
+### Changed
+
+- **Subagent broker liveness hardening.** Still-queued jobs now get a `cancelled` result when the broker stops (so a polling lead never hangs), the final settle is bounded (a worker that ignores its abort can no longer strand the run or leak the project lock), a job that throws as it starts emits a `failed` result instead of vanishing, the drain grace timer is cleared once workers settle, and the skill's documented poll loop has a wall-clock cap.
+- **More Chinese localization.** The partial-writeback and run-cancelled failures (plus several common write/undo/accept failures) now render in Chinese instead of falling back to English, the parallel-subagent "withheld edit" timeline line is reworded into plain language with a next step, and the reasoning/speed controls plus a couple of stray toasts are localized.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.6.2` while keeping native protocol `1`.
+- The release gate now also verifies the compatibility `BUILD_TARGET_VERSION` against the package version and pins the CHANGELOG date check to the tagged commit's date; CI workflows moved to non-deprecated action majors and Node 22.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.6.2.zip`, `codex-overleaf-native-host-v1.6.2.tar.gz`, and `codex-overleaf-link-1.6.2.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.6.2 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.6.2 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.6.2 -- uninstall-native`.
+
 ## v1.6.1 - 2026-06-03
 
 Feature patch — **single-file fan-out** for parallel subagents, two safe modes. The native protocol stays `1`.

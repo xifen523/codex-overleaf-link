@@ -1098,8 +1098,11 @@ test('empty or malformed apply results do not trigger save verification', () => 
   assert.equal(hasApplyResultEntries({ applied: [{}] }), true);
   assert.equal(hasApplyResultEntries({ skipped: [{}] }), true);
   assert.match(applyBody, /const hasConfirmedApplyResult = hasApplyResultEntries\(applied\)/);
-  assert.match(applyBody, /const saveVerification = hasConfirmedApplyResult\s*\?[\s\S]*?verifyPostWriteSaveState\(\)[\s\S]*?:/);
-  assert.match(applyBody, /if \(hasConfirmedApplyResult\) \{[\s\S]*?appendPostWriteSaveVerificationWarning\(saveVerification\)/);
+  // v1.6.2: the save-verify probe + its warning gate on the count of APPLIED
+  // writes, so an all-skipped (zero-write) run never wastes ~5s probing nor
+  // emits the misleading "could not verify saved" warning.
+  assert.match(applyBody, /const saveVerification = appliedPaths\.length\s*\n?\s*\?[\s\S]*?verifyPostWriteSaveState\(\)[\s\S]*?:/);
+  assert.match(applyBody, /if \(appliedPaths\.length\) \{[\s\S]*?appendPostWriteSaveVerificationWarning\(saveVerification\)/);
 });
 
 test('malformed skipped apply result entries are not treated as partial writeback', () => {
@@ -5360,4 +5363,22 @@ test('panel.css ships visible styling for the recovery action button', () => {
     'recovery action button must have a :hover state');
   assert.match(css, /\.run-final-answer__recovery-action:disabled/,
     'recovery action button must have a :disabled state');
+});
+
+test('writeback records the undo checkpoint before any cancellable verify/mirror await (v1.6.2)', () => {
+  // A user-cancel during the post-write save-verify or mirror refresh throws
+  // codex_cancelled. If undo recording sat after those awaits, a cancel would
+  // strip the "Undo written parts" button for changes that already landed.
+  const fn = extractFromContentScript('applySyncChangesToOverleaf');
+  const undoAt = fn.indexOf('recordUndoFromApply(project, applied)');
+  const verifyAt = fn.indexOf('await verifyPostWriteSaveState()');
+  const mirrorAt = fn.indexOf('await refreshProjectMirrorAfterWriteback');
+  assert.ok(undoAt !== -1, 'undo recording present');
+  assert.ok(verifyAt !== -1 && mirrorAt !== -1, 'verify + mirror awaits present');
+  assert.ok(undoAt < verifyAt, 'undo must be recorded before the save-verify await');
+  assert.ok(undoAt < mirrorAt, 'undo must be recorded before the mirror-refresh await');
+  // The ~5s save-verify must only run when real writes landed, not on an
+  // all-skipped (zero-write) run.
+  assert.match(fn, /const saveVerification = appliedPaths\.length/,
+    'save-verify must gate on applied write count, not on skipped-inclusive entries');
 });

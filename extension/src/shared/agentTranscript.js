@@ -268,14 +268,14 @@
       return {
         ...base,
         status: 'warning',
-        title: textFor(locale, `⚠ 子代理波次改动了未授权文件 ${label}，该文件的改动将不会写回 Overleaf。`, `⚠ A subagent wave changed unowned file ${label}; its changes will NOT be written back to Overleaf.`)
+        title: textFor(locale, `⚠ 子代理改动了未分配给它的文件 ${label}，该改动已丢弃、未写回 Overleaf。如果该文件确实需要修改，请重新运行。`, `⚠ A subagent edited ${label}, which it was not assigned; that change was discarded and not written to Overleaf. Re-run if that file should be edited.`)
       };
     }
     if (type === 'codex.subagent.drained') {
       return {
         ...base,
         status: 'completed',
-        title: textFor(locale, '↳ 子代理已全部收尾。', '↳ All subagents drained.')
+        title: textFor(locale, '↳ 子代理已全部完成。', '↳ All subagents finished.')
       };
     }
     return { ...base, status: event.status || 'running', title: label };

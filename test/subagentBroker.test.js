@@ -346,6 +346,97 @@ test('queue control-plane paths are never ownable (only work/ slices are)', asyn
   await broker.stop({ drain: false });
 });
 
+test('a worker that throws lands a failed result and emits codex.subagent.failed', async () => {
+  const dir = makeWorkspace();
+  const events = [];
+  const broker = createSubagentBroker({
+    workspacePath: dir,
+    emit: (type) => events.push(type),
+    runWorkerTask: abortableWorker(async () => { throw new Error('worker boom'); }),
+    limits: { ...TINY, perWorkerTimeoutMs: 5000, brokerBudgetMs: 60000 }
+  });
+  broker.start();
+  writeJob(dir, { id: 'boom', task: 't', files: ['sections/ch1.tex'] });
+  await waitFor(() => readResult(dir, 'boom'));
+  assert.equal(readResult(dir, 'boom').status, 'failed');
+  assert.match(readResult(dir, 'boom').reason, /worker boom/);
+  assert.ok(events.includes('codex.subagent.failed'), 'failed event emitted');
+  await broker.stop({ drain: false });
+});
+
+test('validation rejects oversized, taskless, and fileless jobs', async () => {
+  const dir = makeWorkspace();
+  const broker = createSubagentBroker({
+    workspacePath: dir,
+    runWorkerTask: abortableWorker(async () => ({ assistantMessage: 'x' })),
+    limits: { ...TINY, maxJobsPerRun: 8, perWorkerTimeoutMs: 1000, brokerBudgetMs: 60000 }
+  });
+  broker.start();
+  // >32KB raw file → rejected before parse
+  fs.writeFileSync(path.join(queue(dir), 'jobs', 'toobig.json'), JSON.stringify({ id: 'toobig', task: 'x'.repeat(40000), files: ['main.tex'] }));
+  writeJob(dir, { id: 'notask', files: ['main.tex'] });
+  writeJob(dir, { id: 'nofiles', task: 't' });
+  await waitFor(() => readResult(dir, 'toobig') && readResult(dir, 'notask') && readResult(dir, 'nofiles'));
+  assert.equal(readResult(dir, 'toobig').reason, 'job_too_large');
+  assert.equal(readResult(dir, 'notask').reason, 'missing_task');
+  assert.equal(readResult(dir, 'nofiles').reason, 'missing_files');
+  await broker.stop({ drain: false });
+});
+
+test('a duplicate job id is rejected, keeping the first occurrence only', async () => {
+  const dir = makeWorkspace();
+  const broker = createSubagentBroker({
+    workspacePath: dir,
+    runWorkerTask: abortableWorker(() => new Promise(() => {})),
+    limits: { ...TINY, maxWorkers: 1, perWorkerTimeoutMs: 5000, brokerBudgetMs: 60000 }
+  });
+  broker.start();
+  // distinct filenames, same internal id → the second is a duplicate
+  fs.writeFileSync(path.join(queue(dir), 'jobs', 'aa-dup.json'), JSON.stringify({ id: 'dup', task: 't', files: ['sections/ch1.tex'] }));
+  fs.writeFileSync(path.join(queue(dir), 'jobs', 'bb-dup.json'), JSON.stringify({ id: 'dup', task: 't', files: ['sections/ch2.tex'] }));
+  await waitFor(() => readResult(dir, 'dup')?.reason === 'duplicate_id');
+  assert.equal(readResult(dir, 'dup').reason, 'duplicate_id');
+  await broker.stop({ drain: false });
+});
+
+test("a timed-out worker's partial edits are withheld from writeback", async () => {
+  const dir = makeWorkspace();
+  const broker = createSubagentBroker({
+    workspacePath: dir,
+    runWorkerTask: abortableWorker(async () => {
+      // leave a half-written file on disk, then hang until the deadline aborts us
+      fs.writeFileSync(path.join(dir, 'sections', 'ch1.tex'), 'half-written, never finished');
+      return new Promise(() => {});
+    }),
+    limits: { ...TINY, perWorkerTimeoutMs: 50 }
+  });
+  broker.start();
+  writeJob(dir, { id: 'ch1', task: 'polish', files: ['sections/ch1.tex'] });
+  await waitFor(() => readResult(dir, 'ch1')?.status === 'timeout');
+  assert.deepEqual(readResult(dir, 'ch1').changedFiles, ['sections/ch1.tex']);
+  assert.equal(broker.getViolationPaths().has('sections/ch1.tex'), true, 'partial edit withheld like a violation');
+  await broker.stop({ drain: false });
+});
+
+test('stop() settles still-queued jobs as cancelled so a poll loop never hangs', async () => {
+  const dir = makeWorkspace();
+  const broker = createSubagentBroker({
+    workspacePath: dir,
+    // all jobs own ONE file -> serialized; with one running the rest stay queued
+    runWorkerTask: abortableWorker(() => new Promise(() => {})),
+    limits: { ...TINY, maxWorkers: 3, perWorkerTimeoutMs: 5000, brokerBudgetMs: 60000 }
+  });
+  broker.start();
+  writeJob(dir, { id: 'q1', task: 't', files: ['sections/ch1.tex'] });
+  writeJob(dir, { id: 'q2', task: 't', files: ['sections/ch1.tex'] });
+  writeJob(dir, { id: 'q3', task: 't', files: ['sections/ch1.tex'] });
+  await waitFor(() => broker.hasActiveWorkers());
+  await broker.stop({ drain: false });
+  assert.equal(readResult(dir, 'q2').status, 'cancelled');
+  assert.equal(readResult(dir, 'q3').status, 'cancelled');
+  assert.match(readResult(dir, 'q2').reason, /before this subagent started/);
+});
+
 test('audit summary captures jobs, statuses, and violations without task text', async () => {
   const dir = makeWorkspace();
   const broker = createSubagentBroker({

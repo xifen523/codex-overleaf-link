@@ -269,7 +269,21 @@ function createSubagentBroker(options = {}) {
         return;
       }
       const [jobId] = queued.splice(index, 1);
-      startWorker(jobs.get(jobId));
+      const entry = jobs.get(jobId);
+      try {
+        startWorker(entry);
+      } catch (error) {
+        // A job is spliced out of `queued` before it starts; if startWorker
+        // throws it would vanish with no result, hanging a lead still polling
+        // for its count. Emit a failed result so the poll loop can proceed.
+        if (entry) {
+          entry.status = 'failed';
+        }
+        appendLog(jobId, `start_failed: ${error?.stack || error?.message || String(error)}`);
+        try {
+          writeResult({ id: jobId, status: 'failed', reason: error?.message || 'subagent failed to start' });
+        } catch (_writeError) { /* result dir may be gone */ }
+      }
     }
   }
 
@@ -340,6 +354,17 @@ function createSubagentBroker(options = {}) {
     entry.status = resultFields.status;
     const ownedAfter = hashPaths(job.files);
     const changedFiles = job.files.filter(file => entry.ownedBefore.get(file) !== ownedAfter.get(file));
+    if (resultFields.status !== 'completed' && changedFiles.length) {
+      // A worker that did not finish cleanly (timeout / cancelled / failed)
+      // may have left a half-written file on disk. The mirror scan would
+      // otherwise ship that partial edit straight to Overleaf, so withhold it
+      // the same way ownership violations are withheld — the runner's S8
+      // demotion reads getViolationPaths() and drops these from writeback
+      // (spec S8 safety extension, v1.6.2).
+      for (const file of changedFiles) {
+        violationPaths.add(file);
+      }
+    }
     const result = {
       id: job.id,
       ...resultFields,
@@ -495,19 +520,39 @@ function createSubagentBroker(options = {}) {
 
   async function stop({ drain = true } = {}) {
     accepting = false;
+    // Queued-but-unstarted jobs would otherwise vanish with no result file,
+    // hanging a lead still polling for its job count. Settle them first
+    // (mirrors onParentAbort's queue handling).
+    for (const jobId of queued.splice(0)) {
+      const entry = jobs.get(jobId);
+      if (entry) {
+        entry.status = 'cancelled';
+      }
+      writeResult({ id: jobId, status: 'cancelled', reason: 'The run ended before this subagent started.' });
+    }
     if (drain && running.size) {
+      let graceTimer = null;
       const grace = new Promise(resolve => {
-        setTimeout(resolve, limits.drainGraceMs);
+        graceTimer = setTimeout(resolve, limits.drainGraceMs);
       });
       await Promise.race([
         Promise.allSettled([...running.values()].map(worker => worker.promise)),
         grace
       ]);
+      // The grace timer gates an awaited race; if the workers settled first it
+      // must be cleared or it keeps the event loop alive for drainGraceMs
+      // (the "keep timers gated, then clear" discipline from c3cd357).
+      if (graceTimer) {
+        clearTimeout(graceTimer);
+      }
     }
     for (const { controller } of running.values()) {
       controller.abort(new Error('broker drained'));
     }
-    await Promise.allSettled([...running.values()].map(worker => worker.promise));
+    // Bounded final settle: a worker that ignores its abort must not hang
+    // stop() forever — that strands codex.run and leaks the project lock (the
+    // very zombie-lock case handleCodexCancel exists to recover from).
+    await settleRunningWithin(limits.drainGraceMs);
     if (jobs.size) {
       emit('codex.subagent.drained', 'subagents drained', {
         jobs: jobs.size,
@@ -515,6 +560,23 @@ function createSubagentBroker(options = {}) {
       }, 'completed');
     }
     close();
+  }
+
+  async function settleRunningWithin(timeoutMs) {
+    if (!running.size) {
+      return;
+    }
+    let timer = null;
+    const fallback = new Promise(resolve => {
+      timer = setTimeout(resolve, Math.max(0, timeoutMs));
+    });
+    await Promise.race([
+      Promise.allSettled([...running.values()].map(worker => worker.promise)),
+      fallback
+    ]);
+    if (timer) {
+      clearTimeout(timer);
+    }
   }
 
   function close() {

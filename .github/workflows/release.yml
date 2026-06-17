@@ -21,12 +21,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           registry-url: https://registry.npmjs.org
 
       - name: Run tests
@@ -47,10 +47,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22.14.0
           registry-url: https://registry.npmjs.org
@@ -59,7 +59,13 @@ jobs:
         run: npm install -g npm@11.11.0
 
       - name: Verify release metadata
-        run: npm run verify:release
+        shell: bash
+        run: |
+          # Pin the CHANGELOG date check to the tagged commit's date (immutable,
+          # re-run safe) so a wrong/typo'd release date cannot slip through —
+          # the test.yml push/PR runs stay date-agnostic.
+          commit_date="$(git log -1 --date=short --format=%cd)"
+          npm run verify:release -- --release-date "${commit_date}"
 
       - name: Verify release tag matches package version
         shell: bash

@@ -237,6 +237,11 @@
     if (reason === 'binary_payload_exceeds_native_message_limit') {
       return formatBinaryPayloadLimitReason(change, locale);
     }
+    if (reason === 'subagent_unauthorized_edit') {
+      return isEnglish
+        ? "A subagent's change to this file was withheld from Overleaf — it either fell outside the subagent's assigned files or the subagent did not finish cleanly."
+        : '子代理对该文件的改动未写回 Overleaf——它可能超出了被分配的文件范围，或没有正常完成。';
+    }
     return isEnglish
       ? 'This file type is not supported for automatic writeback yet.'
       : '当前类型暂不支持自动写回。';

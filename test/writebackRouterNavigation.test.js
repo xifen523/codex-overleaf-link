@@ -250,6 +250,87 @@ test('known-base mismatch still refuses the switch even when content changed', a
   assert.equal(result.skipped[0].result.code, 'editor_document_not_switched');
 });
 
+test('unknown-base acceptor lets an off-baseline target reach a clean missing_base_file verdict, not a switch timeout (v1.6.2 lock)', async () => {
+  // Last-resort switch acceptor: path matches + content moved off the previous
+  // document + settle elapsed, allowed ONLY when the target's base is unknown
+  // (not in baseFiles). Exercises writebackRouter's
+  // `!baseComparison.known && contentChangedFromPrevious && settledLongEnough`,
+  // which every other navigation case (target seeded into baseFiles) skips.
+  // Its value: the switch CONFIRMS (so the op reaches the stale guard, which
+  // correctly refuses an unread file with missing_base_file) instead of
+  // looping to a misleading editor_document_not_switched timeout. The file is
+  // never overwritten either way.
+  const files = new Map([
+    ['main.tex', 'root body'],
+    ['sections/new.tex', 'existing new body']
+  ]);
+  let selectedPath = 'main.tex';
+  let editorPath = 'main.tex';
+  const router = writebackRouter.create({
+    activeEditorIdentityChanged: () => false,
+    compileBridge: { markSourceEdited() {} },
+    getActiveEditorIdentity: () => ({ type: 'codemirror-view', doc: 'doc' }),
+    normalizeSafeProjectPath: projectFiles.normalizeSafeProjectPath,
+    normalizeTextPatches,
+    readActiveEditorText: () => files.get(editorPath) || '',
+    replaceActiveEditorPatches(patches) {
+      const text = files.get(editorPath) || '';
+      const next = patches.slice().sort((left, right) => right.from - left.from).reduce((value, patch) => {
+        return value.slice(0, patch.from) + patch.insert + value.slice(patch.to);
+      }, text);
+      files.set(editorPath, next);
+      return { ok: true, method: 'codemirror-view-patch' };
+    },
+    treeOperations: {
+      contentSignature(content) {
+        const text = String(content || '');
+        return `${text.length}:${text.slice(0, 80)}:${text.slice(-80)}`;
+      },
+      getActiveFilePath: () => selectedPath,
+      openFileByPath(path) {
+        selectedPath = path;
+        editorPath = path;
+        return Promise.resolve({ ok: true, method: 'dom-click' });
+      },
+      waitForActiveEditorText(path) {
+        return Promise.resolve({ ok: true, path, text: files.get(editorPath) || '' });
+      }
+    },
+    window: {
+      CodexOverleafStaleGuard: staleGuard,
+      setTimeout,
+      clearTimeout
+    }
+  });
+
+  const result = await router.applyOperations({
+    baseFiles: [
+      // sections/new.tex is deliberately ABSENT -> its base is unknown
+      { path: 'main.tex', content: 'root body' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'sections/new.tex',
+        patches: [
+          { from: 0, to: 0, expected: '', insert: 'PREPENDED ' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 1);
+  const verdict = String(result.skipped[0].result.reasonKey || result.skipped[0].result.code || '');
+  assert.notEqual(result.skipped[0].result.code, 'editor_document_not_switched',
+    'the switch must confirm via the unknown-base acceptor, not loop to a timeout');
+  assert.match(verdict, /missing_base_file|missingBaseFile/,
+    'an off-baseline target is refused as missing_base_file');
+  assert.equal(files.get('sections/new.tex'), 'existing new body',
+    'the unknown-base target is never overwritten');
+});
+
 test('writeback router force-reopens a selected target when the editor is still on another document', async () => {
   const files = new Map([
     ['main.tex', 'root body'],

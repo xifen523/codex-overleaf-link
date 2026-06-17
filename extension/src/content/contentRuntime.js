@@ -311,7 +311,6 @@
     getRunStatusText,
     renderRunEvent,
     upsertStreamEvent,
-    appendEventTechnicalDetail,
     renderCompletionReport,
     isTrackedChangeLifecycleRun,
     configureUndoButton,
@@ -1335,6 +1334,8 @@
     setElementTitleAndAria('[data-skills-back]', tr('settingsBack'), tr('settingsBack'));
     setElementTitleAndAria('[data-add-context]', tr('addContext'), tr('addContext'));
     setElementTitleAndAria('[data-context-refresh]', tr('refreshFileList'), tr('refreshFileList'));
+    setElementTitleAndAria('[data-reasoning]', tr('reasoningLabel'), tr('reasoningLabel'));
+    setElementTitleAndAria('[data-speed]', tr('speedLabel'), tr('speedLabel'));
     setElementTitleAndAria('[data-run]', currentRunView ? tr('cancelRun') : tr('send'), currentRunView ? tr('cancelRun') : tr('send'));
 
     const actions = panel.querySelector('.codex-vscode-head-actions');
@@ -1649,7 +1650,7 @@
 
     const task = state.task.trim();
     if (!task) {
-      appendLog('Enter a task first.');
+      appendLog(tx('Enter a task first.', '请先输入任务。'));
       return;
     }
 
@@ -3612,27 +3613,38 @@
       }), additionalSkippedEntries)
       : mergeApplyResultSkipped({ ok: true, applied: [], skipped: [] }, additionalSkippedEntries);
     const hasConfirmedApplyResult = hasApplyResultEntries(applied);
-    const saveVerification = hasConfirmedApplyResult
-      ? await verifyPostWriteSaveState()
-      : {
-        ok: false,
-        state: 'not_checked',
-        reason: 'No applied or skipped writeback entries were returned.'
-      };
-    if (hasConfirmedApplyResult) {
-      appendPostWriteSaveVerificationWarning(saveVerification);
-    }
-    await refreshProjectMirrorAfterWriteback(project, applied, saveVerification);
-    if (runMode === 'auto') {
-      renderReadOnlyDiffReview(getAppliedSyncChanges(syncChanges, applied));
-    }
+    // Record the apply result + undo checkpoint IMMEDIATELY, before any
+    // cancellable verify/mirror awaits below. A user-cancel during the
+    // post-write save-verify or mirror refresh throws codex_cancelled; if undo
+    // recording sat after those awaits (as it used to), a cancel skipped it and
+    // left the user no "Undo written parts" button for changes that already
+    // landed in Overleaf. The manual-confirm path already records undo right
+    // after its write — match that ordering here (v1.6.2).
     appendApplyResult(applied);
     recordUndoFromApply(project, applied);
     const skippedEntries = getSkippedEntries(applied);
     if (skippedEntries.length) {
       appendPartialWritebackWarning(applied);
     }
+    if (runMode === 'auto') {
+      renderReadOnlyDiffReview(getAppliedSyncChanges(syncChanges, applied));
+    }
     const appliedPaths = getAppliedOperationPaths(applied);
+    // Only probe save-state + refresh the mirror when real writes landed. A
+    // zero-write run (every operation skipped) has nothing to save-verify, so
+    // skip the ~5s probe and its misleading "could not verify saved" warning
+    // (v1.6.2).
+    const saveVerification = appliedPaths.length
+      ? await verifyPostWriteSaveState()
+      : {
+        ok: false,
+        state: 'not_checked',
+        reason: 'No applied writeback operations were returned.'
+      };
+    if (appliedPaths.length) {
+      appendPostWriteSaveVerificationWarning(saveVerification);
+    }
+    await refreshProjectMirrorAfterWriteback(project, applied, saveVerification);
     const compileSummary = appliedPaths.length
       ? await autoRecompileAfterWriteback(appliedPaths, saveVerification).catch(error => {
         appendRunEvent({
@@ -5726,7 +5738,7 @@
 
   function appendReviewingDiagnostics(diagnostics) {
     if (!diagnostics) {
-      appendLog('Probe diagnostics unavailable.');
+      appendLog(tx('Probe diagnostics unavailable.', '诊断探针不可用。'));
       return;
     }
 
@@ -7045,7 +7057,6 @@
       return;
     }
     view.events.append(renderRunEvent(event));
-    appendEventTechnicalDetail(view, event);
     bumpUnreadIfDetached();
   }
 
