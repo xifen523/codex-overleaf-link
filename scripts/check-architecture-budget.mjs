@@ -40,9 +40,12 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // 8800 -> 8850 in v1.5.1: the hotfix moved the module-composition wiring
     // above its consumers and documents the hoisted-safe zone (+13 lines).
     // v1.6.3 phase 6 carved the sync-writeback orchestration into
-    // writebackOrchestrator.js (8850 -> 8330, gain locked).
+    // writebackOrchestrator.js (8850 -> 8330, gain locked). 8330 -> 8380 in
+    // v1.6.4 for the UI-polish pack (attach input wiring, composer autogrow +
+    // send availability, destructive-confirm focus safety, Esc dismissals,
+    // native-missing badge copy).
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 8330
+    maxLines: 8380
   },
   {
     // Carved from contentRuntime in v1.4.5: markdown/inline rendering, the

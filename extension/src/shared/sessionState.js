@@ -1076,6 +1076,9 @@
           streamKey: typeof event.streamKey === 'string' ? event.streamKey : '',
           streamRole: typeof event.streamRole === 'string' ? event.streamRole : ''
         };
+        if (event.subagent === true) {
+          compact.subagent = true;
+        }
         const detail = compactDetailForStorage(event.detail, getEventDetailLimit(event, limits));
         if (detail !== undefined) {
           compact.detail = detail;

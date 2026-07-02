@@ -216,6 +216,9 @@
     const base = {
       kind: 'activity',
       visible: true,
+      // Timeline renderers indent/badge subagent rows so parallel workers
+      // read as a distinct track instead of flat interleaved lines.
+      subagent: true,
       technicalDetail: normalizeRawEvent(event)
     };
     if (type === 'codex.subagent.queued') {

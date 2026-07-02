@@ -1552,8 +1552,10 @@ test('panel.css ships the jump-to-latest button, dark scrollbar, and motion prim
   assert.match(css, /\.tl-jump-latest\[hidden\]\s*\{\s*display:\s*none/);
   // Themed scrollbar on the scroll container (was the light native default);
   // the thumb hue is now the border-strong token so it tracks dark/light.
+  // v1.6.4 hoisted the webkit rules panel-wide so every scroll region
+  // (sessions, settings, diff, trays) shares the same themed scrollbar.
   assert.match(css, /\.col-log[\s\S]*?scrollbar-color:\s*var\(--tl-border-strong\)/);
-  assert.match(css, /\.col-log::-webkit-scrollbar-thumb/);
+  assert.match(css, /#codex-overleaf-panel ::-webkit-scrollbar-thumb/);
   // Motion primitives + reduced-motion guard.
   assert.match(css, /@keyframes tl-fade-in/);
   assert.match(css, /@keyframes tl-spin/);

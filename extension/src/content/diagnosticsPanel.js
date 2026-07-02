@@ -297,6 +297,20 @@
     }
     const health = HEALTH_STATES.indexOf(status.health) !== -1 ? status.health : 'unknown';
     dot.dataset.health = health;
+    // The 9px dot carries the whole health signal; give the trigger a
+    // per-state tooltip so the colors are decodable without opening the menu.
+    const trigger = instance?.container?.querySelector('[data-diagnostics-menu]');
+    if (trigger) {
+      const tooltipKey = {
+        ok: 'diagnosticsDotOk',
+        warn: 'diagnosticsDotWarn',
+        fail: 'diagnosticsDotFail',
+        unknown: 'diagnosticsDotUnknown'
+      }[health] || 'diagnosticsDotUnknown';
+      const tooltip = t(instance, tooltipKey);
+      trigger.title = tooltip;
+      trigger.setAttribute('aria-label', tooltip);
+    }
   }
 
   function t(instance, key, params) {

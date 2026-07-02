@@ -64,7 +64,7 @@
               <input type="checkbox" data-experimental-ot hidden>
               <button type="button" class="codex-diagnostics-ot-toggle" data-experimental-ot-toggle role="switch" aria-checked="false">
                 <span data-i18n="experimentalOtMenuTitle">Experimental OT Mirror</span>
-                <small data-experimental-ot-menu-status>OT: Off · Experimental: tracks the current editor and warms the local mirror; falls back when unsafe.</small>
+                <small data-experimental-ot-menu-status>OT: Off · Experimental — speeds up reading the file you are editing; Codex falls back to normal reading whenever unsure.</small>
               </button>
             </div>
           </details>

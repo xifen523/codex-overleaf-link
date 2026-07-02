@@ -129,6 +129,9 @@
     button.textContent = unreadSinceDetach > 0
       ? tx(`↓ Latest · ${unreadSinceDetach}`, `↓ 最新 · ${unreadSinceDetach}`)
       : tx('↓ Latest', '↓ 最新');
+    button.setAttribute('aria-label', unreadSinceDetach > 0
+      ? tx(`Jump to latest, ${unreadSinceDetach} new steps`, `跳到最新，${unreadSinceDetach} 个新步骤`)
+      : tx('Jump to latest', '跳到最新'));
   }
 
   // Called by the event-append path so the unread counter only counts discrete
@@ -324,7 +327,7 @@
           </summary>
           <div class="run-activity-list" data-run-events></div>
         </details>
-        <div class="run-report" data-run-report hidden></div>
+        <div class="run-report" data-run-report aria-live="polite" hidden></div>
       </div>
     `;
 
@@ -424,6 +427,9 @@
     row.className = 'run-activity';
     row.dataset.status = event.status || 'info';
     row.dataset.kind = event.kind || 'activity';
+    if (event.subagent === true) {
+      row.dataset.subagent = 'true';
+    }
     row.title = sanitizeAssistantVisibleText(buildActivityTooltip(event));
 
     const marker = document.createElement('span');

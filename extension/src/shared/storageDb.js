@@ -676,6 +676,9 @@
           streamKey: typeof event.streamKey === 'string' ? redactSecretLikeText(event.streamKey) : '',
           streamRole: typeof event.streamRole === 'string' ? redactSecretLikeText(event.streamRole) : ''
         };
+        if (event.subagent === true) {
+          compact.subagent = true;
+        }
         var detail = compactDisplayDetailForStorage(event.detail, getEventDetailLimit(event));
         if (detail !== undefined) {
           compact.detail = detail;

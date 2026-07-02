@@ -245,6 +245,7 @@
 }
 
 #codex-overleaf-panel .codex-toast {
+  animation: tl-fade-in 120ms ease;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 22px;
   align-items: start;
@@ -1096,7 +1097,7 @@
 #codex-overleaf-panel .codex-plugin-confirm-confirm {
   border-color: var(--tl-ok);
   background: var(--tl-ok);
-  color: #ffffff;
+  color: var(--tl-on-solid);
 }
 
 #codex-overleaf-panel .codex-plugin-confirm-confirm[data-destructive="true"] {
@@ -1146,7 +1147,8 @@
 }
 
 #codex-overleaf-panel .codex-session-row[data-active="true"] {
-  background: var(--tl-hover);
+  background: var(--tl-accent-wash);
+  box-shadow: inset 2px 0 0 var(--tl-accent);
 }
 
 #codex-overleaf-panel .codex-session-row[data-running="true"] .codex-session-row-title::before {
@@ -1292,6 +1294,9 @@
   --tl-ok: #89d185;
   --tl-fail: #e0795f;
   --tl-review: #d7ba7d;
+  --tl-run-wash: rgba(78, 201, 176, 0.14);
+  --tl-on-solid: #16181a;        /* ink on solid semantic fills (pastel in dark) */
+  --tl-diff-add-fg: #89d185;     /* added-line code text; darkened in light */
   --tl-r-sm: 4px;
   --tl-r-md: 8px;
 }
@@ -1320,6 +1325,9 @@
   --tl-ok: #2e9e54;
   --tl-fail: #c0392b;
   --tl-review: #b8860b;
+  --tl-run-wash: rgba(31, 156, 134, 0.12);
+  --tl-on-solid: #ffffff;        /* semantic fills are dark/saturated in light */
+  --tl-diff-add-fg: #1a7f37;     /* AA-safe green for 11px mono on light wash */
 }
 
 @keyframes tl-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -1556,20 +1564,21 @@
   overflow-anchor: none;     /* the JS scroll engine owns follow behavior */
 }
 
-#codex-overleaf-panel .col-log::-webkit-scrollbar {
+#codex-overleaf-panel ::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 
-#codex-overleaf-panel .col-log::-webkit-scrollbar-thumb {
+#codex-overleaf-panel ::-webkit-scrollbar-thumb {
   background: var(--tl-border-strong);
   border-radius: 4px;
 }
 
-#codex-overleaf-panel .col-log::-webkit-scrollbar-thumb:hover {
+#codex-overleaf-panel ::-webkit-scrollbar-thumb:hover {
   background: var(--tl-border-strong);
 }
 
-#codex-overleaf-panel .col-log::-webkit-scrollbar-track {
+#codex-overleaf-panel ::-webkit-scrollbar-track {
   background: transparent;
 }
 
@@ -1674,7 +1683,7 @@
 #codex-overleaf-panel .run-turn-meta [data-run-accept-confirm] {
   border: 1px solid var(--tl-accent);
   background: var(--tl-accent);
-  color: #ffffff;
+  color: var(--tl-on-solid);
   box-shadow: 0 0 0 1px rgba(76, 143, 222, 0.34), 0 4px 12px rgba(0, 0, 0, 0.24);
 }
 
@@ -1703,7 +1712,7 @@
   border: 1px solid var(--tl-review);
   border-radius: 4px;
   background: var(--tl-review);
-  color: #ffffff;
+  color: var(--tl-on-solid);
   padding: 3px 11px;
   box-shadow: 0 0 0 1px rgba(240, 136, 62, 0.34), 0 4px 12px rgba(0, 0, 0, 0.24);
   font-size: 12px;
@@ -1831,6 +1840,20 @@
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+#codex-overleaf-panel .run-activity[data-subagent="true"] {
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--tl-border-strong);
+}
+
+#codex-overleaf-panel .run-activity[data-status="warning"] .run-activity-title,
+#codex-overleaf-panel .run-activity[data-status="failed"] .run-activity-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
 }
 
 #codex-overleaf-panel .run-activity-time {
@@ -2059,6 +2082,12 @@
   color: var(--tl-fail);
 }
 
+/* .run-final-answer resets color to fg-1 for normal reports; a failed report's
+   conclusion must keep the alert color or failure reads like success. */
+#codex-overleaf-panel .run-completion-report[data-status="failed"] .run-final-answer {
+  color: var(--tl-fail);
+}
+
 /* Failed-status reports keep their alert color for the conclusion, but the
    meta block stays muted so it still reads as system info rather than amplifying
    the alert. */
@@ -2182,7 +2211,7 @@
 #codex-overleaf-panel .codex-slash-menu button[data-active="true"],
 #codex-overleaf-panel .codex-slash-menu button:hover {
   background: var(--tl-accent-wash);
-  color: #ffffff;
+  color: var(--tl-fg-1);
 }
 
 #codex-overleaf-panel .codex-slash-menu small {
@@ -2238,7 +2267,7 @@
 
 #codex-overleaf-panel .codex-composer-skill-context button:hover {
   background: var(--tl-hover);
-  color: #ffffff;
+  color: var(--tl-fg-1);
 }
 
 #codex-overleaf-panel .codex-composer textarea {
@@ -2248,7 +2277,7 @@
   max-height: 160px;
   border: 0;
   outline: none;
-  resize: vertical;
+  resize: none; /* autogrow owns the height (input-driven, 58-160px) */
   background: transparent;
   color: var(--tl-fg-1);
   padding: 10px 10px 6px;
@@ -2494,7 +2523,7 @@
 
 #codex-overleaf-panel .codex-attachment-preview-remove:hover {
   background: var(--tl-hover);
-  color: #ffffff;
+  color: var(--tl-fg-1);
 }
 
 #codex-overleaf-panel .codex-attachment-preview-dialog {
@@ -2542,7 +2571,7 @@
 
 #codex-overleaf-panel .codex-composer-toolbar {
   display: grid;
-  grid-template-columns: 26px 54px 70px minmax(0, 1fr) minmax(112px, 156px) 28px;
+  grid-template-columns: 26px 54px 70px minmax(0, 1fr) minmax(96px, 156px) 28px;
   align-items: center;
   gap: 4px;
   padding: 4px 6px 6px;
@@ -2605,7 +2634,7 @@
 #codex-overleaf-panel .codex-review-toggle:has(input:checked),
 #codex-overleaf-panel .codex-recompile-toggle:has(input:checked) {
   color: var(--tl-ok);
-  background: rgba(137, 209, 133, 0.08);
+  background: var(--tl-ok-wash);
 }
 
 #codex-overleaf-panel .codex-review-toggle:has(input:focus-visible),
@@ -2652,7 +2681,7 @@
 #codex-overleaf-panel .codex-model-config-button [data-model-display] {
   flex: 0 1 auto;
   min-width: 0;
-  max-width: 72px;
+  max-width: 96px;
   overflow: hidden;
   color: var(--tl-fg-1);
   font-size: 13px;
@@ -2664,7 +2693,7 @@
   flex: 0 0 auto;
   border-left: 1px solid var(--tl-border);
   padding-left: 5px;
-  max-width: 42px;
+  max-width: 56px;
   overflow: hidden;
   color: var(--tl-fg-3);
   font-size: 12px;
@@ -3078,19 +3107,26 @@
   padding: 2px 0;
 }
 
+#codex-overleaf-panel .codex-diff-hunk-location {
+  padding: 2px 8px 0;
+  color: var(--tl-fg-4);
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
 #codex-overleaf-panel .codex-diff-hunk[data-decision="accepted"] {
-  background: rgba(35, 134, 54, 0.08);
+  background: var(--tl-ok-wash);
 }
 
 #codex-overleaf-panel .codex-diff-hunk[data-decision="rejected"] {
-  background: rgba(248, 81, 73, 0.06);
+  background: var(--tl-fail-wash);
   opacity: 0.68;
 }
 
 #codex-overleaf-panel .codex-diff-hunk[data-focused="true"] {
   outline: 1px solid var(--tl-accent);
   outline-offset: -1px;
-  background: rgba(79, 156, 255, 0.08);
+  background: var(--tl-accent-wash);
 }
 
 #codex-overleaf-panel .codex-diff-hunk[data-collapsed="true"] .codex-diff-hunk-lines {
@@ -3170,12 +3206,12 @@
 }
 
 #codex-overleaf-panel .codex-diff-line[data-type="add"] {
-  background: rgba(35, 134, 54, 0.15);
-  color: var(--tl-ok);
+  background: var(--tl-ok-wash);
+  color: var(--tl-diff-add-fg);
 }
 
 #codex-overleaf-panel .codex-diff-line[data-type="remove"] {
-  background: rgba(248, 81, 73, 0.1);
+  background: var(--tl-fail-wash);
   color: var(--tl-fail);
 }
 
@@ -3187,7 +3223,7 @@
   display: inline-block;
   width: 12px;
   margin-right: 6px;
-  color: #555;
+  color: var(--tl-fg-4);
   text-align: center;
 }
 
@@ -3343,12 +3379,18 @@
   color: var(--tl-fail);
 }
 
+#codex-overleaf-panel .recent-projects-loading {
+  padding: 10px 12px;
+  color: var(--tl-fg-3);
+  font-size: 12px;
+}
+
 #codex-overleaf-panel .recent-projects-row-expand {
   flex: 0 0 auto;
   width: 26px;
   border-radius: var(--tl-r-sm);
-  color: var(--tl-fg-4);
-  font-size: 10px;
+  color: var(--tl-fg-3);
+  font-size: 11px;
 }
 
 #codex-overleaf-panel .recent-projects-row-expand:hover {
@@ -3537,7 +3579,7 @@
    the in-project surface. */
 #codex-overleaf-panel .recent-projects-row-badge.badge-pending,
 #codex-overleaf-panel .recent-projects-row-badge.badge-running {
-  background: rgba(78, 201, 176, 0.12);
+  background: var(--tl-run-wash);
   border-color: rgba(78, 201, 176, 0.32);
   color: var(--tl-run);
 }
@@ -3545,7 +3587,7 @@
 #codex-overleaf-panel .recent-projects-row-badge.badge-accepted,
 #codex-overleaf-panel .recent-projects-row-badge.badge-completed,
 #codex-overleaf-panel .recent-projects-row-badge.badge-background-completed {
-  background: rgba(137, 209, 133, 0.12);
+  background: var(--tl-ok-wash);
   border-color: rgba(137, 209, 133, 0.32);
   color: var(--tl-ok);
 }

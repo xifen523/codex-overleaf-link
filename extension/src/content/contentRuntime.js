@@ -941,6 +941,8 @@
           onSlashMenuClick: handleSlashMenuClick,
           onClearSkillInvocation: clearComposerSkillInvocation,
           onAddContext: toggleContextTray,
+          onAttachClick: () => panel.querySelector('[data-attach-input]')?.click(),
+          onAttachInput: handleAttachInputChange,
           onContextRefresh: () => loadContextFiles({ force: true }),
           onModelConfigToggle: () => toggleModelConfigPopover(),
           onModelConfigChoiceClick: event => {
@@ -1351,6 +1353,19 @@
     return composerAttachmentController.addFiles(files);
   }
 
+  function handleAttachInputChange(event) {
+    const input = event?.target;
+    const files = input?.files ? [...input.files] : [];
+    if (files.length) {
+      Promise.resolve(composerAttachmentController.addFiles(files)).catch(error => {
+        appendPlainLog(tx(`Could not attach files: ${error.message}`, `附件添加失败：${error.message}`));
+      });
+    }
+    if (input) {
+      input.value = '';
+    }
+  }
+
   function getComposerAttachmentsForRun() {
     return composerAttachmentController.getAttachmentsForRun();
   }
@@ -1380,13 +1395,16 @@
 
     setElementTitleAndAria('[data-panel-resize-handle]', tr('resizePanel'), tr('resizePanel'));
     setElementTitleAndAria('[data-refresh]', tr('refreshProbe'), tr('refreshProbe'));
-    setElementTitleAndAria('[data-diagnostics-menu]', tr('diagnosticsMenu'), tr('diagnosticsMenu'));
+    // State-dependent tooltip: re-derive from the dot's current health so a
+    // locale/session refresh doesn't clobber it back to the generic label.
+    setDiagnosticsHealth(panel.querySelector('[data-diagnostics-health-dot]')?.dataset.health || 'unknown');
     setElementTitleAndAria('[data-diagnostics-result-close]', tr('close'), tr('closeDiagnostics'));
     setElementTitleAndAria('[data-new-session]', tr('newSession'), tr('newSession'));
     setElementTitleAndAria('[data-custom-instructions-settings]', tr('projectSettings'), tr('projectSettings'));
     setElementTitleAndAria('[data-settings-back]', tr('settingsBack'), tr('settingsBack'));
     setElementTitleAndAria('[data-skills-back]', tr('settingsBack'), tr('settingsBack'));
     setElementTitleAndAria('[data-add-context]', tr('addContext'), tr('addContext'));
+    setElementTitleAndAria('[data-attach-file]', tr('attachFiles'), tr('attachFiles'));
     setElementTitleAndAria('[data-context-refresh]', tr('refreshFileList'), tr('refreshFileList'));
     setElementTitleAndAria('[data-reasoning]', tr('reasoningLabel'), tr('reasoningLabel'));
     setElementTitleAndAria('[data-speed]', tr('speedLabel'), tr('speedLabel'));
@@ -1510,6 +1528,15 @@
         return;
       }
       closeModelConfigPopover();
+    }, true);
+    document.addEventListener('keydown', event => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      const popover = panel?.querySelector('[data-model-config-popover]');
+      if (popover && !popover.hidden) {
+        closeModelConfigPopover();
+      }
     }, true);
   }
 
@@ -2812,9 +2839,28 @@
         if (event.key === 'Escape') {
           event.preventDefault();
           cleanup(false);
-        } else if (event.key === 'Enter') {
+          return;
+        }
+        if (event.key === 'Enter') {
           event.preventDefault();
-          cleanup(true);
+          // Destructive dialogs never treat a bare Enter as consent — the
+          // user must deliberately reach the (red) confirm button. Enter on
+          // a focused button still activates it via the click handler.
+          if (!destructive && event.target !== cancel) {
+            cleanup(true);
+          } else if (event.target === cancel) {
+            cleanup(false);
+          } else if (event.target === confirm) {
+            cleanup(true);
+          }
+          return;
+        }
+        if (event.key === 'Tab') {
+          // aria-modal contract: keep Tab cycling inside the two-button card
+          // instead of drifting onto the Overleaf page behind the overlay.
+          event.preventDefault();
+          const next = event.target === cancel ? confirm : cancel;
+          next.focus();
         }
       };
 
@@ -2826,7 +2872,9 @@
       cancel.addEventListener('click', () => cleanup(false));
       confirm.addEventListener('click', () => cleanup(true));
       document.addEventListener('keydown', onKeydown, true);
-      confirm.focus();
+      // Destructive dialogs open on the SAFE button so a stray keystroke
+      // cannot delete anything; benign confirms keep the fast path.
+      (destructive ? cancel : confirm).focus();
     });
   }
 
@@ -3082,6 +3130,28 @@
     });
   }
 
+  function autosizeTaskTextarea() {
+    const task = panel?.querySelector('[data-task]');
+    if (!task) {
+      return;
+    }
+    task.style.height = 'auto';
+    task.style.height = `${Math.min(task.scrollHeight, 160)}px`;
+  }
+
+  function syncComposerSendAvailability() {
+    const runButton = panel?.querySelector('[data-run]');
+    if (!runButton) {
+      return;
+    }
+    // While a run is active the button is Cancel and must stay clickable.
+    if (currentRunView) {
+      runButton.disabled = false;
+      return;
+    }
+    runButton.disabled = !String(panel?.querySelector('[data-task]')?.value || '').trim();
+  }
+
   function handleTaskInputKeydown(event) {
     if (handleSlashMenuKeydown(event)) {
       return;
@@ -3094,6 +3164,8 @@
   }
 
   function handleTaskInput() {
+    autosizeTaskTextarea();
+    syncComposerSendAvailability();
     scheduleMirrorPrefetch({
       reason: 'composer-input',
       delayMs: mirrorHealth?.PREFETCH_DEBOUNCE_MS || 1200
@@ -3311,6 +3383,8 @@
     }
     input.value = `${input.value.slice(0, trigger.start)}${input.value.slice(trigger.end)}`;
     state = { ...state, task: input.value };
+    autosizeTaskTextarea();
+    syncComposerSendAvailability();
   }
 
   function closeSlashMenu() {
@@ -5292,9 +5366,12 @@
       });
     } catch (_error) {
       setDiagnosticsHealth('fail');
+      // No ping response at all means the native host is missing or not
+      // running — telling a never-installed user an "update" exists is
+      // misleading; point them at setup instead.
       PanelRenderer.setBadge(panelRendererInstance.headerEl, {
         type: 'update',
-        tooltip: tx('Native host update available', 'Native host 可更新'),
+        tooltip: tx('Native host is not responding — click for setup steps', 'Native host 未响应——点击查看安装步骤'),
         onClick: () => showNativeUpdateGuidanceModal(fallbackNativeCompatibility({ ok: false }))
       });
     }
@@ -6120,6 +6197,7 @@
     if (taskInput) {
       taskInput.value = '';
     }
+    autosizeTaskTextarea();
     composerAttachmentController.clear();
     composerSkillInvocation = null;
     renderComposerSkillInvocation();
@@ -6143,6 +6221,10 @@
     panel.querySelector('[data-speed]').value = state.speedTier;
     panel.querySelector('[data-mode]').value = state.mode;
     panel.querySelector('[data-task]').value = state.task;
+    // Programmatic value changes fire no input event: re-sync the autogrow
+    // height and the empty-task send disable (session switch / init restore).
+    autosizeTaskTextarea();
+    syncComposerSendAvailability();
     panel.querySelector('[data-require-reviewing]').checked = state.requireReviewing;
     const recompileCheckbox = panel?.querySelector('[data-auto-recompile]');
     if (recompileCheckbox) {
@@ -6182,7 +6264,9 @@
 
   function setRunning(running) {
     const runButton = panel.querySelector('[data-run]');
-    runButton.disabled = false;
+    // Running -> the button is Cancel and must never be disabled; idle -> it
+    // is Send and disables on an empty composer (feedback instead of no-op).
+    runButton.disabled = running ? false : !String(panel.querySelector('[data-task]')?.value || '').trim();
     runButton.title = running ? tr('cancelRun') : tr('send');
     runButton.setAttribute('aria-label', running ? tr('cancelRun') : tr('send'));
     panel.querySelector('[data-new-session]').disabled = false;
@@ -6320,6 +6404,7 @@
 
     appendRunEvent({
       kind: activity.kind || 'activity',
+      subagent: activity.subagent === true ? true : undefined,
       title: activity.title,
       status: activity.status || 'running',
       detail: activity.detail,
@@ -6359,6 +6444,7 @@
       detail: sanitizeAssistantVisibleValue(detail),
       timestamp: timestamp || new Date().toISOString(),
       kind: input.kind || 'activity',
+      subagent: input.subagent === true ? true : undefined,
       technicalDetail: sanitizeAssistantVisibleValue(input.technicalDetail),
       streamKey: sanitizeAssistantVisibleText(input.streamKey),
       streamRole: sanitizeAssistantVisibleText(input.streamRole),

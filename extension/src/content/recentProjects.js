@@ -446,12 +446,17 @@
   async function renderProjectSessions(sessionsEl, projectId) {
     var StorageDb = window.CodexOverleafStorageDb;
     sessionsEl.innerHTML = '';
+    var sessionsLoading = document.createElement('div');
+    sessionsLoading.className = 'recent-projects-loading';
+    sessionsLoading.textContent = tx('Loading sessions…', '正在加载会话…');
+    sessionsEl.appendChild(sessionsLoading);
     var records = [];
     try {
       records = await loadProjectSessionRecords(projectId);
     } catch (_error) {
       records = [];
     }
+    sessionsLoading.remove();
     if (!records.length) {
       sessionsEl.appendChild(textNode(tr('recentProjects_sessions_empty'), 'recent-projects-sessions-empty'));
       return;
@@ -756,6 +761,13 @@
     listContainer.setAttribute('data-recent-projects-list', '');
     rootEl.appendChild(listContainer);
 
+    // Slow IndexedDB reads must not render as "no projects": show a loading
+    // line for the await window below (cleared before rows/empty render).
+    var listLoading = document.createElement('div');
+    listLoading.className = 'recent-projects-loading';
+    listLoading.textContent = tx('Loading projects…', '正在加载项目…');
+    listContainer.appendChild(listLoading);
+
     // Pre-warm the project-name cache mirror so the synchronous
     // `lookupProjectName` calls inside `renderRecentProjectRow` see the
     // latest data the first time the variant renders.
@@ -776,6 +788,7 @@
       rows = [];
     }
 
+    listLoading.remove();
     if (!rows || !rows.length) {
       listContainer.appendChild(renderEmptyState());
     } else {

@@ -491,6 +491,17 @@
         hunkEl.setAttribute('data-diff-review-hunk', '');
         hunkEl.dataset.hunkIndex = String(hunkIndex);
         if (reviewHunk) {
+          // Orientation header: reviewers need "what changed where" — the
+          // start line was always computed (reviewHunks) but never shown.
+          if (Number.isFinite(Number(reviewHunk.startLine)) && Number(reviewHunk.startLine) > 0) {
+            const location = document.createElement('div');
+            location.className = 'codex-diff-hunk-location';
+            location.textContent = tr('diffHunkLocation', {
+              line: String(reviewHunk.startLine),
+              count: String(reviewHunk.lineCount || 1)
+            });
+            hunkEl.append(location);
+          }
           const hunkDecision = hunkStates.get(reviewHunk.decisionKey);
           hunkEl.dataset.decision = readonly ? 'accepted' : (hunkDecision === true ? 'accepted' : hunkDecision === false ? 'rejected' : 'pending');
           if (!readonly && (hunkDecision === true || hunkDecision === false)) {
@@ -507,16 +518,19 @@
             acceptHunkBtn.setAttribute('data-diff-hunk-accept', '');
             acceptHunkBtn.textContent = '✓';
             acceptHunkBtn.title = tr('diffHunkAccept');
+            acceptHunkBtn.setAttribute('aria-label', tr('diffHunkAccept'));
             const rejectHunkBtn = document.createElement('button');
             rejectHunkBtn.type = 'button';
             rejectHunkBtn.setAttribute('data-diff-hunk-reject', '');
             rejectHunkBtn.textContent = '✗';
             rejectHunkBtn.title = tr('diffHunkReject');
+            rejectHunkBtn.setAttribute('aria-label', tr('diffHunkReject'));
             const jumpHunkBtn = document.createElement('button');
             jumpHunkBtn.type = 'button';
             jumpHunkBtn.setAttribute('data-diff-hunk-jump', '');
             jumpHunkBtn.textContent = '↗';
             jumpHunkBtn.title = tr('diffHunkJump');
+            jumpHunkBtn.setAttribute('aria-label', tr('diffHunkJump'));
 
             acceptHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, true));
             rejectHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, false));
@@ -572,11 +586,13 @@
           acceptBtn.dataset.diffAccept = '';
           acceptBtn.textContent = '✓';
           acceptBtn.title = tr('diffAccept');
+          acceptBtn.setAttribute('aria-label', tr('diffAccept'));
           const rejectBtn = document.createElement('button');
           rejectBtn.type = 'button';
           rejectBtn.dataset.diffReject = '';
           rejectBtn.textContent = '✗';
           rejectBtn.title = tr('diffReject');
+          rejectBtn.setAttribute('aria-label', tr('diffReject'));
 
           acceptBtn.addEventListener('click', () => decideFileChange(change.path, true));
           rejectBtn.addEventListener('click', () => decideFileChange(change.path, false));

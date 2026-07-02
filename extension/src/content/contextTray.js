@@ -58,6 +58,21 @@
         }
         closeContextTray();
       }, true);
+      document.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') {
+          return;
+        }
+        // Layered dismissal: if the slash menu is open above the tray, let
+        // its own Escape handler close it first — one Escape, one layer.
+        const slashMenu = getPanel()?.querySelector('[data-slash-menu]');
+        if (slashMenu && !slashMenu.hidden) {
+          return;
+        }
+        const tray = getPanel()?.querySelector('[data-context-tray]');
+        if (tray && !tray.hidden) {
+          closeContextTray();
+        }
+      }, true);
     }
 
     function isContextTrayClickTarget(target) {

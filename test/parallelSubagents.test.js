@@ -127,6 +127,37 @@ test('skipped writeback rows surface the navigation debug payload', () => {
   assert.match(router, /!baseComparison\.known && contentChangedFromPrevious && settledLongEnough/);
 });
 
+test('the subagent timeline flag survives the bridge and both storage compactors (v1.6.4 lock)', () => {
+  // The visual subagent track died once already: mapSubagentEvent set the
+  // flag but appendNativeEvent's explicit forwarding list dropped it. Lock
+  // every hop: producer -> bridge -> appendRunEvent whitelist -> compactors.
+  const transcript = require('../extension/src/shared/agentTranscript');
+  const mapped = transcript.mapAgentEventToActivity(
+    { type: 'codex.subagent.started', title: 'ch1', detail: {} }, { locale: 'en' });
+  assert.equal(mapped.subagent, true, 'producer sets the flag');
+
+  const runtime = repo('extension/src/content/contentRuntime.js');
+  const bridge = extractFunction(runtime, 'appendNativeEvent');
+  assert.match(bridge, /subagent: activity\.subagent === true/, 'bridge forwards the flag');
+  const appendEvent = extractFunction(runtime, 'appendRunEvent');
+  assert.match(appendEvent, /subagent: input\.subagent === true/, 'whitelist keeps the flag');
+
+  const view = repo('extension/src/content/runTimelineView.js');
+  assert.match(view, /row\.dataset\.subagent = 'true'/, 'renderer marks the row');
+
+  const sessionState = require('../extension/src/shared/sessionState');
+  const prepared = sessionState.prepareStateForStorage({
+    sessions: [{ id: 's1', runs: [{ id: 'r1', task: 't', events: [
+      { title: 'sub', status: 'running', kind: 'activity', subagent: true },
+      { title: 'plain', status: 'running', kind: 'activity' }
+    ] }] }],
+    activeSessionId: 's1'
+  });
+  const events = prepared.sessions[0].runs[0].events;
+  assert.equal(events[0].subagent, true, 'sessionState compactor keeps the flag');
+  assert.equal('subagent' in events[1], false, 'absent flag stays absent');
+});
+
 test('codex.subagent.* events map to bilingual timeline lines', () => {
   const transcript = require('../extension/src/shared/agentTranscript');
   const map = (event, locale) => transcript.mapAgentEventToActivity(event, { locale });

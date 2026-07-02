@@ -1,5 +1,38 @@
 # Changelog
 
+## v1.6.4 - 2026-07-02
+
+UI polish pack — ~25 small display/interaction fixes from a full UI/UX audit, adversarially verified item-by-item before release. The native protocol stays `1`.
+
+### Fixed
+
+- **Honest composer copy.** The placeholder/hints promised "Type @ to add context" but no `@` trigger exists (only `/` is wired); the copy now points at the ＋ button (typed `@compile-log` still resolves and still documented). Real `@` autocomplete lands in 1.7.
+- **Failed reports read as failed.** The failed completion report's alert color was silently reset by the conclusion's base style; failure now stays red.
+- **Destructive confirms are keyboard-safe.** Delete dialogs open focused on Cancel, a bare Enter no longer confirms them, and Tab cycles inside the dialog (focus trap) instead of drifting onto Overleaf.
+- **Readable action buttons in both themes.** New `--tl-on-solid` ink token replaces white-on-pastel text on the confirm/undo/accept solid fills (was ~1.7:1 in dark theme); hover states no longer turn white-on-light-grey in the light theme.
+- **Subagent rows get their own visual track.** Parallel-subagent timeline lines are indented with a left rail (flag carried through the event bridge and both storage compactors, so the track survives reloads).
+- **High-signal rows stop truncating.** Warning/failed timeline lines wrap to two lines instead of clipping mid-sentence.
+
+### Added
+
+- **Attachments are discoverable.** A file-picker button in the ＋ context tray (paste/drop still work); the ＋ hint now mentions attachments.
+- **Diff hunks show where they land.** Each hunk carries a "Line N · M lines" location header (the data existed, it was never rendered).
+- **Composer ergonomics.** The task box auto-grows with content (58-160px, single height mechanism), Send disables on an empty composer (Cancel is never disabled), and Esc closes the model popover and the context tray (layered: one Esc, one layer).
+- **Visibility polish.** Active session row gets an accent bar; the dashboard's expand caret is brighter; dashboard/session lists show loading placeholders instead of blank panes; the diagnostics dot has per-state tooltips; toasts fade in; themed scrollbars everywhere in the panel.
+- **Accessibility.** aria-labels on the diff icon buttons and jump-to-latest pill; the completion report is an aria-live region.
+
+### Changed
+
+- A missing native host now says "not responding — click for setup steps" instead of claiming an update is available; the experimental OT setting describes itself in plain language; diff colors joined the theme-token system (with an AA-safe light-theme green); `×` glyphs unified.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.6.4` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.6.4.zip`, `codex-overleaf-native-host-v1.6.4.tar.gz`, and `codex-overleaf-link-1.6.4.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.6.4 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.6.4 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.6.4 -- uninstall-native`.
+
 ## v1.6.3 - 2026-07-02
 
 Structural patch — debt phase 6. No behavior changes intended; the native protocol stays `1`.

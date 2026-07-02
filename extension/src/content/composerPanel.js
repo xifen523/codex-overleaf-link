@@ -92,6 +92,8 @@
         <div class="codex-context-tray" data-context-tray hidden>
           <div class="codex-context-head">
             <span data-i18n="contextTitle">@ Context</span>
+            <button type="button" class="codex-attach-button" data-attach-file title="Attach files (PDF, images)" aria-label="Attach files (PDF, images)">⌲</button>
+            <input type="file" data-attach-input multiple hidden>
             <button type="button" data-context-refresh title="Refresh file list" aria-label="Refresh file list">↻</button>
           </div>
           <div class="codex-context-selection" data-context-selection></div>
@@ -137,6 +139,8 @@
     bind(instance, instance.container.querySelector('[data-slash-menu]'), 'click', event => instance.callbacks.onSlashMenuClick?.(event));
     bind(instance, instance.container.querySelector('[data-composer-skill-clear]'), 'click', () => instance.callbacks.onClearSkillInvocation?.());
     bind(instance, instance.container.querySelector('[data-add-context]'), 'click', () => instance.callbacks.onAddContext?.());
+    bind(instance, instance.container.querySelector('[data-attach-file]'), 'click', () => instance.callbacks.onAttachClick?.());
+    bind(instance, instance.container.querySelector('[data-attach-input]'), 'change', event => instance.callbacks.onAttachInput?.(event));
     bind(instance, instance.container.querySelector('[data-context-refresh]'), 'click', () => instance.callbacks.onContextRefresh?.());
     bind(instance, instance.container.querySelector('[data-model-config-toggle]'), 'click', event => {
       event.preventDefault();

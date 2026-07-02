@@ -366,7 +366,7 @@
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'codex-attachment-preview-remove';
-        remove.textContent = 'x';
+        remove.textContent = '×';
         remove.title = options.tx ? options.tx('Remove attachment', '移除附件') : 'Remove attachment';
         remove.setAttribute('aria-label', options.tx
           ? options.tx(`Remove ${attachment.name}`, `移除 ${attachment.name}`)
@@ -398,7 +398,7 @@
     const close = document.createElement('button');
     close.type = 'button';
     close.className = 'codex-attachment-preview-dialog-close';
-    close.textContent = 'x';
+    close.textContent = '×';
     close.title = options.tr ? options.tr('close') : 'Close';
     close.setAttribute('aria-label', options.tr ? options.tr('close') : 'Close');
     const image = document.createElement('img');
