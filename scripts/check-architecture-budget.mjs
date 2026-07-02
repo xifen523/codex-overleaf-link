@@ -46,9 +46,13 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // native-missing badge copy). 8380 -> 8560 in v1.7.0 for the @ file
     // autocomplete cluster + the first-run setup prompt; the @ cluster
     // (getAtFileTrigger/renderAtFileMenu/applyAtFileSelection, ~130 lines) is
-    // a candidate for a future composer-menu carve.
+    // a candidate for a future composer-menu carve. 8560 -> 8900 in v1.7.5
+    // for the journey pack: recovery-action handlers (retry refill, open
+    // file, storage settings), the history & storage settings card, the
+    // change-history read path, cross-tab hints, and the mirror barriers.
+    // The recovery/history cluster (~300 lines) is the next carve candidate.
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 8560
+    maxLines: 8900
   },
   {
     // Carved from contentRuntime in v1.4.5: markdown/inline rendering, the
@@ -65,16 +69,20 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
   {
     // Carved from contentRuntime in v1.4.6: the run-timeline render pipeline
     // (scroll engine, run cards, stream events, completion report, run-card
-    // Undo/Accept controls).
+    // Undo/Accept controls). Raised 950 -> 1080 in v1.7.5 for the
+    // recovery-action registry (per-failure-code buttons), the compile-fix /
+    // rejected-redo report actions, and the jump-to-turn navigator.
     path: 'extension/src/content/runTimelineView.js',
-    maxLines: 950
+    maxLines: 1080
   },
   {
     // Carved from contentRuntime in v1.4.7: the session lifecycle + list
     // surface (create/switch/rename/delete, header bar, running guards).
-    // Raised 400 -> 460 in v1.5.0 for the header session dropdown switcher.
+    // Raised 400 -> 460 in v1.5.0 for the header session dropdown switcher;
+    // 460 -> 490 in v1.7.5 for the eviction-consent and running-run switch
+    // confirms.
     path: 'extension/src/content/sessionManager.js',
-    maxLines: 460
+    maxLines: 490
   },
   {
     // Carved from contentRuntime in v1.4.7: apply-result / failure-reason

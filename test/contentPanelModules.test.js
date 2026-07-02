@@ -389,7 +389,7 @@ test('settingsPanel renders NO [data-custom-instructions-save] button', () => {
   assert.equal(saveBtn, null, 'should NOT render [data-custom-instructions-save] button after Task 2');
 });
 
-test('OT click interceptor reads the POST-flip checked value as the target (v1.7.1 lock)', () => {
+test('OT click interceptor reads the POST-flip checked value as the target (v1.7.5 lock)', () => {
   // The switch died once already: click on a checkbox fires AFTER pre-click
   // activation flips .checked, so `!checkbox.checked` computed the pre-click
   // state and inverted the whole flow (enable ran the disable branch).
@@ -402,7 +402,7 @@ test('OT click interceptor reads the POST-flip checked value as the target (v1.7
     'explicit target wins; inversion only for un-flipped callers');
 });
 
-test('broad-glob guardrail probes the REAL governance matcher (v1.7.1 lock)', () => {
+test('broad-glob guardrail probes the REAL governance matcher (v1.7.5 lock)', () => {
   // Hardcoded pattern sets cried wolf on inert './**' (never matches) and
   // missed genuinely-total '***'. Verify against the real engine.
   const rules = require('../extension/src/shared/governanceRules');
@@ -417,7 +417,7 @@ test('broad-glob guardrail probes the REAL governance matcher (v1.7.1 lock)', ()
   assert.doesNotMatch(panel, /BROAD_GLOBS/, 'the hardcoded set is gone');
 });
 
-test('settingsPanel renders per-card saved badges (v1.7.1: global chip replaced)', () => {
+test('settingsPanel renders per-card saved badges (v1.7.5: global chip replaced)', () => {
   // The single header "Saved" chip was replaced by a ✓ badge on each settings
   // card so feedback appears next to the thing that changed.
   const src = read('extension/src/content/settingsPanel.js');

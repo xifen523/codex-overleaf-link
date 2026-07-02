@@ -149,7 +149,8 @@
     failed: 'badge-failed',
     background_completed: 'badge-background-completed',
     needs_review_after_navigation: 'badge-needs-review-after-navigation',
-    abandoned_after_navigation: 'badge-abandoned-after-navigation'
+    abandoned_after_navigation: 'badge-abandoned-after-navigation',
+    interrupted: 'badge-interrupted'
   };
 
   // Carved modules (v1.4.5 structural-debt phase 1). Factory-injected with the
@@ -295,6 +296,10 @@
     getPanel: () => panel,
     getState: () => state,
     getCurrentRunView: () => currentRunView,
+    refillComposerForRetry,
+    showNativeSetupGuidance: () => showNativeUpdateGuidanceModal({}),
+    openProjectFileForFailure,
+    openStorageSettings,
     trackedChangeInFlight
   });
   const {
@@ -417,8 +422,37 @@
   });
   const {
     applySyncChangesToOverleaf,
-    resolveCompileLogContext
+    resolveCompileLogContext,
+    getPendingMirrorRefresh
   } = writebackOrchestrator;
+
+  // Cross-tab awareness (v1.7.5, coarse): warn when another tab starts a run
+  // on the same project. Same-origin channel; payloads carry only ids.
+  let crossTabRunChannel = null;
+  try {
+    crossTabRunChannel = new BroadcastChannel('codex-overleaf-runs');
+    crossTabRunChannel.addEventListener('message', event => {
+      const data = event?.data;
+      if (!data || data.type !== 'run-started') {
+        return;
+      }
+      if (data.projectId && data.projectId === getCurrentProjectId()) {
+        showPluginToast(tx(
+          'Another tab just started a Codex run on this project \u2014 avoid running here at the same time.',
+          '另一个标签页刚在本项目启动了 Codex 任务——请避免同时在这里运行。'
+        ));
+      }
+    });
+  } catch (error) {
+    // BroadcastChannel unavailable — cross-tab hints stay off.
+  }
+  function announceCrossTabRunStart() {
+    try {
+      crossTabRunChannel?.postMessage({ type: 'run-started', projectId: getCurrentProjectId(), at: Date.now() });
+    } catch (error) {
+      // Channel closed mid-navigation; the hint is best-effort.
+    }
+  }
 
   const modelPicker = window.CodexOverleafModelPicker.create({
     tr,
@@ -502,7 +536,12 @@
     callPageBridge,
     getRunEvents: () => currentRunView?.events,
     appendRunEvent,
-    scrollLogToBottom
+    scrollLogToBottom,
+    onRejectedHunks: summaries => {
+      if (currentRunView && Array.isArray(summaries) && summaries.length) {
+        currentRunView.rejectedHunks = summaries;
+      }
+    }
   });
   const contextTrayController = ContextTray.createContextTrayController({
     root: window,
@@ -898,6 +937,9 @@
           onInputChange: () => persistPanelInputs(),
           onSkillsOpen: () => openSkillsView(),
           onSkillsBack: () => closeSkillsView(),
+          onClearAllHistory: () => clearAllHistoryWithConfirm(),
+          onHistoryOpen: () => renderAuditHistoryPanel(),
+          onHistoryFilter: () => applyAuditHistoryFilter(),
           // Experimental OT mirror: a single visible switch whose click is
           // intercepted so the confirm-before-enable flow still runs.
           onOtToggleClick: handleExperimentalOtToggleClick
@@ -952,7 +994,7 @@
           onModeChoice: mode => {
             selectMode(mode).catch(error => appendPlainLog(tr('modeSwitchFailedToast', { message: error.message })));
           },
-          onInputChange: () => persistPanelInputs()
+          onInputChange: event => persistPanelInputs(event)
         }
       });
 
@@ -1063,6 +1105,148 @@
     };
   }
 
+  // --- Change history (v1.7.5): the audit log finally gets a read path. ---
+  // Loaded lazily when the Settings card is expanded; newest 50 project runs.
+  let auditHistoryRecords = [];
+
+  async function renderAuditHistoryPanel() {
+    const container = settingsPanelInstance?.container;
+    const list = container?.querySelector('[data-history-list]');
+    if (!list) {
+      return;
+    }
+    const filterInput = container.querySelector('[data-history-filter]');
+    if (filterInput && !filterInput.placeholder) {
+      filterInput.placeholder = tx('Filter by file or task\u2026', '按文件名或任务过滤…');
+    }
+    list.textContent = tx('Loading\u2026', '正在加载…');
+    let records = [];
+    try {
+      const StorageDb = window.CodexOverleafStorageDb;
+      records = StorageDb?.getAllByIndex
+        ? await StorageDb.getAllByIndex('auditLogs', 'projectId', getCurrentProjectId())
+        : [];
+    } catch (error) {
+      list.textContent = tx(`Could not load change history: ${error.message}`, `无法加载变更历史：${error.message}`);
+      return;
+    }
+    auditHistoryRecords = (records || [])
+      .sort((a, b) => String(b?.createdAt || '').localeCompare(String(a?.createdAt || '')))
+      .slice(0, 50);
+    applyAuditHistoryFilter();
+  }
+
+  function applyAuditHistoryFilter() {
+    const container = settingsPanelInstance?.container;
+    const list = container?.querySelector('[data-history-list]');
+    if (!list) {
+      return;
+    }
+    const query = String(container.querySelector('[data-history-filter]')?.value || '').trim().toLowerCase();
+    const filePaths = record => []
+      .concat(record?.appliedFiles || [], record?.changedFiles || [])
+      .map(file => (file && typeof file === 'object') ? file.path : file)
+      .filter(Boolean);
+    const rows = auditHistoryRecords.filter(record => {
+      if (!query) {
+        return true;
+      }
+      return [record?.promptSummary || '', ...filePaths(record)].join(' ').toLowerCase().includes(query);
+    });
+    list.replaceChildren();
+    if (!rows.length) {
+      const empty = document.createElement('div');
+      empty.className = 'codex-history-empty';
+      empty.textContent = query
+        ? tx('No recorded changes match this filter.', '没有匹配该过滤条件的变更记录。')
+        : tx('No recorded changes for this project yet.', '本项目还没有已记录的变更。');
+      list.append(empty);
+      return;
+    }
+    for (const record of rows) {
+      const row = document.createElement('div');
+      row.className = 'codex-history-row';
+      row.dataset.resultStatus = record.resultStatus || '';
+      const when = document.createElement('div');
+      when.className = 'codex-history-when';
+      when.textContent = record.createdAt ? new Date(record.createdAt).toLocaleString() : '';
+      const task = document.createElement('div');
+      task.className = 'codex-history-task';
+      task.textContent = record.promptSummary || '';
+      const files = document.createElement('div');
+      files.className = 'codex-history-files';
+      const applied = (record.appliedFiles || [])
+        .map(file => (file && typeof file === 'object') ? file.path : file)
+        .filter(Boolean);
+      files.textContent = applied.length
+        ? applied.join(' \u00b7 ')
+        : tx('No files were written.', '未写入文件。');
+      row.append(when, task, files);
+      list.append(row);
+    }
+  }
+
+  // --- History & storage (v1.7.5): usage summary + clear-all in Settings ---
+  function refreshStorageUsageSummary() {
+    const node = settingsPanelInstance?.container?.querySelector('[data-storage-usage]');
+    if (!node) {
+      return;
+    }
+    const sessionCount = Array.isArray(state?.sessions) ? state.sessions.length : 0;
+    const runCount = Array.isArray(state?.runs) ? state.runs.length : 0;
+    const counts = tx(
+      `${sessionCount} session(s) · ${runCount} recent run(s) kept`,
+      `${sessionCount} 个会话 · 保留最近 ${runCount} 轮运行`
+    );
+    node.textContent = counts;
+    const estimate = navigator.storage?.estimate?.();
+    if (estimate?.then) {
+      estimate.then(info => {
+        const usage = Number(info?.usage);
+        if (Number.isFinite(usage) && usage >= 0) {
+          const mb = usage / (1024 * 1024);
+          const size = mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(usage / 1024))} KB`;
+          node.textContent = tx(`${counts} · ~${size} used on this site`, `${counts} · 本站点约占用 ${size}`);
+        }
+      }).catch(() => { /* estimate unsupported — counts alone are fine */ });
+    }
+  }
+
+  async function clearAllHistoryWithConfirm() {
+    if (currentRunView) {
+      showPluginToast(tx('A run is in progress — wait for it to finish (or cancel it) before clearing history.', '有任务正在运行——请先等它结束（或取消）再清空历史。'));
+      return;
+    }
+    const confirmed = await showPluginConfirm({
+      title: tx('Clear all history?', '清空全部历史？'),
+      message: tx(
+        'This permanently deletes every stored session, run and audit record for ALL projects. Project settings and rules are kept. This cannot be undone.',
+        '将永久删除所有项目的全部会话、运行与审计记录。项目设置与规则会保留。此操作不可撤销。'
+      ),
+      confirmLabel: tx('Delete everything', '全部删除'),
+      destructive: true
+    });
+    if (!confirmed) {
+      return;
+    }
+    try {
+      await window.CodexOverleafStorageDb?.clearAllStores?.();
+    } catch (error) {
+      showPluginToast(tx(`Could not clear history: ${error.message}`, `清空历史失败：${error.message}`));
+      return;
+    }
+    // Reset the in-panel state to match the emptied store and re-render
+    // EXPLICITLY. startNewSession() is unusable here: its empty-session reuse
+    // guard matches the fresh session that normalization mints and returns
+    // before applyStateToPanel(), leaving the deleted cards on screen.
+    state = normalizePanelState({ ...state, sessions: [], runs: [], activeSessionId: '' });
+    await saveState();
+    applyStateToPanel();
+    refreshStorageUsageSummary();
+    showPluginToast(tx('All history cleared.', '已清空全部历史。'));
+    panel?.querySelector('[data-task]')?.focus();
+  }
+
   function openCustomInstructionsSettings() {
     if (!settingsPanelInstance) {
       return;
@@ -1079,6 +1263,12 @@
     syncProjectSettingsEditorForProject();
     panelRendererInstance?.setView?.('settings');
     SettingsPanel.show(settingsPanelInstance);
+    refreshStorageUsageSummary();
+    // A history card left expanded re-loads on every settings open; the
+    // toggle listener only fires on the closed->open transition.
+    if (settingsPanelInstance?.container?.querySelector('[data-history-card]')?.open) {
+      renderAuditHistoryPanel();
+    }
     if (typeof refreshLocalSkills === 'function') {
       refreshLocalSkills().catch(error => setProjectSettingsStatus(tx(`Could not list local skills: ${error.message}`, `无法列出本地技能：${error.message}`), 'failed'));
     }
@@ -1401,7 +1591,7 @@
     // governance warning follows a language switch.
     settingsPanelInstance?.refreshNotes?.();
     setElementTitleAndAria('[data-diagnostics-result-close]', tr('close'), tr('closeDiagnostics'));
-    setElementTitleAndAria('[data-new-session]', tr('newSession'), tr('newSession'));
+    setElementTitleAndAria('[data-new-session]', tr('newSessionTooltip'), tr('newSession'));
     setElementTitleAndAria('[data-custom-instructions-settings]', tr('projectSettings'), tr('projectSettings'));
     setElementTitleAndAria('[data-settings-back]', tr('settingsBack'), tr('settingsBack'));
     setElementTitleAndAria('[data-skills-back]', tr('settingsBack'), tr('settingsBack'));
@@ -1719,6 +1909,15 @@
   }
 
   async function runTask() {
+    // Barrier on a still-flying background mirror refresh from the previous
+    // turn (v1.7.5) BEFORE startRunView creates the new run view: the mirror's
+    // wrap-up events must land in the run that produced them, not the new
+    // one, and mirror.sync landing mid-run would swap the local baseline
+    // under Codex.
+    const pendingMirror = getPendingMirrorRefresh?.();
+    if (pendingMirror) {
+      await pendingMirror.catch(() => {});
+    }
     readPanelInputs();
     // Freeze submitted run identity before the panel can change during the run.
     const submittedMode = state.mode;
@@ -1752,7 +1951,11 @@
       mode: submittedMode,
       focusFiles: getActiveFocusFiles()
     });
-    clearTaskComposer();
+    announceCrossTabRunStart();
+    // Keep attachments across turns (v1.7.5): screenshots and files usually
+    // anchor several follow-up questions. The tray keeps them visible and
+    // hand-removable; only the task text resets after submit.
+    clearTaskComposer({ keepAttachments: true });
     appendRunEvent({
       title: submittedSkillInvocation?.id === 'skill-installer'
         ? tx('I will use the Codex skill installer for this request.', '我会用 Codex skill installer 处理这个请求。')
@@ -1784,9 +1987,13 @@
         return;
       }
       appendRunEvent({
+        // Wording must match behavior: a non-empty focus selection RESTRICTS
+        // reads and writes to these files (shouldRestrictWritebackToFocus),
+        // it does not merely "prioritize" them. The selection persists across
+        // turns until cleared via the ＋ tray.
         title: tx(
-          `This run will prioritize: ${formatContextItems(getActiveFocusFiles())}`,
-          `这轮会优先参考：${formatContextItems(getActiveFocusFiles())}`
+          `This run reads and writes ONLY: ${formatContextItems(getActiveFocusFiles())} (persists across turns; clear via ＋)`,
+          `本轮仅读写：${formatContextItems(getActiveFocusFiles())}（跨轮保留，可在 ＋ 中清除）`
         ),
         status: 'completed'
       });
@@ -2075,23 +2282,50 @@
         // so emit `native_bridge_unavailable` (blocked, retryable). All other
         // native errors are treated as a Codex-side surface error and emit
         // `codex_no_usable_result` (error, retryable).
-        const codexRunFailure = isNativeBridgeUnavailableError(response.error)
-          ? buildContentFailure('native_bridge_unavailable', { path: 'codex.run' }, {
-            technicalMessage: response.error?.message || '',
-            evidence: {
-              handshakeFailed: true,
-              errorCode: response.error?.code || ''
-            }
+        // Map native/codex failures onto their SPECIFIC catalog codes — the
+        // timeout/not-found/output-limit entries (and their bilingual next
+        // steps) existed but were never emitted, so everything collapsed into
+        // "no usable result" and pointed users at the wrong recovery.
+        const runErrorMessage = String(response.error?.message || '');
+        const codexRunFailure = response.error?.code === 'native_execution_interrupted'
+          ? buildContentFailure('native_request_failed', { path: 'codex.run' }, {
+            // The host IS installed — the request was interrupted mid-flight.
+            // Telling this user to reinstall would be a misdiagnosis.
+            technicalMessage: runErrorMessage,
+            evidence: { errorCode: response.error?.code || '', interrupted: true }
           })
+          : isNativeBridgeUnavailableError(response.error)
+            ? buildContentFailure('native_bridge_unavailable', { path: 'codex.run' }, {
+              technicalMessage: runErrorMessage,
+              evidence: {
+                handshakeFailed: true,
+                errorCode: response.error?.code || ''
+              }
+            })
           : response.error?.code === 'project_locked'
             ? buildContentFailure('codex_project_locked', { path: 'codex.run' }, {
-              technicalMessage: response.error?.message || '',
+              technicalMessage: runErrorMessage,
               evidence: {
                 errorCode: response.error?.code || ''
               }
             })
+          : /Codex CLI was not found/i.test(runErrorMessage)
+            ? buildContentFailure('codex_not_found', { path: 'codex.run' }, {
+              technicalMessage: runErrorMessage,
+              evidence: { errorCode: response.error?.code || '' }
+            })
+          : /idle watchdog/i.test(runErrorMessage)
+            ? buildContentFailure('codex_timeout', { path: 'codex.run' }, {
+              technicalMessage: runErrorMessage,
+              evidence: { errorCode: response.error?.code || '' }
+            })
+          : /output limit exceeded/i.test(runErrorMessage)
+            ? buildContentFailure('codex_output_limit', { path: 'codex.run' }, {
+              technicalMessage: runErrorMessage,
+              evidence: { errorCode: response.error?.code || '' }
+            })
           : buildContentFailure('codex_no_usable_result', { path: 'codex.run' }, {
-            technicalMessage: response.error?.message || '',
+            technicalMessage: runErrorMessage,
             evidence: {
               hasFinalReport: false,
               errorCode: response.error?.code || ''
@@ -2723,7 +2957,10 @@
     if (code === 'native_unavailable') return true;
     if (code === 'native_update_required') return true;
     if (code === 'native_missing') return true;
-    if (code === 'native_execution_interrupted') return true;
+    // native_execution_interrupted deliberately NOT here: the host is
+    // installed and reachable — that error means one in-flight request was
+    // cut (host restart, crash mid-run). It maps to native_request_failed
+    // with retry semantics, not to "reinstall the bridge".
     const message = typeof error.message === 'string' ? error.message : '';
     return /native host disconnected|specified native messaging host not found|not registered/i.test(message);
   }
@@ -6066,7 +6303,7 @@
         ));
         return;
       }
-      const compactState = prepareStateForStorage(state);
+      const compactState = prepareStateForStorage(state, { onAggressive: notifyAggressiveCompactionOnce });
       compactState.autoRecompile = state.autoRecompile;
       compactState.loadCodexLocalSkills = state.loadCodexLocalSkills !== false;
       compactState.loadCodexOverleafSkills = state.loadCodexOverleafSkills !== false;
@@ -6159,6 +6396,20 @@
         }
       }
     }
+  }
+
+  // One toast per page load: aggressive compaction silently halves history
+  // limits; the user deserves to know trimming is happening and where to act.
+  let aggressiveCompactionNoticeShown = false;
+  function notifyAggressiveCompactionOnce() {
+    if (aggressiveCompactionNoticeShown) {
+      return;
+    }
+    aggressiveCompactionNoticeShown = true;
+    showPluginToast(tx(
+      'Storage is tight: older history is being trimmed harder so saving keeps working. You can clear old history in Settings.',
+      '存储空间紧张：正在更积极地精简较旧历史以保证保存成功。可在设置的「历史与存储」中清理。'
+    ));
   }
 
   function prepareCompactFallbackState(inputState) {
@@ -6279,7 +6530,16 @@
     return error?.message || String(error);
   }
 
-  async function persistPanelInputs() {
+  async function persistPanelInputs(event) {
+    // Typing in the task box is the hottest write path: a full saveState per
+    // keystroke serializes every session/run/event and rewrites IndexedDB, so
+    // panels get slower as history grows. Drafts take the debounced saver;
+    // committed control changes keep the immediate full save below.
+    if (event?.type === 'input' && event?.target?.matches?.('[data-task]')) {
+      readPanelInputs();
+      saveStateSoon();
+      return;
+    }
     readPanelInputs();
     renderSpeedOptions(getRenderedModelEntries());
     renderModelConfigChoices();
@@ -6388,13 +6648,15 @@
   }
 
 
-  function clearTaskComposer() {
+  function clearTaskComposer({ keepAttachments = false } = {}) {
     const taskInput = panel?.querySelector('[data-task]');
     if (taskInput) {
       taskInput.value = '';
     }
     autosizeTaskTextarea();
-    composerAttachmentController.clear();
+    if (!keepAttachments) {
+      composerAttachmentController.clear();
+    }
     composerSkillInvocation = null;
     renderComposerSkillInvocation();
     state = updateActiveSession(state, { task: '' });
@@ -6655,7 +6917,20 @@
       // for the report-kind render path. Sanitized so it survives storage
       // round-trips; the renderer falls back to `detail` text when absent
       // (legacy / recovered-history events).
-      detailStructured: input.detailStructured ? sanitizeAssistantVisibleValue(input.detailStructured) : undefined
+      detailStructured: input.detailStructured ? sanitizeAssistantVisibleValue(input.detailStructured) : undefined,
+      // Post-write compile errors (strings, capped) ride on the report event
+      // so the renderer can offer a one-click "fix compile errors" retry.
+      compileErrors: Array.isArray(input.compileErrors) && input.compileErrors.length
+        ? input.compileErrors.slice(0, 5).map(item => sanitizeAssistantVisibleText(String(item))).filter(Boolean)
+        : undefined,
+      // Hunks the user rejected during review ({path, summary}, capped) so
+      // the report can offer "redo the rejected changes".
+      rejectedHunks: Array.isArray(input.rejectedHunks) && input.rejectedHunks.length
+        ? input.rejectedHunks.slice(0, 10).map(item => ({
+            path: sanitizeAssistantVisibleText(String(item?.path || '')),
+            summary: sanitizeAssistantVisibleText(String(item?.summary || ''))
+          })).filter(item => item.path)
+        : undefined
     };
     const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
     let renderedEvent = event;
@@ -6733,7 +7008,8 @@
   function appendRunEventToView(view, event) {
     if (event.kind === 'report') {
       view.report.hidden = false;
-      view.report.replaceChildren(renderCompletionReport(event));
+      const record = view?.recordId ? findRunRecord(view.recordId, view.sessionId) : null;
+      view.report.replaceChildren(renderCompletionReport(event, record));
       bumpUnreadIfDetached();
       return;
     }
@@ -6957,6 +7233,13 @@
     const run = findRunRecord(runId);
     if (!getRunUndoCount(run) || run.undoStatus === 'applied') {
       return;
+    }
+    // Wait out any background mirror refresh before undoing (v1.7.5): a
+    // mirror.sync finishing after the undo would push the pre-undo snapshot
+    // as the local baseline and resurrect the undone content next run.
+    const pendingMirror = getPendingMirrorRefresh?.();
+    if (pendingMirror) {
+      await pendingMirror.catch(() => {});
     }
 
     if ((Array.isArray(run.undoTrackedChanges) && run.undoTrackedChanges.length) || hasTrackedEditorUndo(run)) {
@@ -8115,6 +8398,58 @@
     return line;
   }
 
+  // --- Recovery-action handlers (v1.7.5) — injected into runTimelineView ---
+  // Retry deliberately refills the composer instead of re-running directly:
+  // the failed task usually needs a tweak before it is worth resending.
+  function refillComposerForRetry(run, textOverride) {
+    const input = panel?.querySelector('[data-task]');
+    const task = typeof textOverride === 'string' && textOverride.trim()
+      ? textOverride
+      : String(run?.task || '');
+    if (!input || !task.trim()) {
+      showPluginToast(tx('Nothing to refill: the original task text is unavailable.', '无法回填：原任务文本不可用。'));
+      return;
+    }
+    input.value = task;
+    state.task = task;
+    autosizeTaskTextarea();
+    saveStateSoon();
+    input.focus();
+    try {
+      input.setSelectionRange(task.length, task.length);
+    } catch (error) {
+      // Non-text inputs throw; cursor placement is best-effort.
+    }
+    if (Array.isArray(run?.attachments) && run.attachments.length) {
+      showPluginToast(tx('Task refilled. Attachments are not restored — re-add them via ＋.', '任务已回填。附件不会自动恢复，请在 ＋ 中重新添加。'));
+    } else {
+      showPluginToast(tx('Task refilled — edit and resend.', '任务已回填，修改后可直接重发。'));
+    }
+  }
+
+  // jumpToPosition opens the file via the page-side editor bridge; 0..0 lands
+  // at the top without selecting anything.
+  async function openProjectFileForFailure(path) {
+    const target = String(path || '').trim();
+    if (!target) {
+      return;
+    }
+    try {
+      await callPageBridge('jumpToPosition', { path: target, from: 0, to: 0 });
+    } catch (error) {
+      showPluginToast(tx(`Could not open ${target}: ${error.message}`, `无法打开 ${target}：${error.message}`));
+    }
+  }
+
+  function openStorageSettings() {
+    openCustomInstructionsSettings();
+    const card = panel?.querySelector('[data-storage-card]');
+    if (card) {
+      card.open = true;
+      card.scrollIntoView({ block: 'center' });
+    }
+  }
+
   function appendCompletionReport(input = {}) {
     const operations = input.operations || [];
     const applyResults = input.applyResults || [];
@@ -8138,7 +8473,15 @@
       // can demote the meta block visually (separator + muted color). The
       // legacy `detail` text stays attached for storage / transcripts / the
       // fallback render path used when reloading older persisted events.
-      detailStructured: report.structured || null
+      detailStructured: report.structured || null,
+      // The structured failure must ride on the report event itself —
+      // appendRecoveryActionForFailure reads event.failure.code to decide
+      // which recovery button to render. (Fixed in v1.7.5: callers passed
+      // input.failure since v1.6.2 but it was never forwarded, so recovery
+      // buttons on completion reports could never appear.)
+      failure: input.failure || undefined,
+      compileErrors: input.compileErrors || undefined,
+      rejectedHunks: input.rejectedHunks || currentRunView?.rejectedHunks || undefined
     });
   }
 

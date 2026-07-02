@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.7.5 - 2026-07-03
+
+Journey pack — the three walkthrough audits (daily loop, failure recovery, long-term use) shipped as one release: every dead-end now has a next action you can click. Adversarially fleet-verified (5 findings fixed pre-release, including a mirror-barrier ordering race, an unreachable open-file recovery branch, and a clear-history flow that left deleted cards on screen). The native protocol stays `1`.
+
+### Added
+
+- **Recovery-action registry.** A failure's completion report now renders the executable next step, per failure code: retryable failures (timeout, no usable result, stale source, write errors, …) get **Edit & resend** (the run's task text refills the composer); native-bridge failures get **Fix the native host** (opens the install/update guidance); file-targeting failures get **Open the file in Overleaf**; storage failures get **Open history & storage cleanup**; a locked project keeps its force-release button. Latent bug fixed on the way: the structured failure was never forwarded onto the report event, so the v1.6.2 force-release button could never actually render.
+- **Fix compile errors in one click.** When the post-write compile fails, the report carries the structured error list and a **Fix N compile error(s)** button that prefills a task with `@compile-log` and the captured errors.
+- **Redo rejected changes.** Hunks you reject during review are summarized onto the run's report (file, line, snippet — persisted across reloads); a **Redo N rejected change(s) differently** button prefills a task quoting each one so Codex can try another approach.
+- **History & storage settings card.** Session/run counts plus site storage usage, and a destructive-confirmed **Clear all history** (all projects; settings and rules are kept) wired to the previously write-only store cleaner.
+- **Change history finally has a read path.** A Settings card lists this project's audit log (newest 50 runs: time, task, files written) with a file/task filter — the audit store was previously write-only.
+- **Jump to a turn.** Once a session holds 3+ runs, a dropdown above the log jumps straight to any turn's card.
+- **Dashboard "Show all projects".** The recent-projects list shows 10 and now offers expanding to everything instead of silently hiding the rest.
+- **Cross-tab heads-up (coarse).** Starting a run announces itself on a BroadcastChannel; other tabs on the same project show a "another tab is running" toast.
+
+### Changed
+
+- **Interrupted, not failed.** A run orphaned by a page refresh is now marked `interrupted` (amber) instead of `failed`, and its notice is a report event carrying a retryable failure code — so the registry's **Edit & resend** appears right on the card.
+- **Mirror refresh runs in the background.** The post-write zip snapshot + `mirror.sync` (often the slowest tail step) no longer blocks the completion report. Undo and the next run barrier on the in-flight promise, so a late `mirror.sync` can never push a pre-undo snapshot as the local baseline.
+- **Attachments persist across turns.** Submitting a task keeps the attachments in the tray (screenshots usually anchor several follow-up questions); only the task text resets. The retry-refill toast says when attachments must be re-added by hand.
+- **Aggressive storage compaction announces itself.** When the state exceeds the 4MB target and history limits silently halve, a one-per-load toast now points at the history & storage card.
+- **Truncation is labeled.** The run log tops out with "showing the most recent 20 runs" (the note existed since B1 but was never rendered) and long event lists carry their existing 300-event note.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.7.5` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.7.5.zip`, `codex-overleaf-native-host-v1.7.5.tar.gz`, and `codex-overleaf-link-1.7.5.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.7.5 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.7.5 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.7.5 -- uninstall-native`.
+
 ## v1.7.1 - 2026-07-02
 
 Settings page redesign — clearer operation logic, safety guardrails, and visual unification. Adversarially verified (9 findings fixed pre-release, including an inverted OT switch). The native protocol stays `1`.

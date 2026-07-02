@@ -1372,8 +1372,13 @@ test('composer clears the submitted task as soon as Codex accepts the run', () =
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
 
   assert.match(runTaskBody, /currentRunView = startRunView\(/);
-  assert.match(runTaskBody, /clearTaskComposer\(\)/);
+  // v1.7.5: the submit-path clear keeps attachments across turns (they anchor
+  // follow-up questions); only the task text resets.
+  assert.match(runTaskBody, /clearTaskComposer\(\{ keepAttachments: true \}\)/);
   assert.match(contentScript, /function clearTaskComposer\(/);
+  const clearBody = extractFromContentScript('clearTaskComposer');
+  assert.match(clearBody, /if \(!keepAttachments\)/,
+    'attachment clearing must be gated on keepAttachments');
   assert.match(contentScript, /taskInput\.value = ''/);
   assert.match(contentScript, /task: ''/);
 });
@@ -3572,7 +3577,7 @@ test('project custom instructions editor auto-saves on change and restores by pr
   assert.equal(harness.input.value, 'Use NeurIPS style and \\\\cref{}.');
 });
 
-test('settings save feedback is per-card: no global chip, persist has no dead status writer (v1.7.1)', () => {
+test('settings save feedback is per-card: no global chip, persist has no dead status writer (v1.7.5)', () => {
   const contentScript = getContentScriptSource();
   // The global header Saved chip and its Saving/Saved lifecycle are gone —
   // per-card flashSaved (settingsPanel) is the single feedback mechanism.
@@ -3960,6 +3965,7 @@ test('saveState merges latest lightweight prefs before saving project-scoped set
     let currentRunView = null;
     function appendPlainLog() {}
     function tx(en) { return en; }
+    function notifyAggressiveCompactionOnce() {}
     ${extractFromContentScript( 'readLiveRunViewForSaveStateGuard')}
     ${extractFromContentScript( 'saveState')}
     return {
@@ -4812,6 +4818,7 @@ test('Fix A: saveState skips persistence when run is navigation-divergent and no
     + "function getCodexOverleafSkillEnabled(){ return {}; }"
     + "function isStorageQuotaError(){ return false; }"
     + "function appendStorageNoticeOnce(){}"
+    + "function notifyAggressiveCompactionOnce(){}"
     + "function appendPlainLog(){ window.__skipLogged = true; }"
     + "function tx(en, _zh){ return en; }"
     + "function getCurrentProjectId(){ return window.location.pathname.match(/\\/project\\/([^/?#]+)/)[1]; }"
@@ -5255,18 +5262,65 @@ test('forceCancelStuckTaskForCurrentProject sends force=true so a zombie lock ca
   assert.match(body, /method:\s*'codex\.cancel'/, 'must dispatch via codex.cancel');
 });
 
-test('renderCompletionReport surfaces a recovery action button for codex_project_locked', () => {
+test('renderCompletionReport surfaces recovery action buttons per failure code (v1.7.5 registry)', () => {
   const src = getContentScriptSource();
   const renderer = extractFromContentScript('renderCompletionReport');
   assert.match(renderer, /appendRecoveryActionForFailure/,
     'renderCompletionReport must call the recovery-action appender');
   const action = extractFromContentScript('appendRecoveryActionForFailure');
+  // The v1.7.5 registry: retryable codes refill the composer, native codes
+  // open setup guidance, file codes open the file, storage codes open the
+  // storage settings, and codex_project_locked keeps its force-release.
+  assert.match(action, /RETRYABLE_FAILURE_CODES/,
+    'retryable failures must route through the retry-refill set');
+  assert.match(action, /refillComposerForRetry/,
+    'retryable failures must refill the composer');
+  assert.match(action, /NATIVE_SETUP_FAILURE_CODES[\s\S]*showNativeSetupGuidance/,
+    'native-bridge failures must open the setup guidance');
+  assert.match(action, /OPEN_FILE_FAILURE_CODES[\s\S]*openProjectFileForFailure/,
+    'file-targeting failures must offer opening the file');
+  assert.match(action, /STORAGE_FAILURE_CODES[\s\S]*openStorageSettings/,
+    'storage failures must open the history & storage settings');
   assert.match(action, /failureCode\s*!==\s*'codex_project_locked'/,
-    'only codex_project_locked failures get the action button today');
+    'codex_project_locked keeps the force-release fallback');
   assert.match(action, /forceCancelStuckTaskForCurrentProject/,
-    'button click must invoke the force-cancel helper');
+    'locked-project click must invoke the force-cancel helper');
   assert.match(action, /run-final-answer__recovery-action/,
-    'button must carry the canonical CSS class');
+    'buttons must carry the canonical CSS class');
+  // The structured failure must actually reach the report event — without
+  // this forwarding no recovery button can ever render (latent since v1.6.2).
+  const reportAppend = extractFromContentScript('appendCompletionReport');
+  assert.match(reportAppend, /failure:\s*input\.failure/,
+    'appendCompletionReport must forward input.failure onto the report event');
+  assert.match(reportAppend, /compileErrors:\s*input\.compileErrors/,
+    'appendCompletionReport must forward compile errors for the fix action');
+});
+
+test('writeback failure promotes the primary skipped failure so file/write recovery buttons are reachable (v1.7.5 fleet)', () => {
+  // Target-file and write-stage failure codes only ever exist inside
+  // applied.skipped[].result.failure. Without promoting one to the report's
+  // run-level failure, the registry's OPEN_FILE / write-retry branches are
+  // dead code (fleet-confirmed).
+  const fn = extractFromContentScript('applySyncChangesToOverleaf');
+  assert.match(fn, /failure:\s*writebackIncomplete \? promoteWritebackSkippedFailure\(applied\)/,
+    'the failed-writeback report must carry the primary skipped failure');
+  const picker = extractFromContentScript('promoteWritebackSkippedFailure');
+  assert.match(picker, /getSkippedEntries\(applied\)/);
+  assert.match(picker, /failure\.file/, 'promoted failure must keep/derive the file for the open-file action');
+});
+
+test('clear-all-history re-renders the panel explicitly instead of relying on startNewSession (v1.7.5 fleet)', () => {
+  // startNewSession's empty-session reuse guard early-returns before
+  // applyStateToPanel when the sessions list was just emptied, leaving the
+  // deleted run cards on screen (fleet-confirmed). The clear flow must
+  // normalize + save + re-render itself.
+  const body = extractFromContentScript('clearAllHistoryWithConfirm');
+  assert.match(body, /clearAllStores/);
+  assert.match(body, /normalizePanelState\(\{ \.\.\.state, sessions: \[\], runs: \[\], activeSessionId: '' \}\)/);
+  assert.match(body, /applyStateToPanel\(\)/, 'must re-render the emptied panel');
+  assert.doesNotMatch(body, /await startNewSession\(\)/,
+    'must not route through startNewSession (its reuse guard skips the re-render)');
+  assert.match(body, /destructive: true/, 'confirm must be destructive-styled');
 });
 
 test('panel.css ships visible styling for the recovery action button', () => {
@@ -5279,18 +5333,31 @@ test('panel.css ships visible styling for the recovery action button', () => {
     'recovery action button must have a :disabled state');
 });
 
-test('writeback records the undo checkpoint before any cancellable verify/mirror await (v1.6.2)', () => {
-  // A user-cancel during the post-write save-verify or mirror refresh throws
-  // codex_cancelled. If undo recording sat after those awaits, a cancel would
-  // strip the "Undo written parts" button for changes that already landed.
+test('writeback records the undo checkpoint before any cancellable verify await; mirror runs in background with barriers (v1.7.5)', () => {
+  // A user-cancel during the post-write save-verify throws codex_cancelled.
+  // If undo recording sat after that await, a cancel would strip the "Undo
+  // written parts" button for changes that already landed.
   const fn = extractFromContentScript('applySyncChangesToOverleaf');
   const undoAt = fn.indexOf('recordUndoFromApply(project, applied)');
   const verifyAt = fn.indexOf('await verifyPostWriteSaveState()');
-  const mirrorAt = fn.indexOf('await refreshProjectMirrorAfterWriteback');
+  // v1.7.5: the mirror refresh no longer blocks the completion report — it
+  // runs in the background and its promise is stored for barriers.
+  const mirrorAt = fn.indexOf('pendingMirrorRefresh = refreshProjectMirrorAfterWriteback');
   assert.ok(undoAt !== -1, 'undo recording present');
-  assert.ok(verifyAt !== -1 && mirrorAt !== -1, 'verify + mirror awaits present');
+  assert.ok(verifyAt !== -1 && mirrorAt !== -1, 'verify await + background mirror present');
   assert.ok(undoAt < verifyAt, 'undo must be recorded before the save-verify await');
-  assert.ok(undoAt < mirrorAt, 'undo must be recorded before the mirror-refresh await');
+  assert.ok(undoAt < mirrorAt, 'undo must be recorded before the mirror refresh starts');
+  assert.doesNotMatch(fn, /await refreshProjectMirrorAfterWriteback/,
+    'the report path must not block on the mirror refresh');
+  // The barriers: an in-flight mirror.sync landing AFTER an undo (or after
+  // the next run started) would push the pre-undo snapshot as the local
+  // baseline. Both consumers must wait it out.
+  const undoBody = extractFromContentScript('undoRun');
+  assert.match(undoBody, /getPendingMirrorRefresh/,
+    'undoRun must barrier on the pending mirror refresh');
+  const runTaskBody = getContentScriptSource().match(/async function runTask\(\) \{[\s\S]*?\n  async function handleTaskResult/)?.[0] || '';
+  assert.match(runTaskBody, /getPendingMirrorRefresh/,
+    'runTask must barrier on the pending mirror refresh');
   // The ~5s save-verify must only run when real writes landed, not on an
   // all-skipped (zero-write) run.
   assert.match(fn, /const saveVerification = appliedPaths\.length/,

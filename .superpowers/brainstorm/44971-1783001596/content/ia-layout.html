@@ -1,0 +1,76 @@
+<h2>信息架构:三选一</h2>
+<p class="subtitle">问题:设置项按什么骨架组织?(点击选择,可多点比较,最后在终端确认)</p>
+
+<style>
+  .wf { display:flex; flex-direction:column; gap:6px; font-size:12px; line-height:1.45; }
+  .wf .bar { opacity:.6; font-size:10.5px; letter-spacing:.08em; }
+  .wf .eyebrow { opacity:.55; font-size:10px; letter-spacing:.12em; margin-top:4px; }
+  .wf .card { border:1px solid #5554; border-radius:8px; padding:8px 10px; }
+  .wf .card b { font-weight:600; }
+  .wf .muted { opacity:.5; }
+  .wf .pill { display:inline-block; border:1px solid #5556; border-radius:99px; padding:0 7px; font-size:9.5px; opacity:.65; margin-left:6px; vertical-align:1px; }
+  .wf .warn { color:#d29922; }
+  .wf .seg { display:flex; border:1px solid #5555; border-radius:7px; overflow:hidden; font-size:11px; text-align:center; }
+  .wf .seg span { flex:1; padding:5px 0; }
+  .wf .seg .on { background:#5b83b022; font-weight:600; }
+</style>
+
+<div class="options">
+
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>双分区保留 · 卡片重切(改动最小)</h3>
+      <p>骨架不动,把"混装"的卡片按主题拆干净;危险项就地警告。</p>
+      <div class="wf" style="margin-top:10px">
+        <div class="bar">‹ 项目设置</div>
+        <div class="eyebrow">本项目</div>
+        <div class="card"><b>✍️ 个性化</b><br><span class="muted">〔风格/术语文本框〕</span></div>
+        <div class="card"><b>🛡 文件保护</b><br><span class="muted">〔只读 glob〕〔可写 glob〕</span><br><span class="warn">⚠ 当前规则会使 Codex 无法写入任何文件</span></div>
+        <div class="card"><b>🔒 隐私</b><br><span class="muted">⊙ 运行前敏感扫描 · ⊙ 允许确认后继续</span></div>
+        <div class="card"><b>🧪 实验性</b><br><span class="muted">⊙ OT 镜像(统一开关样式)</span></div>
+        <div class="eyebrow">全部项目</div>
+        <div class="card"><b>🎨 外观</b> <span class="muted">主题 · 语言</span></div>
+        <div class="card"><b>⚡ 技能</b> <span class="muted">⊙ 本地技能 · Overleaf 技能 ›</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>单列主题卡 · 作用域变徽章(更扁平)</h3>
+      <p>去掉两个分区大标题,每张卡右上角挂"本项目/全局"小徽章;页面更短、扫读更快,但作用域感知变弱。</p>
+      <div class="wf" style="margin-top:10px">
+        <div class="bar">‹ 项目设置</div>
+        <div class="card"><b>✍️ 个性化</b><span class="pill">本项目</span><br><span class="muted">〔文本框〕</span></div>
+        <div class="card"><b>🛡 文件保护</b><span class="pill">本项目</span><br><span class="muted">〔glob ×2 + 就地警告〕</span></div>
+        <div class="card"><b>🔒 隐私</b><span class="pill">本项目</span><br><span class="muted">⊙ ⊙</span></div>
+        <div class="card"><b>🎨 外观</b><span class="pill">全局</span><br><span class="muted">主题 · 语言</span></div>
+        <div class="card"><b>⚡ 技能</b><span class="pill">全局</span><br><span class="muted">⊙ · 入口 ›</span></div>
+        <div class="card"><b>🧪 实验性</b><span class="pill">本项目</span><br><span class="muted">⊙ OT 镜像</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>顶部分段切换(Tab 式)</h3>
+      <p>顶部一个分段控件切三页,每页内容少而聚焦;代价是多一层导航、设置项不能一屏纵览,380px 窄面板上 Tab 文案容易挤。</p>
+      <div class="wf" style="margin-top:10px">
+        <div class="bar">‹ 项目设置</div>
+        <div class="seg"><span class="on">本项目</span><span>全局</span><span>实验</span></div>
+        <div class="card"><b>✍️ 个性化</b><br><span class="muted">〔文本框〕</span></div>
+        <div class="card"><b>🛡 文件保护</b><br><span class="muted">〔glob ×2 + 警告〕</span></div>
+        <div class="card"><b>🔒 隐私</b><br><span class="muted">⊙ ⊙</span></div>
+        <div class="muted" style="text-align:center">(外观/技能在"全局"页)</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="section">
+  <p class="subtitle">我的推荐:<b>A</b> —— 双分区的"本项目 vs 全部项目"是这个产品少有的清晰心智模型,值得保留;问题不在骨架而在卡片切分和防呆。B 适合追求极简,C 在窄面板上得不偿失。</p>
+</div>

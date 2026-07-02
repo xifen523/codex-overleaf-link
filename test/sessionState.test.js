@@ -956,9 +956,14 @@ test('marks restored persisted running runs as no longer tracked after reload', 
     restoreRunningRuns: true
   });
 
-  assert.equal(state.runs[0].status, 'failed');
+  // v1.7.5: reload-orphaned runs are 'interrupted', not 'failed', and the
+  // notice is a report-kind event with a retryable failure code so the
+  // recovery registry offers "Edit & resend" on the card.
+  assert.equal(state.runs[0].status, 'interrupted');
   assert.equal(state.runs[0].statusText, 'Stopped tracking after a page refresh');
   assert.equal(state.runs[0].events[1].title, 'Stopped tracking this run after a page refresh');
+  assert.equal(state.runs[0].events[1].kind, 'report');
+  assert.equal(state.runs[0].events[1].failure.code, 'native_request_failed');
 });
 
 test('localizes restored running run stop messages when locale is Chinese', () => {
@@ -975,7 +980,7 @@ test('localizes restored running run stop messages when locale is Chinese', () =
     restoreRunningRuns: true
   });
 
-  assert.equal(state.runs[0].status, 'failed');
+  assert.equal(state.runs[0].status, 'interrupted');
   assert.equal(state.runs[0].statusText, '页面刷新后已停止跟踪');
   assert.equal(state.runs[0].events[1].title, '页面刷新后已停止跟踪这轮任务');
   assert.equal(
@@ -1752,4 +1757,63 @@ test('saveState round-trip derives safeTaskSummary from runs[0].task when sessio
   } finally {
     global.window = prior;
   }
+});
+
+test('report events keep compileErrors and failure across normalization, and aggressive compaction fires onAggressive (v1.7.5)', () => {
+  const state = normalizePanelState({
+    activeSessionId: 'session_a',
+    sessions: [{
+      id: 'session_a',
+      title: 'A',
+      runs: [{
+        id: 'run_1',
+        task: 'fix the intro',
+        status: 'failed',
+        events: [{
+          title: 'Report',
+          kind: 'report',
+          status: 'failed',
+          detail: 'Compile failed',
+          failure: { code: 'codex_timeout' },
+          compileErrors: ['Undefined control sequence \\foo', 'Missing $ inserted', '', 3, 'e4', 'e5', 'e6-over-cap'],
+          rejectedHunks: [{ path: 'main.tex', summary: 'L12: new intro' }, { path: '', summary: 'dropped: no path' }]
+        }]
+      }]
+    }]
+  });
+
+  const event = state.sessions[0].runs[0].events[0];
+  assert.equal(event.failure.code, 'codex_timeout',
+    'structured failure survives normalization (recovery buttons depend on it)');
+  assert.deepEqual(event.compileErrors, ['Undefined control sequence \\foo', 'Missing $ inserted', '3', 'e4'],
+    'compileErrors take the first five entries, stringified, with empties dropped');
+  assert.deepEqual(event.rejectedHunks, [{ path: 'main.tex', summary: 'L12: new intro' }],
+    'rejectedHunks keep {path, summary} and drop entries without a path');
+
+  // prepareStateForStorage keeps both fields through the compaction path.
+  const compact = prepareStateForStorage(state);
+  const compactEvent = compact.sessions[0].runs[0].events[0];
+  assert.equal(compactEvent.failure.code, 'codex_timeout');
+  assert.deepEqual(compactEvent.compileErrors.slice(0, 2), ['Undefined control sequence \\foo', 'Missing $ inserted']);
+  assert.deepEqual(compactEvent.rejectedHunks, [{ path: 'main.tex', summary: 'L12: new intro' }],
+    'rejectedHunks survive the storage-compaction path too');
+
+  // The aggressive fallback announces itself exactly when it engages. The
+  // engage condition depends on internal byte limits that historical-run
+  // compaction makes hard to exceed from a black-box fixture, so the wiring
+  // is pinned at the source level: the callback fires inside the
+  // over-target branch, before recursing with aggressive limits, and the
+  // recursion preserves the caller's options.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'extension', 'src', 'shared', 'sessionState.js'), 'utf8');
+  const fnStart = source.indexOf('function prepareStateForStorage');
+  const fnBody = source.slice(fnStart, source.indexOf('\n  }', fnStart));
+  assert.match(fnBody, /if \(!options\.aggressive && estimateJsonBytes\(compact\) > limits\.targetBytes\) \{[\s\S]*options\.onAggressive[\s\S]*prepareStateForStorage\(input, \{ \.\.\.options, aggressive: true \}\)/,
+    'onAggressive fires inside the over-target branch and options survive the aggressive recursion');
+
+  // A normal-sized state must NOT fire the callback.
+  let aggressiveNotices = 0;
+  prepareStateForStorage(state, { onAggressive: () => { aggressiveNotices += 1; } });
+  assert.equal(aggressiveNotices, 0, 'normal-sized state does not report aggressive compaction');
 });

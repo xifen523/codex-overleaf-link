@@ -18,6 +18,8 @@
   let tx;
   let getLocale;
   let appendRunEvent;
+  // In-flight background mirror refresh (v1.7.5) — see the writeback path.
+  let pendingMirrorRefresh = null;
   let appendChangeSummary;
   let appendCompletionReport;
   let appendOperationsPreview;
@@ -335,7 +337,24 @@
     if (appliedPaths.length) {
       appendPostWriteSaveVerificationWarning(saveVerification);
     }
-    await refreshProjectMirrorAfterWriteback(project, applied, saveVerification);
+    // v1.7.5: the mirror refresh (zip snapshot + mirror.sync, often the
+    // slowest post-write step) no longer blocks the completion report. The
+    // pending promise is exposed so undoRun and the next runTask barrier on
+    // it — a mirror.sync landing AFTER an undo would otherwise push the
+    // pre-undo snapshot as the local baseline.
+    pendingMirrorRefresh = refreshProjectMirrorAfterWriteback(project, applied, saveVerification)
+      .catch(error => {
+        appendRunEvent({
+          title: tx(
+            `Overleaf was written, but the background workspace refresh failed: ${error.message}. The next run will reread the project.`,
+            `Overleaf 已写入，但后台刷新本地 workspace 失败：${error.message}。下一轮会重新读取项目。`
+          ),
+          status: 'failed'
+        });
+      })
+      .finally(() => {
+        pendingMirrorRefresh = null;
+      });
     const compileSummary = appliedPaths.length
       ? await autoRecompileAfterWriteback(appliedPaths, saveVerification).catch(error => {
         appendRunEvent({
@@ -378,7 +397,17 @@
       operations,
       applyResults: [applied],
       mode: runMode,
-      nextStep: writebackNextStep
+      nextStep: writebackNextStep,
+      // Structured compile errors give the report a one-click fix action.
+      compileErrors: compileSummary?.status === 'failed' && Array.isArray(compileSummary.errors)
+        ? compileSummary.errors
+        : undefined,
+      // Promote the primary per-operation skip failure to the run level when
+      // the writeback failed outright: target-file and write-stage codes only
+      // ever exist inside applied.skipped[], and without this promotion the
+      // recovery registry's "Open <file>" / "Edit & resend" branches are
+      // unreachable for them (fleet finding, v1.7.5).
+      failure: writebackIncomplete ? promoteWritebackSkippedFailure(applied) : undefined
     });
 
     return {
@@ -632,6 +661,21 @@
     };
   }
 
+  // First structured per-operation failure among the skipped writeback
+  // entries — the run-level failure the completion report promotes.
+  function promoteWritebackSkippedFailure(applied) {
+    for (const entry of getSkippedEntries(applied)) {
+      const failure = entry?.result?.failure || entry?.failure;
+      if (failure?.code) {
+        if (!failure.file && entry?.path) {
+          return { ...failure, file: entry.path };
+        }
+        return failure;
+      }
+    }
+    return null;
+  }
+
   function appendCompileSummaryToConclusion(conclusion, compileSummary) {
     if (!compileSummary) {
       return conclusion;
@@ -750,7 +794,8 @@
     } = deps);
     return {
       applySyncChangesToOverleaf,
-      resolveCompileLogContext
+      resolveCompileLogContext,
+      getPendingMirrorRefresh: () => pendingMirrorRefresh
     };
   }
 

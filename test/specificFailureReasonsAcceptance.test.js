@@ -639,8 +639,7 @@ test('content-side emits native_bridge_unavailable when bridge is disconnected',
     'native_connection_failed',
     'native_unavailable',
     'native_update_required',
-    'native_missing',
-    'native_execution_interrupted'
+    'native_missing'
   ]) {
     assert.equal(
       helpers.isNativeBridgeUnavailableError({ code, message: 'x' }),
@@ -648,6 +647,13 @@ test('content-side emits native_bridge_unavailable when bridge is disconnected',
       `${code} should be classified as bridge unavailable`
     );
   }
+  // v1.7.5: an interrupted in-flight request means the host IS installed —
+  // it maps to native_request_failed (retry), never to "reinstall the bridge".
+  assert.equal(
+    helpers.isNativeBridgeUnavailableError({ code: 'native_execution_interrupted', message: 'x' }),
+    false,
+    'native_execution_interrupted must NOT read as bridge-unavailable'
+  );
   // Text-shape match for Chrome's lastError wrapping.
   assert.equal(
     helpers.isNativeBridgeUnavailableError({

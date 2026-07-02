@@ -144,6 +144,10 @@
     switchButton.title = displayTitle;
     titleNode.textContent = displayTitle;
     timeNode.textContent = instance.formatSessionTime(session.updatedAt || session.createdAt);
+    const absoluteTs = session.updatedAt || session.createdAt;
+    if (absoluteTs) {
+      timeNode.title = new Date(absoluteTs).toLocaleString();
+    }
     switchButton.addEventListener('click', () => instance.callbacks.onSelect?.(session.id));
     // Keyboard nav: Up/Down move focus between rows, Enter/Space switch (native
     // button activation -> onSelect), Delete/Backspace delete the focused row.

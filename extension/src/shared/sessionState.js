@@ -561,10 +561,16 @@
     const locale = options.locale || i18n.DEFAULT_LOCALE;
     const events = normalizeRunEvents(run.events);
     if (shouldStopRestoredRun) {
+      // v1.7.5: a reload-orphaned run is 'interrupted', not 'failed' — nothing
+      // went wrong with the task itself. The notice is a report-kind event
+      // carrying a retryable failure code so the recovery-action registry
+      // offers "Edit & resend" right on the card.
       events.push({
         title: i18n.t(locale, 'restoredRunStoppedTitle'),
         status: 'failed',
+        kind: 'report',
         detail: i18n.t(locale, 'restoredRunStoppedDetail'),
+        failure: { code: 'native_request_failed', source: 'panel_reload' },
         timestamp: new Date().toISOString()
       });
     }
@@ -576,7 +582,7 @@
       model: typeof run.model === 'string' ? run.model : '',
       reasoningEffort: typeof run.reasoningEffort === 'string' ? run.reasoningEffort : '',
       speedTier: typeof run.speedTier === 'string' ? run.speedTier : '',
-      status: shouldStopRestoredRun ? 'failed' : normalizeRunStatus(run.status),
+      status: shouldStopRestoredRun ? 'interrupted' : normalizeRunStatus(run.status),
       statusText: shouldStopRestoredRun ? i18n.t(locale, 'restoredRunStoppedStatus') : sanitizeAssistantVisibleText(run.statusText),
       runProjectId: normalizeProjectPrefKey(run.runProjectId),
       startedAt: typeof run.startedAt === 'string' ? run.startedAt : '',
@@ -654,6 +660,7 @@
     'running',
     'completed',
     'failed',
+    'interrupted',
     'background_completed',
     'needs_review_after_navigation',
     'abandoned_after_navigation'
@@ -696,6 +703,19 @@
         }
         if (event.failure) {
           normalized.failure = sanitizeAssistantVisibleValue(event.failure);
+        }
+        if (Array.isArray(event.compileErrors) && event.compileErrors.length) {
+          normalized.compileErrors = event.compileErrors.slice(0, 5)
+            .map(item => sanitizeAssistantVisibleText(String(item)))
+            .filter(Boolean);
+        }
+        if (Array.isArray(event.rejectedHunks) && event.rejectedHunks.length) {
+          normalized.rejectedHunks = event.rejectedHunks.slice(0, 10)
+            .map(item => ({
+              path: sanitizeAssistantVisibleText(String(item?.path || '')),
+              summary: sanitizeAssistantVisibleText(String(item?.summary || ''))
+            }))
+            .filter(item => item.path);
         }
         return normalized;
       })
@@ -847,7 +867,12 @@
     const limits = options.aggressive ? STORAGE_AGGRESSIVE_LIMITS : STORAGE_DEFAULT_LIMITS;
     const compact = compactPanelStateForStorage(input, limits);
     if (!options.aggressive && estimateJsonBytes(compact) > limits.targetBytes) {
-      return prepareStateForStorage(input, { aggressive: true });
+      // Surface the silent degradation: callers can pass onAggressive to tell
+      // the user history is being trimmed harder than the normal limits.
+      if (typeof options.onAggressive === 'function') {
+        options.onAggressive();
+      }
+      return prepareStateForStorage(input, { ...options, aggressive: true });
     }
     return compact;
   }
@@ -1090,6 +1115,19 @@
         }
         if (event.failure) {
           compact.failure = sanitizeAssistantVisibleValue(event.failure);
+        }
+        if (Array.isArray(event.compileErrors) && event.compileErrors.length) {
+          compact.compileErrors = event.compileErrors.slice(0, 5)
+            .map(item => sanitizeAssistantVisibleText(String(item)))
+            .filter(Boolean);
+        }
+        if (Array.isArray(event.rejectedHunks) && event.rejectedHunks.length) {
+          compact.rejectedHunks = event.rejectedHunks.slice(0, 10)
+            .map(item => ({
+              path: sanitizeAssistantVisibleText(String(item?.path || '')),
+              summary: sanitizeAssistantVisibleText(String(item?.summary || ''))
+            }))
+            .filter(item => item.path);
         }
         return compact;
       });

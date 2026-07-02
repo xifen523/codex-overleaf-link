@@ -91,6 +91,16 @@
           </details>
         </div>
         <div class="codex-project-settings-scope codex-project-settings-scope--global">
+          <details class="codex-set-group" data-set-group="history" data-history-card>
+            <summary class="codex-set-group-head">
+              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🕘</span><span data-i18n="historyTitle">Change history</span></span>
+            </summary>
+            <div class="codex-set-card">
+              <p class="codex-set-row-help" data-i18n="historyHelp">What Codex wrote to this project, per run. Filter by file name or task text.</p>
+              <input type="text" class="codex-set-select codex-history-filter" data-history-filter>
+              <div class="codex-history-list" data-history-list></div>
+            </div>
+          </details>
           <div class="codex-project-settings-scope-title codex-set-eyebrow" data-i18n="settingsScopeGlobalTitle">All projects</div>
           <details class="codex-set-group" data-set-group="appearance" open>
             <summary class="codex-set-group-head">
@@ -115,6 +125,16 @@
                 </select>
               </label>
               <p class="codex-set-row-help" data-i18n="languageHelp">Panel display language.</p>
+            </div>
+          </details>
+          <details class="codex-set-group" data-set-group="storage" data-storage-card>
+            <summary class="codex-set-group-head">
+              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🗄</span><span data-i18n="storageTitle">History &amp; storage</span></span>
+            </summary>
+            <div class="codex-set-card">
+              <p class="codex-set-row-help" data-storage-usage data-i18n="storageUsageLoading">Calculating usage…</p>
+              <button type="button" class="codex-set-btn codex-set-btn--danger" data-clear-all-history data-i18n="storageClearAll">Clear all history…</button>
+              <p class="codex-set-row-help" data-i18n="storageClearAllHelp">Removes every stored session, run and audit record for all projects. Project settings and rules are kept.</p>
             </div>
           </details>
           <details class="codex-set-group" data-set-group="skills" open>
@@ -159,6 +179,13 @@
     container.querySelector('[data-settings-back]')?.addEventListener('click', () => instance.callbacks.onBack?.());
     container.querySelector('[data-skills-back]')?.addEventListener('click', () => instance.callbacks.onSkillsBack?.());
     container.querySelector('[data-skills-entry]')?.addEventListener('click', () => instance.callbacks.onSkillsOpen?.());
+    container.querySelector('[data-clear-all-history]')?.addEventListener('click', () => instance.callbacks.onClearAllHistory?.());
+    container.querySelector('[data-history-card]')?.addEventListener('toggle', event => {
+      if (event.target.open) {
+        instance.callbacks.onHistoryOpen?.();
+      }
+    });
+    container.querySelector('[data-history-filter]')?.addEventListener('input', () => instance.callbacks.onHistoryFilter?.());
     // Experimental OT mirror: a single visible switch. The click is
     // intercepted (the runtime's handler preventDefaults, runs the enable
     // confirmation, then sets checked + drives the change flow itself) so the

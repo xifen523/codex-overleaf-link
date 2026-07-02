@@ -66,6 +66,9 @@ const RUNTIME_STUBS = {
   // persistence
   saveState: 'async function saveState() {}',
   saveStateSoon: 'function saveStateSoon() {}',
+  notifyAggressiveCompactionOnce: 'function notifyAggressiveCompactionOnce() {}',
+  // history & storage (v1.7.5 settings card)
+  refreshStorageUsageSummary: 'function refreshStorageUsageSummary() {}',
   // timeline view-state accessors (the carved run-timeline module reads
   // mutable runtime state through these; sandboxes usually declare the
   // backing locals themselves, so the defaults resolve them when present)

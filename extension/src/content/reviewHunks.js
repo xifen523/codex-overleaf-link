@@ -172,6 +172,44 @@
     return decision === true || decision === 'accepted' || decision === 'accept';
   }
 
+  function isRejectedDecision(decision) {
+    return decision === false || decision === 'rejected' || decision === 'reject';
+  }
+
+  // v1.7.5: summaries of what the user rejected during review, so the
+  // completion report can offer a one-click "redo the rejected changes"
+  // retry that quotes the location and a snippet of each dropped hunk.
+  function buildRejectedHunkSummaries(syncChanges = [], decisions = {}) {
+    const model = buildReviewModel(syncChanges);
+    const filesByIndex = new Map(model.files.map(file => [file.index, file]));
+    const rejected = [];
+    for (const [changeIndex, change] of (syncChanges || []).entries()) {
+      const file = filesByIndex.get(changeIndex);
+      if (!file) {
+        continue;
+      }
+      if (!file.reviewable) {
+        if (isRejectedDecision(decisions[file.decisionKey])) {
+          rejected.push({ path: file.path, summary: '' });
+        }
+        continue;
+      }
+      const patches = normalizePatches(change.patches);
+      for (const hunk of file.hunks) {
+        if (!isRejectedDecision(decisions[hunk.decisionKey])) {
+          continue;
+        }
+        const patch = patches[hunk.patchIndexes[0]] || {};
+        const snippet = String(patch.insert || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+        rejected.push({
+          path: file.path,
+          summary: `${hunk.startLine ? `L${hunk.startLine}` : ''}${hunk.startLine && snippet ? ': ' : ''}${snippet}`
+        });
+      }
+    }
+    return rejected;
+  }
+
   function cloneSyncChange(change) {
     if (!change || typeof change !== 'object') {
       return change;
@@ -201,6 +239,7 @@
 
   return {
     buildAcceptedSyncChanges,
+    buildRejectedHunkSummaries,
     buildReviewModel,
     normalizeReviewDecisionKey,
     summarizeReviewModel

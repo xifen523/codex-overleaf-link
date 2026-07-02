@@ -776,12 +776,16 @@
     } catch (_error) { /* swallow; fall back to empty mirror */ }
 
     var rows = [];
+    var showAll = Boolean(options && options.showAll);
+    // Fetch one extra row beyond the fold so "show all" only renders when
+    // there really is more than one page of projects.
+    var pageLimit = 10;
     try {
       var StorageDb = window.CodexOverleafStorageDb;
       if (StorageDb) {
         rows = await StorageDb.listRecentProjectsAcrossAccount({
           accountScopeId: accountScopeId,
-          limit: 10
+          limit: showAll ? 500 : pageLimit + 1
         });
       }
     } catch (_error) {
@@ -789,12 +793,25 @@
     }
 
     listLoading.remove();
-    if (!rows || !rows.length) {
+    var hasMore = !showAll && rows && rows.length > pageLimit;
+    var visibleRows = hasMore ? rows.slice(0, pageLimit) : rows;
+    if (!visibleRows || !visibleRows.length) {
       listContainer.appendChild(renderEmptyState());
     } else {
-      for (var i = 0; i < rows.length; i++) {
-        listContainer.appendChild(renderRecentProjectRow(rows[i]));
+      for (var i = 0; i < visibleRows.length; i++) {
+        listContainer.appendChild(renderRecentProjectRow(visibleRows[i]));
       }
+    }
+    if (hasMore) {
+      var showAllButton = document.createElement('button');
+      showAllButton.type = 'button';
+      showAllButton.className = 'recent-projects-show-all';
+      showAllButton.setAttribute('data-recent-projects-show-all', '');
+      showAllButton.textContent = tx('Show all projects', '查看全部项目');
+      showAllButton.addEventListener('click', function () {
+        renderRecentProjectsVariant(Object.assign({}, options, { showAll: true }));
+      });
+      listContainer.appendChild(showAllButton);
     }
     rootEl.appendChild(renderSettingsEntry({ scope: 'account' }));
     var expandProjectId = options && options.expandProjectId;

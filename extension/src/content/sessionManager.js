@@ -152,6 +152,10 @@
       const time = document.createElement('time');
       time.className = 'codex-session-menu-item-time';
       time.textContent = formatSessionTime(session.updatedAt || session.createdAt);
+      const absoluteTs = session.updatedAt || session.createdAt;
+      if (absoluteTs) {
+        time.title = new Date(absoluteTs).toLocaleString();
+      }
       row.append(title, time);
       row.addEventListener('click', event => {
         event.stopPropagation();
@@ -236,6 +240,19 @@
   }
 
   async function startNewSession() {
+    // Leaving a still-running session is allowed but never silent: the run
+    // keeps going in the background and lands in its own session.
+    const runningActive = getActiveSession(getState());
+    if (runningActive && isSessionRunning(runningActive)) {
+      const approved = await showPluginConfirm({
+        title: tr('sessionSwitchRunningTitle'),
+        message: tr('sessionSwitchRunningMessage'),
+        confirmLabel: tr('sessionSwitchRunningConfirm')
+      });
+      if (!approved) {
+        return;
+      }
+    }
     readPanelInputs();
     // Reuse an already-empty, idle active session instead of minting a ghost.
     // Empty sessions are invisible in the list yet still consume the storage cap
@@ -245,6 +262,22 @@
     if (active && !isDisplayableSession(active) && !isSessionRunning(active)) {
       getPanel().querySelector('[data-task]')?.focus();
       return;
+    }
+    // The 21st session silently and PERMANENTLY evicts the oldest one
+    // (slice(-20) + the storage retention diff physically deletes its
+    // record). Never let that happen without consent.
+    const currentSessions = getState().sessions || [];
+    if (currentSessions.length >= 20) {
+      const oldest = currentSessions[0];
+      const evictionApproved = await showPluginConfirm({
+        title: tr('sessionEvictTitle'),
+        message: tr('sessionEvictMessage', { title: String(oldest?.title || '').slice(0, 40) || '…' }),
+        confirmLabel: tr('sessionEvictConfirm'),
+        destructive: true
+      });
+      if (!evictionApproved) {
+        return;
+      }
     }
     const session = createSession({
       mode: getState().mode,
@@ -264,6 +297,20 @@
   }
 
   async function switchSession(sessionId) {
+    if (sessionId === getState().activeSessionId) {
+      return;
+    }
+    const runningActive = getActiveSession(getState());
+    if (runningActive && isSessionRunning(runningActive)) {
+      const approved = await showPluginConfirm({
+        title: tr('sessionSwitchRunningTitle'),
+        message: tr('sessionSwitchRunningMessage'),
+        confirmLabel: tr('sessionSwitchRunningConfirm')
+      });
+      if (!approved) {
+        return;
+      }
+    }
     readPanelInputs();
     setState(setActiveSession(getState(), sessionId));
     await saveState();

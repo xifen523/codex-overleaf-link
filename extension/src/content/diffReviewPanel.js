@@ -64,12 +64,68 @@
         actions.replaceChildren(status);
       }
 
-      function setHunkDecisionStatus(actions, accepted) {
+      function setHunkDecisionStatus(actions, accepted, hunk) {
         const status = document.createElement('span');
         status.className = 'codex-diff-hunk-status';
         status.setAttribute('data-diff-hunk-status', '');
         status.textContent = accepted ? tr('diffHunkAccepted') : tr('diffHunkRejected');
         actions.replaceChildren(status);
+        // A mis-click must not be permanent: every decision stays reversible
+        // until the review is applied.
+        if (!readonly && hunk) {
+          const revert = document.createElement('button');
+          revert.type = 'button';
+          revert.setAttribute('data-diff-hunk-revert', '');
+          revert.textContent = tr('diffHunkRevert');
+          revert.title = tr('diffHunkRevert');
+          revert.setAttribute('aria-label', tr('diffHunkRevert'));
+          revert.addEventListener('click', () => revertHunkDecision(hunk));
+          actions.append(revert);
+        }
+      }
+
+      function revertHunkDecision(hunk) {
+        if (readonly || hunkStates.get(hunk.decisionKey) === null) {
+          return;
+        }
+        hunkStates.set(hunk.decisionKey, null);
+        const view = hunkViews.get(hunk.decisionKey);
+        if (view) {
+          view.hunkEl.dataset.decision = 'pending';
+          setHunkCollapsed(view, false);
+          renderPendingHunkActions(view.actions, hunk);
+        }
+        const fileView = fileViews.get(hunk.path);
+        const fileModel = reviewModel.files.find(file => file.path === hunk.path);
+        if (fileView && fileModel) {
+          updateReviewableFileDecision(fileView, fileModel);
+        }
+        notifyDecisionChanged();
+      }
+
+      function renderPendingHunkActions(actions, reviewHunk) {
+        const acceptHunkBtn = document.createElement('button');
+        acceptHunkBtn.type = 'button';
+        acceptHunkBtn.setAttribute('data-diff-hunk-accept', '');
+        acceptHunkBtn.textContent = '✓';
+        acceptHunkBtn.title = tr('diffHunkAccept');
+        acceptHunkBtn.setAttribute('aria-label', tr('diffHunkAccept'));
+        const rejectHunkBtn = document.createElement('button');
+        rejectHunkBtn.type = 'button';
+        rejectHunkBtn.setAttribute('data-diff-hunk-reject', '');
+        rejectHunkBtn.textContent = '✗';
+        rejectHunkBtn.title = tr('diffHunkReject');
+        rejectHunkBtn.setAttribute('aria-label', tr('diffHunkReject'));
+        const jumpHunkBtn = document.createElement('button');
+        jumpHunkBtn.type = 'button';
+        jumpHunkBtn.setAttribute('data-diff-hunk-jump', '');
+        jumpHunkBtn.textContent = '↗';
+        jumpHunkBtn.title = tr('diffHunkJump');
+        jumpHunkBtn.setAttribute('aria-label', tr('diffHunkJump'));
+        acceptHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, true));
+        rejectHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, false));
+        jumpHunkBtn.addEventListener('click', () => jumpToHunk(reviewHunk));
+        actions.replaceChildren(acceptHunkBtn, rejectHunkBtn, jumpHunkBtn);
       }
 
       function setHunkCollapsed(view, collapsed) {
@@ -84,7 +140,7 @@
           return;
         }
         hunkView.hunkEl.dataset.decision = accepted ? 'accepted' : 'rejected';
-        setHunkDecisionStatus(hunkView.actions, accepted);
+        setHunkDecisionStatus(hunkView.actions, accepted, hunk);
         if (options.collapse) {
           setHunkCollapsed(hunkView, true);
         }
@@ -511,32 +567,9 @@
           const hunkActions = document.createElement('div');
           hunkActions.className = 'codex-diff-hunk-actions';
           if (readonly || hunkDecision === true || hunkDecision === false) {
-            setHunkDecisionStatus(hunkActions, readonly ? true : hunkDecision);
+            setHunkDecisionStatus(hunkActions, readonly ? true : hunkDecision, readonly ? null : reviewHunk);
           } else {
-            const acceptHunkBtn = document.createElement('button');
-            acceptHunkBtn.type = 'button';
-            acceptHunkBtn.setAttribute('data-diff-hunk-accept', '');
-            acceptHunkBtn.textContent = '✓';
-            acceptHunkBtn.title = tr('diffHunkAccept');
-            acceptHunkBtn.setAttribute('aria-label', tr('diffHunkAccept'));
-            const rejectHunkBtn = document.createElement('button');
-            rejectHunkBtn.type = 'button';
-            rejectHunkBtn.setAttribute('data-diff-hunk-reject', '');
-            rejectHunkBtn.textContent = '✗';
-            rejectHunkBtn.title = tr('diffHunkReject');
-            rejectHunkBtn.setAttribute('aria-label', tr('diffHunkReject'));
-            const jumpHunkBtn = document.createElement('button');
-            jumpHunkBtn.type = 'button';
-            jumpHunkBtn.setAttribute('data-diff-hunk-jump', '');
-            jumpHunkBtn.textContent = '↗';
-            jumpHunkBtn.title = tr('diffHunkJump');
-            jumpHunkBtn.setAttribute('aria-label', tr('diffHunkJump'));
-
-            acceptHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, true));
-            rejectHunkBtn.addEventListener('click', () => decideHunkChange(reviewHunk, false));
-            jumpHunkBtn.addEventListener('click', () => jumpToHunk(reviewHunk));
-
-            hunkActions.append(acceptHunkBtn, rejectHunkBtn, jumpHunkBtn);
+            renderPendingHunkActions(hunkActions, reviewHunk);
           }
           hunkEl.append(hunkActions);
           hunkViews.set(reviewHunk.decisionKey, { hunkEl, actions: hunkActions, reviewHunk });
@@ -691,6 +724,16 @@
           updateSummary();
           if (review.getPendingCount() === 0) {
             const reviewHunks = getReviewHunks();
+            // Report what was rejected BEFORE resolving: the run's completion
+            // report uses these summaries for the "redo rejected changes"
+            // action. Failure here must never block the accept path.
+            if (typeof deps.onRejectedHunks === 'function' && reviewHunks?.buildRejectedHunkSummaries) {
+              try {
+                deps.onRejectedHunks(reviewHunks.buildRejectedHunkSummaries(syncChanges, review.getDecisions()));
+              } catch (error) {
+                // Summaries are best-effort decoration on the report.
+              }
+            }
             finish(reviewHunks?.buildAcceptedSyncChanges
               ? reviewHunks.buildAcceptedSyncChanges(syncChanges, review.getDecisions())
               : review.getAcceptedChanges());

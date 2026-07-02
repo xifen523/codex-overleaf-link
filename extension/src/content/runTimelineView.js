@@ -34,6 +34,10 @@
       getPanel,
       getState,
       getCurrentRunView,
+      refillComposerForRetry,
+      showNativeSetupGuidance,
+      openProjectFileForFailure,
+      openStorageSettings,
       trackedChangeInFlight
     } = deps;
 
@@ -295,7 +299,41 @@
       log.append(empty);
       return;
     }
-    for (const run of getState().runs) {
+    const runs = getState().runs;
+    if (runs.length >= 20) {
+      const truncated = document.createElement('div');
+      truncated.className = 'run-history-truncated';
+      truncated.textContent = tr('runsTruncatedNote');
+      log.append(truncated);
+    }
+    // Turn navigation (v1.7.5): once the log holds enough turns that
+    // scroll-hunting hurts, offer a jump-to-turn dropdown pinned above them.
+    if (runs.length >= 3) {
+      const nav = document.createElement('select');
+      nav.className = 'run-turn-nav';
+      nav.setAttribute('data-run-turn-nav', '');
+      nav.setAttribute('aria-label', tr('runTurnNavLabel'));
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = tr('runTurnNavLabel');
+      nav.append(placeholder);
+      runs.forEach((run, index) => {
+        const option = document.createElement('option');
+        option.value = run.id;
+        option.textContent = `#${index + 1} ${String(run.task || '').replace(/\s+/g, ' ').slice(0, 48)}`;
+        nav.append(option);
+      });
+      nav.addEventListener('change', () => {
+        if (!nav.value) {
+          return;
+        }
+        const card = log.querySelector(`[data-run-id="${cssEscape(nav.value)}"]`);
+        card?.scrollIntoView({ block: 'start' });
+        nav.value = '';
+      });
+      log.append(nav);
+    }
+    for (const run of runs) {
       log.append(renderRunCard(run));
     }
     scrollLogToBottom({ force: true });
@@ -339,10 +377,16 @@
 
     const events = root.querySelector('[data-run-events]');
     const report = root.querySelector('[data-run-report]');
+    if ((run.events || []).length >= 300) {
+      const truncated = document.createElement('div');
+      truncated.className = 'run-history-truncated';
+      truncated.textContent = tr('eventsTruncatedNote');
+      events.append(truncated);
+    }
     for (const event of run.events || []) {
       if (event.kind === 'report') {
         report.hidden = false;
-        report.replaceChildren(renderCompletionReport(event));
+        report.replaceChildren(renderCompletionReport(event, run));
       } else if (event.kind === 'technical') {
         continue;
       } else if (event.kind === 'stream') {
@@ -571,11 +615,51 @@
     }
   }
 
-  function renderCompletionReport(input) {
+  function renderCompletionReport(input, run) {
     const event = sanitizeRunEventForRender(input);
     const report = document.createElement('section');
     report.className = 'run-completion-report';
     report.dataset.status = event.status || 'completed';
+    // Compile errors captured post-write get a one-click fix loop: the
+    // structured error list rides on the report event (compileErrors).
+    const appendCompileFix = target => {
+      const compileErrors = Array.isArray(event.compileErrors) ? event.compileErrors.filter(Boolean) : [];
+      if (!compileErrors.length || typeof refillComposerForRetry !== 'function') {
+        return;
+      }
+      const fix = buildRecoveryButton('compile_errors',
+        tx(`Fix ${compileErrors.length} compile error(s)`, `修复 ${compileErrors.length} 个编译错误`),
+        tx('Prefills a task with @compile-log and the captured errors.', '自动组一条带 @compile-log 和错误列表的任务。'));
+      fix.addEventListener('click', clickEvent => {
+        clickEvent.stopPropagation();
+        const lines = compileErrors.slice(0, 5).map(item => `- ${item}`).join('\n');
+        refillComposerForRetry(null, tx(
+          `@compile-log Fix these LaTeX compile errors:\n${lines}`,
+          `@compile-log 请修复以下 LaTeX 编译错误：\n${lines}`
+        ));
+      });
+      target.append(fix);
+    };
+    // Rejected-hunk redo: quote what was dropped during review back into the
+    // composer so the next turn can try a different approach.
+    const appendRejectedRedo = target => {
+      const rejectedHunks = Array.isArray(event.rejectedHunks) ? event.rejectedHunks.filter(item => item?.path) : [];
+      if (!rejectedHunks.length || typeof refillComposerForRetry !== 'function') {
+        return;
+      }
+      const redo = buildRecoveryButton('rejected_hunks',
+        tx(`Redo ${rejectedHunks.length} rejected change(s) differently`, `换种方式重做 ${rejectedHunks.length} 处被拒改动`),
+        tx('Prefills a task quoting each rejected change so Codex can try another approach.', '自动组一条任务，引用每处被拒的改动，让 Codex 换一种实现。'));
+      redo.addEventListener('click', clickEvent => {
+        clickEvent.stopPropagation();
+        const lines = rejectedHunks.map(item => `- ${item.path}${item.summary ? ` (${item.summary})` : ''}`).join('\n');
+        refillComposerForRetry(null, tx(
+          `I rejected these proposed changes in review. Please take a different approach for:\n${lines}`,
+          `以下改动在评审中被我拒绝了，请换一种方式重新实现：\n${lines}`
+        ));
+      });
+      target.append(redo);
+    };
 
     // Structured path: conclusion + body render as the Codex answer; meta
     // rows (Why nothing changed / Write result / Undo / Next) render as a
@@ -602,7 +686,9 @@
       }
 
       appendCompletionMetaBlock(report, structured.meta);
-      appendRecoveryActionForFailure(report, event);
+      appendCompileFix(report);
+      appendRejectedRedo(report);
+      appendRecoveryActionForFailure(report, event, run);
       return report;
     }
 
@@ -617,8 +703,10 @@
     body.className = 'run-final-answer';
     renderMarkdownBlockText(body, split.body || flatText);
     report.append(body);
+    appendCompileFix(report);
+    appendRejectedRedo(report);
     appendCompletionMetaBlock(report, split.meta);
-    appendRecoveryActionForFailure(report, event);
+    appendRecoveryActionForFailure(report, event, run);
     return report;
   }
 
@@ -627,8 +715,80 @@
   // report. Today's only consumer is codex_project_locked → "Force-release
   // the stuck task" (covers the page-refresh-then-locked-out scenario where
   // the normal cancel button is hidden because currentRunView is null).
-  function appendRecoveryActionForFailure(report, event) {
-    const failureCode = event?.failure?.code;
+  // Recovery-action registry: failure codes whose "next step" is executable
+  // from the panel get a button, not prose. One primary action per failure.
+  const RETRYABLE_FAILURE_CODES = new Set([
+    'native_request_failed', 'codex_timeout', 'codex_no_usable_result',
+    'codex_output_limit', 'stale_source_changed', 'patch_anchor_not_found',
+    'target_editor_not_ready', 'write_timeout', 'partial_write_needs_review',
+    'write_operation_failed'
+  ]);
+  const NATIVE_SETUP_FAILURE_CODES = new Set([
+    'native_bridge_unavailable', 'native_protocol_incompatible'
+  ]);
+  const OPEN_FILE_FAILURE_CODES = new Set([
+    'target_file_not_active', 'target_file_open_failed', 'target_file_not_found'
+  ]);
+  const STORAGE_FAILURE_CODES = new Set([
+    'storage_quota_exceeded', 'run_state_persist_failed'
+  ]);
+
+  function buildRecoveryButton(failureCode, label, title) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'run-final-answer__recovery-action';
+    button.dataset.recoveryFor = failureCode;
+    button.textContent = label;
+    if (title) {
+      button.title = title;
+    }
+    return button;
+  }
+
+  function appendRecoveryActionForFailure(report, event, run) {
+    const failureCode = event?.failure?.code || '';
+    if (RETRYABLE_FAILURE_CODES.has(failureCode) && typeof refillComposerForRetry === 'function') {
+      const retry = buildRecoveryButton(failureCode,
+        tx('Edit & resend', '编辑后重发'),
+        tx('Put this run\u2019s task back into the composer so you can adjust and resend it.', '把本轮任务填回输入框，修改后可直接重发。'));
+      retry.addEventListener('click', clickEvent => {
+        clickEvent.stopPropagation();
+        refillComposerForRetry(run || null);
+      });
+      report.append(retry);
+      return;
+    }
+    if (NATIVE_SETUP_FAILURE_CODES.has(failureCode) && typeof showNativeSetupGuidance === 'function') {
+      const fix = buildRecoveryButton(failureCode,
+        tx('Fix the native host', '修复 native host'),
+        tx('Opens the install/update guidance with the copyable command.', '打开安装/更新指引（含可复制命令）。'));
+      fix.addEventListener('click', clickEvent => {
+        clickEvent.stopPropagation();
+        showNativeSetupGuidance();
+      });
+      report.append(fix);
+      return;
+    }
+    if (OPEN_FILE_FAILURE_CODES.has(failureCode) && event?.failure?.file && typeof openProjectFileForFailure === 'function') {
+      const open = buildRecoveryButton(failureCode,
+        tx(`Open ${event.failure.file} in Overleaf`, `在 Overleaf 打开 ${event.failure.file}`), '');
+      open.addEventListener('click', clickEvent => {
+        clickEvent.stopPropagation();
+        openProjectFileForFailure(event.failure.file);
+      });
+      report.append(open);
+      return;
+    }
+    if (STORAGE_FAILURE_CODES.has(failureCode) && typeof openStorageSettings === 'function') {
+      const clean = buildRecoveryButton(failureCode,
+        tx('Open history & storage cleanup', '打开历史与存储清理'), '');
+      clean.addEventListener('click', clickEvent => {
+        clickEvent.stopPropagation();
+        openStorageSettings();
+      });
+      report.append(clean);
+      return;
+    }
     if (failureCode !== 'codex_project_locked') return;
     const button = document.createElement('button');
     button.type = 'button';

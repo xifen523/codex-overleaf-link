@@ -50,7 +50,7 @@ test('project snapshot action lives in the diagnostics menu instead of the heade
   assert.match(panelSource, /Check Project Read/);
   assert.match(panelSource, /Check Experimental OT Mirror/);
   // The experimental OT toggle + the language selector now live in Settings.
-  // v1.7.1: the dual hidden-checkbox + button control became a single visible
+  // v1.7.5: the dual hidden-checkbox + button control became a single visible
   // switch (the checkbox itself); the confirm-before-enable click interceptor
   // binds to it directly.
   assert.match(settingsPanel, /data-experimental-ot\b/);
