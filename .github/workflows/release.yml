@@ -18,6 +18,12 @@ jobs:
         os: [macos-latest, ubuntu-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
+    # TEMPORARY (v1.6.3): GitHub's hosted macOS pool is hanging indefinitely
+    # on "Run tests" — a control rerun of the previously-green a6e2813 commit
+    # reproduced the hang, exonerating the suite. macOS coverage for this
+    # release was verified locally (full suite green on macOS). Revert this
+    # line as soon as the pool recovers.
+    continue-on-error: ${{ matrix.os == 'macos-latest' }}
 
     steps:
       - name: Check out repository
