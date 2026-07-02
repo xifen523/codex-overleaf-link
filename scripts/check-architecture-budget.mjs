@@ -114,9 +114,11 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
   {
     // Carved from contentRuntime in v1.6.3 (phase 6): the sync-writeback
     // orchestration (applySyncChangesToOverleaf + post-write verify/mirror/
-    // compile pipeline).
+    // compile pipeline). Raised 800 -> 820 in v1.7.5 for the backgrounded
+    // mirror refresh (pendingMirrorRefresh) and the skipped-failure
+    // promotion that feeds the recovery-action registry.
     path: 'extension/src/content/writebackOrchestrator.js',
-    maxLines: 800
+    maxLines: 820
   },
   {
     // Writeback router: large but cohesive. v1.3.9 added the cross-world
