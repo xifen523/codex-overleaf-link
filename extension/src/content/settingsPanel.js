@@ -9,6 +9,7 @@
     const instance = {
       container,
       callbacks: options.callbacks || {},
+      i18n: options.i18n || null,
       button: options.button || null
     };
 
@@ -20,32 +21,46 @@
             <div class="codex-custom-instructions-title" data-i18n="projectSettingsTitle">Project Settings</div>
             <div class="codex-custom-instructions-subtitle" data-i18n="projectSettingsSubtitle">Customize how Codex behaves in this and all projects.</div>
           </div>
-          <span class="codex-settings-save-status" data-settings-save-status data-i18n="settingsSaved">Saved</span>
         </div>
         <div class="codex-project-settings-status" data-project-settings-status></div>
         <div class="codex-project-settings-scope">
           <div class="codex-project-settings-scope-title codex-set-eyebrow" data-i18n="settingsScopeProjectTitle">This project</div>
-          <details class="codex-set-group" open>
-            <summary class="codex-set-group-head"><span data-i18n="personalizationConfig">Personalization</span></summary>
+          <details class="codex-set-group" data-set-group="personalization" open>
+            <summary class="codex-set-group-head">
+              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">✍️</span><span data-i18n="personalizationConfig">Personalization</span></span>
+              <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
+            </summary>
             <div class="codex-set-card">
               <p class="codex-set-row-help" data-i18n="personalizationHelp">Style, terminology, and LaTeX conventions Codex should follow in this project.</p>
               <textarea id="codex-custom-instructions-input" class="codex-custom-instructions-input" data-custom-instructions-input rows="6" placeholder="Style, terminology, venue constraints, and LaTeX conventions for this project."></textarea>
             </div>
           </details>
-          <details class="codex-set-group" open>
-            <summary class="codex-set-group-head"><span data-i18n="governanceRulesTitle">Governance Rules</span></summary>
+          <details class="codex-set-group" data-set-group="protection" open>
+            <summary class="codex-set-group-head">
+              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🛡</span><span data-i18n="fileProtectionTitle">File protection</span></span>
+              <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
+            </summary>
             <div class="codex-set-card">
               <div class="codex-set-row">
                 <label class="codex-set-row-label" for="codex-governance-readonly-patterns" data-i18n="governanceReadonlyPatterns">Read-only patterns</label>
                 <p class="codex-set-row-help" data-i18n="governanceReadonlyHelp">Files Codex must never modify (one glob per line).</p>
                 <textarea id="codex-governance-readonly-patterns" class="codex-project-settings-textarea" data-governance-readonly-patterns rows="3" placeholder="paper/accepted/**&#10;main.tex"></textarea>
+                <div class="codex-set-note" data-governance-readonly-note hidden></div>
               </div>
               <div class="codex-set-row">
                 <label class="codex-set-row-label" for="codex-governance-writable-patterns" data-i18n="governanceWritablePatterns">Writable patterns</label>
                 <p class="codex-set-row-help" data-i18n="governanceWritableHelp">Files Codex may edit (one glob per line).</p>
                 <textarea id="codex-governance-writable-patterns" class="codex-project-settings-textarea" data-governance-writable-patterns rows="3" placeholder="sections/**&#10;figures/**"></textarea>
+                <div class="codex-set-note" data-governance-writable-note hidden></div>
               </div>
-              <div class="codex-set-hairline"></div>
+            </div>
+          </details>
+          <details class="codex-set-group" data-set-group="privacy" open>
+            <summary class="codex-set-group-head">
+              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🔒</span><span data-i18n="privacyTitle">Privacy</span></span>
+              <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
+            </summary>
+            <div class="codex-set-card">
               <label class="codex-project-settings-row codex-project-settings-row--switch">
                 <span class="codex-project-settings-row-label" data-i18n="sensitiveCheckEnabled">Check for sensitive content before Codex runs</span>
                 <input type="checkbox" class="codex-switch" data-sensitive-check-enabled>
@@ -58,23 +73,32 @@
               <p class="codex-set-row-help" data-i18n="sensitiveConfirmHelp">Let you review and proceed when the scan flags content.</p>
             </div>
           </details>
-          <details class="codex-set-group">
-            <summary class="codex-set-group-head"><span data-i18n="experimentalTitle">Experimental</span></summary>
+          <details class="codex-set-group" data-set-group="experimental">
+            <summary class="codex-set-group-head">
+              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🧪</span><span data-i18n="experimentalTitle">Experimental</span></span>
+              <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
+            </summary>
             <div class="codex-set-card">
-              <input type="checkbox" data-experimental-ot hidden>
-              <button type="button" class="codex-diagnostics-ot-toggle" data-experimental-ot-toggle role="switch" aria-checked="false">
-                <span data-i18n="experimentalOtMenuTitle">Experimental OT Mirror</span>
-                <small data-experimental-ot-menu-status>OT: Off · Experimental — speeds up reading the file you are editing; Codex falls back to normal reading whenever unsure.</small>
-              </button>
+              <label class="codex-project-settings-row codex-project-settings-row--switch">
+                <span class="codex-project-settings-row-label">
+                  <span data-i18n="experimentalOtMenuTitle">Experimental OT Mirror</span>
+                  <small class="codex-set-row-sub" data-i18n="experimentalOtMenuSubtitle">Experimental — speeds up reading the file you are editing; Codex falls back to normal reading whenever unsure.</small>
+                </span>
+                <input type="checkbox" class="codex-switch" data-experimental-ot>
+              </label>
+              <p class="codex-set-row-help" data-experimental-ot-menu-status></p>
             </div>
           </details>
         </div>
         <div class="codex-project-settings-scope codex-project-settings-scope--global">
           <div class="codex-project-settings-scope-title codex-set-eyebrow" data-i18n="settingsScopeGlobalTitle">All projects</div>
-          <details class="codex-set-group" open>
-            <summary class="codex-set-group-head"><span data-i18n="appearanceTitle">Appearance</span></summary>
+          <details class="codex-set-group" data-set-group="appearance" open>
+            <summary class="codex-set-group-head">
+              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🎨</span><span data-i18n="appearanceTitle">Appearance</span></span>
+              <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
+            </summary>
             <div class="codex-set-card">
-              <label class="codex-project-settings-row codex-project-settings-row--switch">
+              <label class="codex-project-settings-row codex-project-settings-row--select">
                 <span class="codex-project-settings-row-label" data-i18n="themeLabel">Theme</span>
                 <select class="codex-set-select" data-theme-select>
                   <option value="dark" data-i18n="themeDark">Dark</option>
@@ -83,7 +107,7 @@
                 </select>
               </label>
               <p class="codex-set-row-help" data-i18n="themeHelp">Switch the Codex panel between dark, light, or following your operating system.</p>
-              <label class="codex-project-settings-row codex-project-settings-row--switch">
+              <label class="codex-project-settings-row codex-project-settings-row--select">
                 <span class="codex-project-settings-row-label" data-i18n="languageLabel">Language</span>
                 <select class="codex-set-select" data-language-select>
                   <option value="en" data-i18n="languageEnglish">English</option>
@@ -93,8 +117,11 @@
               <p class="codex-set-row-help" data-i18n="languageHelp">Panel display language.</p>
             </div>
           </details>
-          <details class="codex-set-group" open>
-            <summary class="codex-set-group-head"><span data-i18n="localSkillsTitle">Skills</span></summary>
+          <details class="codex-set-group" data-set-group="skills" open>
+            <summary class="codex-set-group-head">
+              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">⚡</span><span data-i18n="localSkillsTitle">Skills</span></span>
+              <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
+            </summary>
             <div class="codex-set-card">
               <label class="codex-project-settings-row codex-project-settings-row--switch">
                 <span class="codex-project-settings-row-label" data-i18n="loadCodexLocalSkills">Load local Codex skills</span>
@@ -116,6 +143,7 @@
           <div>
             <div class="codex-custom-instructions-title" data-i18n="codexOverleafSkillsTitle">Codex Overleaf skills</div>
           </div>
+          <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
         </div>
         <div class="codex-set-card">
           <label class="codex-project-settings-row codex-project-settings-row--switch">
@@ -131,26 +159,33 @@
     container.querySelector('[data-settings-back]')?.addEventListener('click', () => instance.callbacks.onBack?.());
     container.querySelector('[data-skills-back]')?.addEventListener('click', () => instance.callbacks.onSkillsBack?.());
     container.querySelector('[data-skills-entry]')?.addEventListener('click', () => instance.callbacks.onSkillsOpen?.());
-    // Experimental OT mirror toggle (relocated here from the diagnostics menu);
-    // its enable/disable flow stays in the runtime, wired through callbacks.
-    container.querySelector('[data-experimental-ot-toggle]')?.addEventListener('click', event => instance.callbacks.onOtToggleClick?.(event));
-    container.querySelector('[data-experimental-ot-toggle]')?.addEventListener('keydown', event => instance.callbacks.onOtToggleKeydown?.(event));
-    container.querySelector('[data-experimental-ot]')?.addEventListener('change', event => instance.callbacks.onOtCheckboxChange?.(event));
+    // Experimental OT mirror: a single visible switch. The click is
+    // intercepted (the runtime's handler preventDefaults, runs the enable
+    // confirmation, then sets checked + drives the change flow itself) so the
+    // confirm-before-enable contract survives the control unification.
+    container.querySelector('[data-experimental-ot]')?.addEventListener('click', event => instance.callbacks.onOtToggleClick?.(event));
     // Personalization textarea: auto-save on change (the change event fires on blur — avoids per-keystroke saves).
     const customInstructionsInput = container.querySelector('[data-custom-instructions-input]');
     customInstructionsInput?.addEventListener('change', event => {
       instance.callbacks.onInputChange?.(event);
-      flashSaved(instance);
+      flashSaved(instance, event);
     });
     // Governance and skill fields: auto-save on change and input for immediate response.
     for (const selector of ['[data-governance-readonly-patterns]', '[data-governance-writable-patterns]', '[data-sensitive-check-enabled]', '[data-sensitive-confirm-allowed]', '[data-load-codex-local-skills]', '[data-load-codex-overleaf-skills]', '[data-theme-select]', '[data-language-select]']) {
       const element = container.querySelector(selector);
       element?.addEventListener?.('change', event => {
         instance.callbacks.onInputChange?.(event);
-        flashSaved(instance);
+        flashSaved(instance, event);
       });
       element?.addEventListener?.('input', event => instance.callbacks.onInputChange?.(event));
     }
+    // Guardrails: live, non-blocking analysis of the protection globs.
+    for (const selector of ['[data-governance-readonly-patterns]', '[data-governance-writable-patterns]']) {
+      const element = container.querySelector(selector);
+      element?.addEventListener?.('input', () => updateGovernanceNotes(instance));
+      element?.addEventListener?.('change', () => updateGovernanceNotes(instance));
+    }
+    setupGroupPersistence(instance);
 
     return {
       show: () => show(instance),
@@ -160,6 +195,7 @@
       setStatus: (text, status) => setStatus(instance, text, status),
       clearStatus: () => clearStatus(instance),
       setSkillsSummary: text => setSkillsSummary(instance, text),
+      refreshNotes: () => updateGovernanceNotes(instance),
       destroy: () => destroy(instance),
       _instance: instance
     };
@@ -225,6 +261,7 @@
       setValue(root, '[data-governance-writable-patterns]', (rules.writablePatterns || []).join('\n'));
       setChecked(root, '[data-sensitive-check-enabled]', rules.sensitiveCheckEnabled !== false);
       setChecked(root, '[data-sensitive-confirm-allowed]', rules.sensitiveConfirmAllowed === true);
+      updateGovernanceNotes(instance);
     }
     if (Object.prototype.hasOwnProperty.call(state, 'skillToggles')) {
       // The local-skills switch lives on the settings screen; the Codex Overleaf
@@ -293,21 +330,107 @@
   // Flash the "✓ Saved" indicator after a field auto-saves, then fade it out.
   // The fields persist immediately on change, so this is purely a confirmation
   // cue — it never gates the save itself.
-  function flashSaved(instance) {
-    const status = instance?.container?.querySelector('[data-settings-save-status]');
-    if (!status) {
+  function flashSaved(instance, event) {
+    // Card-level feedback: the ✓ appears on the card that was actually
+    // changed (falls back to the screen's first badge, e.g. the skills page).
+    const origin = event?.target?.closest?.('details.codex-set-group, section');
+    const badge = origin?.querySelector?.('[data-set-saved]')
+      || instance?.container?.querySelector('[data-set-saved]');
+    if (!badge) {
       return;
     }
-    status.dataset.state = 'saved';
-    if (instance._savedFlashTimer) {
-      clearTimeout(instance._savedFlashTimer);
+    badge.hidden = false;
+    if (badge._savedFlashTimer) {
+      clearTimeout(badge._savedFlashTimer);
     }
-    instance._savedFlashTimer = setTimeout(() => {
-      const current = instance?.container?.querySelector('[data-settings-save-status]');
-      if (current) {
-        current.dataset.state = '';
-      }
+    badge._savedFlashTimer = setTimeout(() => {
+      badge.hidden = true;
     }, 1600);
+  }
+
+  function t(instance, key, params) {
+    if (typeof instance?.i18n?.tr === 'function') {
+      return instance.i18n.tr(key, params);
+    }
+    return key;
+  }
+
+  // Guardrail analysis for the protection globs: warn (never block) when a
+  // read-only rule matches everything. Broadness is probed against the REAL
+  // enforcement matcher (governanceRules.matchesGovernancePattern) so the
+  // warning can neither cry wolf on inert patterns like './**' (which the
+  // engine never matches) nor miss genuinely-total ones like '***'. Falls
+  // back to a literal check when the module is absent (test harnesses).
+  const BROAD_PROBE_PATHS = ['main.tex', 'sections/deep/chapter.tex'];
+
+  function patternMatchesEverything(pattern) {
+    const rules = (typeof window !== 'undefined' ? window : globalThis)?.CodexOverleafGovernanceRules;
+    if (typeof rules?.matchesGovernancePattern === 'function') {
+      return BROAD_PROBE_PATHS.every(path => rules.matchesGovernancePattern(path, pattern));
+    }
+    return pattern === '**' || pattern === '*';
+  }
+
+  function analyzePatternList(value) {
+    const lines = String(value || '').split('\n').map(line => line.trim()).filter(Boolean);
+    return {
+      count: lines.length,
+      broad: lines.find(line => patternMatchesEverything(line)) || ''
+    };
+  }
+
+  function updateGovernanceNotes(instance) {
+    const root = instance?.container;
+    if (!root) {
+      return;
+    }
+    const readonlyNote = root.querySelector('[data-governance-readonly-note]');
+    const writableNote = root.querySelector('[data-governance-writable-note]');
+    const readonly = analyzePatternList(root.querySelector('[data-governance-readonly-patterns]')?.value);
+    const writable = analyzePatternList(root.querySelector('[data-governance-writable-patterns]')?.value);
+    if (readonlyNote) {
+      if (readonly.broad) {
+        readonlyNote.dataset.tone = 'warn';
+        readonlyNote.textContent = t(instance, 'governanceBroadReadonlyWarning', { pattern: readonly.broad });
+        readonlyNote.hidden = false;
+      } else {
+        readonlyNote.hidden = true;
+      }
+    }
+    if (writableNote) {
+      if (writable.count > 0) {
+        writableNote.dataset.tone = 'info';
+        writableNote.textContent = t(instance, 'governanceWritableAllowlistNote');
+        writableNote.hidden = false;
+      } else {
+        writableNote.hidden = true;
+      }
+    }
+  }
+
+  // Collapse memory: card open/closed state persists per browser profile.
+  const GROUP_STORE_KEY = 'codexOverleafSettingsGroups';
+
+  function setupGroupPersistence(instance) {
+    let stored = {};
+    try {
+      stored = JSON.parse(globalThis.localStorage?.getItem(GROUP_STORE_KEY) || '{}') || {};
+    } catch (_error) {
+      stored = {};
+    }
+    for (const details of instance.container.querySelectorAll('details[data-set-group]')) {
+      const key = details.dataset.setGroup;
+      if (key in stored) {
+        details.open = stored[key] !== false;
+      }
+      details.addEventListener('toggle', () => {
+        try {
+          const current = JSON.parse(globalThis.localStorage?.getItem(GROUP_STORE_KEY) || '{}') || {};
+          current[key] = details.open;
+          globalThis.localStorage?.setItem(GROUP_STORE_KEY, JSON.stringify(current));
+        } catch (_error) { /* private mode — collapse state just doesn't persist */ }
+      });
+    }
   }
 
   function getRoot(instance) {

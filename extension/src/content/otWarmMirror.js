@@ -157,8 +157,15 @@
   }
 
   async function handleExperimentalOtToggleClick(event) {
+    // The handler is bound to the visible checkbox: by the time click fires,
+    // pre-click activation has ALREADY flipped .checked — that flipped value
+    // is the user's intended target. preventDefault then rolls the visual
+    // state back (synchronously, when dispatch completes), and the confirm
+    // flow applies the target only after approval.
+    const clicked = event?.currentTarget || event?.target;
+    const targetEnabled = clicked && typeof clicked.checked === 'boolean' ? clicked.checked : undefined;
     event.preventDefault();
-    await toggleExperimentalOtCheckbox();
+    await toggleExperimentalOtCheckbox(targetEnabled);
   }
 
   async function handleExperimentalOtToggleKeydown(event) {
@@ -169,12 +176,14 @@
     await toggleExperimentalOtCheckbox();
   }
 
-  async function toggleExperimentalOtCheckbox() {
+  async function toggleExperimentalOtCheckbox(targetEnabled) {
     const checkbox = getPanel()?.querySelector('[data-experimental-ot]');
     if (!checkbox) {
       return;
     }
-    const nextEnabled = !checkbox.checked;
+    // Explicit target from the click interceptor wins; the keyboard/legacy
+    // path (no argument, un-flipped checkbox) falls back to inversion.
+    const nextEnabled = typeof targetEnabled === 'boolean' ? targetEnabled : !checkbox.checked;
     if (nextEnabled) {
       closeDiagnosticsMenu();
       const approved = await showPluginConfirm({
@@ -205,6 +214,17 @@
     lastExperimentalOtProjectId = projectId;
     setExperimentalOtEnabledForProject(projectId, checkbox.checked);
     updateExperimentalOtToggleControl(checkbox.checked);
+    // Per-card saved feedback, same contract as every other settings card.
+    const savedBadge = getPanel()?.querySelector('details[data-set-group="experimental"] [data-set-saved]');
+    if (savedBadge) {
+      savedBadge.hidden = false;
+      if (savedBadge._savedFlashTimer) {
+        clearTimeout(savedBadge._savedFlashTimer);
+      }
+      savedBadge._savedFlashTimer = setTimeout(() => {
+        savedBadge.hidden = true;
+      }, 1600);
+    }
     updateOtStatusDisplay(checkbox.checked ? (currentOtStatus === 'off' ? 'starting' : currentOtStatus) : 'off');
     syncOtWarmMirrorController().catch(error => {
       updateOtStatusDisplay('unavailable');
@@ -214,13 +234,12 @@
   }
 
   function updateExperimentalOtToggleControl(enabled) {
-    const toggle = getPanel()?.querySelector('[data-experimental-ot-toggle]');
-    if (!toggle) {
-      return;
+    // The visible switch (the checkbox itself) is the single control; keep it
+    // in sync for programmatic changes, then refresh the status line.
+    const checkbox = getPanel()?.querySelector('[data-experimental-ot]');
+    if (checkbox) {
+      checkbox.checked = enabled === true;
     }
-    const checked = enabled === true;
-    toggle.dataset.checked = checked ? 'true' : 'false';
-    toggle.setAttribute('aria-checked', checked ? 'true' : 'false');
     updateExperimentalOtMenuStatus();
   }
 
@@ -626,7 +645,7 @@
     if (!statusElement) {
       return;
     }
-    statusElement.textContent = `${formatOtToggleStatusText(formatOtStatusLabel(currentOtStatus))} · ${tr('experimentalOtMenuSubtitle')}`;
+    statusElement.textContent = formatOtToggleStatusText(formatOtStatusLabel(currentOtStatus));
   }
 
   function normalizeOtStatus(status) {

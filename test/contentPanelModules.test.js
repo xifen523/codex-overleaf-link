@@ -389,21 +389,43 @@ test('settingsPanel renders NO [data-custom-instructions-save] button', () => {
   assert.equal(saveBtn, null, 'should NOT render [data-custom-instructions-save] button after Task 2');
 });
 
-test('settingsPanel renders a [data-settings-save-status] element', () => {
-  const { doc } = buildFakeDocument();
-  const container = doc.createElement('div');
-  doc.documentElement._children.push(container);
+test('OT click interceptor reads the POST-flip checked value as the target (v1.7.1 lock)', () => {
+  // The switch died once already: click on a checkbox fires AFTER pre-click
+  // activation flips .checked, so `!checkbox.checked` computed the pre-click
+  // state and inverted the whole flow (enable ran the disable branch).
+  const src = read('extension/src/content/otWarmMirror.js');
+  const click = src.match(/async function handleExperimentalOtToggleClick\([\s\S]*?\n  \}/)?.[0] || '';
+  assert.match(click, /clicked\.checked/, 'the flipped value IS the intended target');
+  assert.match(click, /toggleExperimentalOtCheckbox\(targetEnabled\)/);
+  const toggle = src.match(/async function toggleExperimentalOtCheckbox\([\s\S]*?\n  \}/)?.[0] || '';
+  assert.match(toggle, /typeof targetEnabled === 'boolean' \? targetEnabled : !checkbox\.checked/,
+    'explicit target wins; inversion only for un-flipped callers');
+});
 
-  const fakeWindow6 = {};
+test('broad-glob guardrail probes the REAL governance matcher (v1.7.1 lock)', () => {
+  // Hardcoded pattern sets cried wolf on inert './**' (never matches) and
+  // missed genuinely-total '***'. Verify against the real engine.
+  const rules = require('../extension/src/shared/governanceRules');
+  const everything = pattern => ['main.tex', 'sections/deep/chapter.tex']
+    .every(p => rules.matchesGovernancePattern(p, pattern));
+  assert.equal(everything('**'), true);
+  assert.equal(everything('***'), true, 'a triple-star really matches everything');
+  assert.equal(everything('./**'), false, "'./**' is inert in the real matcher — must NOT warn");
+  assert.equal(everything('sections/**'), false);
+  const panel = read('extension/src/content/settingsPanel.js');
+  assert.match(panel, /matchesGovernancePattern/, 'guardrail delegates to the engine');
+  assert.doesNotMatch(panel, /BROAD_GLOBS/, 'the hardcoded set is gone');
+});
+
+test('settingsPanel renders per-card saved badges (v1.7.1: global chip replaced)', () => {
+  // The single header "Saved" chip was replaced by a ✓ badge on each settings
+  // card so feedback appears next to the thing that changed.
   const src = read('extension/src/content/settingsPanel.js');
-  // eslint-disable-next-line no-new-func
-  new Function('window', 'document', src)(fakeWindow6, doc);
-
-  const SettingsPanel = fakeWindow6.CodexOverleafSettingsPanel;
-  SettingsPanel.create({ container });
-
-  const statusEl = container.querySelector('[data-settings-save-status]');
-  assert.ok(statusEl, 'should render a [data-settings-save-status] element');
+  assert.doesNotMatch(src, /data-settings-save-status/);
+  const badgeCount = (src.match(/data-set-saved/g) || []).length;
+  assert.ok(badgeCount >= 6, `every card carries a saved badge (found ${badgeCount})`);
+  assert.match(src, /closest\?\.\('details\.codex-set-group, section'\)/,
+    'flashSaved targets the changed card');
 });
 
 // Task 3: per-skill enable toggles for Codex Overleaf skills

@@ -63,9 +63,9 @@ test('experimental OT toggle and language selector relocated from the menu to Se
 
   // Removed from the diagnostics menu.
   assert.doesNotMatch(diag, /data-language-toggle/);
-  assert.doesNotMatch(diag, /data-experimental-ot-toggle/);
+  assert.doesNotMatch(diag, /data-experimental-ot\b/);
   // Relocated into Settings and wired.
-  assert.match(settings, /data-experimental-ot-toggle/);
+  assert.match(settings, /data-experimental-ot\b/);
   assert.match(settings, /data-experimental-ot\b/);
   assert.match(settings, /data-language-select/);
   assert.match(settings, /data-i18n="experimentalTitle"/);

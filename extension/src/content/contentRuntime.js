@@ -898,10 +898,9 @@
           onInputChange: () => persistPanelInputs(),
           onSkillsOpen: () => openSkillsView(),
           onSkillsBack: () => closeSkillsView(),
-          // Experimental OT mirror toggle moved here from the diagnostics menu.
-          onOtToggleClick: handleExperimentalOtToggleClick,
-          onOtToggleKeydown: handleExperimentalOtToggleKeydown,
-          onOtCheckboxChange: handleExperimentalOtToggleChange
+          // Experimental OT mirror: a single visible switch whose click is
+          // intercepted so the confirm-before-enable flow still runs.
+          onOtToggleClick: handleExperimentalOtToggleClick
         }
       });
 
@@ -1398,6 +1397,9 @@
     // State-dependent tooltip: re-derive from the dot's current health so a
     // locale/session refresh doesn't clobber it back to the generic label.
     setDiagnosticsHealth(panel.querySelector('[data-diagnostics-health-dot]')?.dataset.health || 'unknown');
+    // Guardrail notes carry locale-resolved text; re-render them so a visible
+    // governance warning follows a language switch.
+    settingsPanelInstance?.refreshNotes?.();
     setElementTitleAndAria('[data-diagnostics-result-close]', tr('close'), tr('closeDiagnostics'));
     setElementTitleAndAria('[data-new-session]', tr('newSession'), tr('newSession'));
     setElementTitleAndAria('[data-custom-instructions-settings]', tr('projectSettings'), tr('projectSettings'));
@@ -1447,12 +1449,9 @@
     if (recompileToggle) {
       recompileToggle.title = tr('autoCompileTitle');
     }
-    const otToggle = panel.querySelector('[data-experimental-ot-toggle]');
-    if (otToggle) {
-      otToggle.title = tr('experimentalOtWarmMirrorTitle');
-    }
     const otCheckbox = panel.querySelector('[data-experimental-ot]');
     if (otCheckbox) {
+      otCheckbox.title = tr('experimentalOtWarmMirrorTitle');
       otCheckbox.setAttribute('aria-label', tr('experimentalOtWarmMirror'));
     }
     const contextStatus = panel.querySelector('[data-context-status]');
@@ -6280,24 +6279,14 @@
     return error?.message || String(error);
   }
 
-  function setSettingsSaveStatus(key) {
-    const statusEl = panel?.querySelector('[data-settings-save-status]');
-    if (statusEl) {
-      statusEl.textContent = tr(key);
-    }
-  }
-
   async function persistPanelInputs() {
     readPanelInputs();
     renderSpeedOptions(getRenderedModelEntries());
     renderModelConfigChoices();
     updateModelDisplay();
-    setSettingsSaveStatus('settingsSaving');
-    try {
-      await saveState();
-    } finally {
-      setSettingsSaveStatus('settingsSaved');
-    }
+    // Save feedback is per-card now (settingsPanel flashSaved); the global
+    // header chip and its Saving/Saved lifecycle are gone.
+    await saveState();
     syncModeControls();
     applySessionLabel();
     renderSessionList();

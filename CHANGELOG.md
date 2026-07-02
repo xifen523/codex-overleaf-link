@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.7.1 - 2026-07-02
+
+Settings page redesign — clearer operation logic, safety guardrails, and visual unification. Adversarially verified (9 findings fixed pre-release, including an inverted OT switch). The native protocol stays `1`.
+
+### Changed
+
+- **Cards re-cut by topic.** Governance no longer mixes concerns: 🛡 File protection holds the read-only/writable globs, 🔒 Privacy holds the sensitive-content switches, and every card carries an icon title. The two-scope skeleton (This project / All projects) stays.
+- **Per-card save feedback.** The ✓ Saved badge appears on the card you actually changed (the far-away global header chip is gone), including the Experimental card when toggling OT.
+- **One OT control.** The hidden-checkbox + button pair became a single visible switch with a plain-language subtitle and a separate status line; the confirm-before-enable flow is preserved (and its direction verified — the first cut inverted it: a checkbox's click fires after the checked state flips).
+- **Collapse memory.** Card open/closed state persists per browser profile; Experimental stays collapsed by default.
+
+### Added
+
+- **Protection-glob guardrails (warn, never block).** A read-only rule that matches every file (probed against the real governance matcher, so `./**` — which the engine ignores — does not cry wolf while `***` — which really matches everything — does warn) shows an amber note: the rule is saved, but Codex will not be able to write anything. A non-empty writable list shows a neutral "allowlist active" note. Notes re-render on language switch.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.7.1` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.7.1.zip`, `codex-overleaf-native-host-v1.7.1.tar.gz`, and `codex-overleaf-link-1.7.1.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.7.1 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.7.1 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.7.1 -- uninstall-native`.
+
 ## v1.7.0 - 2026-07-02
 
 Feature release — **@ file autocomplete** and a **first-run setup prompt**. Both adversarially verified (17 findings fixed pre-release, including two P1s). The native protocol stays `1`.

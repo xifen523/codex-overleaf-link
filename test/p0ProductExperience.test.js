@@ -3534,7 +3534,6 @@ test('project custom instructions editor auto-saves on change and restores by pr
     ${extractFromContentScript( 'clearProjectSettingsStatus')}
     ${extractFromContentScript( 'openCustomInstructionsSettings')}
     ${extractFromContentScript( 'closeCustomInstructionsSettings')}
-    ${extractFromContentScript( 'setSettingsSaveStatus')}
     ${extractFromContentScript( 'readPanelInputs')}
     ${extractFromContentScript( 'persistPanelInputs')}
     return {
@@ -3573,105 +3572,16 @@ test('project custom instructions editor auto-saves on change and restores by pr
   assert.equal(harness.input.value, 'Use NeurIPS style and \\\\cref{}.');
 });
 
-test('persistPanelInputs save-status lifecycle: success path ends at settingsSaved', async () => {
+test('settings save feedback is per-card: no global chip, persist has no dead status writer (v1.7.1)', () => {
   const contentScript = getContentScriptSource();
-  const statusHistory = [];
-  const harness = Function('pushStatus', `
-    let currentProjectId = 'project_a';
-    let state = { customInstructionsByProject: {} };
-    const customInstructionsInput = { value: '', placeholder: '', focus() {} };
-    const settingsButton = { dataset: {}, setAttribute() {} };
-    const statusEl = { set textContent(v) { pushStatus(v); } };
-    const fakeInput = (value = '') => ({ value, checked: false });
-    const controls = {
-      '[data-custom-instructions-input]': customInstructionsInput,
-      '[data-custom-instructions-settings]': settingsButton,
-      '[data-reasoning]': fakeInput(),
-      '[data-mode]': fakeInput('ask'),
-      '[data-task]': fakeInput(),
-      '[data-speed]': fakeInput('standard'),
-      '[data-require-reviewing]': fakeInput(),
-      '[data-auto-recompile]': fakeInput(),
-      '[data-experimental-ot]': null,
-      '[data-model]': null,
-      '[data-project-settings-panel]': null,
-      '[data-settings-save-status]': statusEl
-    };
-    const panel = {
-      dataset: { view: 'settings' },
-      querySelector(selector) {
-        return Object.prototype.hasOwnProperty.call(controls, selector) ? controls[selector] : null;
-      },
-      querySelectorAll() { return []; }
-    };
-    function getCurrentProjectId() { return currentProjectId; }
-    let lastExperimentalOtProjectId = '';
-    ${runtimeStubs()}
-    ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
-    ${extractFromContentScript( 'getCustomInstructionsForCurrentProject')}
-    ${extractFromContentScript( 'setCustomInstructionsForProject')}
-    ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
-    ${extractFromContentScript( 'clearProjectSettingsStatus')}
-    ${extractFromContentScript( 'setSettingsSaveStatus')}
-    ${extractFromContentScript( 'readPanelInputs')}
-    ${extractFromContentScript( 'persistPanelInputs')}
-    return { persistPanelInputs };
-  `)(v => statusHistory.push(v));
-
-  await harness.persistPanelInputs();
-  assert.deepEqual(statusHistory, ['settingsSaving', 'settingsSaved'],
-    'success path: status should be settingsSaving then settingsSaved');
-});
-
-test('persistPanelInputs save-status lifecycle: status ends at settingsSaved even when saveState rejects', async () => {
-  const contentScript = getContentScriptSource();
-  const statusHistory = [];
-  const harness = Function('pushStatus', `
-    let currentProjectId = 'project_a';
-    let state = { customInstructionsByProject: {} };
-    const customInstructionsInput = { value: '', placeholder: '', focus() {} };
-    const settingsButton = { dataset: {}, setAttribute() {} };
-    const statusEl = { set textContent(v) { pushStatus(v); } };
-    const fakeInput = (value = '') => ({ value, checked: false });
-    const controls = {
-      '[data-custom-instructions-input]': customInstructionsInput,
-      '[data-custom-instructions-settings]': settingsButton,
-      '[data-reasoning]': fakeInput(),
-      '[data-mode]': fakeInput('ask'),
-      '[data-task]': fakeInput(),
-      '[data-speed]': fakeInput('standard'),
-      '[data-require-reviewing]': fakeInput(),
-      '[data-auto-recompile]': fakeInput(),
-      '[data-experimental-ot]': null,
-      '[data-model]': null,
-      '[data-project-settings-panel]': null,
-      '[data-settings-save-status]': statusEl
-    };
-    const panel = {
-      dataset: { view: 'settings' },
-      querySelector(selector) {
-        return Object.prototype.hasOwnProperty.call(controls, selector) ? controls[selector] : null;
-      },
-      querySelectorAll() { return []; }
-    };
-    function getCurrentProjectId() { return currentProjectId; }
-    let lastExperimentalOtProjectId = '';
-    async function saveState() { throw new Error('storage quota exceeded'); }
-    ${runtimeStubs({ omit: ['saveState'] })}
-    ${extractFromContentScript( 'normalizeCustomInstructionsByProject')}
-    ${extractFromContentScript( 'getCustomInstructionsForCurrentProject')}
-    ${extractFromContentScript( 'setCustomInstructionsForProject')}
-    ${extractFromContentScript( 'syncCustomInstructionsEditorForProject')}
-    ${extractFromContentScript( 'clearProjectSettingsStatus')}
-    ${extractFromContentScript( 'setSettingsSaveStatus')}
-    ${extractFromContentScript( 'readPanelInputs')}
-    ${extractFromContentScript( 'persistPanelInputs')}
-    return { persistPanelInputs };
-  `)(v => statusHistory.push(v));
-
-  await assert.rejects(harness.persistPanelInputs());
-  assert.deepEqual(statusHistory, ['settingsSaving', 'settingsSaved'],
-    'error path: status must still end at settingsSaved despite saveState throwing');
+  // The global header Saved chip and its Saving/Saved lifecycle are gone —
+  // per-card flashSaved (settingsPanel) is the single feedback mechanism.
+  assert.doesNotMatch(contentScript, /setSettingsSaveStatus/);
+  assert.doesNotMatch(contentScript, /data-settings-save-status/);
+  const persist = extractFromContentScript('persistPanelInputs');
+  assert.match(persist, /await saveState\(\)/);
+  const settingsPanel = fs.readFileSync(path.join(__dirname, '..', 'extension/src/content/settingsPanel.js'), 'utf8');
+  assert.match(settingsPanel, /function flashSaved\(instance, event\)/);
 });
 
 test('project settings gear toggles the settings panel closed when already open', () => {
