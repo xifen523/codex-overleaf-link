@@ -24,7 +24,7 @@ test('architecture budget tracks v1.0 final split targets for the largest files'
     [
       ['extension/src/contentScript.js', 4500],
       ['extension/src/pageBridge.js', 2250],
-      ['extension/src/content/contentRuntime.js', 8380],
+      ['extension/src/content/contentRuntime.js', 8560],
       ['extension/src/content/markdownText.js', 700],
       ['extension/src/content/diagnosticsController.js', 700],
       ['extension/src/content/runTimelineView.js', 950],

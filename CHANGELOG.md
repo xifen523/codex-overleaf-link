@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.7.0 - 2026-07-02
+
+Feature release — **@ file autocomplete** and a **first-run setup prompt**. Both adversarially verified (17 findings fixed pre-release, including two P1s). The native protocol stays `1`.
+
+### Added
+
+- **Type `@` to add files.** Typing `@` anywhere in the composer opens an inline autocomplete over the project's files (filter as you type, `.tex` first, arrows/Enter/Esc/click, capped at 8) plus the `@compile-log` builtin. Selecting a file inserts the `@path` token and selects it as a focus file — the selection is what actually attaches the file to the run. Works after CJK text with no space (`润色@` triggers; emails like `a@b` never do), is IME-safe (a composition-commit Enter is never hijacked), skips binary files, namespaces the builtin against same-named project files, ignores stale menus (caret moved → nothing is silently attached), and surfaces the 5-file focus cap instead of silently evicting. The composer copy promises `@` again — now truthfully.
+- **First-run setup prompt.** When the panel loads and the native host has never been installed, the install guidance opens once automatically (per browser profile; a dismissal is final; profiles that ever had a working host are exempt, so transient outages can never misfire it). The guidance modal now speaks "one step left: install" with a clear status line instead of update framing.
+
+### Fixed
+
+- **`@compile-log` actually triggers now.** The run-time gate used `\b@compile-log\b`, whose leading `\b` requires a word character before the `@` — exactly the positions a typed token never occupies. The gate now matches start-of-text/after-whitespace tokens (mid-word stays inert).
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.7.0` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.7.0.zip`, `codex-overleaf-native-host-v1.7.0.tar.gz`, and `codex-overleaf-link-1.7.0.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.7.0 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.7.0 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.7.0 -- uninstall-native`.
+
 ## v1.6.4 - 2026-07-02
 
 UI polish pack — ~25 small display/interaction fixes from a full UI/UX audit, adversarially verified item-by-item before release. The native protocol stays `1`.

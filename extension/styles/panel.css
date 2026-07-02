@@ -2214,6 +2214,12 @@
   color: var(--tl-fg-1);
 }
 
+#codex-overleaf-panel .codex-slash-menu-note {
+  padding: 8px 10px;
+  color: var(--tl-fg-3);
+  font-size: 12px;
+}
+
 #codex-overleaf-panel .codex-slash-menu small {
   color: var(--tl-fg-3);
   font-size: 11px;

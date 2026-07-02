@@ -43,9 +43,12 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // writebackOrchestrator.js (8850 -> 8330, gain locked). 8330 -> 8380 in
     // v1.6.4 for the UI-polish pack (attach input wiring, composer autogrow +
     // send availability, destructive-confirm focus safety, Esc dismissals,
-    // native-missing badge copy).
+    // native-missing badge copy). 8380 -> 8560 in v1.7.0 for the @ file
+    // autocomplete cluster + the first-run setup prompt; the @ cluster
+    // (getAtFileTrigger/renderAtFileMenu/applyAtFileSelection, ~130 lines) is
+    // a candidate for a future composer-menu carve.
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 8380
+    maxLines: 8560
   },
   {
     // Carved from contentRuntime in v1.4.5: markdown/inline rendering, the

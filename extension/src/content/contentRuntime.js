@@ -1910,7 +1910,7 @@
 
       // Resolve @compile-log if mentioned in task
       let compileLogContext = null;
-      if (/\b@compile-log\b/i.test(task)) {
+      if (/(^|[^\w])@compile-log\b/i.test(task)) {
         appendRunEvent({ title: tx('Fetching compile log (@compile-log).', '正在获取编译日志 (@compile-log)。'), status: 'running' });
         compileLogContext = await resolveCompileLogContext();
         if (compileLogContext.available) {
@@ -3234,22 +3234,178 @@
   }
 
   function updateSlashMenuForTaskInput() {
-    const trigger = getSlashTrigger();
     const menu = panel?.querySelector('[data-slash-menu]');
     if (!menu) {
       return;
     }
-    if (!trigger) {
-      closeSlashMenu();
+    const trigger = getSlashTrigger();
+    if (trigger) {
+      const query = trigger.query.toLowerCase();
+      const commands = getSlashCommands().filter(command => {
+        return !query
+          || command.title.toLowerCase().includes(query)
+          || command.id.toLowerCase().includes(query);
+      });
+      renderSlashMenu(commands);
+      return;
+    }
+    const atTrigger = getAtFileTrigger();
+    if (atTrigger) {
+      renderAtFileMenu(atTrigger);
+      return;
+    }
+    closeSlashMenu();
+  }
+
+  // @ file autocomplete (v1.7): typing @ anywhere in the task opens an inline
+  // file picker driven by the context tray's project file list. Selecting a
+  // file inserts the @path token AND selects it as a focus file — typed
+  // tokens other than @compile-log are cosmetic; the focus selection is what
+  // actually attaches the file to the run.
+  function getAtFileTrigger() {
+    const input = panel?.querySelector('[data-task]');
+    if (!input || currentRunView) {
+      return null;
+    }
+    const cursor = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+    const before = input.value.slice(0, cursor);
+    // The @ may follow anything that cannot be an email local-part or a
+    // mid-word marker (word chars, dot, hyphen, another @) — this keeps
+    // emails inert while CJK text directly before @ still triggers
+    // (\w is ASCII-only, so 你好@ works without a space).
+    const match = /(^|[^\w@.\-])@([^\s@]*)$/.exec(before);
+    if (!match) {
+      return null;
+    }
+    const query = match[2] || '';
+    return {
+      query,
+      start: cursor - query.length - 1,
+      end: cursor
+    };
+  }
+
+  function renderAtFileMenu(trigger) {
+    const menu = panel?.querySelector('[data-slash-menu]');
+    if (!menu) {
       return;
     }
     const query = trigger.query.toLowerCase();
-    const commands = getSlashCommands().filter(command => {
-      return !query
-        || command.title.toLowerCase().includes(query)
-        || command.id.toLowerCase().includes(query);
+    const files = contextTrayController.getContextProjectFiles(
+      contextTrayController.getContextProject()?.files || []
+    ).filter(file => file.selectable !== false && file.kind !== 'binary');
+    if (!files.length) {
+      ensureContextFilesForAtMenu();
+    }
+    const entries = [];
+    if ('@compile-log'.includes(query) || 'compile-log'.includes(query)) {
+      entries.push({
+        // Namespaced apart from file ids: a project file literally named
+        // 'compile-log' must not collide in the rendered-commands map.
+        id: 'at-builtin:compile-log',
+        kind: 'at-file',
+        insertText: '@compile-log',
+        title: '@compile-log',
+        subtitle: tr('atMenuCompileLogSubtitle')
+      });
+    }
+    const ranked = files
+      .map(file => String(file.path || ''))
+      .filter(path => path && path.toLowerCase().includes(query))
+      .sort((left, right) => {
+        const rankDelta = contextTrayController.getContextFileRank(left) - contextTrayController.getContextFileRank(right);
+        return rankDelta !== 0 ? rankDelta : left.localeCompare(right);
+      })
+      .slice(0, 8);
+    for (const path of ranked) {
+      const separator = path.lastIndexOf('/');
+      entries.push({
+        id: `at:${path}`,
+        kind: 'at-file',
+        path,
+        insertText: `@${path}`,
+        title: separator === -1 ? path : path.slice(separator + 1),
+        subtitle: separator === -1 ? tr('atMenuFileSubtitle') : path
+      });
+    }
+    if (!entries.length) {
+      const menu = panel?.querySelector('[data-slash-menu]');
+      if (!files.length && atMenuFilesLoad === 'pending' && menu) {
+        // Inert placeholder (no button): Enter still submits, clicks are
+        // no-ops, and the next keystroke re-renders naturally.
+        menu.textContent = '';
+        const loading = document.createElement('div');
+        loading.className = 'codex-slash-menu-note';
+        loading.textContent = tr('atMenuLoading');
+        menu.append(loading);
+        menu.hidden = false;
+        return;
+      }
+      closeSlashMenu();
+      return;
+    }
+    renderSlashMenu(entries);
+  }
+
+  // Lazy one-shot load: the tray's file list is usually warm (panel open
+  // prefetches), but a cold first @ must trigger a load and re-render once
+  // the list lands — only if the @ trigger is still active by then.
+  let atMenuFilesLoad = 'idle';
+  function ensureContextFilesForAtMenu() {
+    if (atMenuFilesLoad !== 'idle') {
+      return;
+    }
+    atMenuFilesLoad = 'pending';
+    // loadContextFiles never rejects (it settles errors internally), so
+    // completion always lands in then(); 'done' with an empty list simply
+    // renders no menu — a later tray load repopulates the same source.
+    Promise.resolve(loadContextFiles({})).then(() => {
+      atMenuFilesLoad = 'done';
+      const menu = panel?.querySelector('[data-slash-menu]');
+      const input = panel?.querySelector('[data-task]');
+      // Re-render only an ACTIVE menu for a focused input — never re-open a
+      // menu the user dismissed or walked away from.
+      if (menu && !menu.hidden && document.activeElement === input && getAtFileTrigger()) {
+        updateSlashMenuForTaskInput();
+      }
     });
-    renderSlashMenu(commands);
+  }
+
+  function applyAtFileSelection(command) {
+    const input = panel?.querySelector('[data-task]');
+    const trigger = getAtFileTrigger();
+    closeSlashMenu();
+    if (!input || !trigger) {
+      // The menu was stale (caret moved / trigger gone): do nothing — a
+      // token-less silent attachment would be invisible state.
+      input?.focus?.();
+      return;
+    }
+    if (input && trigger) {
+      const token = String(command.insertText || `@${command.path || ''}`);
+      input.value = `${input.value.slice(0, trigger.start)}${token} ${input.value.slice(trigger.end)}`;
+      const caret = trigger.start + token.length + 1;
+      input.setSelectionRange?.(caret, caret);
+      state = { ...state, task: input.value };
+      autosizeTaskTextarea();
+      syncComposerSendAvailability();
+      saveStateSoon();
+    }
+    // Selection is what attaches the file; selectFocusFile toggles, so guard
+    // against deselecting an already-focused file.
+    const focusFiles = contextTrayController.getActiveFocusFiles();
+    if (command.path && !focusFiles.includes(command.path)) {
+      if (focusFiles.length >= 5) {
+        // The tray caps focus files at 5 by evicting the oldest — say so,
+        // or the evicted file's @token silently lies in the task text.
+        appendPlainLog(tx(
+          `Focus limit is 5 files — "${focusFiles[0]}" was replaced. Remove its @ mention if you no longer want it referenced.`,
+          `重点文件上限 5 个——已替换「${focusFiles[0]}」。若不再需要，请删除文本中它的 @ 引用。`
+        ));
+      }
+      Promise.resolve(contextTrayController.selectFocusFile(command.path)).catch(() => {});
+    }
+    input?.focus?.();
   }
 
   function getSlashTrigger() {
@@ -3315,6 +3471,11 @@
   }
 
   function handleSlashMenuKeydown(event) {
+    // Never fight the IME: a composition-commit Enter (keyCode 229 /
+    // isComposing) must reach the editor, not select a menu entry.
+    if (event.isComposing || event.keyCode === 229) {
+      return false;
+    }
     const menu = panel?.querySelector('[data-slash-menu]');
     if (!menu || menu.hidden) {
       return false;
@@ -3362,6 +3523,13 @@
     const command = renderedSlashCommands.get(commandId);
     if (!command) {
       closeSlashMenu();
+      return;
+    }
+    if (command.kind === 'at-loading') {
+      return;
+    }
+    if (command.kind === 'at-file') {
+      applyAtFileSelection(command);
       return;
     }
     clearSlashTriggerFromTaskInput();
@@ -5354,6 +5522,9 @@
       if (classification === 'compatible') {
         PanelRenderer.setBadge(panelRendererInstance.headerEl, { type: 'none' });
         setDiagnosticsHealth('ok');
+        try {
+          window.localStorage.setItem('codexOverleafNativeEverOk', 'true');
+        } catch (_storageError) { /* private mode etc.; the wizard just stays eligible */ }
         return;
       }
       // update-available reads as attention; anything else (incompatible /
@@ -5364,6 +5535,11 @@
         tooltip: tx('Native host update available', 'Native host 可更新'),
         onClick: () => showNativeUpdateGuidanceModal(compatibility)
       });
+      // A never-installed host does NOT throw: background resolves
+      // {ok:false, native_connection_failed} and classification lands here.
+      if (!compatibility?.native?.version) {
+        maybePromptFirstRunSetup();
+      }
     } catch (_error) {
       setDiagnosticsHealth('fail');
       // No ping response at all means the native host is missing or not
@@ -5374,7 +5550,31 @@
         tooltip: tx('Native host is not responding — click for setup steps', 'Native host 未响应——点击查看安装步骤'),
         onClick: () => showNativeUpdateGuidanceModal(fallbackNativeCompatibility({ ok: false }))
       });
+      maybePromptFirstRunSetup();
     }
+  }
+
+  // First-run wizard (v1.7): the native host is the one hard prerequisite,
+  // and pre-1.7 its absence was a 9px red dot. Auto-open the install guidance
+  // ONCE per browser profile; the flag is set before showing so a dismissal
+  // is respected forever (no nag loop).
+  function maybePromptFirstRunSetup() {
+    let storage = null;
+    try {
+      storage = window.localStorage;
+      if (!storage || storage.getItem('codexOverleafSetupPromptShown') === 'true') {
+        return;
+      }
+      // A profile that ever completed a successful ping is an installed user
+      // having a transient outage, not a first run — never auto-modal them.
+      if (storage.getItem('codexOverleafNativeEverOk') === 'true') {
+        return;
+      }
+      storage.setItem('codexOverleafSetupPromptShown', 'true');
+    } catch (_storageError) {
+      return;
+    }
+    showNativeUpdateGuidanceModal(fallbackNativeCompatibility({ ok: false }));
   }
 
   function showNativeUpdateGuidanceModal(compatibility = {}) {
@@ -5395,19 +5595,26 @@
     overlay.dataset.nativeUpdateGuidance = 'true';
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
-    overlay.setAttribute('aria-label', tx('Native host update available', 'Native host 可更新'));
+    const nativeMissing = !native.version;
+    overlay.setAttribute('aria-label', nativeMissing
+      ? tx('Set up the native host', '安装 Native host')
+      : tx('Native host update available', 'Native host 可更新'));
 
     const card = document.createElement('section');
     card.className = 'codex-plugin-confirm-card';
 
     const title = document.createElement('div');
     title.className = 'codex-plugin-confirm-title';
-    title.textContent = tx('Native host update available', 'Native host 可更新');
+    title.textContent = nativeMissing
+      ? tx('One step left: install the native host', '还差一步：安装 Native host')
+      : tx('Native host update available', 'Native host 可更新');
 
     const body = document.createElement('div');
     body.className = 'codex-plugin-confirm-body';
     body.textContent = [
-      tx(`Extension v${extensionVersion} / Native v${nativeVersion}`, `扩展 v${extensionVersion} / Native v${nativeVersion}`),
+      nativeMissing
+        ? tx(`Extension v${extensionVersion} is ready; Codex still needs its local bridge to read and edit this project.`, `扩展 v${extensionVersion} 已就绪；Codex 还需要本地桥接程序才能读写这个项目。`)
+        : tx(`Extension v${extensionVersion} / Native v${nativeVersion}`, `扩展 v${extensionVersion} / Native v${nativeVersion}`),
       tx('Run the platform-specific command below, reload the extension, then refresh Overleaf.', '运行下面的平台命令，重新加载扩展，然后刷新 Overleaf。')
     ].join('\n\n');
 
