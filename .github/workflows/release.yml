@@ -18,6 +18,9 @@ jobs:
         os: [macos-latest, ubuntu-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
+    # Permanent hygiene: the suite takes 2-4 minutes; a hung runner must never
+    # hold the release hostage for the 360-minute default timeout.
+    timeout-minutes: 25
     # TEMPORARY (v1.6.3): GitHub's hosted macOS pool is hanging indefinitely
     # on "Run tests" — a control rerun of the previously-green a6e2813 commit
     # reproduced the hang, exonerating the suite. macOS coverage for this
