@@ -522,7 +522,9 @@ test('release workflow gates publishing on the cross-platform test matrix', () =
 
   assertContainsInOrder(workflow, [
     'test-matrix:',
-    'os: [macos-latest, ubuntu-latest, windows-latest]',
+    // TEMPORARY (v1.6.3): macos-latest removed from the release gate while
+    // GitHub's hosted macOS pool hangs; restore alongside release.yml.
+    'os: [ubuntu-latest, windows-latest]',
     'run: npm test',
     'release:',
     'needs: test-matrix',

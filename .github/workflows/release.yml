@@ -15,18 +15,20 @@ jobs:
 
     strategy:
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        # TEMPORARY (v1.6.3): macos-latest is removed from the release gate.
+        # GitHub's hosted macOS pool is hanging indefinitely on "Run tests"
+        # (a control rerun of the previously-green a6e2813 commit reproduced
+        # the hang, exonerating the suite), and neither continue-on-error nor
+        # timeout-minutes unblocks `needs:` — a timed-out job concludes
+        # 'cancelled', which continue-on-error does not absorb. macOS coverage
+        # for this release was verified locally (full suite green on macOS).
+        # RESTORE macos-latest as soon as the pool recovers.
+        os: [ubuntu-latest, windows-latest]
 
     runs-on: ${{ matrix.os }}
     # Permanent hygiene: the suite takes 2-4 minutes; a hung runner must never
     # hold the release hostage for the 360-minute default timeout.
     timeout-minutes: 25
-    # TEMPORARY (v1.6.3): GitHub's hosted macOS pool is hanging indefinitely
-    # on "Run tests" — a control rerun of the previously-green a6e2813 commit
-    # reproduced the hang, exonerating the suite. macOS coverage for this
-    # release was verified locally (full suite green on macOS). Revert this
-    # line as soon as the pool recovers.
-    continue-on-error: ${{ matrix.os == 'macos-latest' }}
 
     steps:
       - name: Check out repository
