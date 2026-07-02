@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.6.3 - 2026-07-02
+
+Structural patch — debt phase 6. No behavior changes intended; the native protocol stays `1`.
+
+### Changed
+
+- **Sync-writeback orchestration carved out of `contentRuntime.js`.** `applySyncChangesToOverleaf` and the post-write pipeline (save verification, mirror refresh, auto recompile, compile/unsupported-change summaries) now live in `extension/src/content/writebackOrchestrator.js` (758 lines), factory-wired like the earlier carves. Code moved verbatim; the only rewrites route the mutable runtime bindings through accessors (`state` → `getState()`, `currentRunView` → `getCurrentRunView()`). `contentRuntime.js` shrinks 8849 → 8257 lines and its architecture ceiling LOWERS 8850 → 8330 to lock the gain (it was 1 line from the ceiling).
+- **`writebackRouter.js` gets deliberate headroom** (ceiling 3300 → 3400; it was 8 lines from the ceiling) so bugfixes are not squeezed. The real relief — carving the ~1100-line tracked-changes lifecycle cluster — is earmarked as structural phase 7 with its own dedicated, test-locked pass.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.6.3` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.6.3.zip`, `codex-overleaf-native-host-v1.6.3.tar.gz`, and `codex-overleaf-link-1.6.3.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.6.3 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.6.3 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.6.3 -- uninstall-native`.
+
 ## v1.6.2 - 2026-06-17
 
 Quality patch — correctness, safety, and localization fixes for the parallel-subagents and writeback paths. The native protocol stays `1`.

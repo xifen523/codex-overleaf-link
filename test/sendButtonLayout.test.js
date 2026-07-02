@@ -122,7 +122,9 @@ test('starting a run is not blocked by asynchronous state persistence', () => {
     path.join(__dirname, '../extension/src/content/contentRuntime.js'),
     'utf8'
   );
-  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function applySyncChangesToOverleaf/)?.[0] || '';
+  // v1.6.3: applySyncChangesToOverleaf moved to writebackOrchestrator.js, so
+  // runTask's end delimiter is the next function still in contentRuntime.
+  const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function runSkillInstallerTask/)?.[0] || '';
   const beforeStartRun = runTaskBody.split(/currentRunView = startRunView\(/)[0] || '';
 
   assert.doesNotMatch(beforeStartRun, /await saveState\(\)/);

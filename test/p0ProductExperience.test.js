@@ -1351,7 +1351,9 @@ test('ask mode ignores unexpected local Codex writeback changes without failing 
   const guardEnd = applySyncBody.indexOf('let operations = buildSyncApplyOperations');
   const guardBody = guardEnd > -1 ? applySyncBody.slice(0, guardEnd) : applySyncBody;
 
-  assert.match(applySyncBody, /const runMode = options\.mode \|\| state\.mode/);
+  // v1.6.3 carve: the orchestrator reads panel state through the getState()
+  // accessor (mutable runtime binding), same semantics.
+  assert.match(applySyncBody, /const runMode = options\.mode \|\| getState\(\)\.mode/);
   assert.match(applySyncBody, /options\.mode === 'ask'/);
   assert.match(applySyncBody, /Ask mode ignored local file changes/);
   assert.match(contentScript, /mode:\s*submittedMode/);

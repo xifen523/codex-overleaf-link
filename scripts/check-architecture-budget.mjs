@@ -39,8 +39,10 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // + the recent-projects dashboard.
     // 8800 -> 8850 in v1.5.1: the hotfix moved the module-composition wiring
     // above its consumers and documents the hoisted-safe zone (+13 lines).
+    // v1.6.3 phase 6 carved the sync-writeback orchestration into
+    // writebackOrchestrator.js (8850 -> 8330, gain locked).
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 8850
+    maxLines: 8330
   },
   {
     // Carved from contentRuntime in v1.4.5: markdown/inline rendering, the
@@ -96,10 +98,22 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     maxLines: 1000
   },
   {
+    // Carved from contentRuntime in v1.6.3 (phase 6): the sync-writeback
+    // orchestration (applySyncChangesToOverleaf + post-write verify/mirror/
+    // compile pipeline).
+    path: 'extension/src/content/writebackOrchestrator.js',
+    maxLines: 800
+  },
+  {
     // Writeback router: large but cohesive. v1.3.9 added the cross-world
-    // cancel racer + per-op race wrapping (~80 lines). Freeze at +50 more.
+    // cancel racer + per-op race wrapping (~80 lines). 3300 -> 3400 in
+    // v1.6.3: deliberate headroom so bugfixes are not squeezed (was 8 lines
+    // from the ceiling). The real relief is the phase-7 split target: the
+    // tracked-changes lifecycle cluster (accept/rejectTrackedChanges + the
+    // accept-replay/no-trace-undo helpers, ~1100 lines) is a cohesive carve
+    // candidate that deserves its own dedicated, test-locked phase.
     path: 'extension/src/page/writebackRouter.js',
-    maxLines: 3300
+    maxLines: 3400
   },
   {
     path: 'extension/src/page/treeOperations.js',

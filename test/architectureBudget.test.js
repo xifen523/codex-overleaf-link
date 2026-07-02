@@ -24,7 +24,7 @@ test('architecture budget tracks v1.0 final split targets for the largest files'
     [
       ['extension/src/contentScript.js', 4500],
       ['extension/src/pageBridge.js', 2250],
-      ['extension/src/content/contentRuntime.js', 8850],
+      ['extension/src/content/contentRuntime.js', 8330],
       ['extension/src/content/markdownText.js', 700],
       ['extension/src/content/diagnosticsController.js', 700],
       ['extension/src/content/runTimelineView.js', 950],
@@ -33,7 +33,8 @@ test('architecture budget tracks v1.0 final split targets for the largest files'
       ['extension/src/content/modelPicker.js', 550],
       ['extension/src/content/recentProjects.js', 880],
       ['extension/src/content/otWarmMirror.js', 1000],
-      ['extension/src/page/writebackRouter.js', 3300],
+      ['extension/src/content/writebackOrchestrator.js', 800],
+      ['extension/src/page/writebackRouter.js', 3400],
       ['extension/src/page/treeOperations.js', 1650],
       ['extension/src/shared/storageDb.js', 1350],
       ['native-host/src/codexSessionRunner.js', 1500],

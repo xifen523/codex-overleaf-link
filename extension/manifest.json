@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Codex Overleaf Link",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "Connect the active Overleaf project to a local Codex bridge.",
   "icons": {
     "16": "assets/icons/icon16.png",
@@ -72,6 +72,7 @@
         "src/content/modelPicker.js",
         "src/content/recentProjects.js",
         "src/content/otWarmMirror.js",
+        "src/content/writebackOrchestrator.js",
         "src/content/contentRuntime.js",
         "src/contentScript.js"
       ],
