@@ -128,8 +128,18 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // tracked-changes lifecycle cluster (accept/rejectTrackedChanges + the
     // accept-replay/no-trace-undo helpers, ~1100 lines) is a cohesive carve
     // candidate that deserves its own dedicated, test-locked phase.
+    // Phase 7 (v1.8.0, #117): the tracked-changes lifecycle (~1500 lines)
+    // moved to trackedChangesLifecycle.js; the router keeps applyOperations,
+    // the write pipeline, and the failure catalog. 3400 -> 1950.
     path: 'extension/src/page/writebackRouter.js',
-    maxLines: 3400
+    maxLines: 1950
+  },
+  {
+    // Carved from writebackRouter in v1.8.0 (phase 7, #117): accept/reject
+    // tracked-changes flows, accept-replay + editor-undo recovery, blocked
+    // -result builders, and the tracked-change DOM collectors.
+    path: 'extension/src/page/trackedChangesLifecycle.js',
+    maxLines: 1650
   },
   {
     path: 'extension/src/page/treeOperations.js',

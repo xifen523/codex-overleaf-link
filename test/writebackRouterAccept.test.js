@@ -1087,8 +1087,13 @@ test('reject sweep tracked_change_undo_max_iterations emits structured tracked_c
   // to the test value (the existing reject-path tests already cover behavior).
   const fs = require('node:fs');
   const path = require('node:path');
+  // v1.8.0 phase 7: the reject sweeps moved to trackedChangesLifecycle.js;
+  // the failure catalog stays in writebackRouter.js. Pin across both.
   const writebackRouterText = fs.readFileSync(
     path.join(__dirname, '../extension/src/page/writebackRouter.js'),
+    'utf8'
+  ) + fs.readFileSync(
+    path.join(__dirname, '../extension/src/page/trackedChangesLifecycle.js'),
     'utf8'
   );
   // Both reject-sweep terminal returns reference the canonical code.

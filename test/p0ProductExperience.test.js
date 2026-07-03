@@ -2841,8 +2841,13 @@ test('reviewing write undo passes post-run content so Overleaf native undo can r
     path.join(__dirname, '../extension/src/pageBridge.js'),
     'utf8'
   );
+  // v1.8.0 phase 7: the editor-undo reject flow lives in
+  // trackedChangesLifecycle.js; pin across router + lifecycle.
   const writebackRouter = fs.readFileSync(
     path.join(__dirname, '../extension/src/page/writebackRouter.js'),
+    'utf8'
+  ) + fs.readFileSync(
+    path.join(__dirname, '../extension/src/page/trackedChangesLifecycle.js'),
     'utf8'
   );
   const undoRunBody = contentScript.match(/async function undoRunTrackedChanges\(runId, run\) \{[\s\S]*?\n  function getRunUndoCount/)?.[0] || '';
