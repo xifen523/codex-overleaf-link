@@ -10,6 +10,7 @@ importScripts('shared/compatibility.js');
     'task.confirm',
     'mirror.sync',
     'mirror.patchFiles',
+    'mirror.confirmWriteback',
     'mirror.scanSensitive',
     'codex.history.clearPlugin',
     'skills.list',
@@ -97,6 +98,8 @@ importScripts('shared/compatibility.js');
       case 'mirror.sync':
         return 'safe_sync_retry';
       case 'mirror.patchFiles':
+        return 'safe_sync_retry';
+      case 'mirror.confirmWriteback':
         return 'safe_sync_retry';
       case 'codex.cancel':
         return 'best_effort';

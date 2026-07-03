@@ -484,11 +484,58 @@
     });
   }
 
+  // v1.8.0: text-only writebacks confirm the mirror in place. The written
+  // content ORIGINATED in the local workspace, so after a verified writeback
+  // the workspace already equals Overleaf; only the baseline hashes and
+  // freshness metadata are stale. mirror.confirmWriteback re-hashes the
+  // written files without re-downloading the project. Anything unusual —
+  // tree ops, binary writes, dirty mirror, an older native host without the
+  // method — falls back to the full zip resync below.
+  const MIRROR_CONFIRMABLE_OPERATION_TYPES = new Set(['edit']);
+
+  async function tryConfirmMirrorWriteback(applied) {
+    const entries = Array.isArray(applied?.applied) ? applied.applied : [];
+    if (!entries.length) {
+      return false;
+    }
+    const paths = [];
+    for (const entry of entries) {
+      const operation = entry?.operation || {};
+      if (!MIRROR_CONFIRMABLE_OPERATION_TYPES.has(operation.type) || !operation.path) {
+        return false;
+      }
+      paths.push(operation.path);
+    }
+    try {
+      const response = await sendBackgroundNative({
+        method: 'mirror.confirmWriteback',
+        params: {
+          projectId: getCurrentProjectId(),
+          paths: Array.from(new Set(paths))
+        }
+      });
+      return response?.ok === true && response?.result?.ok === true;
+    } catch (error) {
+      return false;
+    }
+  }
+
   async function refreshProjectMirrorAfterWriteback(project = {}, applied = {}, saveVerification = {}) {
     if (saveVerification?.state !== 'verified_saved') {
       return;
     }
     if (!Array.isArray(applied?.applied) || !applied.applied.length) {
+      return;
+    }
+
+    if (await tryConfirmMirrorWriteback(applied)) {
+      appendRunEvent({
+        title: tx(
+          'Local Codex workspace confirmed in place (no project re-download needed). The next run starts from the latest content.',
+          '本地 Codex workspace 已就地确认（无需重新下载项目），下一轮将从最新内容开始。'
+        ),
+        status: 'completed'
+      });
       return;
     }
 

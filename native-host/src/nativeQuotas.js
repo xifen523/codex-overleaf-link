@@ -26,6 +26,8 @@ function validateNativeRequestQuotas(request = {}) {
       ]);
     case 'mirror.sync':
       return validateProjectSnapshotQuota(params.project);
+    case 'mirror.confirmWriteback':
+      return validateOperationListQuota(params.paths, 'paths');
     case 'mirror.patchFiles':
       return firstQuotaViolation([
         validateOperationListQuota(params.files, 'files'),

@@ -5366,6 +5366,29 @@ test('panel.css ships visible styling for the recovery action button', () => {
     'recovery action button must have a :disabled state');
 });
 
+test('verified text-only writebacks confirm the mirror in place with a full-resync fallback (v1.8.0)', () => {
+  // The written content ORIGINATES in the local workspace, so a verified
+  // writeback only needs the baseline re-hashed (mirror.confirmWriteback) —
+  // not a full project re-download. Anything unusual must fall back.
+  const refresh = extractFromContentScript('refreshProjectMirrorAfterWriteback');
+  assert.match(refresh, /await tryConfirmMirrorWriteback\(applied\)/,
+    'the incremental confirm path runs first');
+  assert.match(refresh, /getProjectSnapshot/,
+    'the full zip resync fallback stays in place');
+  const confirm = extractFromContentScript('tryConfirmMirrorWriteback');
+  assert.match(confirm, /MIRROR_CONFIRMABLE_OPERATION_TYPES\.has\(operation\.type\)/,
+    'only whitelisted text operations qualify');
+  assert.match(confirm, /return false/,
+    'any non-qualifying entry falls back to the full resync');
+  assert.match(confirm, /mirror\.confirmWriteback/,
+    'dispatches the v1.8.0 confirm method');
+  assert.match(confirm, /catch \(error\)/,
+    'an old native host without the method must not break the refresh');
+  const src = getContentScriptSource();
+  assert.match(src, /MIRROR_CONFIRMABLE_OPERATION_TYPES = new Set\(\['edit'\]\)/,
+    'tree ops and binary writes are excluded from the in-place confirm');
+});
+
 test('writeback records the undo checkpoint before any cancellable verify await; mirror runs in background with barriers (v1.7.5)', () => {
   // A user-cancel during the post-write save-verify throws codex_cancelled.
   // If undo recording sat after that await, a cancel would strip the "Undo

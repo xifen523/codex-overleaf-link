@@ -41,6 +41,7 @@
     'task.confirm',
     'mirror.sync',
     'mirror.patchFiles',
+    'mirror.confirmWriteback',
     'mirror.scanSensitive',
     'codex.history.clearPlugin',
     'skills.list',

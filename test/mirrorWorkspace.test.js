@@ -6,6 +6,7 @@ const test = require('node:test');
 
 const {
   SAFE_INLINE_BINARY_CHANGE_BYTES,
+  confirmWritebackFiles,
   markMirrorDirty,
   collectMirrorChangesDetailed,
   collectMirrorChanges,
@@ -716,6 +717,88 @@ test('rejects project paths that would escape the local mirror', async () => {
       }),
       /Unsafe project path/
     );
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('confirmWritebackFiles re-hashes written workspace files in place and refreshes freshness (v1.8.0)', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    await syncOverleafToMirror({
+      projectId: 'confirm-project',
+      project: {
+        files: [
+          { path: 'main.tex', content: 'original content\n' },
+          { path: 'other.tex', content: 'untouched\n' }
+        ],
+        capabilities: { fullProjectSnapshot: true }
+      },
+      rootDir
+    });
+    const mirror = getProjectMirror('confirm-project', { rootDir });
+    const statusBefore = getMirrorStatus('confirm-project', { rootDir });
+
+    // Codex edits the workspace copy (the writeback SOURCE), then the
+    // writeback lands it in Overleaf. Confirm must adopt the workspace
+    // content as the new baseline without any re-download.
+    fs.writeFileSync(path.join(mirror.workspacePath, 'main.tex'), 'edited by codex\n', 'utf8');
+
+    const result = await confirmWritebackFiles({
+      projectId: 'confirm-project',
+      paths: ['main.tex'],
+      rootDir
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.confirmed.length, 1);
+    assert.equal(result.confirmed[0].path, 'main.tex');
+
+    const baseline = JSON.parse(fs.readFileSync(mirror.baselinePath, 'utf8'));
+    const mainEntry = baseline.files.find(file => file.path === 'main.tex');
+    assert.equal(mainEntry.content, 'edited by codex\n', 'baseline adopts the workspace content');
+    const otherEntry = baseline.files.find(file => file.path === 'other.tex');
+    assert.equal(otherEntry.content, 'untouched\n', 'untouched files keep their baseline');
+    assert.equal(baseline.lastSyncSource, 'writeback-confirm');
+    assert.ok(baseline.lastFullSyncAt >= statusBefore.lastFullSyncAt, 'freshness is renewed');
+
+    const statusAfter = getMirrorStatus('confirm-project', { rootDir });
+    assert.equal(statusAfter.exists, true, 'mirror stays reusable after confirm');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('confirmWritebackFiles refuses dirty mirrors, unknown files and missing baselines (v1.8.0)', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    // No baseline yet -> refuse (caller falls back to the full resync).
+    const noBaseline = await confirmWritebackFiles({ projectId: 'confirm-guards', paths: ['main.tex'], rootDir });
+    assert.equal(noBaseline.ok, false);
+    assert.equal(noBaseline.reason, 'no_baseline');
+
+    await syncOverleafToMirror({
+      projectId: 'confirm-guards',
+      project: {
+        files: [{ path: 'main.tex', content: 'original\n' }],
+        capabilities: { fullProjectSnapshot: true }
+      },
+      rootDir
+    });
+
+    // A path outside the baseline (e.g. a tree op slipped through) -> refuse.
+    const unknown = await confirmWritebackFiles({ projectId: 'confirm-guards', paths: ['new-file.tex'], rootDir });
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.reason, 'missing_baseline_file');
+
+    // Empty path list -> refuse.
+    const empty = await confirmWritebackFiles({ projectId: 'confirm-guards', paths: [], rootDir });
+    assert.equal(empty.ok, false);
+
+    // Dirty mirror -> refuse.
+    markMirrorDirty({ projectId: 'confirm-guards', rootDir, reason: 'test_dirty' });
+    const dirty = await confirmWritebackFiles({ projectId: 'confirm-guards', paths: ['main.tex'], rootDir });
+    assert.equal(dirty.ok, false);
+    assert.equal(dirty.reason, 'dirty_mirror');
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

@@ -771,6 +771,61 @@ async function applyFileOverlays({ projectId, overlays, rootDir }) {
   });
 }
 
+// v1.8.0: after a VERIFIED writeback, the workspace already holds the exact
+// content that landed in Overleaf (the writeback reads from this workspace).
+// Instead of re-downloading the whole project only to rewrite what we just
+// uploaded, re-hash the written workspace files in place and refresh the
+// baseline freshness metadata. Any doubt -> ok:false, and the caller falls
+// back to a full syncOverleafToMirror.
+async function confirmWritebackFiles({ projectId, paths, rootDir }) {
+  const mirror = getProjectMirror(projectId, { rootDir });
+  const baseline = readBaseline(mirror.baselinePath);
+  if (!baseline.lastFullSyncAt) {
+    return { ok: false, reason: 'no_baseline' };
+  }
+  if (baseline.dirty === true) {
+    return { ok: false, reason: 'dirty_mirror' };
+  }
+  const filesByPath = new Map((baseline.files || []).map(file => [file.path, file]));
+  const confirmed = [];
+  for (const rawPath of Array.isArray(paths) ? paths : []) {
+    const normalizedPath = normalizeRelativePath(rawPath);
+    const baselineFile = filesByPath.get(normalizedPath);
+    if (!baselineFile) {
+      return { ok: false, reason: 'missing_baseline_file', path: normalizedPath };
+    }
+    if (baselineFile.kind !== 'text') {
+      return { ok: false, reason: 'not_text', path: normalizedPath };
+    }
+    let target;
+    try {
+      target = resolveWorkspacePath(mirror.workspacePath, normalizedPath);
+    } catch (error) {
+      return { ok: false, reason: 'unsafe_path', path: normalizedPath };
+    }
+    let content;
+    try {
+      content = fs.readFileSync(target, 'utf8');
+    } catch (error) {
+      return { ok: false, reason: 'workspace_read_failed', path: normalizedPath };
+    }
+    const hash = hashText(content);
+    filesByPath.set(normalizedPath, { ...baselineFile, hash, content });
+    confirmed.push({ path: normalizedPath, hash });
+  }
+  if (!confirmed.length) {
+    return { ok: false, reason: 'no_paths' };
+  }
+  const now = new Date().toISOString();
+  writeBaseline(mirror.baselinePath, {
+    ...baseline,
+    lastFullSyncAt: now,
+    lastSyncSource: 'writeback-confirm',
+    files: Array.from(filesByPath.values())
+  });
+  return { ok: true, confirmed, lastFullSyncAt: now };
+}
+
 async function patchMirrorFiles({ projectId, files, rootDir, source = 'ot' }) {
   const mirror = getProjectMirror(projectId, { rootDir });
   const baseline = readBaseline(mirror.baselinePath);
@@ -1013,6 +1068,7 @@ module.exports = {
   SAFE_INLINE_BINARY_CHANGE_BYTES,
   SAFE_NATIVE_RESPONSE_PAYLOAD_BYTES,
   applyFileOverlays,
+  confirmWritebackFiles,
   collectMirrorChangesDetailed,
   collectMirrorChanges,
   getDefaultMirrorRoot,

@@ -65,6 +65,10 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
     return handleMirrorPatchFiles(request, env);
   }
 
+  if (request.method === 'mirror.confirmWriteback') {
+    return handleMirrorConfirmWriteback(request, env);
+  }
+
   if (request.method === 'mirror.status') {
     return handleMirrorStatus(request, env);
   }
@@ -546,6 +550,32 @@ async function handleMirrorPatchFiles(request, env) {
     return okResponse(request.id, result);
   } catch (error) {
     return errorResponse(request.id, 'mirror_patch_files_failed', error.message);
+  } finally {
+    releaseProjectLock(projectKey, lockToken);
+  }
+}
+
+async function handleMirrorConfirmWriteback(request, env) {
+  const { confirmWritebackFiles } = require('./mirrorWorkspace');
+  const params = request.params || {};
+  const projectId = params.projectId || 'unknown';
+  const projectKey = resolveProjectKey(params);
+  const rootDir = env.CODEX_OVERLEAF_MIRROR_ROOT;
+
+  const lockToken = acquireProjectLock(projectKey);
+  if (!lockToken) {
+    return errorResponse(request.id, 'project_locked', `Project ${projectKey} is currently in use by codex.run`);
+  }
+
+  try {
+    const result = await confirmWritebackFiles({
+      projectId,
+      paths: params.paths,
+      rootDir
+    });
+    return okResponse(request.id, result);
+  } catch (error) {
+    return errorResponse(request.id, 'mirror_confirm_writeback_failed', error.message);
   } finally {
     releaseProjectLock(projectKey, lockToken);
   }
