@@ -73,6 +73,7 @@
         "src/content/recentProjects.js",
         "src/content/otWarmMirror.js",
         "src/content/writebackOrchestrator.js",
+        "src/content/panelMaintenance.js",
         "src/content/contentRuntime.js",
         "src/contentScript.js"
       ],

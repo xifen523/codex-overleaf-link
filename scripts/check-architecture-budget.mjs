@@ -51,8 +51,17 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // file, storage settings), the history & storage settings card, the
     // change-history read path, cross-tab hints, and the mirror barriers.
     // The recovery/history cluster (~300 lines) is the next carve candidate.
+    // Phase 8 (v1.8.0): the recovery-action handlers, change-history read
+    // path, history & storage card, and compaction notice moved to
+    // panelMaintenance.js. 8900 -> 8750.
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 8900
+    maxLines: 8750
+  },
+  {
+    // Carved from contentRuntime in v1.8.0 (phase 8): recovery handlers +
+    // change-history + storage card + compaction notice.
+    path: 'extension/src/content/panelMaintenance.js',
+    maxLines: 300
   },
   {
     // Carved from contentRuntime in v1.4.5: markdown/inline rendering, the

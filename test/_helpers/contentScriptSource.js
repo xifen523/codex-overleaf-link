@@ -22,6 +22,7 @@ const CONTENT_SOURCE_PATHS = [
   path.join(CONTENT_DIR, 'recentProjects.js'),
   path.join(CONTENT_DIR, 'otWarmMirror.js'),
   path.join(CONTENT_DIR, 'writebackOrchestrator.js'),
+  path.join(CONTENT_DIR, 'panelMaintenance.js'),
   CONTENT_SCRIPT_PATH
 ];
 

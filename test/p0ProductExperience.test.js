@@ -5347,7 +5347,9 @@ test('clear-all-history re-renders the panel explicitly instead of relying on st
   // normalize + save + re-render itself.
   const body = extractFromContentScript('clearAllHistoryWithConfirm');
   assert.match(body, /clearAllStores/);
-  assert.match(body, /normalizePanelState\(\{ \.\.\.state, sessions: \[\], runs: \[\], activeSessionId: '' \}\)/);
+  // v1.8.0 phase 8: the handler lives in panelMaintenance.js and goes
+  // through the injected getState/setState accessors.
+  assert.match(body, /setState\(normalizePanelState\(\{ \.\.\.getState\(\), sessions: \[\], runs: \[\], activeSessionId: '' \}\)\)/);
   assert.match(body, /applyStateToPanel\(\)/, 'must re-render the emptied panel');
   assert.doesNotMatch(body, /await startNewSession\(\)/,
     'must not route through startNewSession (its reuse guard skips the re-render)');
