@@ -32,6 +32,7 @@
         <div class="codex-vscode-head-actions" aria-label="Codex actions">
           <button type="button" data-refresh title="Refresh current file status. This will not sync or modify files." aria-label="Refresh current file status. This will not sync or modify files.">↻</button>
           <div data-diagnostics-slot></div>
+          <button type="button" data-change-history title="Change history" aria-label="Change history">🕘</button>
           <button type="button" data-new-session title="New Session" aria-label="New Session">+</button>
           <button type="button" data-custom-instructions-settings title="Project Settings" aria-label="Project Settings" aria-expanded="false">⚙</button>
         </div>
@@ -74,6 +75,7 @@
     bind(instance, panelEl, 'mousedown', event => event.stopPropagation());
     bind(instance, panelEl.querySelector('[data-refresh]'), 'click', () => callbacks.onRefresh?.());
     bind(instance, panelEl.querySelector('[data-new-session]'), 'click', () => callbacks.onNewSession?.());
+    bind(instance, panelEl.querySelector('[data-change-history]'), 'click', () => callbacks.onChangeHistory?.());
     bind(instance, panelEl.querySelector('[data-custom-instructions-settings]'), 'click', () => callbacks.onSettingsClick?.());
     bind(instance, panelEl.querySelector('[data-panel-resize-handle]'), 'pointerdown', event => startResize(instance, event));
     bind(instance, panelEl.querySelector('[data-panel-resize-handle]'), 'dblclick', event => {

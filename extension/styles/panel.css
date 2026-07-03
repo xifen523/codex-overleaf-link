@@ -3859,3 +3859,52 @@
 #codex-overleaf-panel .transcript-turn[data-status="interrupted"] .run-status {
   color: #d7ba7d;
 }
+
+/* v1.8.0: in-session run search + history-row links + jump flash. */
+#codex-overleaf-panel .run-search {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 6px;
+  padding: 4px 8px;
+  background: var(--codex-bg-input, #181818);
+  border: 1px solid var(--codex-border, #2a2a2a);
+  border-radius: 6px;
+  color: var(--codex-fg, #e4e4e4);
+  font-size: 11.5px;
+}
+#codex-overleaf-panel .codex-history-row--linked {
+  cursor: pointer;
+}
+#codex-overleaf-panel .codex-history-row--linked:hover {
+  background: var(--tl-hover, rgba(255, 255, 255, 0.04));
+}
+#codex-overleaf-panel .run-card--flash {
+  animation: codex-jump-flash 1.6s ease-out;
+}
+@keyframes codex-jump-flash {
+  0%, 40% { box-shadow: inset 0 0 0 1px var(--tl-accent, #4dd0be); }
+  100% { box-shadow: none; }
+}
+
+/* v1.8.0: per-file undo selection list inside the confirm overlay. */
+#codex-overleaf-panel .codex-undo-file-list {
+  max-height: 180px;
+  overflow-y: auto;
+  margin: 8px 0;
+  text-align: left;
+}
+#codex-overleaf-panel .codex-undo-file-item {
+  display: block;
+  padding: 3px 0;
+  font-size: 11.5px;
+  color: var(--codex-fg, #e4e4e4);
+  word-break: break-all;
+  cursor: pointer;
+}
+#codex-overleaf-panel .codex-undo-file-item--all {
+  border-bottom: 1px solid var(--codex-border, #2a2a2a);
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  color: var(--codex-fg-muted, #8a8a8a);
+}

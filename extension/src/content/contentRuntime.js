@@ -290,6 +290,7 @@
     applyStateToPanel: () => applyStateToPanel(),
     normalizePanelState,
     openCustomInstructionsSettings: () => openCustomInstructionsSettings(),
+    onHistoryRowJump: record => jumpToHistoryRun(record),
     getPanel: () => panel,
     getState: () => state,
     setState: next => { state = next; },
@@ -297,6 +298,8 @@
     getSettingsPanelInstance: () => settingsPanelInstance
   });
   const {
+    showUndoFileSelection,
+    openChangeHistory,
     renderAuditHistoryPanel,
     applyAuditHistoryFilter,
     refreshStorageUsageSummary,
@@ -909,6 +912,7 @@
         callbacks: {
           onRefresh: () => refreshProbe({ userInitiated: true }),
           onNewSession: () => startNewSession(),
+          onChangeHistory: () => openChangeHistory(),
           onSettingsClick: () => toggleCustomInstructionsSettings(),
           onWidthChange: (width, options = {}) => {
             if (state) {
@@ -6469,6 +6473,7 @@
     if (getLastExperimentalOtProjectId() !== projectId) {
       syncExperimentalOtToggleForProject(projectId);
     }
+    persistComposerAttachmentsToState();
     state = updateActiveSession(state, {
       model: readSelectedModelInput(),
       reasoningEffort: panel.querySelector('[data-reasoning]').value,
@@ -6528,6 +6533,12 @@
   }
 
 
+  function persistComposerAttachmentsToState() {
+    if (typeof composerAttachmentController?.serializePersistableAttachments === 'function') {
+      state.composerAttachments = composerAttachmentController.serializePersistableAttachments();
+    }
+  }
+
   function clearTaskComposer({ keepAttachments = false } = {}) {
     const taskInput = panel?.querySelector('[data-task]');
     if (taskInput) {
@@ -6582,6 +6593,13 @@
     renderRunHistory();
     renderContextSelection();
     renderContextSummary();
+    // v1.8.0 C4: refresh recovery — small attachments persisted in state are
+    // restored into the (empty) tray once, before the render below.
+    if (Array.isArray(state.composerAttachments) && state.composerAttachments.length
+      && !composerAttachmentController.getAttachmentsForRun?.().length
+      && typeof composerAttachmentController.restorePersistedAttachments === 'function') {
+      composerAttachmentController.restorePersistedAttachments(state.composerAttachments);
+    }
     renderComposerAttachments();
     renderComposerSkillInvocation();
     applyLocaleToPanel();
@@ -7144,30 +7162,51 @@
       return;
     }
 
-    const approved = await showPluginConfirm({
-      title: tr('undoNoTraceTitle'),
-      message: [
-        truncateRunTitle(run.task),
-        '',
-        tr('undoNoTraceMessage', { files: formatOperationFiles(undoOperations) })
-      ].join('\n'),
-      confirmLabel: tr('undoConfirm'),
-      cancelLabel: tr('confirmDefaultCancel'),
-      destructive: true
-    });
-    if (!approved) {
-      return;
+    // v1.8.0 C3: multi-file undos confirm through a per-file selection —
+    // undoing a subset leaves undoStatus 'partial' and the button usable;
+    // re-undoing an already-restored file is skipped by the base check.
+    const undoPaths = Array.from(new Set(undoOperations.map(operation => operation?.path).filter(Boolean)));
+    let selectedOperations = undoOperations;
+    if (undoPaths.length > 1 && typeof showUndoFileSelection === 'function') {
+      const selectedPaths = await showUndoFileSelection({
+        title: tr('undoFileSelectTitle'),
+        task: truncateRunTitle(run.task),
+        confirmLabel: tr('undoFileSelectConfirm'),
+        cancelLabel: tr('confirmDefaultCancel'),
+        selectAllLabel: tr('undoFileSelectAll'),
+        paths: undoPaths
+      });
+      if (!selectedPaths) {
+        return;
+      }
+      const selectedSet = new Set(selectedPaths);
+      selectedOperations = undoOperations.filter(operation => selectedSet.has(operation?.path));
+    } else {
+      const approved = await showPluginConfirm({
+        title: tr('undoNoTraceTitle'),
+        message: [
+          truncateRunTitle(run.task),
+          '',
+          tr('undoNoTraceMessage', { files: formatOperationFiles(undoOperations) })
+        ].join('\n'),
+        confirmLabel: tr('undoConfirm'),
+        cancelLabel: tr('confirmDefaultCancel'),
+        destructive: true
+      });
+      if (!approved) {
+        return;
+      }
     }
 
     setRunUndoStatus(runId, 'running');
     appendRunRecordEvent(runId, {
       title: tr('undoNoTraceStarted'),
       status: 'running',
-      detail: { [tr('detailWillUndo')]: formatOperationFiles(undoOperations) }
+      detail: { [tr('detailWillUndo')]: formatOperationFiles(selectedOperations) }
     });
 
       const result = await callPageBridge('applyOperations', {
-        operations: undoOperations,
+        operations: selectedOperations,
         baseFiles: run.undoBaseFiles || [],
         reviewingPolicy: 'no-trace-undo',
         // Welcome-panel + write-guard:
@@ -7192,7 +7231,10 @@
           }))
         }
       });
-      setRunUndoStatus(runId, undoApplied ? 'applied' : 'partial');
+      // A subset undo never closes the ledger: unselected files can still
+      // be undone later, so the run stays 'partial' and the button usable.
+      const fullSelection = selectedOperations.length === undoOperations.length;
+      setRunUndoStatus(runId, undoApplied && fullSelection ? 'applied' : 'partial');
   }
 
   async function undoRunTrackedChanges(runId, run) {
@@ -8285,6 +8327,28 @@
     return line;
   }
 
+
+  // v1.8.0 C1: a change-history row jumps to the run it describes —
+  // switch to its session if needed, then scroll + flash the run card.
+  async function jumpToHistoryRun(record = {}) {
+    closeCustomInstructionsSettings();
+    if (record.sessionId && record.sessionId !== state.activeSessionId) {
+      const target = (state.sessions || []).find(session => session.id === record.sessionId);
+      if (!target) {
+        showPluginToast(tx('That session is no longer stored (history keeps the last 20).', '该会话已不在存储中（历史仅保留最近 20 个会话）。'));
+        return;
+      }
+      await switchSession(record.sessionId);
+    }
+    const card = panel?.querySelector(`[data-run-id="${cssEscape(record.turnId || '')}"]`);
+    if (!card) {
+      showPluginToast(tx('That run is no longer in the timeline (runs keep the last 20).', '该轮已不在时间线中（仅保留最近 20 轮）。'));
+      return;
+    }
+    card.scrollIntoView({ block: 'start' });
+    card.classList.add('run-card--flash');
+    setTimeout(() => card.classList.remove('run-card--flash'), 1600);
+  }
 
   function appendCompletionReport(input = {}) {
     const operations = input.operations || [];

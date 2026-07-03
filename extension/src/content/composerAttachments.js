@@ -229,7 +229,45 @@
       });
     }
 
+    // v1.8.0 C4: survive a page refresh. Only small attachments persist
+    // (single base64 <= 1MB, max 3) — oversized ones are dropped on restore
+    // rather than bloating chrome.storage and every debounced saveState.
+    const PERSIST_MAX_CONTENT_CHARS = 1024 * 1024;
+    const PERSIST_MAX_COUNT = 3;
+
+    function serializePersistableAttachments() {
+      return attachments
+        .filter(attachment => (attachment.contentBase64 || '').length <= PERSIST_MAX_CONTENT_CHARS)
+        .slice(0, PERSIST_MAX_COUNT)
+        .map(attachment => ({
+          id: attachment.id,
+          name: attachment.name,
+          mimeType: attachment.mimeType,
+          size: attachment.size,
+          kind: attachment.kind,
+          previewDataUrl: attachment.previewDataUrl,
+          contentBase64: attachment.contentBase64,
+          dedupeKey: attachment.dedupeKey
+        }));
+    }
+
+    function restorePersistedAttachments(persisted) {
+      const usable = (Array.isArray(persisted) ? persisted : [])
+        .filter(item => item && item.name && typeof item.contentBase64 === 'string'
+          && item.contentBase64.length > 0
+          && item.contentBase64.length <= PERSIST_MAX_CONTENT_CHARS)
+        .slice(0, PERSIST_MAX_COUNT);
+      if (!usable.length) {
+        return 0;
+      }
+      attachments = usable.map(item => ({ ...item }));
+      renderComposerAttachments();
+      return attachments.length;
+    }
+
     return {
+      serializePersistableAttachments,
+      restorePersistedAttachments,
       handlePaste,
       handleDragOver,
       handleDragLeave,

@@ -2807,7 +2807,7 @@ test('no-trace undo restores original file snapshots in one operation per file',
   assert.match(contentScript, /buildSnapshotRestoreUndo/);
   assert.match(undoRunBody, /const undoRestore = buildNoTraceUndoRestore\(run\)/);
   assert.match(undoRunBody, /const undoOperations = undoRestore\.operations/);
-  assert.match(undoRunBody, /operations:\s*undoOperations/);
+  assert.match(undoRunBody, /operations:\s*selectedOperations/);
   assert.match(undoRunBody, /baseFiles:\s*run\.undoBaseFiles \|\| \[\]/);
   assert.match(recordUndoBody, /record\.undoExpectedFiles = selectExpectedFilesForTrackedUndo\(project, combinedAppliedOperations, \[\]\)/);
   assert.doesNotMatch(recordUndoBody, /record\.undoExpectedFiles = \[\]/);
@@ -2820,7 +2820,7 @@ test('no-trace undo marks button applied when verified restore succeeds despite 
   assert.match(contentScript, /function isUndoResultEffectivelyApplied\(run, result\)/);
   assert.match(undoRunBody, /const undoApplied = isUndoResultEffectivelyApplied\(run, result\)/);
   assert.match(undoRunBody, /status:\s*undoApplied \? 'completed' : result\.skipped\?\.length \? 'failed' : 'completed'/);
-  assert.match(undoRunBody, /setRunUndoStatus\(runId,\s*undoApplied \? 'applied' : 'partial'\)/);
+  assert.match(undoRunBody, /setRunUndoStatus\(runId,\s*undoApplied && fullSelection \? 'applied' : 'partial'\)/);
 });
 
 test('reviewing write undo rejects Overleaf tracked changes instead of text patching', () => {

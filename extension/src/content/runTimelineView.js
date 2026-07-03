@@ -42,6 +42,7 @@
     } = deps;
 
   let logAutoFollow = true;
+  let runSearchQuery = '';
   let userScrollIntentUntil = 0;
   // Scroll engine: a single rAF coalesces a burst of scroll requests into one
   // write per frame (streaming can fire ~25/sec); `scrollLogPendingForce`
@@ -306,6 +307,23 @@
       truncated.textContent = tr('runsTruncatedNote');
       log.append(truncated);
     }
+    // In-session search (v1.8.0): filter run cards by task or report text.
+    // Rendered with the same >= 3 threshold as the turn navigator; filtering
+    // is pure display (hidden attribute), state is kept across re-renders.
+    if (runs.length >= 3) {
+      const search = document.createElement('input');
+      search.type = 'search';
+      search.className = 'run-search';
+      search.setAttribute('data-run-search', '');
+      search.placeholder = tr('runSearchPlaceholder');
+      search.setAttribute('aria-label', tr('runSearchPlaceholder'));
+      search.value = runSearchQuery;
+      search.addEventListener('input', () => {
+        runSearchQuery = search.value;
+        applyRunSearchFilter(log);
+      });
+      log.append(search);
+    }
     // Turn navigation (v1.7.5): once the log holds enough turns that
     // scroll-hunting hurts, offer a jump-to-turn dropdown pinned above them.
     if (runs.length >= 3) {
@@ -336,7 +354,32 @@
     for (const run of runs) {
       log.append(renderRunCard(run));
     }
+    if (runSearchQuery) {
+      applyRunSearchFilter(log);
+    }
     scrollLogToBottom({ force: true });
+  }
+
+  // Case-insensitive substring match over the run's task text and its
+  // report/event narration. Empty query shows everything again.
+  function applyRunSearchFilter(log) {
+    const query = String(runSearchQuery || '').trim().toLowerCase();
+    const state = getState();
+    const matchingIds = new Set();
+    if (query) {
+      for (const run of state.runs || []) {
+        const haystack = [
+          run.task || '',
+          ...(run.events || []).map(event => `${event.title || ''} ${typeof event.detail === 'string' ? event.detail : ''}`)
+        ].join(' ').toLowerCase();
+        if (haystack.includes(query)) {
+          matchingIds.add(run.id);
+        }
+      }
+    }
+    for (const card of log.querySelectorAll('[data-run-id]')) {
+      card.hidden = Boolean(query) && !matchingIds.has(card.dataset.runId);
+    }
   }
 
   function renderRunCard(run) {

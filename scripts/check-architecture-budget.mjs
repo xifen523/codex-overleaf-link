@@ -54,14 +54,18 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // Phase 8 (v1.8.0): the recovery-action handlers, change-history read
     // path, history & storage card, and compaction notice moved to
     // panelMaintenance.js. 8900 -> 8750.
+    // v1.8.0 B3 raised 8750 -> 8830: history-row jump, per-file undo
+    // selection wiring, and composer-attachment refresh persistence.
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 8750
+    maxLines: 8830
   },
   {
     // Carved from contentRuntime in v1.8.0 (phase 8): recovery handlers +
     // change-history + storage card + compaction notice.
+    // v1.8.0 B3 raised 300 -> 420: the change-history entry/jump rows and
+    // the per-file undo selection overlay live here.
     path: 'extension/src/content/panelMaintenance.js',
-    maxLines: 300
+    maxLines: 420
   },
   {
     // Carved from contentRuntime in v1.4.5: markdown/inline rendering, the
@@ -81,8 +85,9 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // Undo/Accept controls). Raised 950 -> 1080 in v1.7.5 for the
     // recovery-action registry (per-failure-code buttons), the compile-fix /
     // rejected-redo report actions, and the jump-to-turn navigator.
+    // v1.8.0 B3 raised 1080 -> 1160 for the in-session run search.
     path: 'extension/src/content/runTimelineView.js',
-    maxLines: 1080
+    maxLines: 1160
   },
   {
     // Carved from contentRuntime in v1.4.7: the session lifecycle + list
@@ -126,8 +131,9 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // compile pipeline). Raised 800 -> 820 in v1.7.5 for the backgrounded
     // mirror refresh (pendingMirrorRefresh) and the skipped-failure
     // promotion that feeds the recovery-action registry.
+    // v1.8.0 B2 raised 820 -> 880 for the in-place mirror confirm path.
     path: 'extension/src/content/writebackOrchestrator.js',
-    maxLines: 820
+    maxLines: 880
   },
   {
     // Writeback router: large but cohesive. v1.3.9 added the cross-world

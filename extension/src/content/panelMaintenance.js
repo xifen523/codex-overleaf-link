@@ -21,6 +21,7 @@
       applyStateToPanel,
       normalizePanelState,
       openCustomInstructionsSettings,
+      onHistoryRowJump,
       getPanel,
       getState,
       setState,
@@ -106,6 +107,20 @@
         ? applied.join(' \u00b7 ')
         : tx('No files were written.', '未写入文件。');
       row.append(when, task, files);
+      // v1.8.0: rows jump to the run they describe (turnId === run.id).
+      if (record.sessionId && record.turnId && typeof onHistoryRowJump === 'function') {
+        row.classList.add('codex-history-row--linked');
+        row.setAttribute('role', 'button');
+        row.tabIndex = 0;
+        const jump = () => onHistoryRowJump(record);
+        row.addEventListener('click', jump);
+        row.addEventListener('keydown', keyEvent => {
+          if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
+            keyEvent.preventDefault();
+            jump();
+          }
+        });
+      }
       list.append(row);
     }
   }
@@ -228,6 +243,99 @@
     }
   }
 
+  // Per-file undo selection (v1.8.0 C3). A destructive-confirm variant with
+  // one checkbox per written file, all checked by default. Resolves with the
+  // selected paths, or null on cancel. Re-undoing an already-undone file is
+  // safe: the page-side base-content check skips it, so the modal never has
+  // to track which files a previous partial undo already restored.
+  function showUndoFileSelection({ title, task, confirmLabel, cancelLabel, selectAllLabel, paths }) {
+    const host = getPanel();
+    if (!host || !Array.isArray(paths) || !paths.length) {
+      return Promise.resolve(null);
+    }
+    return new Promise(resolve => {
+      host.querySelector('[data-undo-file-select]')?.remove();
+      const overlay = document.createElement('div');
+      overlay.className = 'codex-plugin-confirm codex-undo-file-select';
+      overlay.setAttribute('data-undo-file-select', '');
+      const box = document.createElement('div');
+      box.className = 'codex-plugin-confirm-box';
+      const heading = document.createElement('div');
+      heading.className = 'codex-plugin-confirm-title';
+      heading.textContent = title;
+      const taskLine = document.createElement('div');
+      taskLine.className = 'codex-plugin-confirm-message';
+      taskLine.textContent = task || '';
+      const list = document.createElement('div');
+      list.className = 'codex-undo-file-list';
+      const boxes = [];
+      const allToggle = document.createElement('label');
+      const allInput = document.createElement('input');
+      allInput.type = 'checkbox';
+      allInput.checked = true;
+      allToggle.append(allInput, document.createTextNode(` ${selectAllLabel}`));
+      allToggle.className = 'codex-undo-file-item codex-undo-file-item--all';
+      allInput.addEventListener('change', () => {
+        for (const input of boxes) {
+          input.checked = allInput.checked;
+        }
+      });
+      list.append(allToggle);
+      for (const path of paths) {
+        const item = document.createElement('label');
+        item.className = 'codex-undo-file-item';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = true;
+        input.value = path;
+        input.addEventListener('change', () => {
+          allInput.checked = boxes.every(box => box.checked);
+        });
+        boxes.push(input);
+        item.append(input, document.createTextNode(` ${path}`));
+        list.append(item);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'codex-plugin-confirm-actions';
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.textContent = cancelLabel;
+      const confirm = document.createElement('button');
+      confirm.type = 'button';
+      confirm.className = 'codex-plugin-confirm-confirm';
+      confirm.dataset.destructive = 'true';
+      confirm.textContent = confirmLabel;
+      const finish = value => {
+        overlay.remove();
+        resolve(value);
+      };
+      cancel.addEventListener('click', () => finish(null));
+      confirm.addEventListener('click', () => {
+        const selected = boxes.filter(input => input.checked).map(input => input.value);
+        finish(selected.length ? selected : null);
+      });
+      actions.append(cancel, confirm);
+      box.append(heading, taskLine, list, actions);
+      overlay.append(box);
+      host.append(overlay);
+      cancel.focus();
+    });
+  }
+
+  // Change history first-class entry (v1.8.0): the header clock button jumps
+  // straight to the Settings history card, expanded and loaded.
+  function openChangeHistory() {
+    openCustomInstructionsSettings();
+    const card = getSettingsPanelInstance()?.container?.querySelector('[data-history-card]');
+    if (card) {
+      if (!card.open) {
+        card.open = true;
+      }
+      renderAuditHistoryPanel();
+      card.scrollIntoView({ block: 'start' });
+    }
+  }
+
   function openStorageSettings() {
     openCustomInstructionsSettings();
     const card = getPanel()?.querySelector('[data-storage-card]');
@@ -237,6 +345,8 @@
     }
   }
     return {
+      showUndoFileSelection,
+      openChangeHistory,
       renderAuditHistoryPanel,
       applyAuditHistoryFilter,
       refreshStorageUsageSummary,

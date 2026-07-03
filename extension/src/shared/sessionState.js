@@ -130,6 +130,7 @@
     state.task = typeof state.task === 'string' ? state.task : '';
     state.model = typeof state.model === 'string' && state.model ? state.model : DEFAULT_PANEL_STATE.model;
     state.customInstructionsByProject = normalizeCustomInstructionsByProject(state.customInstructionsByProject);
+    state.composerAttachments = normalizeComposerAttachmentsForPersistence(state.composerAttachments);
     const localizedOptions = { ...options, locale: state.locale };
     state.runs = normalizeRuns(state.runs, localizedOptions);
     state.sessions = normalizeSessions(state, input, localizedOptions);
@@ -722,6 +723,31 @@
       .slice(-MAX_RUN_EVENTS);
   }
 
+  // v1.8.0 C4: composer attachments that survive a page refresh. Hard caps
+  // keep chrome.storage and every debounced saveState cheap: 3 attachments,
+  // 1MB of base64 each.
+  function normalizeComposerAttachmentsForPersistence(attachments) {
+    const MAX_COUNT = 3;
+    const MAX_CONTENT_CHARS = 1024 * 1024;
+    return (Array.isArray(attachments) ? attachments : [])
+      .filter(item => item && typeof item === 'object'
+        && normalizeAttachmentName(item.name)
+        && typeof item.contentBase64 === 'string'
+        && item.contentBase64.length > 0
+        && item.contentBase64.length <= MAX_CONTENT_CHARS)
+      .slice(0, MAX_COUNT)
+      .map(item => ({
+        id: normalizeTextField(item.id, 80),
+        name: normalizeAttachmentName(item.name),
+        mimeType: normalizeTextField(item.mimeType, 120),
+        size: Number(item.size) || 0,
+        kind: item.kind === 'image' ? 'image' : 'file',
+        previewDataUrl: typeof item.previewDataUrl === 'string' ? item.previewDataUrl : '',
+        contentBase64: item.contentBase64,
+        dedupeKey: normalizeTextField(item.dedupeKey, 200)
+      }));
+  }
+
   function normalizeRunAttachments(attachments, limits = STORAGE_DEFAULT_LIMITS) {
     const normalized = [];
     for (const attachment of Array.isArray(attachments) ? attachments : []) {
@@ -909,6 +935,7 @@
       // stripped here — so the gate silently died after any reload until the
       // Skills page was reopened.
       codexOverleafSkills: compactCodexOverleafSkillsForStorage(source.codexOverleafSkills),
+      composerAttachments: normalizeComposerAttachmentsForPersistence(source.composerAttachments),
       mode: VALID_MODES.has(active?.mode) ? active.mode : normalizeMode(source.mode),
       model: normalizeTextField(active?.model || source.model || DEFAULT_PANEL_STATE.model, 80),
       reasoningEffort: VALID_REASONING.has(active?.reasoningEffort)

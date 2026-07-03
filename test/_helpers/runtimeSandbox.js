@@ -67,6 +67,7 @@ const RUNTIME_STUBS = {
   saveState: 'async function saveState() {}',
   saveStateSoon: 'function saveStateSoon() {}',
   notifyAggressiveCompactionOnce: 'function notifyAggressiveCompactionOnce() {}',
+  persistComposerAttachmentsToState: 'function persistComposerAttachmentsToState() {}',
   // history & storage (v1.7.5 settings card)
   refreshStorageUsageSummary: 'function refreshStorageUsageSummary() {}',
   // timeline view-state accessors (the carved run-timeline module reads

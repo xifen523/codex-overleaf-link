@@ -1817,3 +1817,22 @@ test('report events keep compileErrors and failure across normalization, and agg
   prepareStateForStorage(state, { onAggressive: () => { aggressiveNotices += 1; } });
   assert.equal(aggressiveNotices, 0, 'normal-sized state does not report aggressive compaction');
 });
+
+test('composer attachments persist across refresh within hard caps (v1.8.0 C4)', () => {
+  const small = { id: 'a1', name: 'shot.png', mimeType: 'image/png', size: 10, kind: 'image', previewDataUrl: 'data:image/png;base64,AA', contentBase64: 'QUJD', dedupeKey: 'shot.png:10' };
+  const oversized = { ...small, id: 'a2', name: 'big.pdf', kind: 'file', contentBase64: 'x'.repeat(1024 * 1024 + 1) };
+  const state = normalizePanelState({
+    activeSessionId: 'session_a',
+    sessions: [{ id: 'session_a', title: 'A', runs: [] }],
+    composerAttachments: [small, oversized, small, small, small]
+  });
+  // Oversized dropped; count capped at 3.
+  assert.equal(state.composerAttachments.length, 3);
+  assert.equal(state.composerAttachments.every(item => item.name === 'shot.png'), true);
+  assert.equal(state.composerAttachments[0].contentBase64, 'QUJD');
+
+  const compact = prepareStateForStorage(state);
+  assert.equal(compact.composerAttachments.length, 3,
+    'attachments survive the storage-compaction whitelist');
+  assert.equal(compact.composerAttachments[0].contentBase64, 'QUJD');
+});
