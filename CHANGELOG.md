@@ -1,5 +1,28 @@
 # Changelog
 
+## v1.7.6 - 2026-07-03
+
+Motion & running-state consistency — the wobbling half-circle is gone, and no spinner ever spins forever. Adversarially fleet-verified (a P1 caught pre-release: the new CLI-guide button — and several v1.7.5 recovery buttons — keyed off failure objects that were never built). The native protocol stays `1`.
+
+### Fixed
+
+- **The wobbling spinner.** The timeline's running indicators (the per-line status glyph and the collapsed-header current step) used the `◐` character rotated by CSS — a font glyph spins around its bounding box, not its visual center, so it wobbled. Both are now CSS-drawn arc rings, identical to the send-button/session spinners, on one unified 800ms cadence (the old glyphs ran at 1.4s).
+- **Spinners that never stop.** Any activity line written with a running status kept spinning forever — the background mirror refresh's "checking latest Overleaf content" line after the report landed, and every historical "started X" line when expanding an old run's process log. Two CSS guards settle them to the neutral dot: a running line only spins while its run card is itself running AND no newer activity line has landed below it.
+- **Recovery buttons for shared failure codes were unreachable.** `buildContentFailure` only knew the 8 content-local codes and returned `null` for every shared-catalog code — so `codex_timeout`, `codex_output_limit`, `stale_source_changed` and `native_protocol_incompatible` failures never carried a structured failure onto their report, and the v1.7.5 "Edit & resend" / "Fix the native host" buttons never fired for them. It now falls back to the shared §9 catalog, locked by a behavioral test (not a source grep).
+- **Reduced motion now actually stops the rings.** The `prefers-reduced-motion` reset targeted `#codex-overleaf-panel *`, which never matches `::before` pseudo-elements — exactly where every spinner lives. The reset now covers `*::before`/`*::after`.
+
+### Added
+
+- **`codex_not_found` gets a recovery action.** A "Codex CLI was not found" failure now renders a "Codex CLI troubleshooting guide" button that opens the README's PATH/login checks — previously it was the one common failure with no clickable next step.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.7.6` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.7.6.zip`, `codex-overleaf-native-host-v1.7.6.tar.gz`, and `codex-overleaf-link-1.7.6.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.7.6 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.7.6 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.7.6 -- uninstall-native`.
+
 ## v1.7.5 - 2026-07-03
 
 Journey pack — the three walkthrough audits (daily loop, failure recovery, long-term use) shipped as one release: every dead-end now has a next action you can click. Adversarially fleet-verified (5 findings fixed pre-release, including a mirror-barrier ordering race, an unreachable open-file recovery branch, and a clear-history flow that left deleted cards on screen). The native protocol stays `1`.

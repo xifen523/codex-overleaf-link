@@ -1572,15 +1572,23 @@ test('panel.css ships the jump-to-latest button, dark scrollbar, and motion prim
 
 test('Option B visual: glyph status rows, sticky current-step header, left-rule stream', () => {
   const css = fs.readFileSync(path.join(__dirname, '../extension/styles/panel.css'), 'utf8');
-  // Status glyphs (not colored circles): running ◐, completed ✓, failed ✕.
+  // Status glyphs: idle ·, completed ✓, failed ✕. Running is a CSS-drawn arc
+  // ring (v1.7.6) — the old ◐ character wobbled because a font glyph does not
+  // rotate around its visual center. Both running spinners share the ring +
+  // the unified 800ms cadence.
   assert.match(css, /\.run-activity-dot::before\s*\{[\s\S]*?content:\s*"·"/);
-  assert.match(css, /\.run-activity\[data-status="running"\] \.run-activity-dot::before\s*\{[\s\S]*?content:\s*"◐"/);
+  assert.match(css, /\.run-activity\[data-status="running"\] \.run-activity-dot::before\s*\{[\s\S]*?content:\s*""[\s\S]*?border-radius:\s*50%[\s\S]*?animation:\s*tl-spin 800ms/);
+  assert.doesNotMatch(css, /content:\s*"◐"/, 'the wobbling half-circle glyph must not return');
   assert.match(css, /\.run-activity\[data-status="completed"\] \.run-activity-dot::before\s*\{[\s\S]*?content:\s*"✓"/);
   assert.match(css, /\.run-activity\[data-status="failed"\] \.run-activity-dot::before\s*\{[\s\S]*?content:\s*"✕"/);
+  // Stale-spinner guard (v1.7.6): a running-status line stops spinning once
+  // the run settled or a newer activity line landed below it.
+  assert.match(css, /\.transcript-turn:not\(\[data-status="running"\]\) \.run-activity\[data-status="running"\] \.run-activity-dot::before/);
+  assert.match(css, /\.run-activity\[data-status="running"\]:has\(~ \.run-activity\) \.run-activity-dot::before/);
   // Sticky current-step header: the run-process summary pins to top with a
   // status glyph mirroring the card's data-status.
   assert.match(css, /\.run-process summary\s*\{[\s\S]*?position:\s*sticky[\s\S]*?top:\s*0/);
-  assert.match(css, /\.transcript-turn\[data-status="running"\] \.run-process summary::before\s*\{[\s\S]*?content:\s*"◐"/);
+  assert.match(css, /\.transcript-turn\[data-status="running"\] \.run-process summary::before\s*\{[\s\S]*?content:\s*""[\s\S]*?animation:\s*tl-spin 800ms/);
   // Stream rows carry a role-colored left rule.
   assert.match(css, /\.run-stream\s*\{[\s\S]*?border-left:\s*2px solid/);
   assert.match(css, /\.run-stream\[data-stream-role="assistant"\]\s*\{[\s\S]*?border-left-color:\s*var\(--tl-accent\)/);
@@ -3577,7 +3585,7 @@ test('project custom instructions editor auto-saves on change and restores by pr
   assert.equal(harness.input.value, 'Use NeurIPS style and \\\\cref{}.');
 });
 
-test('settings save feedback is per-card: no global chip, persist has no dead status writer (v1.7.5)', () => {
+test('settings save feedback is per-card: no global chip, persist has no dead status writer (v1.7.1)', () => {
   const contentScript = getContentScriptSource();
   // The global header Saved chip and its Saving/Saved lifecycle are gone —
   // per-card flashSaved (settingsPanel) is the single feedback mechanism.
@@ -5281,6 +5289,8 @@ test('renderCompletionReport surfaces recovery action buttons per failure code (
     'file-targeting failures must offer opening the file');
   assert.match(action, /STORAGE_FAILURE_CODES[\s\S]*openStorageSettings/,
     'storage failures must open the history & storage settings');
+  assert.match(action, /CODEX_INSTALL_FAILURE_CODES[\s\S]*CODEX_CLI_TROUBLESHOOTING_URL/,
+    'codex_not_found must open the CLI troubleshooting guide (v1.7.6)');
   assert.match(action, /failureCode\s*!==\s*'codex_project_locked'/,
     'codex_project_locked keeps the force-release fallback');
   assert.match(action, /forceCancelStuckTaskForCurrentProject/,

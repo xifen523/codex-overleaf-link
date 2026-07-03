@@ -139,8 +139,12 @@ function loadContentRuntimeHelpers(names = []) {
   // Real undo-operations module so buildNoTraceUndoRestore/buildSnapshotRestoreUndo
   // resolve to their production implementations when callers need them.
   const undoOperations = require('../extension/src/shared/undoOperations');
+  // Real shared catalog: buildContentFailure falls back to it for every code
+  // outside the small content-local catalog (v1.7.6).
+  const FailureReasons = require('../extension/src/shared/failureReasons');
   return Function(
     'undoOperations',
+    'FailureReasons',
     `
     'use strict';
     function tx(english) { return english; }
@@ -153,7 +157,7 @@ function loadContentRuntimeHelpers(names = []) {
     ${exportedKeys.map(key => `exported.${key} = ${key};`).join('\n')}
     return exported;
   `
-  )(undoOperations);
+  )(undoOperations, FailureReasons);
 }
 
 // Create a single-doc writeback harness mirrored on createPageBridgeHarness
@@ -798,4 +802,23 @@ test('attachUndoNotVerifiedFailure no-ops when every expected path verifies back
   helpers.attachUndoNotVerifiedFailure(run, result);
   assert.equal(result.ok, true);
   assert.equal(result.skipped.length, 0);
+});
+
+test('buildContentFailure resolves shared-catalog codes so their recovery buttons are reachable (v1.7.6 fleet P1)', () => {
+  // The content-local catalog only holds 8 codes. Every other emitted code
+  // (codex_not_found, codex_timeout, ...) must resolve through the shared
+  // §9 catalog — before v1.7.6 buildContentFailure returned null for them,
+  // so completion reports carried no structured failure and the
+  // recovery-action registry never fired.
+  const helpers = loadContentRuntimeHelpers();
+  for (const code of ['codex_not_found', 'codex_timeout', 'codex_output_limit', 'stale_source_changed', 'native_protocol_incompatible']) {
+    const failure = helpers.buildContentFailure(code, { path: 'task' }, {});
+    assert.ok(failure, `${code} must resolve through the shared catalog`);
+    assert.equal(failure.code, code);
+    assert.ok(failure.userMessage, `${code} carries the catalog fallback user message`);
+    assert.equal(typeof failure.retryable, 'boolean');
+  }
+  // Content-local codes keep winning, unknown codes still return null.
+  assert.ok(helpers.buildContentFailure('codex_project_locked', {}, {}));
+  assert.equal(helpers.buildContentFailure('some_unknown_code', {}, {}), null);
 });

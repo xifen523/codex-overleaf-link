@@ -417,7 +417,7 @@ test('broad-glob guardrail probes the REAL governance matcher (v1.7.5 lock)', ()
   assert.doesNotMatch(panel, /BROAD_GLOBS/, 'the hardcoded set is gone');
 });
 
-test('settingsPanel renders per-card saved badges (v1.7.5: global chip replaced)', () => {
+test('settingsPanel renders per-card saved badges (v1.7.1: global chip replaced)', () => {
   // The single header "Saved" chip was replaced by a ✓ badge on each settings
   // card so feedback appears next to the thing that changed.
   const src = read('extension/src/content/settingsPanel.js');

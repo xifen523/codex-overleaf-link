@@ -3,7 +3,7 @@
   <h1>Codex Overleaf Link</h1>
   <p><strong>Empower Overleaf with Codex.</strong></p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.7.5-blue" alt="version">
+    <img src="https://img.shields.io/badge/version-1.7.6-blue" alt="version">
     <img src="https://img.shields.io/badge/platform-macOS%20%2F%20Windows%20%2F%20Linux-lightgrey" alt="platform">
     <img src="https://img.shields.io/badge/chrome-MV3-green" alt="chrome manifest v3">
     <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="node version">
@@ -38,14 +38,14 @@ One command installs the native host **and** sets up the extension: the script r
 macOS / Linux:
 
 ```bash
-CODEX_OVERLEAF_REF=v1.7.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.7.5/install.sh)"
+CODEX_OVERLEAF_REF=v1.7.6 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.7.6/install.sh)"
 ```
 
 Windows PowerShell:
 
 ```powershell
-iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.7.5/install.ps1 -OutFile install.ps1
-$env:CODEX_OVERLEAF_REF='v1.7.5'
+iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.7.6/install.ps1 -OutFile install.ps1
+$env:CODEX_OVERLEAF_REF='v1.7.6'
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
@@ -56,10 +56,10 @@ Then, in the `chrome://extensions` tab the script opened: enable **Developer mod
 `npm exec` installs and updates the **native host only** — it does not include the Chrome extension. Use it if you prefer a pinned npm package to a source checkout.
 
 ```bash
-npm exec --yes codex-overleaf-link@1.7.5 -- install-native
+npm exec --yes codex-overleaf-link@1.7.6 -- install-native
 ```
 
-Then add the extension yourself: download `codex-overleaf-link-extension-v1.7.5.zip` from the [v1.7.5 GitHub Release](https://github.com/Ghqqqq/codex-overleaf-link/releases/tag/v1.7.5), unzip it to a stable folder, and in `chrome://extensions` enable **Developer mode**, click **Load unpacked**, and select that folder.
+Then add the extension yourself: download `codex-overleaf-link-extension-v1.7.6.zip` from the [v1.7.6 GitHub Release](https://github.com/Ghqqqq/codex-overleaf-link/releases/tag/v1.7.6), unzip it to a stable folder, and in `chrome://extensions` enable **Developer mode**, click **Load unpacked**, and select that folder.
 
 ### Open Overleaf
 
@@ -86,9 +86,9 @@ npm installs, updates, uninstalls, and diagnoses the native host only. npm does 
 
 | Action | Command |
 |--------|---------|
-| Install / update | `npm exec --yes codex-overleaf-link@1.7.5 -- install-native` |
-| Diagnose | `npm exec --yes codex-overleaf-link@1.7.5 -- doctor` |
-| Uninstall | `npm exec --yes codex-overleaf-link@1.7.5 -- uninstall-native` |
+| Install / update | `npm exec --yes codex-overleaf-link@1.7.6 -- install-native` |
+| Diagnose | `npm exec --yes codex-overleaf-link@1.7.6 -- doctor` |
+| Uninstall | `npm exec --yes codex-overleaf-link@1.7.6 -- uninstall-native` |
 
 Use `--extension-id <chrome-extension-id>` only for a custom/dev unpacked extension id that differs from the official bundled id.
 
@@ -98,13 +98,13 @@ To update, re-run any of the [native host installers](#install) — they install
 
 ## GitHub Release Artifacts
 
-The v1.7.5 GitHub Release contains:
+The v1.7.6 GitHub Release contains:
 
-- `codex-overleaf-link-extension-v1.7.5.zip`: loadable Chrome extension package for manual unpacked installation.
-- `codex-overleaf-native-host-v1.7.5.tar.gz`: native host runtime files used by the installer and release verification.
-- `codex-overleaf-link-1.7.5.tgz`: npm native host CLI package for pinned install, doctor, and uninstall flows.
-- `install.sh`: release-pinned macOS / Linux installer that defaults to `v1.7.5` when run directly from the release artifact.
-- `install.ps1`: release-pinned Windows PowerShell installer that defaults to `v1.7.5` when run directly from the release artifact.
+- `codex-overleaf-link-extension-v1.7.6.zip`: loadable Chrome extension package for manual unpacked installation.
+- `codex-overleaf-native-host-v1.7.6.tar.gz`: native host runtime files used by the installer and release verification.
+- `codex-overleaf-link-1.7.6.tgz`: npm native host CLI package for pinned install, doctor, and uninstall flows.
+- `install.sh`: release-pinned macOS / Linux installer that defaults to `v1.7.6` when run directly from the release artifact.
+- `install.ps1`: release-pinned Windows PowerShell installer that defaults to `v1.7.6` when run directly from the release artifact.
 - `uninstall-native-host.mjs`: native host uninstaller that removes the Chrome Native Messaging manifest, bridge executable, and runtime copy.
 - `nativeHostPlatform.js`, `manifest.js`, `runtimeInstaller.js`: helper files required by the loose uninstaller asset.
 - `SHA256SUMS` and `release-manifest.json`: checksum and artifact metadata for release verification.
@@ -115,7 +115,7 @@ The v1.7.5 GitHub Release contains:
 Remove the native host (use `--browser chromium` on Linux Chromium):
 
 ```bash
-npm exec --yes codex-overleaf-link@1.7.5 -- uninstall-native
+npm exec --yes codex-overleaf-link@1.7.6 -- uninstall-native
 ```
 
 The same command works on Windows PowerShell. If you installed from a manual checkout or source installer, you can also run `npm run uninstall:native` inside the repo, use `node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs` on macOS / Linux, or use `node $env:LOCALAPPDATA\CodexOverleaf\source\scripts\uninstall-native-host.mjs` on Windows PowerShell.
@@ -150,13 +150,13 @@ Then remove the extension from `chrome://extensions`. To delete local data: on m
 Linux Chromium install or update:
 
 ```bash
-CODEX_OVERLEAF_REF=v1.7.5 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.7.5/install.sh)" -- --browser chromium
+CODEX_OVERLEAF_REF=v1.7.6 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.7.6/install.sh)" -- --browser chromium
 ```
 
 Linux Chromium uninstall:
 
 ```bash
-npm exec --yes codex-overleaf-link@1.7.5 -- uninstall-native --browser chromium
+npm exec --yes codex-overleaf-link@1.7.6 -- uninstall-native --browser chromium
 ```
 
 ## Features
@@ -291,7 +291,7 @@ Composer attachments are turn-scoped Codex context. Limits are 8 attachments per
 Re-run any [native host installer](#install), reload the extension in `chrome://extensions`, then refresh the Overleaf tab. This also fixes extension/native version mismatch and native protocol mismatch.
 
 ```bash
-npm exec --yes codex-overleaf-link@1.7.5 -- install-native
+npm exec --yes codex-overleaf-link@1.7.6 -- install-native
 ```
 
 **The Windows popup or panel shows a Bash recovery command**
@@ -340,8 +340,8 @@ Use this matrix for release-candidate signoff and compatibility reports. Record 
 | Browser/channel/version | Google Chrome channel and version. | Google Chrome channel and version. | Google Chrome channel and version. | Chromium channel/package and version. |
 | Install mode | Manual unpacked extension from GitHub Release zip or checkout. | Manual unpacked extension from GitHub Release zip or checkout. | Manual unpacked extension from GitHub Release zip or checkout. | Manual unpacked extension from GitHub Release zip or checkout; native host installed with `--browser chromium`. |
 | Extension id | Bundled id `illdpneeeopfffmiepaejglgmhpmdhdc`, or actual custom id passed with `--extension-id`. | Bundled id `illdpneeeopfffmiepaejglgmhpmdhdc`, or actual custom id passed with `--extension-id`. | Bundled id `illdpneeeopfffmiepaejglgmhpmdhdc`, or actual custom id passed with `--extension-id`. | Bundled id `illdpneeeopfffmiepaejglgmhpmdhdc`, or actual custom id passed with `--extension-id`. |
-| Installer/update command | `npm exec --yes codex-overleaf-link@1.7.5 -- install-native` | `npm exec --yes codex-overleaf-link@1.7.5 -- install-native` | `npm exec --yes codex-overleaf-link@1.7.5 -- install-native` | `npm exec --yes codex-overleaf-link@1.7.5 -- install-native --browser chromium` |
-| Uninstall command | `npm exec --yes codex-overleaf-link@1.7.5 -- uninstall-native` | `npm exec --yes codex-overleaf-link@1.7.5 -- uninstall-native` | `npm exec --yes codex-overleaf-link@1.7.5 -- uninstall-native` | `npm exec --yes codex-overleaf-link@1.7.5 -- uninstall-native --browser chromium` |
+| Installer/update command | `npm exec --yes codex-overleaf-link@1.7.6 -- install-native` | `npm exec --yes codex-overleaf-link@1.7.6 -- install-native` | `npm exec --yes codex-overleaf-link@1.7.6 -- install-native` | `npm exec --yes codex-overleaf-link@1.7.6 -- install-native --browser chromium` |
+| Uninstall command | `npm exec --yes codex-overleaf-link@1.7.6 -- uninstall-native` | `npm exec --yes codex-overleaf-link@1.7.6 -- uninstall-native` | `npm exec --yes codex-overleaf-link@1.7.6 -- uninstall-native` | `npm exec --yes codex-overleaf-link@1.7.6 -- uninstall-native --browser chromium` |
 | Manifest/registry path | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.overleaf.json` | `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.codex.overleaf` -> `%LOCALAPPDATA%\CodexOverleaf\native-host-runtime\com.codex.overleaf.json` | `~/.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json` | `~/.config/chromium/NativeMessagingHosts/com.codex.overleaf.json` |
 | Bridge/runtime/source path | Bridge `~/.codex-overleaf/codex-overleaf-bridge`; runtime `~/.codex-overleaf/native-host-runtime`; source `~/.codex-overleaf/source`. | Bridge `%LOCALAPPDATA%\CodexOverleaf\codex-overleaf-bridge.cmd`; runtime `%LOCALAPPDATA%\CodexOverleaf\native-host-runtime`; source `%LOCALAPPDATA%\CodexOverleaf\source`. | Bridge `~/.codex-overleaf/codex-overleaf-bridge`; runtime `~/.codex-overleaf/native-host-runtime`; source `~/.codex-overleaf/source`. | Bridge `~/.codex-overleaf/codex-overleaf-bridge`; runtime `~/.codex-overleaf/native-host-runtime`; source `~/.codex-overleaf/source`. |
 | Node/Git/Codex/TeX | Node.js >= 20; Git; Codex CLI installed and logged in; TeX optional. | Node.js >= 20; Git; Codex CLI installed and logged in; TeX optional. | Node.js >= 20; Git; Codex CLI installed and logged in; TeX optional. | Node.js >= 20; Git; Codex CLI installed and logged in; TeX optional. |

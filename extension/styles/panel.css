@@ -1373,7 +1373,11 @@
 
 @keyframes tl-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
-  #codex-overleaf-panel * {
+  /* The universal selector does not match pseudo-elements, and every spinner
+     ring lives on a ::before — include them or the rings keep spinning. */
+  #codex-overleaf-panel *,
+  #codex-overleaf-panel *::before,
+  #codex-overleaf-panel *::after {
     animation: none !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
@@ -1810,8 +1814,9 @@
 
 /* Typographic status glyph (Option B). The .run-activity-dot element is kept
    (selector/snapshot tests still match it) but is now a glyph slot whose
-   ::before content is driven by data-status: idle ·, running ◐ (spins),
-   completed ✓, failed ✕. Replaces the 2018-era colored circle. */
+   ::before content is driven by data-status: idle ·, completed ✓, failed ✕.
+   Running uses a CSS-drawn arc ring (v1.7.6): the old ◐ character spun
+   around its font bounding box, not its visual center, so it wobbled. */
 #codex-overleaf-panel .run-activity-dot {
   justify-self: center;
   display: inline-flex;
@@ -1830,9 +1835,30 @@
 }
 
 #codex-overleaf-panel .run-activity[data-status="running"] .run-activity-dot::before {
-  content: "◐";
-  color: var(--tl-run);
-  animation: tl-spin 1.4s linear infinite;
+  content: "";
+  display: block;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(78, 201, 176, 0.28);
+  border-top-color: var(--tl-run);
+  border-radius: 50%;
+  animation: tl-spin 800ms linear infinite;
+}
+
+/* A running-status line only spins while it is the run's live tail. Once the
+   run itself settled (background mirror wrap-up, restored history) or a newer
+   activity line landed below it, the historical "started X" line must stop
+   spinning forever and settle to the neutral dot. */
+#codex-overleaf-panel .transcript-turn:not([data-status="running"]) .run-activity[data-status="running"] .run-activity-dot::before,
+#codex-overleaf-panel .run-activity[data-status="running"]:has(~ .run-activity) .run-activity-dot::before {
+  content: "·";
+  display: inline;
+  width: auto;
+  height: auto;
+  border: none;
+  animation: none;
+  color: var(--tl-fg-4);
 }
 
 #codex-overleaf-panel .run-activity[data-status="completed"] .run-activity-dot::before {
@@ -2001,9 +2027,15 @@
 }
 
 #codex-overleaf-panel .transcript-turn[data-status="running"] .run-process summary::before {
-  content: "◐";
-  color: var(--tl-run);
-  animation: tl-spin 1.4s linear infinite;
+  content: "";
+  display: inline-block;
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(78, 201, 176, 0.28);
+  border-top-color: var(--tl-run);
+  border-radius: 50%;
+  animation: tl-spin 800ms linear infinite;
 }
 
 #codex-overleaf-panel .transcript-turn[data-status="completed"] .run-process summary::before {

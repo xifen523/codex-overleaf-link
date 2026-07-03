@@ -7794,7 +7794,14 @@
   // `terminalState` etc. The `op` argument is the operation context that
   // augments `file` / `operationType` when not explicitly overridden.
   function buildContentFailure(code, op, overrides) {
-    const entry = CONTENT_FAILURE_CATALOG[code];
+    // The local catalog holds content-runtime-specific codes; every other
+    // code (codex_not_found, codex_timeout, codex_output_limit,
+    // stale_source_changed, native_protocol_incompatible, ...) resolves
+    // through the shared §9 catalog. Without this fallback the function
+    // returned null for every shared-only code, so completion reports
+    // carried no structured failure and the recovery-action registry never
+    // fired for them (v1.7.6 fleet P1).
+    const entry = CONTENT_FAILURE_CATALOG[code] || FailureReasons?.FAILURE_CODE_CATALOG?.[code];
     if (!entry) {
       return null;
     }

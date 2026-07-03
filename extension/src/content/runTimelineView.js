@@ -732,6 +732,10 @@
   const STORAGE_FAILURE_CODES = new Set([
     'storage_quota_exceeded', 'run_state_persist_failed'
   ]);
+  // A missing `codex` binary is fixed in the terminal, not the panel — the
+  // action opens the README troubleshooting section (PATH / login checks).
+  const CODEX_INSTALL_FAILURE_CODES = new Set(['codex_not_found']);
+  const CODEX_CLI_TROUBLESHOOTING_URL = 'https://github.com/Ghqqqq/codex-overleaf-link#faq-and-troubleshooting';
 
   function buildRecoveryButton(failureCode, label, title) {
     const button = document.createElement('button');
@@ -787,6 +791,17 @@
         openStorageSettings();
       });
       report.append(clean);
+      return;
+    }
+    if (CODEX_INSTALL_FAILURE_CODES.has(failureCode)) {
+      const guide = buildRecoveryButton(failureCode,
+        tx('Codex CLI troubleshooting guide', '查看 Codex CLI 排查指引'),
+        tx('Opens the README section on fixing a missing `codex` command (PATH / login).', '打开 README 中「找不到 codex 命令」的排查说明（PATH／登录）。'));
+      guide.addEventListener('click', clickEvent => {
+        clickEvent.stopPropagation();
+        window.open(CODEX_CLI_TROUBLESHOOTING_URL, '_blank', 'noopener');
+      });
+      report.append(guide);
       return;
     }
     if (failureCode !== 'codex_project_locked') return;
