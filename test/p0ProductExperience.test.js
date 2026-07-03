@@ -5366,6 +5366,20 @@ test('panel.css ships visible styling for the recovery action button', () => {
     'recovery action button must have a :disabled state');
 });
 
+test('every page-world module writebackRouter dereferences is actually injected (v1.8.0 fleet P1)', () => {
+  // The vm test harnesses load page modules manually, so ONLY the real
+  // injectPageBridge sequence proves a carved module reaches the page world.
+  // v1.8.0's phase-7 carve shipped with the module in the manifest but NOT
+  // in this list — the writeback pipeline was dead on every page while the
+  // whole suite stayed green.
+  const body = extractFromContentScript('injectPageBridge');
+  const lifecycleAt = body.indexOf("src/page/trackedChangesLifecycle.js");
+  const routerAt = body.indexOf("src/page/writebackRouter.js");
+  assert.ok(lifecycleAt !== -1, 'trackedChangesLifecycle.js must be injected');
+  assert.ok(routerAt !== -1, 'writebackRouter.js must be injected');
+  assert.ok(lifecycleAt < routerAt, 'lifecycle must load before the router that dereferences it');
+});
+
 test('verified text-only writebacks confirm the mirror in place with a full-resync fallback (v1.8.0)', () => {
   // The written content ORIGINATES in the local workspace, so a verified
   // writeback only needs the baseline re-hashed (mirror.confirmWriteback) —

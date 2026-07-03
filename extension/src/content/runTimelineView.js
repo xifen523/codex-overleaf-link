@@ -310,6 +310,11 @@
     // In-session search (v1.8.0): filter run cards by task or report text.
     // Rendered with the same >= 3 threshold as the turn navigator; filtering
     // is pure display (hidden attribute), state is kept across re-renders.
+    if (runs.length < 3 && runSearchQuery) {
+      // No search box is rendered below this threshold — a stale query from a
+      // bigger session would silently blank this log with no way to clear it.
+      runSearchQuery = '';
+    }
     if (runs.length >= 3) {
       const search = document.createElement('input');
       search.type = 'search';

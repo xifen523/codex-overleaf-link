@@ -1,5 +1,30 @@
 # Changelog
 
+## v1.8.0 - 2026-07-03
+
+Structure, speed & workflow — phase-7/8 carves retire ten versions of structural debt, verified text writebacks skip the full project re-download, and four workflow features land. Adversarially fleet-verified (5 findings fixed pre-release, including a P1 the whole test suite missed: the carved page module was in the manifest but never injected into the page world, which would have killed the writeback pipeline on every page — now locked by an injection-sequence test). The native protocol stays `1`.
+
+### Changed
+
+- **Post-write mirror refresh is near-instant for text-only runs.** The written content originates in the local Codex workspace, so after a save-verified writeback the workspace already equals Overleaf. The refresh now calls the new `mirror.confirmWriteback` — the native host re-hashes the written files in place and renews the baseline freshness — instead of re-downloading the whole project just to rewrite what it uploaded. Tree operations, binary writes, dirty mirrors and older native hosts all fall back to the unchanged full resync; next-run reuse still passes the freshness + focus-overlay checks and the page-side base-content guard.
+- **Structural phase 7 (#117, deferred since v1.6.3):** the tracked-changes lifecycle (accept/reject flows, accept-replay + editor-undo recovery, tracked-change DOM collectors — ~1550 lines) moved out of `writebackRouter.js` (3293 → 1876 lines) into `trackedChangesLifecycle.js` with 30+ factory-injected collaborators.
+- **Structural phase 8:** the recovery-action handlers, change-history read path, history & storage card and compaction notice moved out of `contentRuntime.js` into `panelMaintenance.js`, with mutable runtime state behind getter/setter accessors.
+
+### Added
+
+- **Change history is a first-class surface.** A 🕘 header button opens the history card directly, and every history row jumps to the run it describes — switching sessions if needed, scrolling to the card and flashing it (trimmed runs explain themselves in a toast).
+- **Search this session's runs.** With 3+ turns, a search box above the log filters run cards by task or report text.
+- **Undo by file.** Multi-file undos now confirm through a per-file checkbox list. Undoing a subset keeps the Undo button usable for the rest — re-undoing an already-restored file is safely skipped by the base-content check.
+- **Attachments survive a refresh.** Small composer attachments (up to 3 files, 1MB each) persist across page reloads; oversized ones simply don't persist rather than bloating storage.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.8.0` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.8.0.zip`, `codex-overleaf-native-host-v1.8.0.tar.gz`, and `codex-overleaf-link-1.8.0.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.8.0 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.8.0 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.8.0 -- uninstall-native`.
+
 ## v1.7.7 - 2026-07-03
 
 Process readability & liveliness — narration is never cut off, and a working run finally looks like it's working. Adversarially fleet-verified (2 findings fixed pre-release: a checkpoint-divider collision with the breathing ellipsis, and a 2-line clamp on error titles that lost its overflow anchor). The native protocol stays `1`.

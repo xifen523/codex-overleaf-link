@@ -6005,6 +6005,10 @@
     await injectScriptOnce('src/page/treeOperations.js', 'codex-overleaf-tree-operations-script', { force: true });
     await injectScriptOnce('src/page/snapshotRouter.js', 'codex-overleaf-snapshot-router-script');
     await injectScriptOnce('src/page/writeGuard.js', 'codex-overleaf-write-guard-script', { force: true });
+    // Phase 7 (v1.8.0): the tracked-changes lifecycle must be defined in the
+    // page world BEFORE writebackRouter.create() dereferences it — the vm
+    // test harnesses inject it manually, so only this list proves it loads.
+    await injectScriptOnce('src/page/trackedChangesLifecycle.js', 'codex-overleaf-tracked-changes-lifecycle-script', { force: true });
     await injectScriptOnce('src/page/writebackRouter.js', 'codex-overleaf-writeback-router-script', { force: true });
     await injectScriptOnce('src/pageBridge.js', 'codex-overleaf-page-bridge-script', { force: true });
     await initializePageBridgeCapability();
@@ -6533,6 +6537,8 @@
   }
 
 
+  let composerAttachmentsRestoredOnce = false;
+
   function persistComposerAttachmentsToState() {
     if (typeof composerAttachmentController?.serializePersistableAttachments === 'function') {
       state.composerAttachments = composerAttachmentController.serializePersistableAttachments();
@@ -6594,12 +6600,16 @@
     renderContextSelection();
     renderContextSummary();
     // v1.8.0 C4: refresh recovery — small attachments persisted in state are
-    // restored into the (empty) tray once, before the render below.
-    if (Array.isArray(state.composerAttachments) && state.composerAttachments.length
+    // restored into the (empty) tray ONCE per page load, before the render
+    // below. Re-running the gate on later renders would resurrect files the
+    // user explicitly removed (fleet P2).
+    if (!composerAttachmentsRestoredOnce
+      && Array.isArray(state.composerAttachments) && state.composerAttachments.length
       && !composerAttachmentController.getAttachmentsForRun?.().length
       && typeof composerAttachmentController.restorePersistedAttachments === 'function') {
       composerAttachmentController.restorePersistedAttachments(state.composerAttachments);
     }
+    composerAttachmentsRestoredOnce = true;
     renderComposerAttachments();
     renderComposerSkillInvocation();
     applyLocaleToPanel();
@@ -8339,6 +8349,9 @@
         return;
       }
       await switchSession(record.sessionId);
+      if (state.activeSessionId !== record.sessionId) {
+        return;
+      }
     }
     const card = panel?.querySelector(`[data-run-id="${cssEscape(record.turnId || '')}"]`);
     if (!card) {

@@ -259,12 +259,12 @@
       overlay.className = 'codex-plugin-confirm codex-undo-file-select';
       overlay.setAttribute('data-undo-file-select', '');
       const box = document.createElement('div');
-      box.className = 'codex-plugin-confirm-box';
+      box.className = 'codex-plugin-confirm-card';
       const heading = document.createElement('div');
       heading.className = 'codex-plugin-confirm-title';
       heading.textContent = title;
       const taskLine = document.createElement('div');
-      taskLine.className = 'codex-plugin-confirm-message';
+      taskLine.className = 'codex-plugin-confirm-body';
       taskLine.textContent = task || '';
       const list = document.createElement('div');
       list.className = 'codex-undo-file-list';
