@@ -1372,6 +1372,10 @@
 }
 
 @keyframes tl-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes tl-slide-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   /* The universal selector does not match pseudo-elements, and every spinner
      ring lives on a ::before — include them or the rings keep spinning. */
@@ -1804,12 +1808,15 @@
 #codex-overleaf-panel .run-activity {
   display: grid;
   grid-template-columns: 14px minmax(0, 1fr);
-  align-items: center;
+  /* Titles wrap (v1.7.7) — align the glyph and timestamp to the first line
+     instead of floating mid-paragraph on multi-line rows. */
+  align-items: start;
   gap: 6px;
   min-height: 20px;
   color: var(--tl-fg-2);
   padding: 1px 0;
-  animation: tl-fade-in 140ms ease-out;   /* opacity-only — never reflows neighbors */
+  /* transform+opacity only — composited, never reflows neighbors */
+  animation: tl-slide-in 140ms ease-out;
 }
 
 /* Typographic status glyph (Option B). The .run-activity-dot element is kept
@@ -1819,6 +1826,7 @@
    around its font bounding box, not its visual center, so it wobbled. */
 #codex-overleaf-panel .run-activity-dot {
   justify-self: center;
+  margin-top: 2px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1902,11 +1910,14 @@
 
 #codex-overleaf-panel .run-activity-title {
   min-width: 0;
-  overflow: hidden;
   color: var(--tl-fg-2);
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  /* v1.7.7: activity narration must be readable in full — wrap instead of
+     the old single-line ellipsis (which hid text at every panel width).
+     `anywhere` keeps long paths/commands from forcing horizontal overflow. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 #codex-overleaf-panel .run-activity[data-subagent="true"] {
@@ -1919,6 +1930,9 @@
 #codex-overleaf-panel .run-activity[data-status="failed"] .run-activity-title {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  /* line-clamp only truncates with overflow:hidden — the base title rule no
+     longer provides it since narration wraps (v1.7.7). */
+  overflow: hidden;
   -webkit-box-orient: vertical;
   white-space: normal;
 }
@@ -2036,6 +2050,52 @@
   border-top-color: var(--tl-run);
   border-radius: 50%;
   animation: tl-spin 800ms linear infinite;
+}
+
+/* Indeterminate scan line (v1.7.7): while the run is working, a thin sweep
+   under the sticky current-step header keeps the "in progress" signal alive
+   even when no new lines are streaming. A dedicated .run-scan element hosts
+   the sweep (summary::after is the expand/collapse chevron) and clips it —
+   overflow:hidden on the summary itself would clip the sticky header's
+   focus ring. Composited transform only. */
+#codex-overleaf-panel .run-scan {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  pointer-events: none;
+}
+#codex-overleaf-panel .transcript-turn[data-status="running"] .run-process summary .run-scan {
+  display: block;
+}
+#codex-overleaf-panel .transcript-turn[data-status="running"] .run-process summary .run-scan::before {
+  content: "";
+  display: block;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--tl-run), transparent);
+  animation: tl-scan 1.4s ease-in-out infinite;
+}
+@keyframes tl-scan {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(433%); }
+}
+
+/* Breathing ellipsis (v1.7.7) on the live tail line — the same "run is
+   running AND nothing newer landed below" condition that keeps its ring
+   spinning (inverse of the stale-spinner guards above). */
+#codex-overleaf-panel .transcript-turn[data-status="running"] .run-activity[data-status="running"]:not([data-kind="checkpoint"]):not(:has(~ .run-activity)) .run-activity-title::after {
+  content: "\2026";
+  margin-left: 2px;
+  color: var(--tl-run);
+  animation: tl-ellipsis 1.2s ease-in-out infinite;
+}
+@keyframes tl-ellipsis {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
 }
 
 #codex-overleaf-panel .transcript-turn[data-status="completed"] .run-process summary::before {
@@ -2202,13 +2262,13 @@
 #codex-overleaf-panel .codex-probe-line {
   flex: 0 0 auto;
   min-height: 18px;
-  overflow: hidden;
   border-top: 1px solid var(--tl-border);
   color: var(--tl-fg-3);
   padding: 4px 12px 0;
   font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* Narrative status text (v1.7.7) — wrap instead of hiding the tail. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 #codex-overleaf-panel .codex-probe-line[data-ok="true"] {

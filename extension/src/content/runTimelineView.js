@@ -362,6 +362,7 @@
         <details class="run-process" data-run-process>
           <summary data-run-process-summary>
             <span class="run-status" data-run-status></span>
+            <span class="run-scan" aria-hidden="true"></span>
           </summary>
           <div class="run-activity-list" data-run-events></div>
         </details>

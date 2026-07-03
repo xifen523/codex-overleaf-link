@@ -149,6 +149,7 @@
       const title = document.createElement('span');
       title.className = 'codex-session-menu-item-title';
       title.textContent = getSessionDisplayTitle(session);
+      title.title = getSessionDisplayTitle(session);
       const time = document.createElement('time');
       time.className = 'codex-session-menu-item-time';
       time.textContent = formatSessionTime(session.updatedAt || session.createdAt);

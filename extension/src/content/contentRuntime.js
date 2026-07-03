@@ -1173,6 +1173,7 @@
       const task = document.createElement('div');
       task.className = 'codex-history-task';
       task.textContent = record.promptSummary || '';
+      task.title = record.promptSummary || '';
       const files = document.createElement('div');
       files.className = 'codex-history-files';
       const applied = (record.appliedFiles || [])

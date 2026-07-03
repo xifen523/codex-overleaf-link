@@ -378,6 +378,7 @@
       const name = document.createElement('span');
       name.className = 'codex-context-file-name';
       name.textContent = node.name;
+      name.title = node.path || node.name;
 
       const meta = document.createElement('span');
       meta.className = 'codex-context-file-meta';

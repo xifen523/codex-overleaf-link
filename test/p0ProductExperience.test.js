@@ -1565,9 +1565,25 @@ test('panel.css ships the jump-to-latest button, dark scrollbar, and motion prim
   assert.match(css, /@keyframes tl-fade-in/);
   assert.match(css, /@keyframes tl-spin/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
-  // The running step's glyph spins; new rows fade in (opacity-only).
+  // The running step's glyph spins; new rows slide in (transform+opacity
+  // only, v1.7.7 — composited, never reflows neighbors).
   assert.match(css, /\.run-activity\[data-status="running"\] \.run-activity-dot::before\s*\{[\s\S]*?animation:\s*tl-spin/);
-  assert.match(css, /\.run-activity\s*\{[\s\S]*?animation:\s*tl-fade-in/);
+  assert.match(css, /@keyframes tl-slide-in/);
+  assert.match(css, /\.run-activity\s*\{[\s\S]*?animation:\s*tl-slide-in/);
+  // v1.7.7 liveliness: the running card's sticky header carries a scan line,
+  // and the live tail line breathes an ellipsis.
+  assert.match(css, /@keyframes tl-scan/);
+  assert.match(css, /\.transcript-turn\[data-status="running"\] \.run-process summary \.run-scan::before\s*\{[\s\S]*?animation:\s*tl-scan/);
+  // The sweep lives on a dedicated .run-scan element — summary::after is the
+  // expand/collapse chevron and must stay untouched.
+  const timeline = fs.readFileSync(path.join(__dirname, '../extension/src/content/runTimelineView.js'), 'utf8');
+  assert.match(timeline, /class="run-scan" aria-hidden="true"/);
+  assert.match(css, /@keyframes tl-ellipsis/);
+  assert.match(css, /:not\(:has\(~ \.run-activity\)\) \.run-activity-title::after/);
+  // v1.7.7 readability: activity narration wraps instead of ellipsizing.
+  assert.match(css, /\.run-activity-title\s*\{[\s\S]*?overflow-wrap:\s*anywhere/);
+  assert.doesNotMatch(css.match(/\.run-activity-title\s*\{[\s\S]*?\}/)[0], /text-overflow/,
+    'activity titles must not single-line-ellipsize');
 });
 
 test('Option B visual: glyph status rows, sticky current-step header, left-rule stream', () => {

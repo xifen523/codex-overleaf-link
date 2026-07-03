@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.7.7 - 2026-07-03
+
+Process readability & liveliness — narration is never cut off, and a working run finally looks like it's working. Adversarially fleet-verified (2 findings fixed pre-release: a checkpoint-divider collision with the breathing ellipsis, and a 2-line clamp on error titles that lost its overflow anchor). The native protocol stays `1`.
+
+### Fixed
+
+- **Activity lines wrap instead of vanishing into an ellipsis.** Timeline narration ("I will first understand your request, then inspect the relevant Overleaf files.", step announcements, warnings) was styled single-line with `text-overflow: ellipsis` — no panel width could reliably show it in full. Narration now wraps (long paths/commands break instead of overflowing), with the status glyph and timestamp aligned to the first line. The welcome panel's probe line wraps too.
+- **Truncated list rows gained full-text tooltips.** Diff file paths, session-menu titles, dashboard project names, context-tray file names and change-history task summaries keep their compact single line but now show the full text on hover.
+
+### Added
+
+- **Indeterminate scan line.** While a run is working, a thin sweep animates under the sticky current-step header — the "in progress" signal stays alive even when no new lines are streaming. Hosted on a dedicated element (the header's `::after` is the expand/collapse chevron) and disabled under reduced motion like every other animation.
+- **Breathing ellipsis on the live step.** The line currently being worked on (the same "run is running and nothing newer landed" condition that keeps its ring spinning) pulses a trailing `…`.
+- **Rows slide in.** New timeline lines enter with a 3px slide + fade (previously fade only) — transform+opacity, composited, never reflows neighbors.
+
+### CI
+
+- The Test workflow's matrix is now `fail-fast: false`, so the observational macos-latest leg (GitHub's macOS pool is still degraded — #118 stays open) can never cancel the ubuntu/windows legs.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.7.7` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.7.7.zip`, `codex-overleaf-native-host-v1.7.7.tar.gz`, and `codex-overleaf-link-1.7.7.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.7.7 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.7.7 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.7.7 -- uninstall-native`.
+
 ## v1.7.6 - 2026-07-03
 
 Motion & running-state consistency — the wobbling half-circle is gone, and no spinner ever spins forever. Adversarially fleet-verified (a P1 caught pre-release: the new CLI-guide button — and several v1.7.5 recovery buttons — keyed off failure objects that were never built). The native protocol stays `1`.

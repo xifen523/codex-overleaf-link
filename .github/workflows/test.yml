@@ -9,6 +9,9 @@ on:
 jobs:
   test:
     strategy:
+      # macos-latest is observational while GitHub's macOS pool is degraded
+      # (#118): never let one leg's failure cancel the others.
+      fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
 

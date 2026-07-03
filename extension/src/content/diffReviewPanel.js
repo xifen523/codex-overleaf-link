@@ -605,6 +605,7 @@
         const pathEl = document.createElement('span');
         pathEl.className = 'codex-diff-file-path';
         pathEl.textContent = change.type === 'delete' ? `[delete] ${change.path}` : change.path;
+        pathEl.title = change.path;
         const actions = document.createElement('div');
         actions.className = 'codex-diff-file-actions';
 

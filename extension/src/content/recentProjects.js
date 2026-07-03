@@ -342,7 +342,9 @@
         ? ('Project · ' + projectId.slice(0, 8))
         : tr('recentProjects_row_projectLinkUnavailable');
     }
-    el.appendChild(textNode(name, 'recent-projects-row-name'));
+    var nameNode = textNode(name, 'recent-projects-row-name');
+    nameNode.title = name;
+    el.appendChild(nameNode);
     el.appendChild(textNode(formatRelativeTime(row && row.lastActivityAt), 'recent-projects-row-time'));
     el.appendChild(textNode((row && row.safeTaskSummary) || '', 'recent-projects-row-summary'));
     el.appendChild(renderStatusBadge(row && row.primaryStatusBadge));
