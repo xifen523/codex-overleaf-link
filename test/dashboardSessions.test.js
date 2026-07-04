@@ -40,14 +40,22 @@ test('dashboard rows expand into a per-project session list', () => {
   assert.match(load, /localeCompare/);
   // running sessions are protected (badge derived from the stored record)
   const rowFn = extractFunction(src, 'renderProjectSessionRow');
-  assert.match(rowFn, /derivePrimaryStatusBadge\(record\) === 'running'/);
-  assert.match(rowFn, /del\.disabled = true/);
+  // v1.8.1: a persisted 'running' older than 30 minutes settles to
+  // 'interrupted' at the display layer (zombie-run fix).
+  assert.match(rowFn, /settleDashboardRunStatus\(StorageDb\.derivePrimaryStatusBadge\(record\)/);
+  assert.doesNotMatch(rowFn, /del\.disabled = true/,
+    'v1.8.1: delete stays enabled — fresh running goes through the zombie confirm instead');
+  assert.match(rowFn, /rename\.disabled = true/);
 });
 
 test('dashboard delete mirrors the in-project flow: confirm, storage, record, native, toasts', () => {
   const src = repo('extension/src/content/recentProjects.js');
   const del = extractFunction(src, 'deleteDashboardSession');
-  assert.match(del, /deleteSessionRunningToast/);
+  // v1.8.1: the hard running-guard became a stronger confirm — zombie
+  // sessions must be deletable from the dashboard.
+  assert.match(del, /recentProjects_zombieDeleteConfirm/);
+  assert.doesNotMatch(del, /deleteSessionRunningToast/,
+    'the undeletable hard-guard must not return');
   assert.match(del, /deleteSessionTitle/);
   assert.match(del, /deleteSessionConfirm/);
   assert.match(del, /confirmDefaultCancel/);
@@ -61,7 +69,7 @@ test('dashboard delete mirrors the in-project flow: confirm, storage, record, na
   assert.match(del, /deleteSessionNoThreadToast/);
   assert.match(del, /deleteSessionDoneToast/);
   // the variant re-renders and restores the expansion afterwards
-  assert.match(del, /renderRecentProjectsVariant\(\{ expandProjectId: projectId \}\)/);
+  assert.match(del, /renderRecentProjectsVariant\(\{\s*expandProjectId: projectId,\s*restoreScrollTop/);
 });
 
 test('dashboard storage writeback uses the same key + normalize/prepare pipeline as saveState', () => {

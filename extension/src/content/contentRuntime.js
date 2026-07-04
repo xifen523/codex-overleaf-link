@@ -291,6 +291,7 @@
     normalizePanelState,
     openCustomInstructionsSettings: () => openCustomInstructionsSettings(),
     onHistoryRowJump: record => jumpToHistoryRun(record),
+    resetProjectNameCache: () => recentProjects.resetProjectNameCache(),
     getPanel: () => panel,
     getState: () => state,
     setState: next => { state = next; },
@@ -479,6 +480,9 @@
           '另一个标签页刚在本项目启动了 Codex 任务——请避免同时在这里运行。'
         ));
       }
+      // Dashboard tabs re-render on any cross-tab run signal so badges and
+      // recency stay honest (v1.8.1).
+      refreshDashboardSoon();
     });
   } catch (error) {
     // BroadcastChannel unavailable — cross-tab hints stay off.
@@ -522,6 +526,42 @@
     updateModelDisplay
   } = modelPicker;
 
+  // v1.8.1 D3: the dashboard was a one-shot render — another tab finishing a
+  // run, clearing history or creating sessions never showed up. Refresh it
+  // (debounced) when the tab regains visibility or a cross-tab run signal
+  // arrives while the dashboard view is active.
+  let dashboardRefreshTimer = null;
+  function refreshDashboardSoon() {
+    if (panel?.dataset.view !== 'recent-projects') {
+      return;
+    }
+    clearTimeout(dashboardRefreshTimer);
+    dashboardRefreshTimer = setTimeout(() => {
+      if (panel?.dataset.view !== 'recent-projects') {
+        return;
+      }
+      // Never clobber an in-progress inline rename (fleet P2) — retry later.
+      if (panel.querySelector('.recent-projects-sessions input')) {
+        refreshDashboardSoon();
+        return;
+      }
+      // Preserve what the user has open: expanded projects + scroll.
+      const expanded = Array.from(panel.querySelectorAll('[data-project-row-wrap][data-expanded="true"]'))
+        .map(wrap => wrap.getAttribute('data-project-row-wrap'))
+        .filter(Boolean);
+      const rootEl = panel.querySelector('[data-recent-projects-root]');
+      recentProjects.renderRecentProjectsVariant({
+        restoreExpanded: expanded,
+        restoreScrollTop: rootEl ? rootEl.scrollTop : undefined
+      }).catch(() => { /* keep last render */ });
+    }, 400);
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      refreshDashboardSoon();
+    }
+  });
+
   const recentProjects = window.CodexOverleafRecentProjects.create({
     tr,
     tx,
@@ -530,6 +570,7 @@
     applyStateToPanel,
     getPanel: () => panel,
     getCachedAccountScopeId: () => cachedAccountScopeId,
+    refreshAccountScopeId: () => refreshAccountScopeId(),
     showPluginConfirm,
     showPluginToast,
     sendBackgroundNative,
@@ -710,6 +751,13 @@
     storageKey = getProjectStorageKey(LEGACY_STORAGE_KEY, window.location.href);
     state = normalizePanelState(await loadStoredState(), { restoreRunningRuns: true });
     ensurePanelOpen();
+    // v1.8.1: on a non-editor route the panel must NEVER first paint the
+    // per-project session UI (composer + probe line) and then swap — mount
+    // the dashboard shell synchronously; the account-scope resolution below
+    // fills the list in place.
+    if (!isProjectEditorRoute(window.location)) {
+      recentProjects.mountDashboardShell();
+    }
     applyStateToPanel();
     // Welcome-panel + write-guard: seed the lifecycle
     // module-locals from the current URL, install the SPA route hook so
@@ -6538,6 +6586,7 @@
 
 
   let composerAttachmentsRestoredOnce = false;
+  let lastRunActivityBumpMs = 0;
 
   function persistComposerAttachmentsToState() {
     if (typeof composerAttachmentController?.serializePersistableAttachments === 'function') {
@@ -6843,6 +6892,15 @@
     const record = findRunRecord(currentRunView.recordId, currentRunView.sessionId);
     let renderedEvent = event;
     if (record) {
+      // v1.8.1: keep the session's activity timestamp honest DURING a run —
+      // it was pinned to run start, so the dashboard's 30-minute zombie
+      // heuristic mislabeled any long live run as interrupted (fleet P1).
+      // Throttled to once a minute; updateActiveSession stamps updatedAt.
+      const nowMs = Date.now();
+      if (nowMs - lastRunActivityBumpMs > 60000) {
+        lastRunActivityBumpMs = nowMs;
+        state = updateActiveSession(state, {});
+      }
       renderedEvent = event.kind === 'stream'
         ? upsertRunStreamRecordEvent(record, event)
         : event;

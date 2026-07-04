@@ -919,7 +919,7 @@ test('listRecentProjectsAcrossAccount: excludes records lacking projectId', () =
   assert.equal(rows[0].projectId, 'p2');
 });
 
-test('listRecentProjectsAcrossAccount: row contract has the four v1 fields and does not expose latestSessionId', () => {
+test('listRecentProjectsAcrossAccount: row contract has the five fields (v1.8.1 adds sessionCount) and does not expose latestSessionId', () => {
   const sessions = [
     seedSession({
       id: 's_internal_id',
@@ -933,7 +933,8 @@ test('listRecentProjectsAcrossAccount: row contract has the four v1 fields and d
   const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
   assert.equal(rows.length, 1);
   const row = rows[0];
-  assert.deepEqual(Object.keys(row).sort(), ['lastActivityAt', 'primaryStatusBadge', 'projectId', 'safeTaskSummary']);
+  assert.deepEqual(Object.keys(row).sort(), ['lastActivityAt', 'primaryStatusBadge', 'projectId', 'safeTaskSummary', 'sessionCount']);
+  assert.equal(row.sessionCount, 1);
   assert.equal(row.projectId, 'p1');
   assert.equal(row.lastActivityAt, '2026-05-25T09:00:00Z');
   assert.equal(row.safeTaskSummary, 'rewrite section');

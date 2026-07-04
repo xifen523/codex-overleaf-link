@@ -116,8 +116,11 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // Raised 520 -> 800 in v1.5.2 for per-project session management (expand
     // row to list/rename/delete sessions without entering the project).
     // 800 -> 880 in v1.5.3: cleanup action for dead (invalid-projectId) rows.
+    // v1.8.1 raised 880 -> 1080 for the dashboard-trust pack: zombie-run
+    // settling, dashboard shell, degraded retry, session activate-and-open,
+    // relative-time ticker, and the stats/count surfaces.
     path: 'extension/src/content/recentProjects.js',
-    maxLines: 880
+    maxLines: 1080
   },
   {
     // Carved from contentRuntime in v1.4.9: the experimental OT warm-mirror

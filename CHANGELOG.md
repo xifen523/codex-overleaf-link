@@ -1,5 +1,33 @@
 # Changelog
 
+## v1.8.1 - 2026-07-04
+
+Dashboard trust — a full review of the extension's surface on the Overleaf project list (/project): every status it shows is now honest, every dead-end got an exit, and the first screen stops flashing the wrong UI. Fleet-reviewed twice (4 review dimensions: 8 confirmed defects + 9 improvements; then a P1 caught in the fix itself: the 30-minute zombie heuristic would have mislabeled genuinely-live long runs because activity timestamps were pinned to run start — sessions now bump their activity once a minute during a run, any stored-running delete keeps the stronger warning, and the auto-refresh preserves expanded lists, scroll and in-progress renames). The native protocol stays `1`.
+
+### Fixed
+
+- **Zombie "running" sessions.** A run orphaned by a closed tab/crash kept its project row spinning "running" forever, and the session could be neither renamed nor deleted from the dashboard. A persisted running state older than 30 minutes now displays (and behaves) as interrupted, and deleting a fresh-running session goes through a stronger confirm instead of a hard dead-end.
+- **False green badges.** The storage layer's status whitelist dropped `interrupted`, silently rewriting it to `completed` — interrupted runs showed a success badge and the v1.7.6 amber dashboard badge was unreachable. The status now round-trips.
+- **The dashboard now refreshes itself.** It was a one-shot render: runs finishing in other tabs, cleared history or new sessions never appeared. It now re-renders (debounced) on tab visibility and on cross-tab run signals, relative timestamps tick every minute, and deleting a session updates the list in place without resetting scroll.
+- **Cold-load flash.** Opening /project painted the full per-project editor UI (composer, header buttons, probe line) for a few hundred ms before swapping to the project list. The dashboard shell now mounts synchronously.
+- **"Clear all history" now also clears cached project names** (they live in chrome.storage outside the IndexedDB stores and could retain sensitive titles); the confirm copy says so.
+- **Light-theme freeze.** 18 CSS declarations referenced `--codex-*` variables that never existed, so their dark-value fallbacks always won — the show-all button, run search, history rows and more ignored the light theme. All now use the real `--tl-*` tokens.
+- Session titles got hover tooltips; the "Project · <id>" fallback name is localized.
+
+### Added
+
+- **Glanceable first screen.** The welcome header's boilerplate subtitle becomes a real summary (N projects · M sessions) once rows load; each project row shows its session count on a wider (miss-click-resistant) expand control.
+- **Session rows are now clickable.** Clicking a session opens the project straight into that session (it records the editor's active-session preference before navigating). Enter works too; rows are keyboard-reachable with proper `aria-controls`/region wiring.
+- **A degraded dashboard explains itself.** When the account scope can't be identified, the copy now says what actually happened (instead of telling a signed-in user to sign in) and offers a Retry button. Loading got the arc-ring spinner.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.8.1` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.8.1.zip`, `codex-overleaf-native-host-v1.8.1.tar.gz`, and `codex-overleaf-link-1.8.1.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.8.1 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.8.1 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.8.1 -- uninstall-native`.
+
 ## v1.8.0 - 2026-07-03
 
 Structure, speed & workflow — phase-7/8 carves retire ten versions of structural debt, verified text writebacks skip the full project re-download, and four workflow features land. Adversarially fleet-verified (5 findings fixed pre-release, including a P1 the whole test suite missed: the carved page module was in the manifest but never injected into the page world, which would have killed the writeback pipeline on every page — now locked by an injection-sequence test). The native protocol stays `1`.

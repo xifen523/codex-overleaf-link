@@ -899,7 +899,10 @@
       'failed',
       'background_completed',
       'needs_review_after_navigation',
-      'abandoned_after_navigation'
+      'abandoned_after_navigation',
+      // v1.8.1: reload-orphaned runs settle to 'interrupted' (v1.7.6); the
+      // storage round-trip must not rewrite them to a false 'completed'.
+      'interrupted'
     ].indexOf(status) !== -1 ? status : 'completed';
   }
 
@@ -1146,6 +1149,7 @@
       return [];
     }
     var byProject = {}; // projectId → session
+    var sessionCounts = {}; // projectId → number of sessions
     var all = Array.isArray(sessions) ? sessions : [];
     for (var i = 0; i < all.length; i++) {
       var s = all[i];
@@ -1157,6 +1161,10 @@
       if (!prev || prev.lastActivityAt < s.lastActivityAt) {
         byProject[s.projectId] = s;
       }
+      // v1.8.1: the per-project session count was computed here and thrown
+      // away — keep it so dashboard rows can show how much work lives in a
+      // project without a second scan.
+      sessionCounts[s.projectId] = (sessionCounts[s.projectId] || 0) + 1;
     }
     var survivors = [];
     var keys = Object.keys(byProject);
@@ -1173,7 +1181,8 @@
         projectId: session.projectId,
         lastActivityAt: session.lastActivityAt,
         safeTaskSummary: typeof session.safeTaskSummary === 'string' ? session.safeTaskSummary : '',
-        primaryStatusBadge: derivePrimaryStatusBadge(session)
+        primaryStatusBadge: derivePrimaryStatusBadge(session),
+        sessionCount: sessionCounts[session.projectId] || 1
       });
     }
     return rows;

@@ -22,6 +22,7 @@
       normalizePanelState,
       openCustomInstructionsSettings,
       onHistoryRowJump,
+      resetProjectNameCache,
       getPanel,
       getState,
       setState,
@@ -159,8 +160,8 @@
     const confirmed = await showPluginConfirm({
       title: tx('Clear all history?', '清空全部历史？'),
       message: tx(
-        'This permanently deletes every stored session, run and audit record for ALL projects. Project settings and rules are kept. This cannot be undone.',
-        '将永久删除所有项目的全部会话、运行与审计记录。项目设置与规则会保留。此操作不可撤销。'
+        'This permanently deletes every stored session, run and audit record for ALL projects — including the dashboard project list and cached project names. Project settings and rules are kept. This cannot be undone.',
+        '将永久删除所有项目的全部会话、运行与审计记录——包括仪表盘的项目列表与缓存的项目名。项目设置与规则会保留。此操作不可撤销。'
       ),
       confirmLabel: tx('Delete everything', '全部删除'),
       destructive: true
@@ -170,6 +171,10 @@
     }
     try {
       await window.CodexOverleafStorageDb?.clearAllStores?.();
+      // v1.8.1: the dashboard's project-name cache lives in
+      // chrome.storage.local, outside the IndexedDB stores — clear it too so
+      // no (potentially sensitive) project titles outlive the wipe.
+      await resetProjectNameCache?.();
     } catch (error) {
       showPluginToast(tx(`Could not clear history: ${error.message}`, `清空历史失败：${error.message}`));
       return;

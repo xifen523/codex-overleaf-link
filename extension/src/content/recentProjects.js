@@ -16,6 +16,7 @@
       applyStateToPanel,
       getPanel,
       getCachedAccountScopeId,
+      refreshAccountScopeId,
       showPluginConfirm,
       showPluginToast,
       sendBackgroundNative,
@@ -47,6 +48,16 @@
         resolve(projectNameCacheMirror);
       }
     });
+  }
+
+  // v1.8.1: "Clear all history" must also drop the cached project names —
+  // they can carry sensitive titles and live in chrome.storage.local, not in
+  // the IndexedDB stores that clearAllStores wipes.
+  async function resetProjectNameCache() {
+    projectNameCacheMirror = {};
+    try {
+      await chrome.storage.local.remove(PROJECT_NAME_CACHE_STORAGE_KEY);
+    } catch (_error) { /* storage unavailable — mirror is already empty */ }
   }
 
   function persistProjectNameCacheToStorage() {
@@ -233,7 +244,7 @@
     return el;
   }
 
-  function renderWelcomeHeader() {
+  function renderWelcomeHeader(stats) {
     var el = document.createElement('div');
     el.className = 'recent-projects-welcome';
     el.setAttribute('data-recent-projects-welcome', '');
@@ -242,7 +253,11 @@
     title.textContent = tr('recentProjects_welcome');
     var subtitle = document.createElement('div');
     subtitle.className = 'recent-projects-welcome-subtitle';
-    subtitle.textContent = tr('recentProjects_welcome_subtitle');
+    // v1.8.1: the most expensive spot on the first screen now carries a
+    // glanceable summary instead of boilerplate once the rows are known.
+    subtitle.textContent = stats && stats.projectCount
+      ? tr('recentProjects_welcome_stats', { projects: stats.projectCount, sessions: stats.sessionTotal })
+      : tr('recentProjects_welcome_subtitle');
     el.appendChild(title);
     el.appendChild(subtitle);
     return el;
@@ -260,7 +275,26 @@
     var el = document.createElement('div');
     el.className = 'recent-projects-degraded';
     el.setAttribute('data-recent-projects-degraded', '');
-    el.textContent = tr('recentProjects_degraded');
+    // v1.8.1: the user IS signed in on /project — telling them to sign in
+    // was a dead end. Explain the real condition and offer a retry.
+    var hint = document.createElement('div');
+    hint.textContent = tr('recentProjects_degraded_hint');
+    el.appendChild(hint);
+    var retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'recent-projects-show-all';
+    retry.setAttribute('data-recent-projects-retry', '');
+    retry.textContent = tr('recentProjects_retryScope');
+    retry.addEventListener('click', function () {
+      if (typeof refreshAccountScopeId === 'function') {
+        Promise.resolve(refreshAccountScopeId())
+          .then(function () { return renderRecentProjectsVariant(); })
+          .catch(function () { /* stays degraded */ });
+      } else {
+        renderRecentProjectsVariant();
+      }
+    });
+    el.appendChild(retry);
     return el;
   }
 
@@ -301,6 +335,24 @@
     openCustomInstructionsSettings();
   }
 
+  // v1.8.1: a session record can be stuck at 'running' forever if the tab
+  // closed / browser crashed mid-run and the project was never reopened in
+  // the editor (which is what settles running -> interrupted). The dashboard
+  // applies the same semantics at the display layer: a persisted 'running'
+  // older than 30 minutes is shown (and treated) as interrupted.
+  var ZOMBIE_RUNNING_MS = 30 * 60 * 1000;
+
+  function settleDashboardRunStatus(status, lastTouchedIso) {
+    if (status !== 'running') {
+      return status;
+    }
+    var touched = Date.parse(lastTouchedIso || '');
+    if (!Number.isFinite(touched) || (Date.now() - touched) > ZOMBIE_RUNNING_MS) {
+      return 'interrupted';
+    }
+    return 'running';
+  }
+
   function renderStatusBadge(status) {
     var safeStatus = (typeof status === 'string' && STATUS_BADGE_CLASS[status])
       ? status
@@ -339,15 +391,17 @@
     var name = lookupProjectName(projectId);
     if (!name) {
       name = isValidProjectId(projectId)
-        ? ('Project · ' + projectId.slice(0, 8))
+        ? tr('recentProjects_unnamed', { prefix: projectId.slice(0, 8) })
         : tr('recentProjects_row_projectLinkUnavailable');
     }
     var nameNode = textNode(name, 'recent-projects-row-name');
     nameNode.title = name;
     el.appendChild(nameNode);
-    el.appendChild(textNode(formatRelativeTime(row && row.lastActivityAt), 'recent-projects-row-time'));
+    var rowTime = textNode(formatRelativeTime(row && row.lastActivityAt), 'recent-projects-row-time');
+    rowTime.setAttribute('data-rel-time', String(row && row.lastActivityAt || ''));
+    el.appendChild(rowTime);
     el.appendChild(textNode((row && row.safeTaskSummary) || '', 'recent-projects-row-summary'));
-    el.appendChild(renderStatusBadge(row && row.primaryStatusBadge));
+    el.appendChild(renderStatusBadge(settleDashboardRunStatus(row && row.primaryStatusBadge, row && row.lastActivityAt)));
     if (valid) {
       el.addEventListener('click', function () {
         openProjectFromRow(projectId);
@@ -388,9 +442,15 @@
     expand.className = 'recent-projects-row-expand';
     expand.setAttribute('data-row-expand', '');
     expand.setAttribute('aria-expanded', 'false');
+    // v1.8.1 a11y: tie the toggle to the container it reveals.
+    var sessionsElId = 'codex-project-sessions-' + String(projectId || '').slice(0, 24);
+    expand.setAttribute('aria-controls', sessionsElId);
     expand.title = tr('recentProjects_sessions_toggle');
     expand.setAttribute('aria-label', tr('recentProjects_sessions_toggle'));
-    expand.textContent = '▾';
+    // v1.8.1: show how much work lives here — the count was already computed
+    // by the row query. Wider hit target doubles as the miss-click fix.
+    var count = Number(row && row.sessionCount) || 0;
+    expand.textContent = count > 1 ? ('▾ ' + tr('recentProjects_sessionsCount', { count: count })) : '▾';
     var head = document.createElement('div');
     head.className = 'recent-projects-row-head';
     head.appendChild(el);
@@ -398,6 +458,9 @@
     var sessionsEl = document.createElement('div');
     sessionsEl.className = 'recent-projects-sessions';
     sessionsEl.setAttribute('data-project-sessions', '');
+    sessionsEl.id = sessionsElId;
+    sessionsEl.setAttribute('role', 'region');
+    sessionsEl.setAttribute('aria-label', tr('recentProjects_sessions_toggle'));
     sessionsEl.hidden = true;
     expand.addEventListener('click', function () {
       toggleProjectSessions(wrap, projectId);
@@ -470,7 +533,8 @@
 
   function renderProjectSessionRow(sessionsEl, projectId, record) {
     var StorageDb = window.CodexOverleafStorageDb;
-    var running = Boolean(StorageDb) && StorageDb.derivePrimaryStatusBadge(record) === 'running';
+    var running = Boolean(StorageDb)
+      && settleDashboardRunStatus(StorageDb.derivePrimaryStatusBadge(record), record.updatedAt || record.lastActivityAt) === 'running';
     var row = document.createElement('div');
     row.className = 'recent-projects-session-row';
     row.setAttribute('data-project-session-row', record.id);
@@ -478,7 +542,9 @@
       row.setAttribute('data-running', 'true');
     }
     var title = textNode(sessionRecordDisplayTitle(record), 'recent-projects-session-title');
+    title.title = sessionRecordDisplayTitle(record);
     var time = textNode(formatRelativeTime(record.updatedAt || record.createdAt), 'recent-projects-session-time');
+    time.setAttribute('data-rel-time', String(record.updatedAt || record.createdAt || ''));
     var rename = document.createElement('button');
     rename.type = 'button';
     rename.className = 'recent-projects-session-action';
@@ -494,9 +560,12 @@
     del.setAttribute('aria-label', tr('deleteSession'));
     del.textContent = '×';
     if (running) {
+      // Recently-touched running sessions may genuinely be live in another
+      // tab: keep rename locked, but let delete through a stronger confirm
+      // instead of a permanent dead-end (fleet: zombie sessions were
+      // undeletable from the very surface built to manage them).
       rename.disabled = true;
-      del.disabled = true;
-      del.title = tr('deleteSessionRunningToast');
+      del.title = tr('recentProjects_zombieRunningNote');
     }
     rename.addEventListener('click', function () {
       beginDashboardSessionRename(sessionsEl, projectId, record, row, title);
@@ -508,7 +577,45 @@
     row.appendChild(time);
     row.appendChild(rename);
     row.appendChild(del);
+    // v1.8.1 O2: session rows were click-dead. Clicking one now records it
+    // as the project's active session (the pref the editor reads on load)
+    // and opens the project straight into it.
+    row.classList.add('recent-projects-session-row--linked');
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    var activate = function () {
+      activateSessionAndOpenProject(projectId, record).catch(function () { /* navigation is best-effort */ });
+    };
+    row.addEventListener('click', function (event) {
+      if (event.target.closest('button') || event.target.closest('input')) {
+        return;
+      }
+      activate();
+    });
+    row.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        activate();
+      }
+    });
     return row;
+  }
+
+  async function activateSessionAndOpenProject(projectId, record) {
+    var Migration = window.CodexOverleafStorageMigration;
+    try {
+      if (Migration && Migration.loadPrefs && Migration.savePrefs) {
+        var prefs = await Migration.loadPrefs();
+        prefs = prefs && typeof prefs === 'object' ? prefs : {};
+        var map = prefs.activeSessionByProject && typeof prefs.activeSessionByProject === 'object'
+          ? prefs.activeSessionByProject
+          : {};
+        map[projectId] = record.id;
+        prefs.activeSessionByProject = map;
+        await Migration.savePrefs(prefs);
+      }
+    } catch (_error) { /* fall through: opening the project still works */ }
+    openProjectFromRow(projectId);
   }
 
   // Remove every session record behind a dead (invalid-projectId) dashboard
@@ -592,13 +699,19 @@
   async function deleteDashboardSession(sessionsEl, projectId, record) {
     var StorageDb = window.CodexOverleafStorageDb;
     var SessionState = window.CodexOverleafSessionState;
-    if (StorageDb && StorageDb.derivePrimaryStatusBadge(record) === 'running') {
-      showPluginToast(tr('deleteSessionRunningToast'), { status: 'warning' });
-      return;
-    }
+    // v1.8.1 P1b: ANY record whose stored badge is 'running' gets the
+    // stronger confirm — even one the 30-minute heuristic settled to
+    // interrupted. Activity timestamps are only bumped once a minute during
+    // a run, so the heuristic alone must never be the last line of defense
+    // for deleting what could be a live Codex thread.
+    var storedRunning = Boolean(StorageDb) && StorageDb.derivePrimaryStatusBadge(record) === 'running';
     var approved = await showPluginConfirm({
       title: tr('deleteSessionTitle'),
-      message: [sessionRecordDisplayTitle(record), '', tr('deleteSessionMessage')].join('\n'),
+      message: [
+        sessionRecordDisplayTitle(record),
+        '',
+        storedRunning ? tr('recentProjects_zombieDeleteConfirm') : tr('deleteSessionMessage')
+      ].join('\n'),
       confirmLabel: tr('deleteSessionConfirm'),
       cancelLabel: tr('confirmDefaultCancel'),
       destructive: true
@@ -636,7 +749,14 @@
     }
     // Re-render the whole variant so the row summary/badge reflect the
     // deletion, then restore this project's expanded session list.
-    await renderRecentProjectsVariant({ expandProjectId: projectId });
+    // v1.8.1: refresh the whole variant so the row's session count, badge,
+    // summary and the welcome stats all stay fresh — but restore the scroll
+    // position and this project's expanded list so the delete feels in-place.
+    var rootForScroll = getPanel() && getPanel().querySelector('[data-recent-projects-root]');
+    await renderRecentProjectsVariant({
+      expandProjectId: projectId,
+      restoreScrollTop: rootForScroll ? rootForScroll.scrollTop : undefined
+    });
   }
 
   function beginDashboardSessionRename(sessionsEl, projectId, record, row, titleEl) {
@@ -735,6 +855,52 @@
     return rootEl;
   }
 
+  // v1.8.1: synchronous dashboard shell for cold loads — flips the panel to
+  // the recent-projects view and paints the header + loading line BEFORE the
+  // async account-scope/IndexedDB work, so the per-project session UI never
+  // flashes on /project.
+  // v1.8.1: keep relative timestamps honest on a long-open dashboard tab.
+  // Cheap text-only sweep — no re-render, no scroll reset.
+  var relTimeTimer = null;
+  function startRelativeTimeTicker() {
+    if (relTimeTimer) {
+      return;
+    }
+    relTimeTimer = setInterval(function () {
+      if (document.visibilityState !== 'visible') {
+        return;
+      }
+      var panelEl = getPanel();
+      if (!panelEl || panelEl.dataset.view !== 'recent-projects') {
+        return;
+      }
+      var nodes = panelEl.querySelectorAll('[data-rel-time]');
+      for (var i = 0; i < nodes.length; i++) {
+        var iso = nodes[i].getAttribute('data-rel-time');
+        if (iso) {
+          nodes[i].textContent = formatRelativeTime(iso);
+        }
+      }
+    }, 60000);
+  }
+
+  function mountDashboardShell() {
+    var panelEl = getPanel();
+    if (!panelEl) {
+      return;
+    }
+    panelEl.dataset.view = 'recent-projects';
+    var rootEl = ensureRecentProjectsRoot();
+    if (!rootEl || (rootEl.childNodes || []).length) {
+      return;
+    }
+    rootEl.appendChild(renderWelcomeHeader());
+    var loading = document.createElement('div');
+    loading.className = 'recent-projects-loading';
+    loading.textContent = tx('Loading projects\u2026', '正在加载项目…');
+    rootEl.appendChild(loading);
+  }
+
   async function renderRecentProjectsVariant(options) {
     if (!getPanel()) {
       return;
@@ -743,6 +909,7 @@
     // top-level page DOM. The existing data-view-driven CSS hides per-
     // project regions when the panel root carries this value.
     getPanel().dataset.view = 'recent-projects';
+    startRelativeTimeTicker();
     var rootEl = ensureRecentProjectsRoot();
     if (!rootEl) {
       return;
@@ -795,6 +962,22 @@
     }
 
     listLoading.remove();
+    // v1.8.1 P2: a refresh must not clobber what the user had open — restore
+    // every previously-expanded project and the scroll position.
+    var restoreExpanded = Array.isArray(options && options.restoreExpanded) ? options.restoreExpanded : [];
+    // v1.8.1 O1: fill the welcome subtitle with a real summary now that the
+    // rows are known (header was painted before the async read).
+    var welcomeSubtitle = rootEl.querySelector('.recent-projects-welcome-subtitle');
+    if (welcomeSubtitle && rows && rows.length) {
+      var sessionTotal = 0;
+      for (var st = 0; st < rows.length; st++) {
+        sessionTotal += Number(rows[st].sessionCount) || 1;
+      }
+      welcomeSubtitle.textContent = tr('recentProjects_welcome_stats', {
+        projects: rows.length,
+        sessions: sessionTotal
+      });
+    }
     var hasMore = !showAll && rows && rows.length > pageLimit;
     var visibleRows = hasMore ? rows.slice(0, pageLimit) : rows;
     if (!visibleRows || !visibleRows.length) {
@@ -817,10 +1000,21 @@
     }
     rootEl.appendChild(renderSettingsEntry({ scope: 'account' }));
     var expandProjectId = options && options.expandProjectId;
-    if (expandProjectId) {
-      var wrap = listContainer.querySelector('[data-project-row-wrap="' + expandProjectId + '"]');
+    var toReopen = restoreExpanded.slice();
+    if (expandProjectId && toReopen.indexOf(expandProjectId) === -1) {
+      toReopen.push(expandProjectId);
+    }
+    for (var reopenIndex = 0; reopenIndex < toReopen.length; reopenIndex++) {
+      var wrap = listContainer.querySelector('[data-project-row-wrap="' + toReopen[reopenIndex] + '"]');
       if (wrap) {
-        toggleProjectSessions(wrap, expandProjectId);
+        toggleProjectSessions(wrap, toReopen[reopenIndex]);
+      }
+    }
+    if (options && Number.isFinite(options.restoreScrollTop)) {
+      rootEl.scrollTop = options.restoreScrollTop;
+      var scrollerParent = rootEl.parentElement;
+      if (scrollerParent && scrollerParent.scrollHeight > scrollerParent.clientHeight) {
+        scrollerParent.scrollTop = options.restoreScrollTop;
       }
     }
     opportunisticEnrichmentFromDom().catch(function () { /* swallow */ });
@@ -855,6 +1049,8 @@
       openProjectFromRow,
       renderRecentProjectRow,
       renderRecentProjectsVariant,
+      mountDashboardShell,
+      resetProjectNameCache,
       renderPerProjectVariant
     };
   }

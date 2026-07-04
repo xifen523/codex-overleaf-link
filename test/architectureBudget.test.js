@@ -32,7 +32,7 @@ test('architecture budget tracks v1.0 final split targets for the largest files'
       ['extension/src/content/sessionManager.js', 490],
       ['extension/src/content/applyResultFormatters.js', 450],
       ['extension/src/content/modelPicker.js', 550],
-      ['extension/src/content/recentProjects.js', 880],
+      ['extension/src/content/recentProjects.js', 1080],
       ['extension/src/content/otWarmMirror.js', 1000],
       ['extension/src/content/writebackOrchestrator.js', 880],
       ['extension/src/page/writebackRouter.js', 1950],
