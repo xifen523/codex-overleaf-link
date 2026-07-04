@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.8.3 - 2026-07-04
+## v1.8.3 - 2026-07-05
 
 Dashboard visual alignment fix. The native protocol stays `1`.
 
