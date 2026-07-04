@@ -262,9 +262,23 @@ function getRepoRoot() {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 }
 
-function main() {
+async function main() {
   const args = parseArgs(process.argv.slice(2));
   const errors = collectReleaseVerificationErrors(args);
+  // v1.8.1: the architecture budget is part of release verification — twice
+  // now a late fix pushed a file past its ceiling AFTER the last local
+  // budget run, and only CI's --enforce-target gate caught it (post-tag).
+  try {
+    const budget = await import('./check-architecture-budget.mjs');
+    const results = budget.collectArchitectureBudgetResults({ rootDir: path.resolve(args.rootDir || getRepoRoot()) });
+    for (const result of results) {
+      if (!result.targetMet) {
+        errors.push(`architecture budget: ${result.path} has ${result.lineCount} lines; limit is ${result.ceiling}`);
+      }
+    }
+  } catch (error) {
+    errors.push(`architecture budget check failed to run: ${error.message}`);
+  }
   if (errors.length > 0) {
     console.error('Release verification failed:');
     for (const error of errors) {

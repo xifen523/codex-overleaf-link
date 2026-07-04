@@ -56,8 +56,10 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // panelMaintenance.js. 8900 -> 8750.
     // v1.8.0 B3 raised 8750 -> 8830: history-row jump, per-file undo
     // selection wiring, and composer-attachment refresh persistence.
+    // v1.8.1 raised 8830 -> 8900: dashboard shell mount, debounced dashboard
+    // refresh with interaction preservation, and the in-run activity bump.
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 8830
+    maxLines: 8900
   },
   {
     // Carved from contentRuntime in v1.8.0 (phase 8): recovery handlers +
