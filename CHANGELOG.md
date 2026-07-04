@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.8.3 - 2026-07-04
+
+Dashboard visual alignment fix. The native protocol stays `1`.
+
+### Fixed
+
+- **The dashboard expand chevron is now part of the card.** Project rows keep the session expand control inside the card's right edge instead of floating as a detached icon outside the row.
+- **Old pending dashboard rows no longer look active.** Display-only `pending` rows older than 30 minutes now render as `stale` / `久未处理` while preserving the stored session state.
+- **The dashboard subtitle reads like product copy.** Release-facing commands and version metadata now point to `1.8.3`, and the welcome stats avoid the debug-style `project(s)` wording.
+
 ## v1.8.2 - 2026-07-04
 
 Dashboard proportion fix — the expand toggle is a slim icon again. The native protocol stays `1`.

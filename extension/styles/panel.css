@@ -3473,7 +3473,7 @@
 #codex-overleaf-panel [data-recent-projects-list] {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
 }
 
 #codex-overleaf-panel .recent-projects-empty,
@@ -3490,18 +3490,49 @@
 /* Dashboard per-project session management: expand a row to list, rename, or
    delete that project's sessions without entering it. */
 #codex-overleaf-panel .recent-projects-row-wrap {
+  position: relative;
   display: grid;
   gap: 0;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.12);
+}
+
+#codex-overleaf-panel .recent-projects-row-wrap::before {
+  content: "";
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  left: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--tl-border-strong);
+  opacity: 0.65;
+}
+
+#codex-overleaf-panel .recent-projects-row-wrap:has(.badge-completed)::before,
+#codex-overleaf-panel .recent-projects-row-wrap:has(.badge-accepted)::before,
+#codex-overleaf-panel .recent-projects-row-wrap:has(.badge-background-completed)::before {
+  background: var(--tl-ok);
+}
+
+#codex-overleaf-panel .recent-projects-row-wrap:has(.badge-stale)::before,
+#codex-overleaf-panel .recent-projects-row-wrap:has(.badge-interrupted)::before,
+#codex-overleaf-panel .recent-projects-row-wrap:has(.badge-needs-review)::before,
+#codex-overleaf-panel .recent-projects-row-wrap:has(.badge-needs-review-after-navigation)::before {
+  background: var(--tl-review);
+}
+
+#codex-overleaf-panel .recent-projects-row-wrap:has(.badge-failed)::before,
+#codex-overleaf-panel .recent-projects-row-wrap:has(.badge-abandoned-after-navigation)::before {
+  background: var(--tl-fail);
 }
 
 #codex-overleaf-panel .recent-projects-row-head {
-  display: flex;
-  align-items: stretch;
-  gap: 4px;
+  position: relative;
+  display: block;
 }
 
 #codex-overleaf-panel .recent-projects-row-head [data-recent-projects-row] {
-  flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
 }
 
@@ -3525,21 +3556,44 @@
 }
 
 #codex-overleaf-panel .recent-projects-row-expand {
-  flex: 0 0 auto;
-  width: 26px;
-  border-radius: var(--tl-r-sm);
-  color: var(--tl-fg-3);
+  position: absolute;
+  right: 8px;
+  bottom: 10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 0;
+  height: 18px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  color: var(--tl-accent);
   font-size: 11px;
+  font-weight: 550;
+  background: transparent;
+  opacity: 0;
+  transform: translateX(4px);
+  transition: opacity 120ms ease, transform 120ms ease, color 120ms ease;
+}
+
+#codex-overleaf-panel .recent-projects-row-wrap:hover .recent-projects-row-expand,
+#codex-overleaf-panel .recent-projects-row-expand:focus-visible,
+#codex-overleaf-panel .recent-projects-row-wrap[data-expanded="true"] .recent-projects-row-expand {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 #codex-overleaf-panel .recent-projects-row-expand:hover {
-  background: var(--tl-hover);
-  color: var(--tl-fg-2);
+  background: transparent;
+  color: var(--tl-accent);
+  text-decoration: underline;
 }
 
 #codex-overleaf-panel .recent-projects-row-wrap[data-expanded="true"] .recent-projects-row-expand {
   color: var(--tl-accent);
-  transform: rotate(180deg);
+  background: transparent;
 }
 
 #codex-overleaf-panel .recent-projects-sessions {
@@ -3638,23 +3692,21 @@
   grid-template-columns: minmax(0, 1fr) auto;
   grid-template-areas:
     "name time"
-    "summary summary"
-    "badge badge";
+    "badge sessions";
   align-items: baseline;
-  gap: 4px 12px;
+  gap: 6px 12px;
   width: 100%;
-  border: 1px solid var(--tl-border);
+  border: 0;
   border-radius: 6px;
-  background: var(--tl-surface-1);
+  background: transparent;
   color: var(--tl-fg-2);
-  padding: 10px 12px;
+  padding: 14px 86px 14px 14px;
   cursor: pointer;
   text-align: left;
 }
 
 #codex-overleaf-panel [data-recent-projects-row]:hover:not(:disabled) {
-  border-color: var(--tl-border-strong);
-  background: var(--tl-surface-2);
+  background: linear-gradient(90deg, rgba(128, 128, 128, 0.08), transparent 72%);
 }
 
 #codex-overleaf-panel [data-recent-projects-row]:disabled,
@@ -3666,8 +3718,8 @@
 #codex-overleaf-panel .recent-projects-row-name {
   grid-area: name;
   color: var(--tl-fg-1);
-  font-weight: 600;
-  font-size: 13px;
+  font-weight: 650;
+  font-size: 13.5px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3677,6 +3729,7 @@
   grid-area: time;
   color: var(--tl-fg-3);
   font-size: 11px;
+  letter-spacing: 0.01em;
   white-space: nowrap;
 }
 
@@ -3704,51 +3757,59 @@
   justify-self: start;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  margin-top: 2px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  font-size: 11px;
+  gap: 5px;
+  padding: 0;
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 10.5px;
+  letter-spacing: 0.03em;
   line-height: 1.4;
+  font-weight: 500;
+  text-transform: uppercase;
+  opacity: 0.92;
+}
+
+#codex-overleaf-panel .recent-projects-row-badge::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.85;
 }
 
 /* Status badge palette. All ten values from spec §5.10 — reuses the
    existing per-project run-card hues so the dashboard reads identically to
    the in-project surface. */
-#codex-overleaf-panel .recent-projects-row-badge.badge-pending,
 #codex-overleaf-panel .recent-projects-row-badge.badge-running {
-  background: var(--tl-run-wash);
-  border-color: rgba(78, 201, 176, 0.32);
   color: var(--tl-run);
+}
+
+#codex-overleaf-panel .recent-projects-row-badge.badge-pending {
+  color: var(--tl-fg-3);
 }
 
 #codex-overleaf-panel .recent-projects-row-badge.badge-accepted,
 #codex-overleaf-panel .recent-projects-row-badge.badge-completed,
 #codex-overleaf-panel .recent-projects-row-badge.badge-background-completed {
-  background: var(--tl-ok-wash);
-  border-color: rgba(137, 209, 133, 0.32);
   color: var(--tl-ok);
 }
 
 #codex-overleaf-panel .recent-projects-row-badge.badge-rejected {
-  background: rgba(143, 148, 153, 0.16);
-  border-color: rgba(143, 148, 153, 0.32);
   color: var(--tl-fg-2);
 }
 
 #codex-overleaf-panel .recent-projects-row-badge.badge-needs-review,
 #codex-overleaf-panel .recent-projects-row-badge.badge-interrupted,
-#codex-overleaf-panel .recent-projects-row-badge.badge-needs-review-after-navigation {
-  background: rgba(215, 186, 125, 0.14);
-  border-color: rgba(215, 186, 125, 0.34);
+#codex-overleaf-panel .recent-projects-row-badge.badge-needs-review-after-navigation,
+#codex-overleaf-panel .recent-projects-row-badge.badge-stale {
   color: var(--tl-review);
 }
 
 #codex-overleaf-panel .recent-projects-row-badge.badge-failed,
 #codex-overleaf-panel .recent-projects-row-badge.badge-abandoned-after-navigation {
-  background: rgba(244, 135, 113, 0.14);
-  border-color: rgba(244, 135, 113, 0.34);
   color: var(--tl-fail);
 }
 

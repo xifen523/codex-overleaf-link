@@ -337,20 +337,21 @@
 
   // v1.8.1: a session record can be stuck at 'running' forever if the tab
   // closed / browser crashed mid-run and the project was never reopened in
-  // the editor (which is what settles running -> interrupted). The dashboard
-  // applies the same semantics at the display layer: a persisted 'running'
-  // older than 30 minutes is shown (and treated) as interrupted.
+  // the editor (which is what settles running -> interrupted). v1.8.3 also
+  // treats old display-only 'pending' rows as stale: that preserves the stored
+  // run state while avoiding a dashboard chip that looks actively in progress
+  // days later.
   var ZOMBIE_RUNNING_MS = 30 * 60 * 1000;
 
   function settleDashboardRunStatus(status, lastTouchedIso) {
-    if (status !== 'running') {
+    if (status !== 'running' && status !== 'pending') {
       return status;
     }
     var touched = Date.parse(lastTouchedIso || '');
     if (!Number.isFinite(touched) || (Date.now() - touched) > ZOMBIE_RUNNING_MS) {
-      return 'interrupted';
+      return status === 'running' ? 'interrupted' : 'stale';
     }
-    return 'running';
+    return status;
   }
 
   function renderStatusBadge(status) {
@@ -406,7 +407,6 @@
     if (sessionCount > 1) {
       el.appendChild(textNode(tr('recentProjects_sessionsCount', { count: sessionCount }), 'recent-projects-row-sessions'));
     }
-    el.appendChild(textNode((row && row.safeTaskSummary) || '', 'recent-projects-row-summary'));
     el.appendChild(renderStatusBadge(settleDashboardRunStatus(row && row.primaryStatusBadge, row && row.lastActivityAt)));
     if (valid) {
       el.addEventListener('click', function () {
@@ -453,9 +453,7 @@
     expand.setAttribute('aria-controls', sessionsElId);
     expand.title = tr('recentProjects_sessions_toggle');
     expand.setAttribute('aria-label', tr('recentProjects_sessions_toggle'));
-    // v1.8.2: the toggle stays a pure icon — text inside it bloated the
-    // control against the slim row (and rotated upside-down when expanded).
-    expand.textContent = '▾';
+    expand.textContent = tr('recentProjects_sessions_action');
     var head = document.createElement('div');
     head.className = 'recent-projects-row-head';
     head.appendChild(el);
@@ -484,6 +482,7 @@
     var opening = sessionsEl.hidden;
     sessionsEl.hidden = !opening;
     expand.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    expand.textContent = tr(opening ? 'recentProjects_sessions_action_open' : 'recentProjects_sessions_action');
     wrap.setAttribute('data-expanded', opening ? 'true' : 'false');
     if (opening) {
       renderProjectSessions(sessionsEl, projectId).catch(function () { /* swallow */ });

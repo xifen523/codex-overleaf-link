@@ -151,7 +151,8 @@
     background_completed: 'badge-background-completed',
     needs_review_after_navigation: 'badge-needs-review-after-navigation',
     abandoned_after_navigation: 'badge-abandoned-after-navigation',
-    interrupted: 'badge-interrupted'
+    interrupted: 'badge-interrupted',
+    stale: 'badge-stale'
   };
 
   // Carved modules (v1.4.5 structural-debt phase 1). Factory-injected with the
