@@ -400,6 +400,12 @@
     var rowTime = textNode(formatRelativeTime(row && row.lastActivityAt), 'recent-projects-row-time');
     rowTime.setAttribute('data-rel-time', String(row && row.lastActivityAt || ''));
     el.appendChild(rowTime);
+    // v1.8.2: the session count lives in the row meta, matching its type
+    // scale, instead of inflating the expand toggle.
+    var sessionCount = Number(row && row.sessionCount) || 0;
+    if (sessionCount > 1) {
+      el.appendChild(textNode(tr('recentProjects_sessionsCount', { count: sessionCount }), 'recent-projects-row-sessions'));
+    }
     el.appendChild(textNode((row && row.safeTaskSummary) || '', 'recent-projects-row-summary'));
     el.appendChild(renderStatusBadge(settleDashboardRunStatus(row && row.primaryStatusBadge, row && row.lastActivityAt)));
     if (valid) {
@@ -447,10 +453,9 @@
     expand.setAttribute('aria-controls', sessionsElId);
     expand.title = tr('recentProjects_sessions_toggle');
     expand.setAttribute('aria-label', tr('recentProjects_sessions_toggle'));
-    // v1.8.1: show how much work lives here — the count was already computed
-    // by the row query. Wider hit target doubles as the miss-click fix.
-    var count = Number(row && row.sessionCount) || 0;
-    expand.textContent = count > 1 ? ('▾ ' + tr('recentProjects_sessionsCount', { count: count })) : '▾';
+    // v1.8.2: the toggle stays a pure icon — text inside it bloated the
+    // control against the slim row (and rotated upside-down when expanded).
+    expand.textContent = '▾';
     var head = document.createElement('div');
     head.className = 'recent-projects-row-head';
     head.appendChild(el);

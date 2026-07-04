@@ -3923,10 +3923,14 @@
   border-radius: 50%;
   animation: tl-spin 800ms linear infinite;
 }
-/* Wider expand hit target (miss-click fix) that can also carry the count. */
+/* v1.8.2: the expand toggle stays a slim icon strip — modestly wider than
+   the original 26px for the miss-click fix, but proportionate to the row. */
 #codex-overleaf-panel .recent-projects-row-expand {
-  min-width: 44px;
-  white-space: nowrap;
+  width: 32px;
+}
+#codex-overleaf-panel .recent-projects-row-sessions {
+  color: var(--tl-fg-3);
+  font-size: 10.5px;
 }
 #codex-overleaf-panel .recent-projects-session-row--linked {
   cursor: pointer;

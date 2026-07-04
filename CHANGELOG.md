@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.8.2 - 2026-07-04
+
+Dashboard proportion fix — the expand toggle is a slim icon again. The native protocol stays `1`.
+
+### Fixed
+
+- **The expand toggle no longer dwarfs its row.** v1.8.1 put the session count ("▾ 3 sessions") inside the expand button and widened it to 44px, making the control visually outweigh the slim project row — and the expanded-state 180° rotation flipped the embedded text upside-down. The toggle is back to a proportionate 32px icon strip (still wider than the original 26px for the miss-click fix), and the session count moved into the row's meta line at its type scale.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.8.2` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.8.2.zip`, `codex-overleaf-native-host-v1.8.2.tar.gz`, and `codex-overleaf-link-1.8.2.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.8.2 -- install-native`.
+- Native host diagnostics remain `npm exec --yes codex-overleaf-link@1.8.2 -- doctor`.
+- Native host uninstall is `npm exec --yes codex-overleaf-link@1.8.2 -- uninstall-native`.
+
 ## v1.8.1 - 2026-07-04
 
 Dashboard trust — a full review of the extension's surface on the Overleaf project list (/project): every status it shows is now honest, every dead-end got an exit, and the first screen stops flashing the wrong UI. Fleet-reviewed twice (4 review dimensions: 8 confirmed defects + 9 improvements; then a P1 caught in the fix itself: the 30-minute zombie heuristic would have mislabeled genuinely-live long runs because activity timestamps were pinned to run start — sessions now bump their activity once a minute during a run, any stored-running delete keeps the stronger warning, and the auto-refresh preserves expanded lists, scroll and in-progress renames). The native protocol stays `1`.
