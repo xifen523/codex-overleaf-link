@@ -10,6 +10,12 @@ Dashboard visual alignment fix. The native protocol stays `1`.
 - **Old pending dashboard rows no longer look active.** Display-only `pending` rows older than 30 minutes now render as `stale` / `久未处理` while preserving the stored session state.
 - **The dashboard subtitle reads like product copy.** Release-facing commands and version metadata now point to `1.8.3`, and the welcome stats avoid the debug-style `project(s)` wording.
 
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.8.3` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.8.3.zip`, `codex-overleaf-native-host-v1.8.3.tar.gz`, and `codex-overleaf-link-1.8.3.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.8.3 -- install-native`.
+
 ## v1.8.2 - 2026-07-04
 
 Dashboard proportion fix — the expand toggle is a slim icon again. The native protocol stays `1`.
