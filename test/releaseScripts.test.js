@@ -429,7 +429,7 @@ test('release workflow grants publish permission and builds/verifies artifacts b
 
   assert.match(permissionsSection, /^\s+contents:\s+read\s*$/m);
   assert.match(workflow, /release:[\s\S]*?permissions:\s*\n\s+contents:\s+write\s*\n\s+id-token:\s+write/m);
-  assert.match(workflow, /node-version:\s+22\.14\.0/);
+  assert.match(workflow, /node-version:\s+24\.18\.0/);
   assert.match(workflow, /npm install -g npm@11\.11\.0/);
   assert.match(workflow, /registry-url:\s+https:\/\/registry\.npmjs\.org/);
   assert.match(workflow, /NODE_AUTH_TOKEN:\s+\$\{\{\s*secrets\.NPM_TOKEN\s*\}\}/);
