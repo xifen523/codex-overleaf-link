@@ -399,6 +399,9 @@ test('package exposes release verification and artifact build commands', () => {
   assert.match(runTests, /--test-isolation=none/);
   assert.doesNotMatch(runTests, /--test-force-exit/);
   assert.match(runTests, /for \(const testFile of testFiles\)/);
+  assert.match(runTests, /HIGH_PRIORITY_TEST_FILE_NAMES/);
+  assert.match(runTests, /releaseScripts\.test\.js/);
+  assert.match(runTests, /CODEX_OVERLEAF_RELEASE_SCRIPTS_TEST_TIMEOUT_MS/);
   assert.match(runTests, /CODEX_OVERLEAF_TEST_FILE_TIMEOUT_MS/);
   assert.equal(pkg.scripts['verify:release'], 'node scripts/verify-release.mjs');
   assert.equal(pkg.scripts['build:release'], 'node scripts/build-release.mjs');
