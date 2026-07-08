@@ -382,6 +382,7 @@ test('package exposes release verification and artifact build commands', () => {
 
   assert.equal(pkg.scripts.test, 'node scripts/run-tests.mjs');
   assert.match(runTests, /--test-concurrency=1/);
+  assert.match(runTests, /--test-force-exit/);
   assert.equal(pkg.scripts['verify:release'], 'node scripts/verify-release.mjs');
   assert.equal(pkg.scripts['build:release'], 'node scripts/build-release.mjs');
 });

@@ -12,7 +12,7 @@ const testFiles = fs.readdirSync(testDir)
   .sort()
   .map((fileName) => path.join('test', fileName));
 
-const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...testFiles], {
+const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', '--test-force-exit', ...testFiles], {
   cwd: rootDir,
   stdio: 'inherit'
 });
