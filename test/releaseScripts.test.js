@@ -383,6 +383,8 @@ test('package exposes release verification and artifact build commands', () => {
   assert.equal(pkg.scripts.test, 'node scripts/run-tests.mjs');
   assert.match(runTests, /--test-concurrency=1/);
   assert.match(runTests, /--test-force-exit/);
+  assert.match(runTests, /for \(const testFile of testFiles\)/);
+  assert.match(runTests, /CODEX_OVERLEAF_TEST_FILE_TIMEOUT_MS/);
   assert.equal(pkg.scripts['verify:release'], 'node scripts/verify-release.mjs');
   assert.equal(pkg.scripts['build:release'], 'node scripts/build-release.mjs');
 });
