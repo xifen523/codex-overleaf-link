@@ -16,7 +16,7 @@ const testFiles = fs.readdirSync(testDir)
 for (const testFile of testFiles) {
   const startedAt = Date.now();
   console.error(`[run-tests] starting ${testFile}`);
-  const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', '--test-force-exit', testFile], {
+  const result = spawnSync(process.execPath, ['--test', '--test-concurrency=1', testFile], {
     cwd: rootDir,
     stdio: 'inherit',
     timeout: TEST_FILE_TIMEOUT_MS
