@@ -153,12 +153,18 @@ function getCurrentPackageTarballName() {
 }
 
 function runNpm(args) {
-  const result = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', args, {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    shell: process.platform === 'win32',
-    windowsHide: true
-  });
+  const result = process.platform === 'win32'
+    ? spawnSync(`npm.cmd ${args.map(quoteWindowsShellArg).join(' ')}`, {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        shell: true,
+        windowsHide: true
+      })
+    : spawnSync('npm', args, {
+        cwd: repoRoot,
+        encoding: 'utf8',
+        windowsHide: true
+      });
 
   if (result.error) {
     throw result.error;
@@ -168,6 +174,14 @@ function runNpm(args) {
   }
 
   return result.stdout;
+}
+
+function quoteWindowsShellArg(arg) {
+  const value = String(arg);
+  if (/^[A-Za-z0-9._=:/-]+$/.test(value)) {
+    return value;
+  }
+  return `"${value.replace(/"/g, '\\"')}"`;
 }
 
 function parsePackJsonText(text) {
