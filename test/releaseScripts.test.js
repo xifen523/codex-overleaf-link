@@ -396,6 +396,7 @@ test('package exposes release verification and artifact build commands', () => {
 
   assert.equal(pkg.scripts.test, 'node scripts/run-tests.mjs');
   assert.match(runTests, /--test-concurrency=1/);
+  assert.match(runTests, /--test-isolation=none/);
   assert.doesNotMatch(runTests, /--test-force-exit/);
   assert.match(runTests, /for \(const testFile of testFiles\)/);
   assert.match(runTests, /CODEX_OVERLEAF_TEST_FILE_TIMEOUT_MS/);
@@ -539,9 +540,7 @@ test('release workflow gates publishing on the cross-platform test matrix', () =
 
   assertContainsInOrder(workflow, [
     'test-matrix:',
-    // TEMPORARY (v1.6.3): macos-latest removed from the release gate while
-    // GitHub's hosted macOS pool hangs; restore alongside release.yml.
-    'os: [ubuntu-latest, windows-latest]',
+    'os: [macos-latest, ubuntu-latest, windows-latest]',
     'run: npm test',
     'release:',
     'needs: test-matrix',
