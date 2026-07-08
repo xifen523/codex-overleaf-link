@@ -8,8 +8,9 @@ const __filename = fileURLToPath(import.meta.url);
 const rootDir = path.resolve(path.dirname(__filename), '..');
 const testDir = path.join(rootDir, 'test');
 const TEST_FILE_TIMEOUT_MS = Number.parseInt(process.env.CODEX_OVERLEAF_TEST_FILE_TIMEOUT_MS || '600000', 10);
+const DEFAULT_RELEASE_SCRIPTS_TEST_TIMEOUT_MS = process.platform === 'win32' ? 420000 : 120000;
 const RELEASE_SCRIPTS_TEST_TIMEOUT_MS = Number.parseInt(
-  process.env.CODEX_OVERLEAF_RELEASE_SCRIPTS_TEST_TIMEOUT_MS || '120000',
+  process.env.CODEX_OVERLEAF_RELEASE_SCRIPTS_TEST_TIMEOUT_MS || String(DEFAULT_RELEASE_SCRIPTS_TEST_TIMEOUT_MS),
   10
 );
 const RELEASE_SCRIPTS_SUBTEST_TIMEOUT_MS = Number.parseInt(
