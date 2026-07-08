@@ -291,6 +291,10 @@ async function main() {
   console.log(`Release verification passed for v${pkg.version}.`);
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.env.CODEX_OVERLEAF_TEST_IMPORT !== '1' &&
+  process.argv[1] &&
+  path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   main();
 }

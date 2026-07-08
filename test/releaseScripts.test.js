@@ -9,6 +9,21 @@ const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..');
 
+async function importScriptModule(relativePath) {
+  const moduleUrl = pathToFileURL(path.join(repoRoot, relativePath)).href;
+  const previous = process.env.CODEX_OVERLEAF_TEST_IMPORT;
+  process.env.CODEX_OVERLEAF_TEST_IMPORT = '1';
+  try {
+    return await import(moduleUrl);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CODEX_OVERLEAF_TEST_IMPORT;
+    } else {
+      process.env.CODEX_OVERLEAF_TEST_IMPORT = previous;
+    }
+  }
+}
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
@@ -363,8 +378,7 @@ test('CHANGELOG documents the current release metadata alignment in release tool
   assert.equal(changelog.includes(`## [${version}] - 2026-07-05`), false);
   assert.equal(changelog.indexOf(heading, start + heading.length), -1, 'CHANGELOG.md should not duplicate the current release heading');
 
-  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
-  const { extractReleaseNotes } = await import(moduleUrl);
+  const { extractReleaseNotes } = await importScriptModule('scripts/build-release.mjs');
   const section = extractReleaseNotes(changelog, version);
   const escapedVersion = version.replace(/\./g, '\\.');
 
@@ -571,8 +585,7 @@ test('release verifier catches package and extension manifest version mismatch',
       packageVersion: '1.2.3',
       manifestVersion: '1.2.4'
     });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+    const { collectReleaseVerificationErrors } = await importScriptModule('scripts/verify-release.mjs');
 
     const errors = collectReleaseVerificationErrors({
       rootDir: tempDir,
@@ -595,8 +608,7 @@ test('release verifier follows package metadata and requires Windows installer s
       packageVersion: ''
     });
     fs.rmSync(path.join(tempDir, 'install.ps1'));
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+    const { collectReleaseVerificationErrors } = await importScriptModule('scripts/verify-release.mjs');
 
     const errors = collectReleaseVerificationErrors({
       rootDir: tempDir,
@@ -614,8 +626,7 @@ test('release verifier catches BUILD_TARGET_VERSION mismatch (v1.6.2 single-sour
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-buildtarget-'));
   try {
     writeReleaseFixture(tempDir, { packageVersion: '1.2.3', buildTargetVersion: '1.2.2' });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+    const { collectReleaseVerificationErrors } = await importScriptModule('scripts/verify-release.mjs');
 
     const errors = collectReleaseVerificationErrors({
       rootDir: tempDir,
@@ -638,8 +649,7 @@ test('release verifier catches README badge mismatch', async () => {
       packageVersion: '1.2.3',
       readmeVersion: '1.2.4'
     });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+    const { collectReleaseVerificationErrors } = await importScriptModule('scripts/verify-release.mjs');
 
     const errors = collectReleaseVerificationErrors({
       rootDir: tempDir,
@@ -677,8 +687,7 @@ test('release verifier requires npm package metadata, lockfile, exact manifest, 
         }
       }, null, 2)}\n`
     );
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+    const { collectReleaseVerificationErrors } = await importScriptModule('scripts/verify-release.mjs');
 
     const errors = collectReleaseVerificationErrors({
       rootDir: tempDir,
@@ -702,8 +711,7 @@ test('release verifier rejects invalid package-lock lockfileVersion', async () =
       packageVersion: '1.2.3',
       lockfileVersion: 2
     });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+    const { collectReleaseVerificationErrors } = await importScriptModule('scripts/verify-release.mjs');
 
     const errors = collectReleaseVerificationErrors({
       rootDir: tempDir,
@@ -726,8 +734,7 @@ test('release verifier catches CHANGELOG heading date mismatch', async () => {
       packageVersion: '1.2.3',
       changelogDate: '2026-05-07'
     });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+    const { collectReleaseVerificationErrors } = await importScriptModule('scripts/verify-release.mjs');
 
     const errors = collectReleaseVerificationErrors({
       rootDir: tempDir,
@@ -750,8 +757,7 @@ test('release verifier accepts changelog date from package release heading by de
       packageVersion: '0.9.0',
       changelogDate: '2026-05-07'
     });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+    const { collectReleaseVerificationErrors } = await importScriptModule('scripts/verify-release.mjs');
 
     const errors = collectReleaseVerificationErrors({
       rootDir: tempDir
@@ -770,8 +776,7 @@ test('release verifier rejects forbidden tracked internal and private files', as
       packageVersion: '0.9.0',
       changelogDate: '2026-05-07'
     });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+    const { collectReleaseVerificationErrors } = await importScriptModule('scripts/verify-release.mjs');
 
     const forbiddenPaths = [
       '.local/release-process.md',
@@ -824,8 +829,7 @@ test('release verifier rejects private files from packaged source trees without 
       packageVersion: '0.9.0',
       changelogDate: '2026-05-07'
     });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+    const { collectReleaseVerificationErrors } = await importScriptModule('scripts/verify-release.mjs');
 
     const allowedPackagedPaths = [
       'extension/manifest.json',
@@ -876,8 +880,7 @@ test('release verifier does not require manual extension docs in public source',
       packageVersion: '0.9.0',
       changelogDate: '2026-05-07'
     });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/verify-release.mjs')).href;
-    const { collectReleaseVerificationErrors } = await import(moduleUrl);
+    const { collectReleaseVerificationErrors } = await importScriptModule('scripts/verify-release.mjs');
 
     assert.deepEqual(collectReleaseVerificationErrors({ rootDir: tempDir, releaseDate: '2026-05-07' }), []);
   } finally {
@@ -910,8 +913,7 @@ test('release verifier CLI exits 1 on metadata mismatch', () => {
 });
 
 test('build-release derives the default output directory from version', async () => {
-  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
-  const { getDefaultReleaseOutputDir } = await import(moduleUrl);
+  const { getDefaultReleaseOutputDir } = await importScriptModule('scripts/build-release.mjs');
 
   assert.equal(
     getDefaultReleaseOutputDir({ rootDir: '/tmp/codex-overleaf-link', version: '1.2.3' }),
@@ -920,8 +922,7 @@ test('build-release derives the default output directory from version', async ()
 });
 
 test('build-release rejects unsafe output paths before deletion', async () => {
-  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
-  const { assertSafeReleaseOutputDir } = await import(moduleUrl);
+  const { assertSafeReleaseOutputDir } = await importScriptModule('scripts/build-release.mjs');
   const unsafePaths = [
     repoRoot,
     path.dirname(repoRoot),
@@ -943,8 +944,7 @@ test('build-release rejects unsafe output paths before deletion', async () => {
 });
 
 test('build-release refuses unmarked non-empty custom output directories without deleting them', async () => {
-  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
-  const { buildRelease } = await import(moduleUrl);
+  const { buildRelease } = await importScriptModule('scripts/build-release.mjs');
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-unsafe-output-'));
   const outputDir = path.join(tempDir, 'existing-output');
   const sentinelPath = path.join(outputDir, 'keep.txt');
@@ -967,8 +967,7 @@ test('build-release refuses unmarked non-empty custom output directories without
 });
 
 test('build-release argument parser rejects missing values and unknown flags', async () => {
-  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
-  const { parseBuildReleaseArgs } = await import(moduleUrl);
+  const { parseBuildReleaseArgs } = await importScriptModule('scripts/build-release.mjs');
 
   assert.throws(() => parseBuildReleaseArgs(['--output']), /--output requires a path value/);
   assert.throws(() => parseBuildReleaseArgs(['--output', '--unknown']), /--output requires a path value/);
@@ -1000,8 +999,7 @@ test('build-release CLI exits non-zero on unknown flags before building', () => 
 });
 
 test('release note extraction fails for missing or empty changelog sections', async () => {
-  const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
-  const { extractReleaseNotes } = await import(moduleUrl);
+  const { extractReleaseNotes } = await importScriptModule('scripts/build-release.mjs');
 
   assert.throws(
     () => extractReleaseNotes('# Changelog\n\n## v1.2.2 - 2026-05-05\n\nPrevious notes.\n', '1.2.3'),
@@ -1022,8 +1020,7 @@ test('build-release refuses an untracked Windows installer source', async () => 
     writeMinimalReleaseBuildFixture(fixtureRoot, {
       untracked: ['install.ps1']
     });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
-    const { buildRelease } = await import(moduleUrl);
+    const { buildRelease } = await importScriptModule('scripts/build-release.mjs');
 
     assert.throws(
       () => buildRelease({ rootDir: fixtureRoot, outputDir, allowDirtyReleaseInputs: true }),
@@ -1043,8 +1040,7 @@ test('build-release refuses an untracked required native runtime helper', async 
     writeMinimalReleaseBuildFixture(fixtureRoot, {
       untracked: ['native-host/src/nativeHostPlatform.js']
     });
-    const moduleUrl = pathToFileURL(path.join(repoRoot, 'scripts/build-release.mjs')).href;
-    const { buildRelease } = await import(moduleUrl);
+    const { buildRelease } = await importScriptModule('scripts/build-release.mjs');
 
     assert.throws(
       () => buildRelease({ rootDir: fixtureRoot, outputDir, allowDirtyReleaseInputs: true }),
