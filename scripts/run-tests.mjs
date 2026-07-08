@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,18 +27,15 @@ for (const testFile of testFiles) {
   const nodeArgs = getNodeTestArgs(testFile);
   const timeoutMs = getTestFileTimeoutMs(testFile);
   console.error(`[run-tests] starting ${testFile} (${nodeArgs.join(' ')}, timeout=${timeoutMs}ms)`);
-  const result = spawnSync(process.execPath, nodeArgs, {
-    cwd: rootDir,
-    stdio: 'inherit',
-    timeout: timeoutMs
-  });
+  const result = await runNodeTestFile({ testFile, nodeArgs, timeoutMs });
 
   if (result.error) {
-    if (result.error.code === 'ETIMEDOUT') {
-      console.error(`Test file timed out after ${timeoutMs}ms: ${testFile}`);
-      process.exit(1);
-    }
     throw result.error;
+  }
+
+  if (result.timedOut) {
+    console.error(`Test file timed out after ${timeoutMs}ms: ${testFile}`);
+    process.exit(1);
   }
 
   if (result.status !== 0) {
@@ -46,6 +43,57 @@ for (const testFile of testFiles) {
   }
 
   console.error(`[run-tests] passed ${testFile} in ${Date.now() - startedAt}ms`);
+}
+
+async function runNodeTestFile({ testFile, nodeArgs, timeoutMs }) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, nodeArgs, {
+      cwd: rootDir,
+      stdio: 'inherit',
+      detached: process.platform !== 'win32'
+    });
+    let timedOut = false;
+    let forceExitTimer = null;
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      console.error(`[run-tests] timeout reached for ${testFile}; killing test process tree pid=${child.pid}`);
+      killProcessTree(child);
+      forceExitTimer = setTimeout(() => {
+        console.error(`[run-tests] ${testFile} did not exit after kill; forcing runner exit`);
+        process.exit(1);
+      }, 5000);
+    }, timeoutMs);
+
+    child.on('error', (error) => {
+      clearTimeout(timeoutTimer);
+      clearTimeout(forceExitTimer);
+      resolve({ status: null, signal: null, timedOut, error });
+    });
+    child.on('close', (status, signal) => {
+      clearTimeout(timeoutTimer);
+      clearTimeout(forceExitTimer);
+      resolve({ status, signal, timedOut, error: null });
+    });
+  });
+}
+
+function killProcessTree(child) {
+  if (!child.pid) {
+    return;
+  }
+  if (process.platform === 'win32') {
+    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    return;
+  }
+  try {
+    process.kill(-child.pid, 'SIGKILL');
+  } catch {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // Nothing else to do; the force-exit timer will fail the runner.
+    }
+  }
 }
 
 function getTestFilePriority(testFile) {

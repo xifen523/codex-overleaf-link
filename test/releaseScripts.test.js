@@ -398,6 +398,10 @@ test('package exposes release verification and artifact build commands', () => {
   assert.match(runTests, /--test-concurrency=1/);
   assert.match(runTests, /--test-isolation=none/);
   assert.doesNotMatch(runTests, /--test-force-exit/);
+  assert.match(runTests, /spawn\(process\.execPath, nodeArgs/);
+  assert.doesNotMatch(runTests, /spawnSync\(process\.execPath, nodeArgs/);
+  assert.match(runTests, /killProcessTree/);
+  assert.match(runTests, /SIGKILL|taskkill/);
   assert.match(runTests, /for \(const testFile of testFiles\)/);
   assert.match(runTests, /HIGH_PRIORITY_TEST_FILE_NAMES/);
   assert.match(runTests, /releaseScripts\.test\.js/);
