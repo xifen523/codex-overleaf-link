@@ -8,6 +8,26 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const repoRoot = path.resolve(__dirname, '..');
+const RELEASE_TEST_TRACE = process.env.CI === 'true' || process.env.CODEX_OVERLEAF_RELEASE_TEST_TRACE === '1';
+
+function releaseTest(name, optionsOrFn, maybeFn) {
+  const hasOptions = typeof optionsOrFn !== 'function';
+  const options = hasOptions ? optionsOrFn : undefined;
+  const fn = hasOptions ? maybeFn : optionsOrFn;
+  const wrapped = async (t) => {
+    if (RELEASE_TEST_TRACE) {
+      console.error(`[releaseScripts] start ${name}`);
+    }
+    try {
+      return await fn(t);
+    } finally {
+      if (RELEASE_TEST_TRACE) {
+        console.error(`[releaseScripts] end ${name}`);
+      }
+    }
+  };
+  return hasOptions ? test(name, options, wrapped) : test(name, wrapped);
+}
 
 async function importScriptModule(relativePath) {
   const moduleUrl = pathToFileURL(path.join(repoRoot, relativePath)).href;
@@ -369,7 +389,7 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   fs.writeFileSync(path.join(rootDir, 'scripts/install-native-host.mjs'), '#!/usr/bin/env node\n');
 }
 
-test('CHANGELOG documents the current release metadata alignment in release tooling format', async () => {
+releaseTest('CHANGELOG documents the current release metadata alignment in release tooling format', async () => {
   const version = readJson(path.join(repoRoot, 'package.json')).version;
   const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
   const heading = `## v${version} - 2026-07-05`;
@@ -390,7 +410,7 @@ test('CHANGELOG documents the current release metadata alignment in release tool
   assert.match(section, /native protocol `1`/i);
 });
 
-test('package exposes release verification and artifact build commands', () => {
+releaseTest('package exposes release verification and artifact build commands', () => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
   const runTests = fs.readFileSync(path.join(repoRoot, 'scripts/run-tests.mjs'), 'utf8');
 
@@ -411,14 +431,14 @@ test('package exposes release verification and artifact build commands', () => {
   assert.equal(pkg.scripts['build:release'], 'node scripts/build-release.mjs');
 });
 
-test('README documents the npm tarball in GitHub Release artifacts', () => {
+releaseTest('README documents the npm tarball in GitHub Release artifacts', () => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
   const readme = readText(path.join(repoRoot, 'README.md'));
 
   assert.match(readme, new RegExp(`codex-overleaf-link-${pkg.version.replace(/\./g, '\\.')}\\.tgz`));
 });
 
-test('release workflow only publishes semver-like version tags', () => {
+releaseTest('release workflow only publishes semver-like version tags', () => {
   const workflow = readReleaseWorkflow();
   const triggerSection = getTopLevelYamlSection(workflow, 'on');
 
@@ -431,7 +451,7 @@ test('release workflow only publishes semver-like version tags', () => {
   assert.doesNotMatch(triggerSection, /^\s+schedule:/m);
 });
 
-test('release workflow grants publish permission and builds/verifies artifacts before npm publish', () => {
+releaseTest('release workflow grants publish permission and builds/verifies artifacts before npm publish', () => {
   const workflow = readReleaseWorkflow();
   const permissionsSection = getTopLevelYamlSection(workflow, 'permissions');
 
@@ -454,7 +474,7 @@ test('release workflow grants publish permission and builds/verifies artifacts b
   ]);
 });
 
-test('release workflow fails early when tag and package version differ', () => {
+releaseTest('release workflow fails early when tag and package version differ', () => {
   const workflow = readReleaseWorkflow();
 
   assert.match(workflow, /package_version="\$\(node -p "require\('\.\/package\.json'\)\.version"\)"/);
@@ -472,7 +492,7 @@ test('release workflow fails early when tag and package version differ', () => {
   ]);
 });
 
-test('test workflow runs the test suite on macOS, Linux, and Windows', () => {
+releaseTest('test workflow runs the test suite on macOS, Linux, and Windows', () => {
   const workflow = readTestWorkflow();
 
   assert.match(workflow, /^\s+strategy:\s*$/m);
@@ -487,7 +507,7 @@ test('test workflow runs the test suite on macOS, Linux, and Windows', () => {
   ]);
 });
 
-test('issue templates require task mode and release triage fields', () => {
+releaseTest('issue templates require task mode and release triage fields', () => {
   const taskModeOptions = [
     'Ask-only',
     'Suggest-edit',
@@ -542,7 +562,7 @@ test('issue templates require task mode and release triage fields', () => {
   );
 });
 
-test('release workflow gates publishing on the cross-platform test matrix', () => {
+releaseTest('release workflow gates publishing on the cross-platform test matrix', () => {
   const workflow = readReleaseWorkflow();
 
   assertContainsInOrder(workflow, [
@@ -555,7 +575,7 @@ test('release workflow gates publishing on the cross-platform test matrix', () =
   ]);
 });
 
-test('release workflow publishes generated notes and built artifacts', () => {
+releaseTest('release workflow publishes generated notes and built artifacts', () => {
   const workflow = readReleaseWorkflow();
 
   assert.match(workflow, /uses:\s+softprops\/action-gh-release@v2/);
@@ -571,7 +591,7 @@ test('release workflow publishes generated notes and built artifacts', () => {
   assert.match(workflow, /^\s+overwrite_files:\s+true\s*$/m);
 });
 
-test('release workflow upload artifact gate rejects extra explicit files', () => {
+releaseTest('release workflow upload artifact gate rejects extra explicit files', () => {
   const workflow = readReleaseWorkflow();
   const workflowWithExtraUpload = workflow.replace(
     /^(\s+fail_on_unmatched_files:)/m,
@@ -584,7 +604,7 @@ test('release workflow upload artifact gate rejects extra explicit files', () =>
   );
 });
 
-test('release verifier catches package and extension manifest version mismatch', async () => {
+releaseTest('release verifier catches package and extension manifest version mismatch', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-verify-'));
   try {
     writeReleaseFixture(tempDir, {
@@ -607,7 +627,7 @@ test('release verifier catches package and extension manifest version mismatch',
   }
 });
 
-test('release verifier follows package metadata and requires Windows installer source', async () => {
+releaseTest('release verifier follows package metadata and requires Windows installer source', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-current-'));
   try {
     writeReleaseFixture(tempDir, {
@@ -628,7 +648,7 @@ test('release verifier follows package metadata and requires Windows installer s
   }
 });
 
-test('release verifier catches BUILD_TARGET_VERSION mismatch (v1.6.2 single-source gate)', async () => {
+releaseTest('release verifier catches BUILD_TARGET_VERSION mismatch (v1.6.2 single-source gate)', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-buildtarget-'));
   try {
     writeReleaseFixture(tempDir, { packageVersion: '1.2.3', buildTargetVersion: '1.2.2' });
@@ -648,7 +668,7 @@ test('release verifier catches BUILD_TARGET_VERSION mismatch (v1.6.2 single-sour
   }
 });
 
-test('release verifier catches README badge mismatch', async () => {
+releaseTest('release verifier catches README badge mismatch', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-readme-'));
   try {
     writeReleaseFixture(tempDir, {
@@ -671,7 +691,7 @@ test('release verifier catches README badge mismatch', async () => {
   }
 });
 
-test('release verifier requires npm package metadata, lockfile, exact manifest, README, and upload docs', async () => {
+releaseTest('release verifier requires npm package metadata, lockfile, exact manifest, README, and upload docs', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-npm-metadata-'));
   try {
     writeReleaseFixture(tempDir, {
@@ -710,7 +730,7 @@ test('release verifier requires npm package metadata, lockfile, exact manifest, 
   }
 });
 
-test('release verifier rejects invalid package-lock lockfileVersion', async () => {
+releaseTest('release verifier rejects invalid package-lock lockfileVersion', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-lockfile-version-'));
   try {
     writeReleaseFixture(tempDir, {
@@ -733,7 +753,7 @@ test('release verifier rejects invalid package-lock lockfileVersion', async () =
   }
 });
 
-test('release verifier catches CHANGELOG heading date mismatch', async () => {
+releaseTest('release verifier catches CHANGELOG heading date mismatch', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-changelog-'));
   try {
     writeReleaseFixture(tempDir, {
@@ -756,7 +776,7 @@ test('release verifier catches CHANGELOG heading date mismatch', async () => {
   }
 });
 
-test('release verifier accepts changelog date from package release heading by default', async () => {
+releaseTest('release verifier accepts changelog date from package release heading by default', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-dynamic-date-'));
   try {
     writeReleaseFixture(tempDir, {
@@ -775,7 +795,7 @@ test('release verifier accepts changelog date from package release heading by de
   }
 });
 
-test('release verifier rejects forbidden tracked internal and private files', async () => {
+releaseTest('release verifier rejects forbidden tracked internal and private files', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-forbidden-'));
   try {
     writeReleaseFixture(tempDir, {
@@ -828,7 +848,7 @@ test('release verifier rejects forbidden tracked internal and private files', as
   }
 });
 
-test('release verifier rejects private files from packaged source trees without blocking normal inputs', async () => {
+releaseTest('release verifier rejects private files from packaged source trees without blocking normal inputs', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-packaged-private-'));
   try {
     writeReleaseFixture(tempDir, {
@@ -879,7 +899,7 @@ test('release verifier rejects private files from packaged source trees without 
   }
 });
 
-test('release verifier does not require manual extension docs in public source', async () => {
+releaseTest('release verifier does not require manual extension docs in public source', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-no-public-docs-'));
   try {
     writeReleaseFixture(tempDir, {
@@ -894,7 +914,7 @@ test('release verifier does not require manual extension docs in public source',
   }
 });
 
-test('release verifier CLI exits 1 on metadata mismatch', () => {
+releaseTest('release verifier CLI exits 1 on metadata mismatch', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-cli-'));
   try {
     writeReleaseFixture(tempDir, {
@@ -918,7 +938,7 @@ test('release verifier CLI exits 1 on metadata mismatch', () => {
   }
 });
 
-test('build-release derives the default output directory from version', async () => {
+releaseTest('build-release derives the default output directory from version', async () => {
   const { getDefaultReleaseOutputDir } = await importScriptModule('scripts/build-release.mjs');
 
   assert.equal(
@@ -927,7 +947,7 @@ test('build-release derives the default output directory from version', async ()
   );
 });
 
-test('build-release rejects unsafe output paths before deletion', async () => {
+releaseTest('build-release rejects unsafe output paths before deletion', async () => {
   const { assertSafeReleaseOutputDir } = await importScriptModule('scripts/build-release.mjs');
   const unsafePaths = [
     repoRoot,
@@ -949,7 +969,7 @@ test('build-release rejects unsafe output paths before deletion', async () => {
   }));
 });
 
-test('build-release refuses unmarked non-empty custom output directories without deleting them', async () => {
+releaseTest('build-release refuses unmarked non-empty custom output directories without deleting them', async () => {
   const { buildRelease } = await importScriptModule('scripts/build-release.mjs');
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-unsafe-output-'));
   const outputDir = path.join(tempDir, 'existing-output');
@@ -972,7 +992,7 @@ test('build-release refuses unmarked non-empty custom output directories without
   }
 });
 
-test('build-release argument parser rejects missing values and unknown flags', async () => {
+releaseTest('build-release argument parser rejects missing values and unknown flags', async () => {
   const { parseBuildReleaseArgs } = await importScriptModule('scripts/build-release.mjs');
 
   assert.throws(() => parseBuildReleaseArgs(['--output']), /--output requires a path value/);
@@ -980,7 +1000,7 @@ test('build-release argument parser rejects missing values and unknown flags', a
   assert.throws(() => parseBuildReleaseArgs(['--unknown']), /Unknown option: --unknown/);
 });
 
-test('build-release CLI exits non-zero on unknown flags before building', () => {
+releaseTest('build-release CLI exits non-zero on unknown flags before building', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-bad-args-'));
   const outputDir = path.join(tempDir, 'out');
   try {
@@ -1004,7 +1024,7 @@ test('build-release CLI exits non-zero on unknown flags before building', () => 
   }
 });
 
-test('release note extraction fails for missing or empty changelog sections', async () => {
+releaseTest('release note extraction fails for missing or empty changelog sections', async () => {
   const { extractReleaseNotes } = await importScriptModule('scripts/build-release.mjs');
 
   assert.throws(
@@ -1017,7 +1037,7 @@ test('release note extraction fails for missing or empty changelog sections', as
   );
 });
 
-test('build-release refuses an untracked Windows installer source', async () => {
+releaseTest('build-release refuses an untracked Windows installer source', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-untracked-ps1-'));
   const outputDir = path.join(tempDir, 'out');
   try {
@@ -1037,7 +1057,7 @@ test('build-release refuses an untracked Windows installer source', async () => 
   }
 });
 
-test('build-release refuses an untracked required native runtime helper', async () => {
+releaseTest('build-release refuses an untracked required native runtime helper', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-untracked-native-'));
   const outputDir = path.join(tempDir, 'out');
   try {
@@ -1057,7 +1077,7 @@ test('build-release refuses an untracked required native runtime helper', async 
   }
 });
 
-test('top-level copied uninstaller runs from release artifact root', (t) => {
+releaseTest('top-level copied uninstaller runs from release artifact root', (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-uninstall-'));
   const outputDir = path.join(tempDir, 'out');
   const homeDir = path.join(tempDir, 'home');
@@ -1108,7 +1128,7 @@ test('top-level copied uninstaller runs from release artifact root', (t) => {
   }
 });
 
-test('release archives exclude untracked files under packaged directories', (t) => {
+releaseTest('release archives exclude untracked files under packaged directories', (t) => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
   const version = pkg.version;
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-untracked-'));
@@ -1155,7 +1175,7 @@ test('release archives exclude untracked files under packaged directories', (t) 
   }
 });
 
-test('build-release refuses dirty tracked packaged files before writing artifacts', () => {
+releaseTest('build-release refuses dirty tracked packaged files before writing artifacts', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-dirty-tracked-'));
   const outputDir = path.join(tempDir, 'out');
   const trackedFile = path.join(repoRoot, 'extension/src/shared/summary.js');
@@ -1189,7 +1209,7 @@ test('build-release refuses dirty tracked packaged files before writing artifact
   }
 });
 
-test('build-release refuses packaged files staged for deletion from HEAD', () => {
+releaseTest('build-release refuses packaged files staged for deletion from HEAD', () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-staged-delete-'));
   const outputDir = path.join(tempDir, 'out');
   const relativePath = 'extension/src/shared/summary.js';
@@ -1231,7 +1251,7 @@ test('build-release refuses packaged files staged for deletion from HEAD', () =>
   }
 });
 
-test('build-release creates expected artifacts and metadata', (t) => {
+releaseTest('build-release creates expected artifacts and metadata', (t) => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
   const version = pkg.version;
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-build-'));
@@ -1336,7 +1356,7 @@ test('build-release creates expected artifacts and metadata', (t) => {
   }
 });
 
-test('build-release writes a version-pinned install artifact while root installer stays source-oriented', (t) => {
+releaseTest('build-release writes a version-pinned install artifact while root installer stays source-oriented', (t) => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
   const version = pkg.version;
   const releaseRef = `v${version}`;
@@ -1418,7 +1438,7 @@ test('build-release writes a version-pinned install artifact while root installe
   }
 });
 
-test('native host tarball includes only runtime categories', (t) => {
+releaseTest('native host tarball includes only runtime categories', (t) => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
   const version = pkg.version;
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-native-'));
@@ -1470,7 +1490,7 @@ test('native host tarball includes only runtime categories', (t) => {
   }
 });
 
-test('extension zip includes loadable extension files and excludes repository/native files', (t) => {
+releaseTest('extension zip includes loadable extension files and excludes repository/native files', (t) => {
   const pkg = readJson(path.join(repoRoot, 'package.json'));
   const version = pkg.version;
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-release-extension-'));
@@ -1520,7 +1540,7 @@ test('extension zip includes loadable extension files and excludes repository/na
   }
 });
 
-test('release workflow builds and verifies artifacts before npm publish with retrying npm visibility', () => {
+releaseTest('release workflow builds and verifies artifacts before npm publish with retrying npm visibility', () => {
   const workflow = readReleaseWorkflow();
 
   assertContainsInOrder(workflow, [
@@ -1538,7 +1558,7 @@ test('release workflow builds and verifies artifacts before npm publish with ret
   assert.match(workflow, /overwrite_files:\s*true/);
 });
 
-test('release artifact verifier is wired as an npm script and checks archives', () => {
+releaseTest('release artifact verifier is wired as an npm script and checks archives', () => {
   const packageJson = readJson(path.join(repoRoot, 'package.json'));
   const verifier = readText(path.join(repoRoot, 'scripts/verify-release-artifacts.mjs'));
 

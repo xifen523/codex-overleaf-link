@@ -12,6 +12,10 @@ const RELEASE_SCRIPTS_TEST_TIMEOUT_MS = Number.parseInt(
   process.env.CODEX_OVERLEAF_RELEASE_SCRIPTS_TEST_TIMEOUT_MS || '120000',
   10
 );
+const RELEASE_SCRIPTS_SUBTEST_TIMEOUT_MS = Number.parseInt(
+  process.env.CODEX_OVERLEAF_RELEASE_SCRIPTS_SUBTEST_TIMEOUT_MS || '30000',
+  10
+);
 const HIGH_PRIORITY_TEST_FILE_NAMES = new Set([
   'releaseScripts.test.js'
 ]);
@@ -115,6 +119,9 @@ function getNodeTestArgs(testFile) {
     // on hosted macOS it can keep the file wrapper alive after releaseScripts
     // finishes, which makes CI look hung until the outer timeout kills it.
     args.push('--test-isolation=none');
+  }
+  if (path.basename(testFile) === 'releaseScripts.test.js') {
+    args.push(`--test-timeout=${RELEASE_SCRIPTS_SUBTEST_TIMEOUT_MS}`);
   }
   args.push(testFile);
   return args;
