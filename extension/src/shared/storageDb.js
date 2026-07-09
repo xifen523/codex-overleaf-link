@@ -1156,7 +1156,7 @@
       if (!s) continue;
       if (s.accountScopeId !== accountScopeId) continue;
       if (typeof s.lastActivityAt !== 'string' || !s.lastActivityAt) continue;
-      if (typeof s.projectId !== 'string' || !s.projectId) continue;
+      if (!isValidOverleafProjectId(s.projectId)) continue;
       var prev = byProject[s.projectId];
       if (!prev || prev.lastActivityAt < s.lastActivityAt) {
         byProject[s.projectId] = s;
@@ -1186,6 +1186,10 @@
       });
     }
     return rows;
+  }
+
+  function isValidOverleafProjectId(value) {
+    return typeof value === 'string' && /^[a-f0-9]{24}$/.test(value);
   }
 
   // Per spec §5.10:

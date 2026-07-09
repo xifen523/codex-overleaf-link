@@ -4112,7 +4112,7 @@
   }
 
   function getCurrentProjectId() {
-    return window.location.pathname.match(/\/project\/([^/?#]+)/)?.[1] || window.location.href;
+    return extractProjectIdFromLocation(window.location);
   }
 
   // -------------------------------------------------------------------------
@@ -4125,17 +4125,21 @@
 
   // Spec §5.1. URL predicate is the only signal that selects the variant —
   // no short-timeout DOM downgrade.
-  function isProjectEditorRoute(url) {
+  function extractProjectIdFromLocation(url) {
     const pathname = (url && typeof url.pathname === 'string') ? url.pathname : '';
     const match = pathname.match(/^\/project\/([^/?#]+)(?:\/.*)?$/);
     if (!match) {
-      return false;
+      return '';
     }
     const id = match[1];
     if (PROJECT_EDITOR_RESERVED_IDS.has(id)) {
-      return false;
+      return '';
     }
-    return /^[a-f0-9]{24}$/.test(id);
+    return /^[a-f0-9]{24}$/.test(id) ? id : '';
+  }
+
+  function isProjectEditorRoute(url) {
+    return Boolean(extractProjectIdFromLocation(url));
   }
 
   // Spec §5.2. Stable, unique identifiers ONLY. The display name is NEVER
@@ -6241,6 +6245,9 @@
         : '';
       const urlProjectId = getCurrentProjectId();
       const projectId = projectIdOverride || urlProjectId;
+      if (!projectId) {
+        return;
+      }
       // Read currentRunView through a defensive accessor so historical test
       // harnesses that inline `saveState` without re-declaring the module-
       // local `currentRunView` still execute the happy path unchanged.

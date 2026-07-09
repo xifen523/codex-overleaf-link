@@ -4478,11 +4478,12 @@ test('isProjectEditorRoute returns true only for /project/<24-hex>(/anything)?',
   assert.match(src, /\^\[a-f0-9\]\{24\}\$/);
   assert.match(src, /PROJECT_EDITOR_RESERVED_IDS/);
   // Behavioral test: extract the function body and evaluate inside a sandbox.
+  const helperBody = extractFunction(src, 'extractProjectIdFromLocation');
   const body = extractFunction(src, 'isProjectEditorRoute');
   const sandbox = { result: null };
   vm.createContext(sandbox);
   vm.runInContext(
-    "const PROJECT_EDITOR_RESERVED_IDS = new Set(['new','upload','import']);" + body
+    "const PROJECT_EDITOR_RESERVED_IDS = new Set(['new','upload','import']);" + helperBody + body
       + ";result = {" +
         "good: isProjectEditorRoute({ pathname: '/project/' + 'a'.repeat(24) })," +
         "goodSub: isProjectEditorRoute({ pathname: '/project/' + 'b'.repeat(24) + '/detacher' })," +
@@ -4491,6 +4492,7 @@ test('isProjectEditorRoute returns true only for /project/<24-hex>(/anything)?',
         "reservedNew: isProjectEditorRoute({ pathname: '/project/new' })," +
         "reservedUpload: isProjectEditorRoute({ pathname: '/project/upload' })," +
         "reservedImport: isProjectEditorRoute({ pathname: '/project/import' })," +
+        "projectHome: isProjectEditorRoute({ pathname: '/project' })," +
         "root: isProjectEditorRoute({ pathname: '/' })," +
         "missing: isProjectEditorRoute(null)" +
       "};",
@@ -4503,6 +4505,7 @@ test('isProjectEditorRoute returns true only for /project/<24-hex>(/anything)?',
   assert.equal(sandbox.result.reservedNew, false, 'reserved /project/new should not match');
   assert.equal(sandbox.result.reservedUpload, false, 'reserved /project/upload should not match');
   assert.equal(sandbox.result.reservedImport, false, 'reserved /project/import should not match');
+  assert.equal(sandbox.result.projectHome, false, '/project dashboard should not match');
   assert.equal(sandbox.result.root, false, 'root url should not match');
   assert.equal(sandbox.result.missing, false, 'null url should not match');
 });
@@ -4796,6 +4799,7 @@ test('Fix A: saveState honors options.projectIdOverride instead of getCurrentPro
   assert.match(body, /projectIdOverride/);
   assert.match(body, /options\s*&&\s*typeof\s+options\.projectIdOverride\s*===\s*['"]string['"]/);
   assert.match(body, /projectIdOverride\s*\|\|\s*urlProjectId/);
+  assert.match(body, /if\s*\(!projectId\)\s*\{\s*return;\s*\}/);
   // The navigation-divergent skip path must log and return early. The
   // accessor reads the live currentRunView through a defensive helper
   // (readLiveRunViewForSaveStateGuard) so test harnesses that inline
@@ -4836,7 +4840,7 @@ test('Fix A: saveState skips persistence when run is navigation-divergent and no
     + "    loadPrefs: () => Promise.resolve({}),"
     + "    savePrefs: () => Promise.resolve()"
     + "  },"
-    + "  location: { pathname: '/project/p_url', href: 'http://x/project/p_url' }"
+    + "  location: { pathname: '/project/' + 'a'.repeat(24), href: 'http://x/project/' + 'a'.repeat(24) }"
     + "};"
     + "let currentRunView = null;"
     + "const state = { sessions: [{ id: 's1', task: 't' }], autoRecompile: true, loadCodexLocalSkills: true, loadCodexOverleafSkills: true, experimentalOtByProject: {}, customInstructionsByProject: {}, governanceRulesByProject: {}, activeSessionId: 's1' };"
@@ -4850,23 +4854,27 @@ test('Fix A: saveState skips persistence when run is navigation-divergent and no
     + "function notifyAggressiveCompactionOnce(){}"
     + "function appendPlainLog(){ window.__skipLogged = true; }"
     + "function tx(en, _zh){ return en; }"
-    + "function getCurrentProjectId(){ return window.location.pathname.match(/\\/project\\/([^/?#]+)/)[1]; }"
+    + "function getCurrentProjectId(){ return window.__projectId || ''; }"
     + "let chrome = { storage: { local: { set: () => Promise.resolve() } } };"
     + guardAccessor + ";"
     + body
     + ";"
     + "(async () => {"
+    + "  window.__projectId = 'a'.repeat(24);"
     + "  storageWrites = []; window.__skipLogged = false;"
-    + "  await saveState({ projectIdOverride: 'p_override' });"
+    + "  await saveState({ projectIdOverride: 'b'.repeat(24) });"
     + "  result.withOverride = storageWrites.map(w => w.pid);"
     + "  storageWrites = []; window.__skipLogged = false;"
-    + "  currentRunView = { runProjectId: 'p_original' };"
+    + "  currentRunView = { runProjectId: 'c'.repeat(24) };"
     + "  await saveState();"
     + "  result.divergent = { writes: storageWrites.length, logged: window.__skipLogged === true };"
     + "  storageWrites = []; window.__skipLogged = false;"
-    + "  currentRunView = { runProjectId: 'p_url' };"
+    + "  currentRunView = { runProjectId: 'a'.repeat(24) };"
     + "  await saveState();"
     + "  result.happy = storageWrites.map(w => w.pid);"
+    + "  storageWrites = []; window.__skipLogged = false; currentRunView = null; window.__projectId = '';"
+    + "  await saveState();"
+    + "  result.noProject = { writes: storageWrites.length, logged: window.__skipLogged === true };"
     + "})().then(() => { result.done = true; });",
     sandbox
   );
@@ -4879,12 +4887,14 @@ test('Fix A: saveState skips persistence when run is navigation-divergent and no
     // outer test process (vm.createContext gives them the context's own
     // Array.prototype), so strict deepEqual rejects them even though the
     // values match. Compare via JSON to sidestep that.
-    assert.equal(JSON.stringify(sandbox.result.withOverride), JSON.stringify(['p_override']),
+    assert.equal(JSON.stringify(sandbox.result.withOverride), JSON.stringify(['b'.repeat(24)]),
       'override wins over URL projectId');
     assert.equal(JSON.stringify(sandbox.result.divergent), JSON.stringify({ writes: 0, logged: true }),
       'navigation-divergent saveState skips writes and emits a warning log');
-    assert.equal(JSON.stringify(sandbox.result.happy), JSON.stringify(['p_url']),
+    assert.equal(JSON.stringify(sandbox.result.happy), JSON.stringify(['a'.repeat(24)]),
       'happy path uses URL projectId (no override, no divergence)');
+    assert.equal(JSON.stringify(sandbox.result.noProject), JSON.stringify({ writes: 0, logged: false }),
+      'non-project routes do not persist dashboard sessions');
     resolve();
   }, 40));
 });

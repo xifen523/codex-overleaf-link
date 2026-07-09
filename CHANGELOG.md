@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.8.4 - 2026-07-09
+
+Dashboard data hygiene fix. The native protocol stays `1`.
+
+### Fixed
+
+- **The Overleaf project-list dashboard no longer shows phantom “Project link unavailable” rows.** The extension now treats `/project` as the account dashboard rather than a real project, so it no longer persists the homepage URL as a session `projectId`.
+- **Recent-projects queries now filter legacy invalid project ids.** Old URL-shaped or non-Overleaf project ids stay out of the dashboard even if they already exist in local storage.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.8.4` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.8.4.zip`, `codex-overleaf-native-host-v1.8.4.tar.gz`, and `codex-overleaf-link-1.8.4.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.8.4 -- install-native`.
+
 ## v1.8.3 - 2026-07-05
 
 Dashboard visual alignment fix. The native protocol stays `1`.

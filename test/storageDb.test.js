@@ -828,7 +828,7 @@ test('buildActiveSessionByProject skips empty projectId', () => {
 function seedSession(overrides) {
   return Object.assign({
     id: overrides.id || 'ses_seed',
-    projectId: overrides.projectId || 'proj_default',
+    projectId: overrides.projectId || PROJECT_DEFAULT,
     accountScopeId: overrides.accountScopeId || null,
     lastActivityAt: overrides.lastActivityAt || '',
     safeTaskSummary: overrides.safeTaskSummary || '',
@@ -836,39 +836,48 @@ function seedSession(overrides) {
   }, overrides);
 }
 
+const PROJECT_DEFAULT = 'd'.repeat(24);
+const PROJECT_A = 'a'.repeat(24);
+const PROJECT_B = 'b'.repeat(24);
+const PROJECT_C = 'c'.repeat(24);
+
+function projectIdForIndex(index) {
+  return index.toString(16).padStart(24, '0');
+}
+
 test('listRecentProjectsAcrossAccount: filters by accountScopeId only', () => {
   const sessions = [
-    seedSession({ id: 's1', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-25T10:00:00Z' }),
-    seedSession({ id: 's2', projectId: 'p2', accountScopeId: 'B', lastActivityAt: '2026-05-25T11:00:00Z' }),
-    seedSession({ id: 's3', projectId: 'p3', accountScopeId: 'A', lastActivityAt: '2026-05-25T12:00:00Z' })
+    seedSession({ id: 's1', projectId: PROJECT_A, accountScopeId: 'A', lastActivityAt: '2026-05-25T10:00:00Z' }),
+    seedSession({ id: 's2', projectId: PROJECT_B, accountScopeId: 'B', lastActivityAt: '2026-05-25T11:00:00Z' }),
+    seedSession({ id: 's3', projectId: PROJECT_C, accountScopeId: 'A', lastActivityAt: '2026-05-25T12:00:00Z' })
   ];
   const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
   assert.equal(rows.length, 2);
   const ids = rows.map(r => r.projectId).sort();
-  assert.deepEqual(ids, ['p1', 'p3']);
+  assert.deepEqual(ids, [PROJECT_A, PROJECT_C]);
 });
 
 test('listRecentProjectsAcrossAccount: dedupes by projectId, keeping the largest lastActivityAt', () => {
   const sessions = [
-    seedSession({ id: 's1', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-20T09:00:00Z', safeTaskSummary: 'old' }),
-    seedSession({ id: 's2', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-25T15:00:00Z', safeTaskSummary: 'new' }),
-    seedSession({ id: 's3', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-22T11:00:00Z', safeTaskSummary: 'mid' })
+    seedSession({ id: 's1', projectId: PROJECT_A, accountScopeId: 'A', lastActivityAt: '2026-05-20T09:00:00Z', safeTaskSummary: 'old' }),
+    seedSession({ id: 's2', projectId: PROJECT_A, accountScopeId: 'A', lastActivityAt: '2026-05-25T15:00:00Z', safeTaskSummary: 'new' }),
+    seedSession({ id: 's3', projectId: PROJECT_A, accountScopeId: 'A', lastActivityAt: '2026-05-22T11:00:00Z', safeTaskSummary: 'mid' })
   ];
   const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].projectId, 'p1');
+  assert.equal(rows[0].projectId, PROJECT_A);
   assert.equal(rows[0].lastActivityAt, '2026-05-25T15:00:00Z');
   assert.equal(rows[0].safeTaskSummary, 'new');
 });
 
 test('listRecentProjectsAcrossAccount: sorts desc by lastActivityAt', () => {
   const sessions = [
-    seedSession({ id: 's1', projectId: 'p_a', accountScopeId: 'A', lastActivityAt: '2026-05-25T09:00:00Z' }),
-    seedSession({ id: 's2', projectId: 'p_b', accountScopeId: 'A', lastActivityAt: '2026-05-25T13:00:00Z' }),
-    seedSession({ id: 's3', projectId: 'p_c', accountScopeId: 'A', lastActivityAt: '2026-05-25T11:00:00Z' })
+    seedSession({ id: 's1', projectId: PROJECT_A, accountScopeId: 'A', lastActivityAt: '2026-05-25T09:00:00Z' }),
+    seedSession({ id: 's2', projectId: PROJECT_B, accountScopeId: 'A', lastActivityAt: '2026-05-25T13:00:00Z' }),
+    seedSession({ id: 's3', projectId: PROJECT_C, accountScopeId: 'A', lastActivityAt: '2026-05-25T11:00:00Z' })
   ];
   const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
-  assert.deepEqual(rows.map(r => r.projectId), ['p_b', 'p_c', 'p_a']);
+  assert.deepEqual(rows.map(r => r.projectId), [PROJECT_B, PROJECT_C, PROJECT_A]);
 });
 
 test('listRecentProjectsAcrossAccount: caps at the given limit', () => {
@@ -876,7 +885,7 @@ test('listRecentProjectsAcrossAccount: caps at the given limit', () => {
   for (let i = 0; i < 15; i++) {
     sessions.push(seedSession({
       id: 's' + i,
-      projectId: 'p' + i,
+      projectId: projectIdForIndex(i),
       accountScopeId: 'A',
       lastActivityAt: '2026-05-25T' + String(i).padStart(2, '0') + ':00:00Z'
     }));
@@ -889,7 +898,7 @@ test('listRecentProjectsAcrossAccount: caps at the given limit', () => {
 
 test('listRecentProjectsAcrossAccount: returns [] when accountScopeId is falsy (fail-closed)', () => {
   const sessions = [
-    seedSession({ id: 's1', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-25T09:00:00Z' })
+    seedSession({ id: 's1', projectId: PROJECT_A, accountScopeId: 'A', lastActivityAt: '2026-05-25T09:00:00Z' })
   ];
   assert.deepEqual(filterRecentProjectsAcrossAccount(sessions, { accountScopeId: null }), []);
   assert.deepEqual(filterRecentProjectsAcrossAccount(sessions, { accountScopeId: '' }), []);
@@ -898,32 +907,34 @@ test('listRecentProjectsAcrossAccount: returns [] when accountScopeId is falsy (
 
 test('listRecentProjectsAcrossAccount: excludes legacy records lacking accountScopeId or lastActivityAt', () => {
   const sessions = [
-    seedSession({ id: 's1', projectId: 'p1', accountScopeId: 'A', lastActivityAt: '2026-05-25T09:00:00Z' }),
-    seedSession({ id: 's2', projectId: 'p2', accountScopeId: null, lastActivityAt: '2026-05-25T10:00:00Z' }),
-    seedSession({ id: 's3', projectId: 'p3', accountScopeId: 'A', lastActivityAt: '' }),
+    seedSession({ id: 's1', projectId: PROJECT_A, accountScopeId: 'A', lastActivityAt: '2026-05-25T09:00:00Z' }),
+    seedSession({ id: 's2', projectId: PROJECT_B, accountScopeId: null, lastActivityAt: '2026-05-25T10:00:00Z' }),
+    seedSession({ id: 's3', projectId: PROJECT_C, accountScopeId: 'A', lastActivityAt: '' }),
     // legacy record: no fields at all
-    { id: 's4', projectId: 'p4', runs: [] }
+    { id: 's4', projectId: projectIdForIndex(4), runs: [] }
   ];
   const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].projectId, 'p1');
+  assert.equal(rows[0].projectId, PROJECT_A);
 });
 
-test('listRecentProjectsAcrossAccount: excludes records lacking projectId', () => {
+test('listRecentProjectsAcrossAccount: excludes records lacking an openable projectId', () => {
   const sessions = [
     seedSession({ id: 's1', projectId: '', accountScopeId: 'A', lastActivityAt: '2026-05-25T09:00:00Z' }),
-    seedSession({ id: 's2', projectId: 'p2', accountScopeId: 'A', lastActivityAt: '2026-05-25T10:00:00Z' })
+    seedSession({ id: 's2', projectId: 'https://www.overleaf.com/project', accountScopeId: 'A', lastActivityAt: '2026-05-25T10:00:00Z' }),
+    seedSession({ id: 's3', projectId: 'p2', accountScopeId: 'A', lastActivityAt: '2026-05-25T11:00:00Z' }),
+    seedSession({ id: 's4', projectId: PROJECT_B, accountScopeId: 'A', lastActivityAt: '2026-05-25T12:00:00Z' })
   ];
   const rows = filterRecentProjectsAcrossAccount(sessions, { accountScopeId: 'A' });
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].projectId, 'p2');
+  assert.equal(rows[0].projectId, PROJECT_B);
 });
 
 test('listRecentProjectsAcrossAccount: row contract has the five fields (v1.8.1 adds sessionCount) and does not expose latestSessionId', () => {
   const sessions = [
     seedSession({
       id: 's_internal_id',
-      projectId: 'p1',
+      projectId: PROJECT_A,
       accountScopeId: 'A',
       lastActivityAt: '2026-05-25T09:00:00Z',
       safeTaskSummary: 'rewrite section',
@@ -935,7 +946,7 @@ test('listRecentProjectsAcrossAccount: row contract has the five fields (v1.8.1 
   const row = rows[0];
   assert.deepEqual(Object.keys(row).sort(), ['lastActivityAt', 'primaryStatusBadge', 'projectId', 'safeTaskSummary', 'sessionCount']);
   assert.equal(row.sessionCount, 1);
-  assert.equal(row.projectId, 'p1');
+  assert.equal(row.projectId, PROJECT_A);
   assert.equal(row.lastActivityAt, '2026-05-25T09:00:00Z');
   assert.equal(row.safeTaskSummary, 'rewrite section');
   assert.equal(row.primaryStatusBadge, 'completed');

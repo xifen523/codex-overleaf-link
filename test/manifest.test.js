@@ -23,20 +23,20 @@ const {
 } = require('../native-host/src/nativeHostPlatform');
 const extensionManifest = require('../extension/manifest.json');
 
-test('release metadata is prepared for v1.8.3', () => {
-  assert.equal(packageJson.version, '1.8.3');
+test('release metadata is prepared for v1.8.4', () => {
+  assert.equal(packageJson.version, '1.8.4');
   assert.equal(extensionManifest.version, packageJson.version);
 });
 
-test('release docs carry exact v1.8.3 badge and changelog heading', () => {
+test('release docs carry exact v1.8.4 badge and changelog heading', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
   const changelog = fs.readFileSync(path.join(__dirname, '../CHANGELOG.md'), 'utf8');
   const escapedVersion = packageJson.version.replace(/\./g, '\\.');
 
   assert.match(readme, new RegExp(`version-${escapedVersion}-blue`));
   assert.doesNotMatch(readme, /version-1\.0\.0-blue/);
-  assert.match(changelog, new RegExp(`^## v${escapedVersion} - 2026-07-05$`, 'm'));
-  assert.doesNotMatch(changelog, new RegExp(`^## \\[${escapedVersion}\\] - 2026-07-05$`, 'm'));
+  assert.match(changelog, new RegExp(`^## v${escapedVersion} - 2026-07-09$`, 'm'));
+  assert.doesNotMatch(changelog, new RegExp(`^## \\[${escapedVersion}\\] - 2026-07-09$`, 'm'));
   assert.doesNotMatch(changelog, /^## v1\.0\.0 - 2026-05-07[\s\S]*version-1\.1\.0-blue/m);
 });
 
