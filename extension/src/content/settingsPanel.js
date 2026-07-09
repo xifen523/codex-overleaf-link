@@ -1,6 +1,25 @@
 (function initCodexOverleafSettingsPanel() {
   'use strict';
 
+  function codexIcon(name) {
+    const icons = {
+      appearance: '<path d="M8 2.2v1.1"/><path d="M8 12.7v1.1"/><path d="M2.2 8h1.1"/><path d="M12.7 8h1.1"/><path d="m3.9 3.9.8.8"/><path d="m11.3 11.3.8.8"/><path d="m12.1 3.9-.8.8"/><path d="m4.7 11.3-.8.8"/><circle cx="8" cy="8" r="2.4"/>',
+      bolt: '<path d="M8.9 1.8 3.8 8.8h3.3l-.5 5.4 5.5-7.5H8.8z"/>',
+      database: '<ellipse cx="8" cy="4" rx="4.5" ry="1.9"/><path d="M3.5 4v4c0 1 2 1.9 4.5 1.9s4.5-.9 4.5-1.9V4"/><path d="M3.5 8v4c0 1 2 1.9 4.5 1.9s4.5-.9 4.5-1.9V8"/>',
+      flask: '<path d="M6 2.5h4"/><path d="M7 2.5v4.1l-3.4 5.3A1.4 1.4 0 0 0 4.8 14h6.4a1.4 1.4 0 0 0 1.2-2.1L9 6.6V2.5"/><path d="M5.3 10.5h5.4"/>',
+      history: '<path d="M4.2 3.4h7.6"/><path d="M4.2 8h7.6"/><path d="M4.2 12.6h4.6"/><path d="M2.2 3.4h.1"/><path d="M2.2 8h.1"/><path d="M2.2 12.6h.1"/>',
+      lock: '<rect x="3.6" y="7" width="8.8" height="6.2" rx="1.2"/><path d="M5.6 7V5.3a2.4 2.4 0 0 1 4.8 0V7"/><path d="M8 9.6v1.2"/>',
+      pen: '<path d="M3.2 12.8 4 9.7l6.6-6.6a1.4 1.4 0 0 1 2 2L6 11.7z"/><path d="m9.6 4.1 2.3 2.3"/>',
+      shield: '<path d="M8 2.1 12.4 4v3.5c0 2.9-1.8 5.1-4.4 6.4-2.6-1.3-4.4-3.5-4.4-6.4V4z"/><path d="M6.1 8.1 7.5 9.5 10.2 6.6"/>'
+    };
+    const safeName = Object.prototype.hasOwnProperty.call(icons, name) ? name : 'appearance';
+    return `<span class="codex-icon codex-icon-${safeName}" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false">${icons[safeName]}</svg></span>`;
+  }
+
+  function codexSetIcon(name) {
+    return `<span class="codex-set-group-icon">${codexIcon(name)}</span>`;
+  }
+
   function create(options = {}) {
     const container = options.container;
     if (!container) {
@@ -27,7 +46,7 @@
           <div class="codex-project-settings-scope-title codex-set-eyebrow" data-i18n="settingsScopeProjectTitle">This project</div>
           <details class="codex-set-group" data-set-group="personalization" open>
             <summary class="codex-set-group-head">
-              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">✍️</span><span data-i18n="personalizationConfig">Personalization</span></span>
+              <span class="codex-set-group-title">${codexSetIcon('pen')}<span data-i18n="personalizationConfig">Personalization</span></span>
               <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
             </summary>
             <div class="codex-set-card">
@@ -37,7 +56,7 @@
           </details>
           <details class="codex-set-group" data-set-group="protection" open>
             <summary class="codex-set-group-head">
-              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🛡</span><span data-i18n="fileProtectionTitle">File protection</span></span>
+              <span class="codex-set-group-title">${codexSetIcon('shield')}<span data-i18n="fileProtectionTitle">File protection</span></span>
               <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
             </summary>
             <div class="codex-set-card">
@@ -57,7 +76,7 @@
           </details>
           <details class="codex-set-group" data-set-group="privacy" open>
             <summary class="codex-set-group-head">
-              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🔒</span><span data-i18n="privacyTitle">Privacy</span></span>
+              <span class="codex-set-group-title">${codexSetIcon('lock')}<span data-i18n="privacyTitle">Privacy</span></span>
               <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
             </summary>
             <div class="codex-set-card">
@@ -75,7 +94,7 @@
           </details>
           <details class="codex-set-group" data-set-group="experimental">
             <summary class="codex-set-group-head">
-              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🧪</span><span data-i18n="experimentalTitle">Experimental</span></span>
+              <span class="codex-set-group-title">${codexSetIcon('flask')}<span data-i18n="experimentalTitle">Experimental</span></span>
               <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
             </summary>
             <div class="codex-set-card">
@@ -93,7 +112,7 @@
         <div class="codex-project-settings-scope codex-project-settings-scope--global">
           <details class="codex-set-group" data-set-group="history" data-history-card>
             <summary class="codex-set-group-head">
-              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🕘</span><span data-i18n="historyTitle">Change history</span></span>
+              <span class="codex-set-group-title">${codexSetIcon('history')}<span data-i18n="historyTitle">Change history</span></span>
             </summary>
             <div class="codex-set-card">
               <p class="codex-set-row-help" data-i18n="historyHelp">What Codex wrote to this project, per run. Filter by file name or task text.</p>
@@ -104,7 +123,7 @@
           <div class="codex-project-settings-scope-title codex-set-eyebrow" data-i18n="settingsScopeGlobalTitle">All projects</div>
           <details class="codex-set-group" data-set-group="appearance" open>
             <summary class="codex-set-group-head">
-              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🎨</span><span data-i18n="appearanceTitle">Appearance</span></span>
+              <span class="codex-set-group-title">${codexSetIcon('appearance')}<span data-i18n="appearanceTitle">Appearance</span></span>
               <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
             </summary>
             <div class="codex-set-card">
@@ -129,7 +148,7 @@
           </details>
           <details class="codex-set-group" data-set-group="storage" data-storage-card>
             <summary class="codex-set-group-head">
-              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">🗄</span><span data-i18n="storageTitle">History &amp; storage</span></span>
+              <span class="codex-set-group-title">${codexSetIcon('database')}<span data-i18n="storageTitle">History &amp; storage</span></span>
             </summary>
             <div class="codex-set-card">
               <p class="codex-set-row-help" data-storage-usage data-i18n="storageUsageLoading">Calculating usage…</p>
@@ -139,7 +158,7 @@
           </details>
           <details class="codex-set-group" data-set-group="skills" open>
             <summary class="codex-set-group-head">
-              <span class="codex-set-group-title"><span class="codex-set-group-icon" aria-hidden="true">⚡</span><span data-i18n="localSkillsTitle">Skills</span></span>
+              <span class="codex-set-group-title">${codexSetIcon('bolt')}<span data-i18n="localSkillsTitle">Skills</span></span>
               <span class="codex-set-saved" data-set-saved hidden>✓ <span data-i18n="settingsSaved">Saved</span></span>
             </summary>
             <div class="codex-set-card">

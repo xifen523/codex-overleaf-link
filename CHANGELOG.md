@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.8.5 - 2026-07-09
+
+Panel icon polish. The native protocol stays `1`.
+
+### Fixed
+
+- **The project header no longer carries a redundant clock icon.** Change history remains available inside Settings, so the top action strip now focuses on refresh, diagnostics, new session, and settings.
+- **Settings section icons now use the same linear SVG system as the header.** Emoji icons were replaced with theme-aware stroke icons so the settings screen matches the rest of the panel.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.8.5` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.8.5.zip`, `codex-overleaf-native-host-v1.8.5.tar.gz`, and `codex-overleaf-link-1.8.5.tgz`.
+- Native host install remains `npm exec --yes codex-overleaf-link@1.8.5 -- install-native`.
+
 ## v1.8.4 - 2026-07-09
 
 Dashboard data hygiene fix. The native protocol stays `1`.

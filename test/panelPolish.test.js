@@ -48,3 +48,17 @@ test('settings panel destroy clears the saved-flash timer', () => {
   const destroy = extractFunction(settings, 'destroy');
   assert.match(destroy, /clearTimeout\(instance\._savedFlashTimer\)/);
 });
+
+test('panel chrome uses one linear SVG icon system without the redundant history clock button', () => {
+  const panel = repo('extension/src/content/panelRenderer.js');
+  const settings = repo('extension/src/content/settingsPanel.js');
+  const css = repo('extension/styles/panel.css');
+  const surface = `${panel}\n${settings}`;
+
+  assert.doesNotMatch(panel, /data-change-history/);
+  assert.doesNotMatch(surface, /[↻⚙🕘✍🛡🔒🧪🎨🗄⚡]/);
+  assert.match(surface, /codex-icon/);
+  assert.match(settings, /codexSetIcon/);
+  assert.match(css, /\.codex-icon/);
+  assert.match(css, /\.codex-set-group-icon/);
+});

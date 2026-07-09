@@ -139,10 +139,40 @@
 }
 
 #codex-overleaf-panel .codex-vscode-head-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 26px;
   height: 26px;
   border-radius: 4px;
   color: var(--tl-fg-3);
+  font-size: 0;
+}
+
+#codex-overleaf-panel .codex-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: currentColor;
+}
+
+#codex-overleaf-panel .codex-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#codex-overleaf-panel .codex-vscode-head-actions .codex-icon {
+  width: 15px;
+  height: 15px;
 }
 
 #codex-overleaf-panel .codex-vscode-head-actions [data-diagnostics-menu][data-active="true"],
@@ -686,7 +716,21 @@
 }
 
 #codex-overleaf-panel .codex-set-group-icon {
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--tl-fg-3);
+}
+
+#codex-overleaf-panel .codex-set-group-icon .codex-icon {
+  width: 15px;
+  height: 15px;
+}
+
+#codex-overleaf-panel .codex-set-group[open] .codex-set-group-icon {
+  color: var(--tl-fg-2);
 }
 
 #codex-overleaf-panel .codex-set-saved {

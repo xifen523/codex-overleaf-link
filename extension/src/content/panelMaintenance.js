@@ -327,8 +327,8 @@
     });
   }
 
-  // Change history first-class entry (v1.8.0): the header clock button jumps
-  // straight to the Settings history card, expanded and loaded.
+  // Change history first-class entry (v1.8.0): callers jump straight to the
+  // Settings history card, expanded and loaded.
   function openChangeHistory() {
     openCustomInstructionsSettings();
     const card = getSettingsPanelInstance()?.container?.querySelector('[data-history-card]');

@@ -5,6 +5,16 @@
   const RESIZE_CLASS = 'codex-overleaf-panel-resizing';
   const COMPACT_CLASS = 'codex-overleaf-panel-compact';
 
+  function codexIcon(name) {
+    const icons = {
+      refresh: '<path d="M4.2 5.3A5 5 0 1 1 3.6 10"/><path d="M4.2 2.2v3.1H1.1"/>',
+      plus: '<path d="M8 3.2v9.6"/><path d="M3.2 8h9.6"/>',
+      settings: '<path d="M3.4 5.2h5.9"/><path d="M11.7 5.2h.9"/><path d="M10.1 3.6v3.2"/><path d="M3.4 10.8h1"/><path d="M6.8 10.8h5.8"/><path d="M5.9 9.2v3.2"/>'
+    };
+    const safeName = Object.prototype.hasOwnProperty.call(icons, name) ? name : 'settings';
+    return `<span class="codex-icon codex-icon-${safeName}" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false">${icons[safeName]}</svg></span>`;
+  }
+
   function create(options = {}) {
     const doc = options.document || document;
     const container = options.container || doc.documentElement;
@@ -30,11 +40,10 @@
       <div class="codex-vscode-head" data-panel-header>
         <div class="codex-vscode-title">CODEX</div>
         <div class="codex-vscode-head-actions" aria-label="Codex actions">
-          <button type="button" data-refresh title="Refresh current file status. This will not sync or modify files." aria-label="Refresh current file status. This will not sync or modify files.">↻</button>
+          <button type="button" data-refresh title="Refresh current file status. This will not sync or modify files." aria-label="Refresh current file status. This will not sync or modify files.">${codexIcon('refresh')}</button>
           <div data-diagnostics-slot></div>
-          <button type="button" data-change-history title="Change history" aria-label="Change history">🕘</button>
-          <button type="button" data-new-session title="New Session" aria-label="New Session">+</button>
-          <button type="button" data-custom-instructions-settings title="Project Settings" aria-label="Project Settings" aria-expanded="false">⚙</button>
+          <button type="button" data-new-session title="New Session" aria-label="New Session">${codexIcon('plus')}</button>
+          <button type="button" data-custom-instructions-settings title="Project Settings" aria-label="Project Settings" aria-expanded="false">${codexIcon('settings')}</button>
         </div>
       </div>
       <div data-settings-slot></div>
@@ -75,7 +84,6 @@
     bind(instance, panelEl, 'mousedown', event => event.stopPropagation());
     bind(instance, panelEl.querySelector('[data-refresh]'), 'click', () => callbacks.onRefresh?.());
     bind(instance, panelEl.querySelector('[data-new-session]'), 'click', () => callbacks.onNewSession?.());
-    bind(instance, panelEl.querySelector('[data-change-history]'), 'click', () => callbacks.onChangeHistory?.());
     bind(instance, panelEl.querySelector('[data-custom-instructions-settings]'), 'click', () => callbacks.onSettingsClick?.());
     bind(instance, panelEl.querySelector('[data-panel-resize-handle]'), 'pointerdown', event => startResize(instance, event));
     bind(instance, panelEl.querySelector('[data-panel-resize-handle]'), 'dblclick', event => {
