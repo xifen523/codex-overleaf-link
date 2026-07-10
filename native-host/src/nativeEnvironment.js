@@ -151,6 +151,10 @@ function getDefaultPathSegments(env = process.env, options = {}) {
 
   return [
     ...commonSegments.slice(0, 4),
+    platformPath.join(home, 'Applications/ChatGPT.app/Contents/Resources'),
+    platformPath.join(home, 'Applications/Codex.app/Contents/Resources'),
+    '/Applications/ChatGPT.app/Contents/Resources',
+    '/Applications/Codex.app/Contents/Resources',
     '/Library/TeX/texbin',
     '/opt/homebrew/bin',
     '/opt/homebrew/sbin',

@@ -1,6 +1,8 @@
 'use strict';
 
 const DEFAULT_POSIX_PATH_SEGMENTS = [
+  '/Applications/ChatGPT.app/Contents/Resources',
+  '/Applications/Codex.app/Contents/Resources',
   '/Library/TeX/texbin',
   '/opt/homebrew/bin',
   '/usr/local/bin',

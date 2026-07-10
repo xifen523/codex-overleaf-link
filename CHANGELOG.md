@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.8.6 - 2026-07-10
+
+Codex Desktop executable discovery compatibility. The native protocol stays `1`.
+
+### Fixed
+
+- **The native host now finds Codex after the macOS desktop-app path change.** Codex may now be bundled at `/Applications/ChatGPT.app/Contents/Resources/codex`; native discovery supports that location, the legacy `Codex.app` bundle, and user-local copies under `~/Applications`.
+- **Fresh native-host launchers include both macOS app resource directories.** Chrome's restricted launch environment can resolve the bundled Codex binary without relying on an interactive shell `PATH`.
+
+### Release
+
+- Release metadata alignment: bumped package, extension manifest, compatibility target, README release commands / badges, and release tracking metadata to `1.8.6` while keeping native protocol `1`.
+- Current release artifact names now resolve to `codex-overleaf-link-extension-v1.8.6.zip`, `codex-overleaf-native-host-v1.8.6.tar.gz`, and `codex-overleaf-link-1.8.6.tgz`.
+- Native host install is `npm exec --yes codex-overleaf-link@1.8.6 -- install-native`.
+
 ## v1.8.5 - 2026-07-09
 
 Panel icon polish. The native protocol stays `1`.

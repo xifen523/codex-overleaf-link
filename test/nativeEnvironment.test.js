@@ -54,6 +54,28 @@ test('native runtime env falls back to standard macOS developer paths without us
   assert.equal(segments.includes('/Users/example/.local/bin'), true);
 });
 
+test('native runtime env discovers Codex bundled inside the macOS ChatGPT app', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-chatgpt-app-'));
+  const resources = path.join(root, 'Applications', 'ChatGPT.app', 'Contents', 'Resources');
+  const bundledCodex = path.join(resources, 'codex');
+  fs.mkdirSync(resources, { recursive: true });
+  fs.writeFileSync(bundledCodex, '#!/bin/sh\n', { mode: 0o755 });
+
+  try {
+    const env = buildNativeRuntimeEnv({
+      HOME: root,
+      PATH: '/usr/bin:/bin'
+    }, {
+      platform: 'darwin',
+      readLoginShellEnv: () => null
+    });
+
+    assert.equal(env.CODEX_OVERLEAF_CODEX_PATH, bundledCodex);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('native runtime env merges Windows Path and PATH while resolving PATHEXT executables', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-win-env-'));
   const pathBin = path.join(root, 'win-path-bin');
