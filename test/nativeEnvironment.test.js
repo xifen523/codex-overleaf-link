@@ -49,12 +49,16 @@ test('native runtime env falls back to standard macOS developer paths without us
   });
 
   const segments = env.PATH.split(':');
+  assert.equal(segments.includes('/Users/example/Applications/ChatGPT.app/Contents/Resources'), true);
+  assert.equal(segments.includes('/Users/example/Applications/Codex.app/Contents/Resources'), true);
+  assert.equal(segments.includes('/Applications/ChatGPT.app/Contents/Resources'), true);
+  assert.equal(segments.includes('/Applications/Codex.app/Contents/Resources'), true);
   assert.equal(segments.includes('/Library/TeX/texbin'), true);
   assert.equal(segments.includes('/opt/homebrew/bin'), true);
   assert.equal(segments.includes('/Users/example/.local/bin'), true);
 });
 
-test('native runtime env discovers Codex bundled inside the macOS ChatGPT app', () => {
+test('native runtime env resolves Codex from an app resource candidate on every runner platform', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-chatgpt-app-'));
   const resources = path.join(root, 'Applications', 'ChatGPT.app', 'Contents', 'Resources');
   const bundledCodex = path.join(resources, 'codex');
@@ -64,10 +68,12 @@ test('native runtime env discovers Codex bundled inside the macOS ChatGPT app', 
   try {
     const env = buildNativeRuntimeEnv({
       HOME: root,
-      PATH: '/usr/bin:/bin'
+      PATH: ''
     }, {
-      platform: 'darwin',
-      readLoginShellEnv: () => null
+      platform: process.platform,
+      delimiter: path.delimiter,
+      readLoginShellEnv: () => null,
+      defaultPathSegments: [resources]
     });
 
     assert.equal(env.CODEX_OVERLEAF_CODEX_PATH, bundledCodex);
