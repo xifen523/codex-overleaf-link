@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.9.0 - 2026-07-10
+
+- Managed automatic updates: introduced a stable Manifest V3 Bootstrap, replaceable extension runtime, versioned native runtime, coordinated idle-only apply, health confirmation, and automatic rollback foundation.
+- Release authenticity: stable GitHub updates require an Ed25519-signed release manifest plus exact SHA-256 and size verification for `codex-overleaf-update-v1.9.0.tar.gz`.
+- One-time migration: `npm exec --yes codex-overleaf-link@1.9.0 -- install-managed` creates the stable unpacked extension path and managed native-host launcher; legacy `install-native` remains available.
+- Release metadata alignment: package, extension manifest, compatibility target, README badge/commands, and release tracking metadata now resolve to `1.9.0`; native protocol `1` remains unchanged.
+- Release artifacts now include `codex-overleaf-link-extension-v1.9.0.zip`, `codex-overleaf-native-host-v1.9.0.tar.gz`, `codex-overleaf-link-1.9.0.tgz`, the coordinated update bundle, and a detached signed manifest.
+
 ## v1.8.6 - 2026-07-10
 
 Codex Desktop executable discovery compatibility. The native protocol stays `1`.

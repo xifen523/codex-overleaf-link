@@ -27,6 +27,19 @@ function getDefaultRuntimeRoot(options = {}) {
   return platformPath.join(getCodexOverleafHome(options), 'native-host-runtime');
 }
 
+function getDefaultManagedRoot(options = {}) {
+  const platformPath = getPathModule(options);
+  return platformPath.join(getCodexOverleafHome(options), 'managed');
+}
+
+function getDefaultManagedExtensionRoot(options = {}) {
+  return getPathModule(options).join(getDefaultManagedRoot(options), 'extension');
+}
+
+function getDefaultManagedNativeRoot(options = {}) {
+  return getPathModule(options).join(getDefaultManagedRoot(options), 'native');
+}
+
 function getDefaultBridgePath(options = {}) {
   const platformPath = getPathModule(options);
   const bridgeName = getNativeHostPlatform(options) === 'win32'
@@ -104,6 +117,9 @@ function throwUnsupportedBrowser(platform, browser) {
 module.exports = {
   getCodexOverleafHome,
   getDefaultBridgePath,
+  getDefaultManagedExtensionRoot,
+  getDefaultManagedNativeRoot,
+  getDefaultManagedRoot,
   getDefaultRuntimeRoot,
   getHomeDir,
   getNativeHostPlatform,

@@ -4,7 +4,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { verifyPackagePaths } from './verify-npm-package.mjs';
+
+const require = createRequire(import.meta.url);
+const { verifySignedReleaseManifest } = require('../native-host/src/updateTrust.js');
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FORBIDDEN_ARCHIVE_PATTERNS = [
@@ -17,7 +21,7 @@ const FORBIDDEN_ARCHIVE_PATTERNS = [
 
 function main() {
   try {
-    const result = verifyReleaseArtifacts();
+    const result = verifyReleaseArtifacts({ requireSignature: process.argv.includes('--require-signature') });
     console.log(`Verified release artifacts for v${result.version}.`);
   } catch (error) {
     console.error(`Release artifact verification failed: ${error.message}`);
@@ -30,7 +34,12 @@ export function verifyReleaseArtifacts(options = {}) {
   const pkg = readJson(path.join(rootDir, 'package.json'));
   const version = options.version || pkg.version;
   const releaseDir = path.resolve(options.releaseDir || path.join(rootDir, 'dist/releases', `v${version}`));
-  const expectedAssets = getExpectedReleaseAssets({ version, packageName: pkg.name });
+  const signaturePresent = fs.existsSync(path.join(releaseDir, 'release-manifest.sig'));
+  const expectedAssets = getExpectedReleaseAssets({
+    version,
+    packageName: pkg.name,
+    includeSignature: options.requireSignature || signaturePresent
+  });
   const errors = [];
 
   if (!fs.existsSync(releaseDir) || !fs.statSync(releaseDir).isDirectory()) {
@@ -56,6 +65,7 @@ export function verifyReleaseArtifacts(options = {}) {
   const extensionZipName = `codex-overleaf-link-extension-v${version}.zip`;
   const nativeTarballName = `codex-overleaf-native-host-v${version}.tar.gz`;
   const npmTarballName = `${pkg.name}-${version}.tgz`;
+  const updateBundleName = `codex-overleaf-update-v${version}.tar.gz`;
 
   if (actualSet.has(extensionZipName)) {
     verifyExtensionZip(path.join(releaseDir, extensionZipName), errors);
@@ -66,6 +76,12 @@ export function verifyReleaseArtifacts(options = {}) {
   if (actualSet.has(npmTarballName)) {
     verifyNpmTarball(path.join(releaseDir, npmTarballName), errors);
   }
+  if (actualSet.has(updateBundleName)) {
+    verifyUpdateBundle(path.join(releaseDir, updateBundleName), errors);
+  }
+  if (options.requireSignature || signaturePresent) {
+    verifyReleaseSignature(releaseDir, errors);
+  }
   verifyChecksums(releaseDir, expectedAssets.filter(name => name !== 'SHA256SUMS'), errors);
 
   if (errors.length) {
@@ -75,10 +91,11 @@ export function verifyReleaseArtifacts(options = {}) {
   return { version, releaseDir, assets: actualAssets };
 }
 
-function getExpectedReleaseAssets({ version, packageName }) {
-  return [
+function getExpectedReleaseAssets({ version, packageName, includeSignature = false }) {
+  const assets = [
     `codex-overleaf-link-extension-v${version}.zip`,
     `codex-overleaf-native-host-v${version}.tar.gz`,
+    `codex-overleaf-update-v${version}.tar.gz`,
     `${packageName}-${version}.tgz`,
     'install.sh',
     'install.ps1',
@@ -90,13 +107,22 @@ function getExpectedReleaseAssets({ version, packageName }) {
     'release-notes.md',
     'SHA256SUMS'
   ];
+  if (includeSignature) assets.push('release-manifest.sig');
+  return assets;
 }
 
 function verifyExtensionZip(filePath, errors) {
   const entries = listZipEntries(filePath);
-  requireEntries(entries, ['manifest.json', 'popup.html'], 'extension zip', errors);
+  requireEntries(entries, [
+    'manifest.json',
+    'bootstrap/background.js',
+    'bootstrap/popup.html',
+    'bootstrap/runtimeContext.js',
+    'runtime/runtime-manifest.json',
+    'runtime/src/contentScript.js'
+  ], 'extension zip', errors);
   assertNoForbiddenEntries(entries, 'extension zip', errors);
-  const invalid = entries.filter(entry => !/^(manifest\.json|popup\.html|assets\/|src\/|styles\/)/.test(entry));
+  const invalid = entries.filter(entry => !/^(manifest\.json|\.codex-overleaf-managed-extension\.json|assets\/|bootstrap\/|runtime\/)/.test(entry));
   if (invalid.length) {
     errors.push(`Extension zip contains entries outside the runtime allowlist:\n${invalid.map(entry => `  - ${entry}`).join('\n')}`);
   }
@@ -118,6 +144,37 @@ function isAllowedNativeTarballEntry(entry) {
     || /^native-host\/src\/.+/.test(entry)
     || /^extension\/src\/shared\/.+/.test(entry)
     || /^scripts\/(?:codex-json-agent|install-native-host|uninstall-native-host|verify-npm-package)\.mjs$/.test(entry);
+}
+
+function verifyUpdateBundle(filePath, errors) {
+  const entries = listTarEntries(filePath);
+  requireEntries(entries, [
+    'extension-runtime/runtime-manifest.json',
+    'extension-runtime/src/contentScript.js',
+    'native-runtime/package.json',
+    'native-runtime/native-host/src/index.js'
+  ], 'coordinated update bundle', errors);
+  assertNoForbiddenEntries(entries, 'coordinated update bundle', errors);
+  const invalid = entries.filter(entry => !(
+    entry === 'extension-runtime/runtime-manifest.json'
+    || /^extension-runtime\/(?:src|styles)\/.+/.test(entry)
+    || entry === 'native-runtime/package.json'
+    || /^native-runtime\/native-host\/src\/.+/.test(entry)
+    || /^native-runtime\/extension\/src\/shared\/.+/.test(entry)
+    || /^native-runtime\/scripts\/(?:codex-json-agent|install-native-host|uninstall-native-host)\.mjs$/.test(entry)
+  ));
+  if (invalid.length) errors.push(`Coordinated update bundle contains invalid entries:\n${invalid.map(entry => `  - ${entry}`).join('\n')}`);
+}
+
+function verifyReleaseSignature(releaseDir, errors) {
+  try {
+    verifySignedReleaseManifest(
+      fs.readFileSync(path.join(releaseDir, 'release-manifest.json')),
+      fs.readFileSync(path.join(releaseDir, 'release-manifest.sig'))
+    );
+  } catch (error) {
+    errors.push(`Release manifest signature is invalid: ${error.message}`);
+  }
 }
 
 function verifyNpmTarball(filePath, errors) {

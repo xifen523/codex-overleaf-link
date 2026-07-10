@@ -11,6 +11,9 @@ const DEFAULT_RUNTIME_ROOT = getDefaultRuntimeRoot();
 
 function buildRuntimeFileManifest(options = {}) {
   const packageRoot = path.resolve(options.packageRoot || getDefaultPackageRoot());
+  const allowedFiles = options.allowedFiles
+    ? new Set([...options.allowedFiles].map((relativePath) => String(relativePath).replace(/\\/g, '/')))
+    : null;
   const files = [
     fileEntry(packageRoot, 'package.json'),
     ...directoryEntries(packageRoot, 'native-host/src'),
@@ -20,7 +23,9 @@ function buildRuntimeFileManifest(options = {}) {
     fileEntry(packageRoot, 'scripts/uninstall-native-host.mjs')
   ];
 
-  return files.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+  return files
+    .filter((entry) => !allowedFiles || allowedFiles.has(entry.relativePath))
+    .sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
 function assertSafeManagedRuntimeRoot(runtimeRoot, options = {}) {

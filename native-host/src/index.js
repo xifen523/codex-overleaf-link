@@ -4,6 +4,8 @@
 const { decodeFrames, encodeMessage } = require('./nativeMessaging');
 const { logDebug } = require('./debugLog');
 const { handleRequest } = require('./taskRunner');
+const { getActiveNativeWorkState } = require('./taskRunnerRuntime');
+const { handleUpdateRequest, isUpdateMethod } = require('./updateManager');
 const { buildNativeRuntimeEnv, summarizeNativeEnvironment } = require('./nativeEnvironment');
 
 let buffered = Buffer.alloc(0);
@@ -39,13 +41,18 @@ process.stdin.on('data', chunk => {
 async function handleDecodedMessage(message) {
   try {
     logDebug('request.received', summarizeRequest(message));
-    const response = await handleRequest(message, runtimeEnv, event => {
+    const response = isUpdateMethod(message?.method)
+      ? await handleUpdateRequest(message, {
+          env: runtimeEnv,
+          getWorkState: getActiveNativeWorkState
+        })
+      : await handleRequest(message, runtimeEnv, event => {
       writeResponse({
         id: message?.id,
         ok: true,
         event
       });
-    });
+      });
     logDebug('response.ready', summarizeResponse(response));
     writeResponse(response);
   } catch (error) {

@@ -165,6 +165,7 @@ function getExpectedReleaseWorkflowUploadFiles() {
   const checksumCoveredUploads = [
     `${releaseDir}/codex-overleaf-link-extension-` + '${{ github.ref_name }}.zip',
     `${releaseDir}/codex-overleaf-native-host-` + '${{ github.ref_name }}.tar.gz',
+    `${releaseDir}/codex-overleaf-update-` + '${{ github.ref_name }}.tar.gz',
     `${releaseDir}/codex-overleaf-link-` + '${{ env.PACKAGE_VERSION }}.tgz',
     `${releaseDir}/install.sh`,
     `${releaseDir}/install.ps1`,
@@ -173,6 +174,7 @@ function getExpectedReleaseWorkflowUploadFiles() {
     `${releaseDir}/manifest.js`,
     `${releaseDir}/runtimeInstaller.js`,
     `${releaseDir}/release-manifest.json`,
+    `${releaseDir}/release-manifest.sig`,
     `${releaseDir}/release-notes.md`
   ];
 
@@ -235,7 +237,23 @@ function createReleaseTestIndexPath() {
     'add',
     '--',
     'install.ps1',
-    'native-host/src/nativeHostPlatform.js'
+    'native-host/src/nativeHostPlatform.js',
+    'extension/bootstrap/background.js',
+    'extension/bootstrap/manifest.template.json',
+    'extension/bootstrap/popup.css',
+    'extension/bootstrap/popup.html',
+    'extension/bootstrap/popup.js',
+    'extension/bootstrap/runtimeContext.js',
+    'extension/runtime-manifest.json',
+    'extension/src/content/updateIdle.js',
+    'native-host/src/managedInstall.js',
+    'native-host/src/managedLauncherRuntime.js',
+    'native-host/src/updateArchive.js',
+    'native-host/src/updateManager.js',
+    'native-host/src/updateTrust.js',
+    'scripts/install-managed.mjs',
+    'scripts/sign-release-manifest.mjs',
+    'scripts/uninstall-managed.mjs'
   ], {
     cwd: repoRoot,
     env,
@@ -467,6 +485,7 @@ releaseTest('release workflow grants publish permission and builds/verifies arti
     'npm run verify:release -- --release-date',
     'name: Verify release tag matches package version',
     'name: Build release artifacts',
+    'name: Sign coordinated update manifest',
     'name: Verify release artifact contents',
     'name: Publish npm package',
     'name: Verify npm package is published',
@@ -1161,7 +1180,7 @@ releaseTest('release archives exclude untracked files under packaged directories
     assert.equal(result.status, 0, result.stderr || result.stdout);
 
     const zipEntries = listZipEntries(path.join(outputDir, `codex-overleaf-link-extension-v${version}.zip`), t);
-    assert.equal(zipEntries.includes(`src/shared/${uniqueName}`), false);
+    assert.equal(zipEntries.includes(`runtime/src/shared/${uniqueName}`), false);
     assert.equal(zipEntries.includes(`assets/${assetUntrackedName}`), false);
 
     const tarEntries = listTarEntries(path.join(outputDir, `codex-overleaf-native-host-v${version}.tar.gz`));
@@ -1259,6 +1278,7 @@ releaseTest('build-release creates expected artifacts and metadata', (t) => {
   const extensionZip = `codex-overleaf-link-extension-v${version}.zip`;
   const nativeTarball = `codex-overleaf-native-host-v${version}.tar.gz`;
   const npmTarball = `codex-overleaf-link-${version}.tgz`;
+  const updateBundle = `codex-overleaf-update-v${version}.tar.gz`;
   const helperArtifacts = [
     'nativeHostPlatform.js',
     'manifest.js',
@@ -1286,6 +1306,7 @@ releaseTest('build-release creates expected artifacts and metadata', (t) => {
       extensionZip,
       nativeTarball,
       npmTarball,
+      updateBundle,
       'install.sh',
       'install.ps1',
       'uninstall-native-host.mjs',
@@ -1308,6 +1329,7 @@ releaseTest('build-release creates expected artifacts and metadata', (t) => {
         extensionZip,
         nativeTarball,
         npmTarball,
+        updateBundle,
         'install.sh',
         'install.ps1',
         'uninstall-native-host.mjs',
@@ -1336,6 +1358,7 @@ releaseTest('build-release creates expected artifacts and metadata', (t) => {
         extensionZip,
         nativeTarball,
         npmTarball,
+        updateBundle,
         'install.sh',
         'install.ps1',
         'uninstall-native-host.mjs',
@@ -1529,9 +1552,11 @@ releaseTest('extension zip includes loadable extension files and excludes reposi
 
     const entries = listZipEntries(path.join(outputDir, `codex-overleaf-link-extension-v${version}.zip`), t);
     assert.ok(entries.includes('manifest.json'));
-    assert.ok(entries.includes('popup.html'));
-    assert.ok(entries.some((entry) => entry.startsWith('src/')));
-    assert.ok(entries.some((entry) => entry.startsWith('styles/')));
+    assert.ok(entries.includes('bootstrap/background.js'));
+    assert.ok(entries.includes('bootstrap/popup.html'));
+    assert.ok(entries.includes('runtime/runtime-manifest.json'));
+    assert.ok(entries.some((entry) => entry.startsWith('runtime/src/')));
+    assert.ok(entries.some((entry) => entry.startsWith('runtime/styles/')));
     assert.ok(entries.some((entry) => entry.startsWith('assets/')));
 
     const forbiddenPatterns = [
@@ -1561,6 +1586,7 @@ releaseTest('release workflow builds and verifies artifacts before npm publish w
     'name: Verify release metadata',
     'name: Verify release tag matches package version',
     'name: Build release artifacts',
+    'name: Sign coordinated update manifest',
     'name: Verify release artifact contents',
     'name: Publish npm package',
     'name: Verify npm package is published',

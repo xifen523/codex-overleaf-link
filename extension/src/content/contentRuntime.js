@@ -709,10 +709,39 @@
   let customInstructionsEditorValue = '';
   let runCancellationRequested = false;
   let activePluginConfirmResolve = null;
+  const updateIdleClient = root.CodexOverleafUpdateIdle?.create({
+    document,
+    getBusyState: () => ({
+      run: Boolean(currentRunView),
+      cancelling: runCancellationRequested,
+      storage: saveStateInFlight || Boolean(saveStateTimer),
+      reviewAction: trackedChangeInFlight.size > 0,
+      dialog: Boolean(activePluginConfirmResolve)
+    }),
+    checkSaved: () => callPageBridge('waitForSaveState', { deadlineMs: 0, pollIntervalMs: 1 }),
+    onApplyingChange: applying => { if (panel) panel.dataset.updating = applying ? 'true' : 'false'; },
+    showToast: (...args) => showPluginToast(...args),
+    getStateMessage: state => ({
+      staged: tx('A verified update is ready and will install when Overleaf is idle.', '更新已验证，将在 Overleaf 空闲时自动安装。'),
+      applying: tx('Updating Codex Overleaf Link now.', '正在更新 Codex Overleaf Link。'),
+      committed: tx('Codex Overleaf Link was updated successfully.', 'Codex Overleaf Link 已成功更新。'),
+      rolled_back: tx('The update failed its health check, so the previous version was restored.', '更新未通过健康检查，已自动恢复上一版本。')
+    }[state] || '')
+  });
   root[RUNTIME_INSTALLED_FLAG] = true;
   root[RUNTIME_STATE_KEY] = { ok: true, alreadyInstalled: false };
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'codex-overleaf/runtime-health-probe') {
+      sendResponse?.({
+        ok: true,
+        version: CodexOverleafCompatibility?.BUILD_TARGET_VERSION || chrome.runtime.getManifest().version
+      });
+      return false;
+    }
+    if (updateIdleClient?.handleMessage(message, sendResponse)) {
+      return true;
+    }
     if (message?.type === 'codex-overleaf/open-panel') {
       ensurePanelOpen();
       sendResponse?.(getPanelStateResponse());
@@ -2756,6 +2785,10 @@
   }
 
   function safeRunTask() {
+    if (updateIdleClient?.isApplying()) {
+      showPluginToast(tx('An update is being applied. Codex will be available again after reload.', '正在应用更新，重新加载后即可继续使用 Codex。'), { status: 'info' });
+      return;
+    }
     if (currentRunView) {
       return;
     }
@@ -6096,7 +6129,8 @@
         script.remove();
       }
       script.id = id;
-      script.src = chrome.runtime.getURL(src);
+      const runtimePrefix = String(root.__CODEX_OVERLEAF_RUNTIME_PREFIX__ || '');
+      script.src = chrome.runtime.getURL(runtimePrefix + src);
       script.onload = () => {
         cleanup();
         resolve();

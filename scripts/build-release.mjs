@@ -4,7 +4,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+
+const require = createRequire(import.meta.url);
+const { buildManagedExtensionTree } = require('../native-host/src/managedInstall.js');
+const { buildRuntimeFileManifest } = require('../native-host/src/runtimeInstaller.js');
+const { createUpdateBundleArchive } = require('../native-host/src/updateArchive.js');
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const RELEASE_OUTPUT_MARKER = '.codex-overleaf-release-output';
@@ -42,9 +48,11 @@ export function buildRelease(options = {}) {
   const extensionZipName = `codex-overleaf-link-extension-v${version}.zip`;
   const nativeTarballName = `codex-overleaf-native-host-v${version}.tar.gz`;
   const npmTarballName = getNpmTarballName(pkg);
+  const updateBundleName = `codex-overleaf-update-v${version}.tar.gz`;
   const extensionZipPath = path.join(outputDir, extensionZipName);
   const nativeTarballPath = path.join(outputDir, nativeTarballName);
   const npmTarballPath = path.join(outputDir, npmTarballName);
+  const updateBundlePath = path.join(outputDir, updateBundleName);
   const trackedFiles = getGitTrackedFiles(rootDir);
   const headTrackedFiles = getGitHeadTrackedFiles(rootDir);
   const releaseInputFiles = getReleaseInputFilesForProvenance({
@@ -62,6 +70,7 @@ export function buildRelease(options = {}) {
   createExtensionZip({ rootDir, outputPath: extensionZipPath, trackedFiles });
   createNativeTarball({ rootDir, outputPath: nativeTarballPath, trackedFiles });
   createNpmTarball({ rootDir, outputPath: npmTarballPath, expectedName: npmTarballName, trackedFiles });
+  createCoordinatedUpdateBundle({ rootDir, outputPath: updateBundlePath, trackedFiles, version });
 
   const copiedInstallPath = path.join(outputDir, 'install.sh');
   const copiedWindowsInstallPath = path.join(outputDir, 'install.ps1');
@@ -90,15 +99,22 @@ export function buildRelease(options = {}) {
     extensionZipName,
     nativeTarballName,
     npmTarballName,
+    updateBundleName,
     'install.sh',
     'install.ps1',
     'uninstall-native-host.mjs',
     ...NATIVE_UNINSTALL_HELPER_ARTIFACTS.map((artifact) => artifact.name)
   ];
   const manifest = {
+    schemaVersion: 2,
+    repository: 'Ghqqqq/codex-overleaf-link',
+    channel: 'stable',
     version,
+    tag: `v${version}`,
+    bootstrapProtocol: 1,
     gitCommit: getGitCommit(rootDir),
     createdAt: new Date().toISOString(),
+    updateBundle: describeArtifact(updateBundlePath, updateBundleName),
     artifacts: payloadArtifactNames.map((name) => describeArtifact(path.join(outputDir, name), name))
   };
   fs.writeFileSync(path.join(outputDir, 'release-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
@@ -238,7 +254,12 @@ function getRequiredReleaseTrackedFiles(version) {
     'README.md',
     'LICENSE',
     'scripts/install-native-host.mjs',
-    'scripts/verify-npm-package.mjs'
+    'scripts/verify-npm-package.mjs',
+    'scripts/install-managed.mjs',
+    'scripts/uninstall-managed.mjs',
+    'scripts/sign-release-manifest.mjs',
+    'extension/bootstrap/manifest.template.json',
+    'extension/runtime-manifest.json'
   ];
 }
 
@@ -255,13 +276,48 @@ function isSamePathOrAncestor(candidateAncestor, targetPath) {
 }
 
 function createExtensionZip({ rootDir, outputPath, trackedFiles }) {
-  const extensionDir = path.join(rootDir, 'extension');
-  const extensionFiles = getExtensionArchiveFiles(trackedFiles);
-  runRequiredCommand('zip', [
-    '-qr',
-    outputPath,
-    ...extensionFiles
-  ], { cwd: extensionDir });
+  const stagingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-managed-extension-'));
+  try {
+    const version = readJson(path.join(rootDir, 'package.json')).version;
+    buildManagedExtensionTree({ packageRoot: rootDir, targetRoot: stagingRoot, version, allowedFiles: trackedFiles });
+    runRequiredCommand('zip', ['-qr', outputPath, '.'], { cwd: stagingRoot });
+  } finally {
+    fs.rmSync(stagingRoot, { recursive: true, force: true });
+  }
+}
+
+function createCoordinatedUpdateBundle({ rootDir, outputPath, trackedFiles, version }) {
+  const managedExtensionRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-update-extension-'));
+  try {
+    buildManagedExtensionTree({
+      packageRoot: rootDir,
+      targetRoot: managedExtensionRoot,
+      version,
+      allowedFiles: trackedFiles
+    });
+    const entries = [];
+    for (const filePath of walkRegularFiles(path.join(managedExtensionRoot, 'runtime'))) {
+      const relative = path.relative(path.join(managedExtensionRoot, 'runtime'), filePath).replace(/\\/g, '/');
+      entries.push({ sourcePath: filePath, archivePath: `extension-runtime/${relative}` });
+    }
+    for (const entry of buildRuntimeFileManifest({ packageRoot: rootDir, allowedFiles: trackedFiles })) {
+      entries.push({ sourcePath: entry.sourcePath, archivePath: `native-runtime/${entry.relativePath}` });
+    }
+    createUpdateBundleArchive({ outputPath, entries });
+  } finally {
+    fs.rmSync(managedExtensionRoot, { recursive: true, force: true });
+  }
+}
+
+function walkRegularFiles(root) {
+  const files = [];
+  for (const dirent of fs.readdirSync(root, { withFileTypes: true })) {
+    const child = path.join(root, dirent.name);
+    if (dirent.isDirectory()) files.push(...walkRegularFiles(child));
+    else if (dirent.isFile()) files.push(child);
+    else throw new Error(`Update bundle source contains unsupported entry: ${child}`);
+  }
+  return files;
 }
 
 function createNativeTarball({ rootDir, outputPath, trackedFiles }) {
@@ -423,6 +479,8 @@ function getExtensionArchiveFiles(trackedFiles) {
     .filter((relativePath) => (
       relativePath === 'extension/manifest.json' ||
       relativePath === 'extension/popup.html' ||
+      relativePath === 'extension/runtime-manifest.json' ||
+      relativePath.startsWith('extension/bootstrap/') ||
       relativePath.startsWith('extension/src/') ||
       relativePath.startsWith('extension/styles/') ||
       relativePath.startsWith('extension/assets/')
@@ -463,11 +521,13 @@ function getNpmPackageReleaseInputFiles(trackedFiles) {
     'scripts/codex-json-agent.mjs',
     'scripts/install-native-host.mjs',
     'scripts/uninstall-native-host.mjs',
+    'scripts/install-managed.mjs',
+    'scripts/uninstall-managed.mjs',
     'scripts/verify-npm-package.mjs',
     ...[...trackedFiles].filter((relativePath) => (
       relativePath.startsWith('bin/') ||
       relativePath.startsWith('native-host/src/') ||
-      relativePath.startsWith('extension/src/shared/')
+      relativePath.startsWith('extension/')
     ))
   ];
   return [...new Set(files.map(validateTrackedRelativePath).filter((relativePath) => trackedFiles.has(relativePath)))].sort();
@@ -517,7 +577,11 @@ function getReleaseNotesForBuild({ rootDir, version }) {
 
 function appendNpmReleaseGuidance(releaseNotes, version) {
   return `${releaseNotes.trimEnd()}\n\n### npm native host package\n\n` +
-    'Install or update the native host with the pinned npm package. Official release builds use the bundled stable extension id by default; pass `--extension-id` only for a custom or mismatched unpacked extension id:\n\n' +
+    'Install the managed extension and native host once to enable signed automatic stable updates:\n\n' +
+    '```bash\n' +
+    `npm exec --yes codex-overleaf-link@${version} -- install-managed\n` +
+    '```\n\n' +
+    'The legacy native-only installer remains available for unmanaged extension directories:\n\n' +
     '```bash\n' +
     `npm exec --yes codex-overleaf-link@${version} -- install-native\n` +
     '```\n\n' +

@@ -1155,9 +1155,17 @@ function errorResponse(id, code, message, details = {}) {
   };
 }
 
+function getActiveNativeWorkState() {
+  return {
+    projectLocks: activeProjectLocks.size,
+    runControllers: activeRunControllers.size
+  };
+}
+
 module.exports = {
   NATIVE_REQUEST_QUOTAS,
   buildDefaultTaskResult,
+  getActiveNativeWorkState,
   handleRequest,
   parseAgentEventLines,
   purgeExpiredPendingPlans

@@ -84,8 +84,13 @@ jobs:
       - name: Build release artifacts
         run: npm run build:release
 
+      - name: Sign coordinated update manifest
+        env:
+          CODEX_OVERLEAF_UPDATE_SIGNING_KEY_B64: ${{ secrets.CODEX_OVERLEAF_UPDATE_SIGNING_KEY_B64 }}
+        run: npm run sign:release
+
       - name: Verify release artifact contents
-        run: npm run verify:release-artifacts
+        run: npm run verify:release-artifacts -- --require-signature
 
       - name: Publish npm package
         shell: bash
@@ -123,6 +128,7 @@ jobs:
           files: |
             dist/releases/${{ github.ref_name }}/codex-overleaf-link-extension-${{ github.ref_name }}.zip
             dist/releases/${{ github.ref_name }}/codex-overleaf-native-host-${{ github.ref_name }}.tar.gz
+            dist/releases/${{ github.ref_name }}/codex-overleaf-update-${{ github.ref_name }}.tar.gz
             dist/releases/${{ github.ref_name }}/codex-overleaf-link-${{ env.PACKAGE_VERSION }}.tgz
             dist/releases/${{ github.ref_name }}/install.sh
             dist/releases/${{ github.ref_name }}/install.ps1
@@ -131,6 +137,7 @@ jobs:
             dist/releases/${{ github.ref_name }}/manifest.js
             dist/releases/${{ github.ref_name }}/runtimeInstaller.js
             dist/releases/${{ github.ref_name }}/release-manifest.json
+            dist/releases/${{ github.ref_name }}/release-manifest.sig
             dist/releases/${{ github.ref_name }}/release-notes.md
             dist/releases/${{ github.ref_name }}/SHA256SUMS
           fail_on_unmatched_files: true

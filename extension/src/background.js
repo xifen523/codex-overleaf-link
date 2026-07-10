@@ -1,4 +1,6 @@
-importScripts('shared/compatibility.js');
+if (!globalThis.CodexOverleafCompatibility) {
+  importScripts('shared/compatibility.js');
+}
 
 (function initBackground() {
   'use strict';
@@ -26,6 +28,13 @@ importScripts('shared/compatibility.js');
   const CodexOverleafCompatibility = globalThis.CodexOverleafCompatibility;
   let port = null;
   const pending = new Map();
+  globalThis.CodexOverleafNativeBridge = Object.freeze({
+    requestInternal: payload => sendNativeRequest(payload, null, { skipCompatibility: true }),
+    getPendingState: () => ({
+      executionRequests: Array.from(pending.values()).filter(item => item.retryClass === 'no_silent_retry').length,
+      totalRequests: pending.size
+    })
+  });
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message?.type !== 'codex-overleaf/native-request') {
@@ -114,10 +123,10 @@ importScripts('shared/compatibility.js');
     }
   }
 
-  function sendNativeRequest(payload, sender) {
+  function sendNativeRequest(payload, sender, options = {}) {
     const id = payload.id || crypto.randomUUID();
     const requestWithEvidence = { ...payload, id };
-    const compatibilityBlock = getNativeCompatibilityBlock(requestWithEvidence);
+    const compatibilityBlock = options.skipCompatibility ? null : getNativeCompatibilityBlock(requestWithEvidence);
     if (compatibilityBlock) {
       return Promise.resolve({
         ok: false,

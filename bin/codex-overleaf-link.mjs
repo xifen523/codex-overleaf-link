@@ -18,6 +18,8 @@ function printHelp() {
   console.log(`codex-overleaf-link ${packageJson.version}
 
 Commands:
+  install-managed   Install the managed extension and native host
+  uninstall-managed Remove the managed extension and native host
   install-native    Install the native host
   uninstall-native  Uninstall the native host
   doctor            Check local native host setup
@@ -29,6 +31,7 @@ const OPTION_DEFINITIONS = {
   '--extension-id': { key: 'extensionId', takesValue: true },
   '--browser': { key: 'browser', takesValue: true },
   '--runtime-root': { key: 'runtimeRoot', takesValue: true },
+  '--managed-root': { key: 'managedRoot', takesValue: true },
   '--force': { key: 'force', takesValue: false },
   '--keep-runtime': { key: 'keepRuntime', takesValue: false },
   '--reveal-paths': { key: 'revealPaths', takesValue: false },
@@ -52,6 +55,21 @@ const UNINSTALL_NATIVE_OPTIONS = new Set([
   '--force',
   '--keep-runtime',
   '--reveal-paths',
+  '--json',
+  '--help'
+]);
+
+const INSTALL_MANAGED_OPTIONS = new Set([
+  '--extension-id',
+  '--browser',
+  '--managed-root',
+  '--json',
+  '--help'
+]);
+
+const UNINSTALL_MANAGED_OPTIONS = new Set([
+  '--browser',
+  '--managed-root',
   '--json',
   '--help'
 ]);
@@ -139,6 +157,46 @@ switch (command) {
       console.log(packageJson.version);
     }
     break;
+  case 'install-managed': {
+    let installArgs;
+    try {
+      installArgs = parseNativeArgs(args, INSTALL_MANAGED_OPTIONS);
+    } catch (error) {
+      exitWithError(error);
+    }
+    if (installArgs.help) {
+      printHelp();
+      break;
+    }
+    try {
+      const { formatInstallManagedHuman, installManaged } = await import('../scripts/install-managed.mjs');
+      const result = installManaged({ ...installArgs, packageRoot });
+      process.stdout.write(installArgs.json ? JSON.stringify(result, null, 2) + '\n' : formatInstallManagedHuman(result));
+    } catch (error) {
+      exitWithError(error);
+    }
+    break;
+  }
+  case 'uninstall-managed': {
+    let uninstallArgs;
+    try {
+      uninstallArgs = parseNativeArgs(args, UNINSTALL_MANAGED_OPTIONS);
+    } catch (error) {
+      exitWithError(error);
+    }
+    if (uninstallArgs.help) {
+      printHelp();
+      break;
+    }
+    try {
+      const { uninstallManaged } = await import('../scripts/uninstall-managed.mjs');
+      const result = uninstallManaged(uninstallArgs);
+      process.stdout.write(uninstallArgs.json ? JSON.stringify(result, null, 2) + '\n' : 'Removed managed Codex Overleaf Link installation.\n');
+    } catch (error) {
+      exitWithError(error);
+    }
+    break;
+  }
   case 'install-native': {
     let installArgs;
     try {

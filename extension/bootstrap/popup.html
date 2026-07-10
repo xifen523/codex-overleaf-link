@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Codex Overleaf Link</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <h1>Codex Overleaf Link</h1>
+    <div class="version-status">
+      <span id="compat-status-icon" class="status-icon incompatible" title="Native host incompatible">X</span>
+      <span id="version-pair">Extension unknown / Native unknown</span>
+    </div>
+    <button id="open-panel">Open panel in Overleaf</button>
+    <p id="status">Use this on an Overleaf project tab.</p>
+    <section class="updates" aria-labelledby="updates-title">
+      <div class="section-head">
+        <strong id="updates-title">Stable updates</strong>
+        <span id="update-state" class="update-state">Checking</span>
+      </div>
+      <p id="update-versions">Current unknown · Latest unknown</p>
+      <p id="update-detail" class="muted">Automatic updates apply when Overleaf is saved and idle.</p>
+      <div class="update-actions">
+        <button id="check-update" class="secondary" type="button">Check now</button>
+        <button id="postpone-update" class="quiet" type="button" hidden>Later</button>
+      </div>
+    </section>
+    <div id="native-install" class="install" hidden>
+      <strong>Native host attention required</strong>
+      <p>Run this command in Terminal, then reload this extension in Chrome.</p>
+      <code id="install-command"></code>
+      <button id="copy-install-command" class="secondary" type="button">Copy install command</button>
+    </div>
+    <script src="../runtime/src/shared/compatibility.js"></script>
+    <script src="../runtime/src/popup.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
