@@ -303,8 +303,27 @@
     return section;
   }
 
-  async function sendConsentAction(action) {
-    const type = {
+function openUpdateCenter(action = '') {
+  const url = new URL(chrome.runtime.getURL('bootstrap/update.html'));
+  if (action) url.searchParams.set('action', action);
+  const opened = window.open(
+    url.href,
+    'codex-overleaf-update-center',
+    'popup,width=420,height=540,resizable=yes,scrollbars=yes'
+  );
+  if (opened) {
+    opened.focus();
+    return;
+  }
+  window.location.assign(url.href);
+}
+
+async function sendConsentAction(action) {
+  if (action === 'install' || action === 'retry' || action === 'center') {
+    openUpdateCenter(action === 'center' ? '' : action);
+    action = 'get';
+  }
+  const type = {
       get: 'codex-overleaf/consent-update-get-state',
       check: 'codex-overleaf/consent-update-check',
       install: 'codex-overleaf/consent-update-install',

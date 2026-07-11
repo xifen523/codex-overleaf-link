@@ -117,6 +117,9 @@ function verifyExtensionZip(filePath, errors) {
     'manifest.json',
     'bootstrap/background.js',
     'bootstrap/popup.html',
+    'bootstrap/update.html',
+    'bootstrap/update.css',
+    'bootstrap/update.js',
     'bootstrap/runtimeContext.js',
     'runtime/runtime-manifest.json',
     'runtime/src/contentScript.js'

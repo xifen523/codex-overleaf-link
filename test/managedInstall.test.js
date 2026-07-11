@@ -25,6 +25,9 @@ test('builds a loadable managed extension with stable Bootstrap and replaceable 
     assert.equal(manifest.permissions.includes('scripting'), true);
     assert.equal(fs.existsSync(path.join(root, 'runtime/runtime-manifest.json')), true);
     assert.equal(fs.existsSync(path.join(root, 'runtime/src/content/contentRuntime.js')), true);
+    assert.equal(fs.existsSync(path.join(root, 'bootstrap/update.html')), true);
+    assert.equal(fs.existsSync(path.join(root, 'bootstrap/update.css')), true);
+    assert.equal(fs.existsSync(path.join(root, 'bootstrap/update.js')), true);
     const marker = JSON.parse(fs.readFileSync(path.join(root, EXTENSION_MARKER), 'utf8'));
     assert.equal(marker.bootstrapProtocol, 1);
   } finally {
