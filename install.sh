@@ -17,6 +17,24 @@ need_command node
 
 echo "CODEX_OVERLEAF_REF: $REF"
 
+node - "$INSTALL_DIR" "$HOME" <<'NODE'
+const fs = require('node:fs');
+const path = require('node:path');
+const target = path.resolve(process.argv[2] || '');
+const home = path.resolve(process.argv[3] || '');
+const relative = path.relative(home, target);
+if (!target || target === home || !relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+  throw new Error('Refusing unsafe install directory: ' + target);
+}
+let current = home;
+for (const part of relative.split(path.sep).filter(Boolean)) {
+  current = path.join(current, part);
+  if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) {
+    throw new Error('Refusing install directory containing a symlink: ' + current);
+  }
+}
+NODE
+
 mkdir -p "$(dirname "$INSTALL_DIR")"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
@@ -25,7 +43,11 @@ if [ -d "$INSTALL_DIR/.git" ]; then
   git -C "$INSTALL_DIR" checkout --detach FETCH_HEAD >/dev/null
 else
   echo "Installing Codex Overleaf Link into $INSTALL_DIR"
-  rm -rf "$INSTALL_DIR"
+  if [ -e "$INSTALL_DIR" ]; then
+    echo "Refusing to replace an existing unmarked source directory: $INSTALL_DIR" >&2
+    echo "Move or delete that directory manually, then re-run the installer." >&2
+    exit 1
+  fi
   git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
   git -C "$INSTALL_DIR" fetch --depth 1 origin "$REF"
   git -C "$INSTALL_DIR" checkout --detach FETCH_HEAD >/dev/null
@@ -37,12 +59,16 @@ if [ -z "$PACKAGE_VERSION" ]; then
 fi
 
 if [ -n "${CODEX_OVERLEAF_EXTENSION_ID:-}" ]; then
-  node "$INSTALL_DIR/scripts/install-native-host.mjs" --extension-id "$CODEX_OVERLEAF_EXTENSION_ID" "$@"
+  MANAGED_RESULT="$(node "$INSTALL_DIR/scripts/install-managed.mjs" --extension-id "$CODEX_OVERLEAF_EXTENSION_ID" "$@" --json)"
 else
-  node "$INSTALL_DIR/scripts/install-native-host.mjs" "$@"
+  MANAGED_RESULT="$(node "$INSTALL_DIR/scripts/install-managed.mjs" "$@" --json)"
 fi
 
-EXTENSION_DIR="$INSTALL_DIR/extension"
+EXTENSION_DIR="$(printf '%s\n' "$MANAGED_RESULT" | sed -n 's/.*"extensionRoot"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+if [ -z "$EXTENSION_DIR" ]; then
+  echo "Managed installer did not return an extension path." >&2
+  exit 1
+fi
 VISIBLE_EXTENSION_DIR="${CODEX_OVERLEAF_EXTENSION_LINK:-$HOME/Codex Overleaf Link Extension}"
 LOAD_UNPACKED_PATH="$EXTENSION_DIR"
 
@@ -66,7 +92,7 @@ if command -v pbcopy >/dev/null 2>&1; then
 fi
 
 echo
-echo "Codex Overleaf Link native host is installed."
+echo "Codex Overleaf Link managed extension and native host are installed."
 echo "Package version: $PACKAGE_VERSION"
 echo "Extension path: $EXTENSION_DIR"
 echo

@@ -803,3 +803,39 @@ test('confirmWritebackFiles refuses dirty mirrors, unknown files and missing bas
     fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });
+
+test('mirror rejects pre-existing symlink escapes before partial sync or change collection', { skip: process.platform === 'win32' }, async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-symlink-'));
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-outside-'));
+  try {
+    const mirror = await syncOverleafToMirror({
+      projectId: 'symlink-escape',
+      rootDir,
+      project: {
+        capabilities: { fullProjectSnapshot: true },
+        files: [{ path: 'main.tex', content: 'safe\n' }]
+      }
+    });
+    fs.symlinkSync(outsideDir, path.join(mirror.workspacePath, 'sections'), 'dir');
+
+    await assert.rejects(
+      syncOverleafToMirror({
+        projectId: 'symlink-escape',
+        rootDir,
+        project: {
+          capabilities: { fullProjectSnapshot: false },
+          files: [{ path: 'sections/intro.tex', content: 'escaped\n' }]
+        }
+      }),
+      /Unsafe mirror path/
+    );
+    assert.equal(fs.existsSync(path.join(outsideDir, 'intro.tex')), false);
+    await assert.rejects(
+      collectMirrorChangesDetailed({ projectId: 'symlink-escape', rootDir }),
+      /Unsafe mirror symlink/
+    );
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  }
+});

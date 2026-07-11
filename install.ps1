@@ -105,14 +105,22 @@ if (Test-Path $PackageJsonPath) {
   }
 }
 
-$InstallNativeHostScript = Join-Path $InstallDir 'scripts/install-native-host.mjs'
-$NativeInstallArgs = @($InstallNativeHostScript)
+$InstallManagedScript = Join-Path $InstallDir 'scripts/install-managed.mjs'
+$ManagedInstallArgs = @($InstallManagedScript)
 if ($env:CODEX_OVERLEAF_EXTENSION_ID) {
-  $NativeInstallArgs += @('--extension-id', $env:CODEX_OVERLEAF_EXTENSION_ID)
+  $ManagedInstallArgs += @('--extension-id', $env:CODEX_OVERLEAF_EXTENSION_ID)
 }
-& node @NativeInstallArgs @args
+$ManagedInstallArgs += '--json'
+$ManagedInstallJson = (& node @ManagedInstallArgs @args | Out-String)
+if ($LASTEXITCODE -ne 0) {
+  throw 'Managed installation failed.'
+}
+$ManagedInstall = $ManagedInstallJson | ConvertFrom-Json
+$ExtensionDir = $ManagedInstall.extensionRoot
+if ([string]::IsNullOrWhiteSpace($ExtensionDir)) {
+  throw 'Managed installer did not return an extension path.'
+}
 
-$ExtensionDir = Join-Path $InstallDir 'extension'
 try {
   Set-Clipboard -Value $ExtensionDir -ErrorAction Stop
   $CopiedExtensionPath = $true
@@ -121,7 +129,7 @@ try {
 }
 
 Write-Host ''
-Write-Host 'Codex Overleaf Link native host is installed.'
+Write-Host 'Codex Overleaf Link managed extension and native host are installed.'
 Write-Host "Package version: $PackageVersion"
 Write-Host "Extension path: $ExtensionDir"
 Write-Host ''

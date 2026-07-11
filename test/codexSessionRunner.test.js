@@ -1834,7 +1834,7 @@ test('command execution approvals only allow known local inspection and LaTeX co
     { decision: 'accept' }
   );
   assert.deepEqual(
-    decideCommandApproval({ mode: 'auto', params: { command: ['latexmk', '-pdf', 'main.tex'] } }),
+    decideCommandApproval({ mode: 'auto', params: { command: ['latexmk', '-norc', '-pdf', 'main.tex'] } }),
     { decision: 'accept' }
   );
   assert.deepEqual(
@@ -1857,7 +1857,6 @@ test('newly added analysis utilities are accepted in auto mode', () => {
     'diff main.tex main-backup.tex',
     'sort references.bib',
     'tr A-Z a-z',
-    'awk {print $1} main.tex',
     'printf %s hello',
     'cut -d: -f1 data.csv',
     'uniq sorted.txt',
@@ -1905,8 +1904,23 @@ test('allowed command executables still reject risky write-like arguments', () =
   const riskyCommands = [
     'find . -exec rm {} ;',
     'find . -delete',
+    'find . -fprint /tmp/codex-overleaf-owned',
+    'find . -fprintf /tmp/codex-overleaf-owned %p',
+    'rg --pre \'touch /tmp/codex-overleaf-owned\' citation main.tex',
+    'rg --pre=touch citation main.tex',
+    'sort -o /tmp/codex-overleaf-owned main.tex',
+    'sort --output=/tmp/codex-overleaf-owned main.tex',
+    'sort -T /tmp main.tex',
+    'awk \'BEGIN { system("touch /tmp/codex-overleaf-owned") }\' main.tex',
+    'sed \'e touch /tmp/codex-overleaf-owned\' main.tex',
     'sed -i s/old/new/g main.tex',
     'awk {print} main.tex -i inplace',
+    'latexmk -pdf main.tex',
+    'latexmk -norc -e \'system("touch /tmp/codex-overleaf-owned")\' main.tex',
+    'pdflatex --shell-escape main.tex',
+    'pdflatex -jobname ../../codex-overleaf-owned main.tex',
+    'xelatex -output-directory=/tmp main.tex',
+    'lualatex main.tex',
     'shasum -c checksums.txt',
     'md5sum --check checksums.txt'
   ];

@@ -42,8 +42,13 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
   const previous = readBaseline(mirror.baselinePath);
   const fullProjectSnapshot = project?.capabilities?.fullProjectSnapshot !== false;
 
+  const mirrorRoot = path.dirname(mirror.projectRoot);
+  assertSafeMirrorPathBeforeCreate(mirror.workspacePath, mirrorRoot);
+  assertSafeMirrorPathBeforeCreate(mirror.metadataPath, mirrorRoot);
   fs.mkdirSync(mirror.workspacePath, { recursive: true });
   fs.mkdirSync(mirror.metadataPath, { recursive: true });
+  assertSafeMirrorPathBeforeCreate(mirror.workspacePath, mirrorRoot);
+  assertSafeMirrorPathBeforeCreate(mirror.metadataPath, mirrorRoot);
 
   if (fullProjectSnapshot) {
     for (const filePath of listWorkspaceFiles(mirror.workspacePath)) {
@@ -52,6 +57,7 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
       }
       const target = resolveWorkspacePath(mirror.workspacePath, filePath);
       if (fs.existsSync(target)) {
+        assertSafeWorkspaceTarget(mirror.workspacePath, target, filePath);
         fs.rmSync(target, { force: true });
         removeEmptyParents(path.dirname(target), mirror.workspacePath);
       }
@@ -63,6 +69,7 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
 
   for (const file of files) {
     const target = resolveWorkspacePath(mirror.workspacePath, file.path);
+    assertSafeWorkspaceTarget(mirror.workspacePath, target, file.path);
     const prev = previousByPath.get(file.path);
     const nextHash = hashProjectFile(file);
     if (prev && prev.hash === nextHash && workspaceFileMatchesBaseline(target, prev)) {
@@ -530,6 +537,9 @@ function listWorkspaceFiles(workspacePath) {
       }
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
       const absolute = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Unsafe mirror symlink: ${relative}`);
+      }
       if (entry.isDirectory()) {
         walk(absolute, relative);
       } else if (entry.isFile()) {
@@ -753,6 +763,7 @@ async function applyFileOverlays({ projectId, overlays, rootDir }) {
     }
     const normalizedPath = normalizeRelativePath(overlay.path);
     const target = resolveWorkspacePath(mirror.workspacePath, normalizedPath);
+    assertSafeWorkspaceTarget(mirror.workspacePath, target, normalizedPath);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, overlay.content, 'utf8');
 
@@ -801,6 +812,9 @@ async function confirmWritebackFiles({ projectId, paths, rootDir }) {
     try {
       target = resolveWorkspacePath(mirror.workspacePath, normalizedPath);
     } catch (error) {
+      return { ok: false, reason: 'unsafe_path', path: normalizedPath };
+    }
+    if (!isSafeWorkspaceWriteTarget(mirror.workspacePath, target)) {
       return { ok: false, reason: 'unsafe_path', path: normalizedPath };
     }
     let content;
@@ -1017,6 +1031,34 @@ function isSafeWorkspaceWriteTarget(workspacePath, target) {
   }
 }
 
+function assertSafeWorkspaceTarget(workspacePath, target, filePath = '') {
+  if (!isSafeWorkspaceWriteTarget(workspacePath, target)) {
+    throw new Error(`Unsafe mirror path: ${filePath || target}`);
+  }
+}
+
+function assertSafeMirrorPathBeforeCreate(target, boundary) {
+  const root = path.resolve(boundary);
+  const resolvedTarget = path.resolve(target);
+  if (resolvedTarget === root || !resolvedTarget.startsWith(root + path.sep)) {
+    throw new Error(`Unsafe mirror root path: ${target}`);
+  }
+  let current = root;
+  const parts = path.relative(root, resolvedTarget).split(path.sep).filter(Boolean);
+  for (let index = -1; index < parts.length; index += 1) {
+    if (index >= 0) {
+      current = path.join(current, parts[index]);
+    }
+    if (!fs.existsSync(current)) {
+      continue;
+    }
+    const stat = fs.lstatSync(current);
+    if (stat.isSymbolicLink() || (index < parts.length - 1 && !stat.isDirectory())) {
+      throw new Error(`Unsafe mirror root path: ${current}`);
+    }
+  }
+}
+
 function markMirrorDirty({ projectId, rootDir, reason = 'dirty_mirror' }) {
   const mirror = getProjectMirror(projectId, { rootDir });
   const baseline = readBaseline(mirror.baselinePath);
@@ -1039,6 +1081,9 @@ function verifyWorkspaceMatchesBaseline(workspacePath, baselineFiles = []) {
     const target = resolveWorkspacePath(workspacePath, file.path);
     if (!fs.existsSync(target)) {
       return { ok: false, reason: 'workspace_mismatch', path: file.path };
+    }
+    if (!isSafeWorkspaceWriteTarget(workspacePath, target)) {
+      return { ok: false, reason: 'unsafe_path', path: file.path };
     }
     if (file.kind === 'binary') {
       if (hashBytes(fs.readFileSync(target)) !== file.hash) {

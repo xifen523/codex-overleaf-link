@@ -479,7 +479,9 @@ releaseTest('release workflow grants publish permission and builds/verifies arti
   assert.match(workflow, /npm install -g npm@11\.11\.0/);
   assert.match(workflow, /registry-url:\s+https:\/\/registry\.npmjs\.org/);
   assert.match(workflow, /NODE_AUTH_TOKEN:\s+\$\{\{\s*secrets\.NPM_TOKEN\s*\}\}/);
-  assert.match(workflow, /npm publish --access public --provenance/);
+  assert.match(workflow, /npm publish "\$\{LOCAL_TGZ\}" --access public --provenance/);
+  assert.match(workflow, /gh release view "\$\{GITHUB_REF_NAME\}"/);
+  assert.match(workflow, /dist\.integrity/);
   assertContainsInOrder(workflow, [
     'run: npm test',
     'npm run verify:release -- --release-date',
@@ -607,7 +609,7 @@ releaseTest('release workflow publishes generated notes and built artifacts', ()
   );
   assertReleaseWorkflowUploadsExactArtifactSet(workflow);
   assert.match(workflow, /^\s+fail_on_unmatched_files:\s+true\s*$/m);
-  assert.match(workflow, /^\s+overwrite_files:\s+true\s*$/m);
+  assert.match(workflow, /^\s+overwrite_files:\s+false\s*$/m);
 });
 
 releaseTest('release workflow upload artifact gate rejects extra explicit files', () => {
@@ -1437,6 +1439,7 @@ releaseTest('build-release writes a version-pinned install artifact while root i
     fs.writeFileSync(path.join(binDir, 'node'), [
       '#!/bin/bash',
       `for arg in "$@"; do printf '%s\\n' "$arg"; done > "${nodeLog}"`,
+      `echo '{"version":"${version}","extensionRoot":"'"$HOME"'/.codex-overleaf/managed/extension","nativeRoot":"'"$HOME"'/.codex-overleaf/managed/native"}'`,
       'exit 0'
     ].join('\n'));
     fs.writeFileSync(path.join(binDir, 'open'), [
@@ -1467,7 +1470,8 @@ releaseTest('build-release writes a version-pinned install artifact while root i
     assert.equal(installResult.status, 0, installResult.stderr || installResult.stdout);
     assert.match(installResult.stdout, new RegExp(`CODEX_OVERLEAF_REF: ${releaseRef}`));
     assert.match(readText(gitLog), new RegExp(`fetch --depth 1 origin ${releaseRef}`));
-    assert.match(readText(nodeLog), /scripts\/install-native-host\.mjs/);
+    assert.match(readText(nodeLog), /scripts\/install-managed\.mjs/);
+    assert.match(readText(nodeLog), /--json/);
     assert.match(readText(openLog), /chrome:\/\/extensions/);
     assert.equal(readText(pbcopyLog), visibleExtensionLink);
   } finally {
@@ -1595,7 +1599,7 @@ releaseTest('release workflow builds and verifies artifacts before npm publish w
   assert.match(workflow, /npm run verify:release-artifacts/);
   assert.match(workflow, /for attempt in 1 2 3 4 5 6 7 8 9 10 11 12;/);
   assert.match(workflow, /sleep 5/);
-  assert.match(workflow, /overwrite_files:\s*true/);
+  assert.match(workflow, /overwrite_files:\s*false/);
 });
 
 releaseTest('release artifact verifier is wired as an npm script and checks archives', () => {

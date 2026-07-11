@@ -924,7 +924,8 @@ test('repository ships a one-command Windows installer', () => {
   assert.match(installer, /Get-Command\s+node/);
   assert.match(installer, /git clone/);
   assert.match(installer, /git -C/);
-  assert.match(installer, /scripts[\\/]install-native-host\.mjs/);
+  assert.match(installer, /scripts[\\/]install-managed\.mjs/);
+  assert.match(installer, /--json/);
   assert.match(installer, /--extension-id/);
   assert.match(installer, /chrome:\/\/extensions/);
   assert.match(installer, /Load unpacked/);
@@ -1365,7 +1366,8 @@ test('repository ships a one-command macOS installer', () => {
   assert.match(installer, /CODEX_OVERLEAF_INSTALL_DIR/);
   assert.match(installer, /CODEX_OVERLEAF_REF/);
   assert.match(installer, /github\.com\/Ghqqqq\/codex-overleaf-link\.git/);
-  assert.match(installer, /scripts\/install-native-host\.mjs/);
+  assert.match(installer, /scripts\/install-managed\.mjs/);
+  assert.doesNotMatch(installer, /rm -rf "\$INSTALL_DIR"/);
   assert.match(installer, /Package version/);
   assert.match(installer, /Extension path/);
   assert.match(installer, /chrome:\/\/extensions/);
@@ -1408,8 +1410,8 @@ test('README documents current cross-platform manual install, uninstall, release
   assert.doesNotMatch(readme, new RegExp(`${escapeRegExp(CANONICAL_NPM_EXEC_PREFIX)} install-native --extension-id <chrome-extension-id>`));
   assert.ok(readme.includes(`${CANONICAL_NPM_EXEC_PREFIX} doctor`));
   assert.ok(readme.includes(`${CANONICAL_NPM_EXEC_PREFIX} uninstall-native`));
-  assert.match(readme, /npm installs, updates, uninstalls, and diagnoses the native host only/i);
-  assert.match(readme, /npm does not install the Chrome extension/i);
+  assert.match(readme, /npm installs, updates, and uninstalls the coordinated managed extension\/native pair/i);
+  assert.match(readme, /legacy `install-native` command remains available only for explicitly unmanaged extension directories/i);
   assert.match(readme, /Use `--extension-id <chrome-extension-id>` only for a custom\/dev unpacked extension id/i);
   assert.doesNotMatch(readme, /Chrome Web Store once published/i);
   assert.doesNotMatch(readme, /version-0\.4\.0-blue/);
@@ -1480,9 +1482,7 @@ test('one-command installer works on macOS Bash 3.2 with bundled extension id de
   fs.writeFileSync(path.join(binDir, 'node'), [
     '#!/bin/bash',
     `for arg in "$@"; do printf '%s\\n' "$arg"; done > "${nodeLog}"`,
-    'echo "Installed Native Messaging host manifest: $HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.overleaf.json"',
-    'echo "Bridge executable: $HOME/.codex-overleaf/codex-overleaf-bridge"',
-    'echo "Runtime root: $HOME/.codex-overleaf/native-host-runtime"',
+    `echo '{"version":"${CURRENT_PACKAGE_VERSION}","extensionRoot":"'"$HOME"'/.codex-overleaf/managed/extension","nativeRoot":"'"$HOME"'/.codex-overleaf/managed/native"}'`,
     'exit 0'
   ].join('\n'));
   fs.writeFileSync(path.join(binDir, 'open'), [
@@ -1513,19 +1513,48 @@ test('one-command installer works on macOS Bash 3.2 with bundled extension id de
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /CODEX_OVERLEAF_REF: main/);
   assert.match(result.stdout, new RegExp(`Package version: ${escapeRegExp(CURRENT_PACKAGE_VERSION)}`));
-  assert.match(result.stdout, /Installed Native Messaging host manifest:/);
-  assert.match(result.stdout, /Bridge executable:/);
-  assert.match(result.stdout, /Runtime root:/);
-  assert.ok(result.stdout.includes(`Extension path: ${path.join(installDir, 'extension')}`));
+  assert.match(result.stdout, /managed extension and native host are installed/);
+  assert.ok(result.stdout.includes(`Extension path: ${path.join(tempDir, '.codex-overleaf', 'managed', 'extension')}`));
   assert.match(result.stdout, /Reload the Chrome extension/);
   assert.match(result.stdout, /Refresh the Overleaf page/);
   const nodeArgs = fs.readFileSync(nodeLog, 'utf8');
-  assert.match(nodeArgs, /scripts\/install-native-host\.mjs/);
+  assert.match(nodeArgs, /scripts\/install-managed\.mjs/);
+  assert.match(nodeArgs, /--json/);
   assert.doesNotMatch(nodeArgs, /--extension-id/);
-  assert.equal(fs.readlinkSync(visibleExtensionLink), path.join(installDir, 'extension'));
+  assert.equal(fs.readlinkSync(visibleExtensionLink), path.join(tempDir, '.codex-overleaf', 'managed', 'extension'));
   assert.equal(fs.readFileSync(pbcopyLog, 'utf8'), visibleExtensionLink);
   const openArgs = fs.readFileSync(openLog, 'utf8');
   assert.match(openArgs, /-a\nGoogle Chrome\nchrome:\/\/extensions/);
   assert.match(openArgs, /-R/);
   assert.match(openArgs, /Codex Overleaf Link Extension/);
+});
+
+test('one-command shell installer refuses dangerous or unmarked existing source directories', t => {
+  if (process.platform === 'win32') {
+    t.skip('POSIX shell installer safety is covered on POSIX runners');
+    return;
+  }
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-install-safe-'));
+  const existing = path.join(home, 'existing-source');
+  const sentinel = path.join(existing, 'keep.txt');
+  fs.mkdirSync(existing, { recursive: true });
+  fs.writeFileSync(sentinel, 'keep\n');
+  try {
+    const existingResult = spawnSync('/bin/bash', [path.join(__dirname, '../install.sh')], {
+      env: { ...process.env, HOME: home, CODEX_OVERLEAF_INSTALL_DIR: existing },
+      encoding: 'utf8'
+    });
+    assert.notEqual(existingResult.status, 0);
+    assert.match(existingResult.stderr, /Refusing to replace an existing unmarked source directory/);
+    assert.equal(fs.readFileSync(sentinel, 'utf8'), 'keep\n');
+
+    const homeResult = spawnSync('/bin/bash', [path.join(__dirname, '../install.sh')], {
+      env: { ...process.env, HOME: home, CODEX_OVERLEAF_INSTALL_DIR: home },
+      encoding: 'utf8'
+    });
+    assert.notEqual(homeResult.status, 0);
+    assert.match(homeResult.stderr, /Refusing unsafe install directory/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });

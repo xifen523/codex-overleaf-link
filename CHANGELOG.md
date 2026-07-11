@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.9.2 - 2026-07-11
+
+- Native command trust boundary: Auto mode no longer approves `awk` or `sed` interpreters, and LaTeX commands reject shell escape, external output directories, unsafe Lua execution, and executable `latexmk` configuration paths.
+- Mirror containment: snapshot sync, partial overlays, change collection, writeback confirmation, and OT patching fail closed when an existing workspace path segment is a symlink.
+- Managed installation convergence: macOS/Linux and Windows one-command installers now install the coordinated managed extension/native pair; the POSIX installer refuses dangerous, symlinked, or unmarked existing source directories.
+- Immutable release bytes: npm publishes the already verified release tarball, verifies registry integrity against that tarball, refuses reused versions/releases, and disables GitHub asset overwrite.
+- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking now resolve to `1.9.2`; native protocol `1` remains unchanged.
+- Release artifacts resolve to `codex-overleaf-link-extension-v1.9.2.zip`, `codex-overleaf-native-host-v1.9.2.tar.gz`, `codex-overleaf-link-1.9.2.tgz`, `codex-overleaf-update-v1.9.2.tar.gz`, and the detached signed manifest.
+
 ## v1.9.1 - 2026-07-11
 
 - Reasoning stream display: removes empty `<!-- -->` placeholders emitted by current Codex reasoning-summary events before they reach the visible run timeline.

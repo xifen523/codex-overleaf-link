@@ -1125,8 +1125,8 @@ function isAllowedLocalCommand(params = {}) {
   }
 
   const allowed = new Set([
-    'rg', 'grep', 'cat', 'sed', 'head', 'tail', 'nl', 'find', 'ls',
-    'wc', 'diff', 'sort', 'tr', 'awk', 'printf', 'cut', 'uniq',
+    'rg', 'grep', 'cat', 'head', 'tail', 'nl', 'find', 'ls',
+    'wc', 'diff', 'sort', 'tr', 'printf', 'cut', 'uniq',
     'stat', 'file', 'basename', 'dirname', 'realpath',
     'shasum', 'md5', 'md5sum',
     'latexmk', 'pdflatex', 'xelatex', 'lualatex', 'bibtex', 'biber',
@@ -1201,18 +1201,61 @@ function isUnsafeShellToken(token) {
 function hasDisallowedCommandArguments(executable, args = []) {
   const flags = args.map(String);
   if (executable === 'find') {
-    return flags.some(flag => ['-exec', '-execdir', '-delete', '-ok', '-okdir'].includes(flag));
+    return flags.some(flag => [
+      '-exec', '-execdir', '-delete', '-ok', '-okdir',
+      '-fprint', '-fprint0', '-fprintf', '-fls'
+    ].includes(flag));
   }
-  if (executable === 'sed') {
-    return flags.some(flag => flag === '-i' || /^-i[^a-zA-Z0-9]?/.test(flag));
+  if (executable === 'rg') {
+    return flags.some(flag => flag === '--pre' || flag.startsWith('--pre='));
   }
-  if (executable === 'awk') {
-    return flags.some((flag, index) => flag === '-i' && flags[index + 1] === 'inplace');
+  if (executable === 'sort') {
+    return flags.some(flag => flag === '-o'
+      || flag.startsWith('-o')
+      || flag === '--output'
+      || flag.startsWith('--output=')
+      || flag === '-T'
+      || flag.startsWith('-T')
+      || flag === '--temporary-directory'
+      || flag.startsWith('--temporary-directory='));
+  }
+  if (executable === 'latexmk') {
+    return !flags.includes('-norc')
+      || flags.some(isUnsafeLatexmkArgument)
+      || flags.some(isUnsafeTexEngineArgument);
+  }
+  if (['pdflatex', 'xelatex', 'lualatex'].includes(executable)) {
+    if (executable === 'lualatex' && !flags.some(flag => flag === '--safer' || flag === '-safer')) {
+      return true;
+    }
+    return flags.some(isUnsafeTexEngineArgument);
   }
   if (executable === 'shasum' || executable === 'md5sum') {
     return flags.some(flag => flag === '-c' || flag === '--check');
   }
   return false;
+}
+
+function isUnsafeLatexmkArgument(value) {
+  const flag = String(value || '').toLowerCase();
+  return /^-(?:e|r)(?:$|=)/.test(flag)
+    || /^-(?:usepretex|useposttex)(?:$|=)/.test(flag)
+    || /^-(?:pdflatex|xelatex|lualatex|latex|bibtex|biber|makeindex|dvi_filter|ps_filter|pdf_previewer)(?:$|=)/.test(flag);
+}
+
+function isUnsafeTexEngineArgument(value) {
+  const flag = String(value || '').toLowerCase();
+  if (/(?:shell-escape|shell-restricted|write18)/.test(flag)) {
+    return true;
+  }
+  if (/^--?(?:output-directory|aux-directory|outdir|auxdir)(?:$|=)/.test(flag)) {
+    return true;
+  }
+  if (flag === '-jobname' || flag === '--jobname') {
+    return true;
+  }
+  const jobName = flag.match(/^--?jobname=(.*)$/)?.[1] || '';
+  return Boolean(jobName && (jobName.includes('..') || /[\\/]/.test(jobName)));
 }
 
 function pathBasename(value) {
