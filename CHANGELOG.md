@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.3 - 2026-07-11
+
+- Update wait visibility: the stable-update popup now reports every concrete Overleaf and native-host idle blocker instead of showing an opaque waiting state.
+- Idempotent staging: repeated checks reuse an already verified transaction, and completed or replaced transactions remove orphan `staging-*` directories.
+- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking now resolve to `1.9.3`; native protocol `1` remains unchanged. Successful apply and rollback transactions also update both extension and native managed markers alongside the manifest and active-version pointer.
+- Release artifacts resolve to `codex-overleaf-link-extension-v1.9.3.zip`, `codex-overleaf-native-host-v1.9.3.tar.gz`, `codex-overleaf-link-1.9.3.tgz`, `codex-overleaf-update-v1.9.3.tar.gz`, and the detached signed manifest.
+
 ## v1.9.2 - 2026-07-11
 
 - Native command trust boundary: Auto mode no longer approves `awk` or `sed` interpreters, and LaTeX commands reject shell escape, external output directories, unsafe Lua execution, and executable `latexmk` configuration paths.

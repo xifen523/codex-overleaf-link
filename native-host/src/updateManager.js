@@ -172,6 +172,23 @@ async function stageCandidate(context, options = {}) {
   if (!isNewerStableVersion(manifest.version, activeVersion)) {
     throw updateError('update_candidate_stale', 'The staged update is no longer newer than the active version.');
   }
+  const existingJournal = readJournal(context);
+  if (existingJournal?.state === 'staged' && existingJournal.targetVersion === manifest.version) {
+    try {
+      verifyStagedPair(existingJournal.payloadRoot, manifest.version);
+      return {
+        transactionId: existingJournal.id,
+        targetVersion: existingJournal.targetVersion,
+        state: existingJournal.state,
+        reused: true
+      };
+    } catch (_error) {
+      cleanupStage(existingJournal.stageRoot);
+    }
+  }
+  if (existingJournal && ['applying', 'awaiting_health'].includes(existingJournal.state)) {
+    throw updateError('update_transaction_in_progress', 'A managed update transaction is already being applied.');
+  }
   const transactionId = crypto.randomUUID();
   const stageRoot = path.join(context.updatesRoot, 'staging-' + transactionId);
   fs.mkdirSync(stageRoot, { recursive: true, mode: 0o700 });
@@ -202,6 +219,7 @@ async function stageCandidate(context, options = {}) {
     updatedAt: new Date().toISOString()
   };
   writeJournal(context, journal);
+  cleanupOrphanStageRoots(context.updatesRoot, [stageRoot]);
   return { transactionId, targetVersion: manifest.version, state: journal.state };
 }
 
@@ -247,6 +265,7 @@ function applyStagedUpdate(context, params = {}, options = {}) {
     atomicWriteText(path.join(context.nativeRoot, 'previous-version'), journal.sourceVersion + '\n');
     atomicWriteText(path.join(context.nativeRoot, 'active-version'), journal.targetVersion + '\n');
     rewriteManagedManifestVersion(manifestPath, journal.targetVersion);
+    syncManagedMarkerVersions(context, journal.targetVersion);
   } catch (error) {
     rollbackFiles(context, { ...journal, previousManifest });
     throw updateError('update_apply_failed', 'Managed update could not be applied atomically.', { cause: error });
@@ -282,6 +301,7 @@ function confirmUpdate(context, params = {}) {
   });
   pruneNativeVersions(context.nativeRoot, new Set([journal.targetVersion, journal.sourceVersion]));
   cleanupStage(journal.stageRoot);
+  cleanupOrphanStageRoots(context.updatesRoot);
   return { version: journal.targetVersion, state: 'committed' };
 }
 
@@ -306,6 +326,7 @@ function rollbackUpdate(context, params = {}) {
     previousManifest: undefined
   });
   cleanupStage(journal.stageRoot);
+  cleanupOrphanStageRoots(context.updatesRoot);
   return { version: journal.sourceVersion, state: 'rolled_back' };
 }
 
@@ -328,6 +349,45 @@ function rollbackFiles(context, journal) {
     atomicWriteText(path.join(context.nativeRoot, 'previous-version'), sourcePrevious + '\n');
   } else {
     fs.rmSync(path.join(context.nativeRoot, 'previous-version'), { force: true });
+  }
+  if (parseSemver(journal.sourceVersion)) {
+    syncManagedMarkerVersions(context, journal.sourceVersion);
+  }
+}
+
+function syncManagedMarkerVersions(context, version) {
+  rewriteManagedMarkerVersion(context.extensionRoot, EXTENSION_MARKER, 'extension', version);
+  rewriteManagedMarkerVersion(context.nativeRoot, NATIVE_MARKER, 'native', version);
+}
+
+function rewriteManagedMarkerVersion(root, filename, kind, version) {
+  const markerPath = path.join(root, filename);
+  const marker = readJsonSafe(markerPath, null);
+  if (!isManagedMarker(marker, kind)) {
+    throw updateError('update_marker_invalid', `The managed ${kind} marker is missing or invalid.`);
+  }
+  atomicWriteJson(markerPath, {
+    ...marker,
+    version,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+function cleanupOrphanStageRoots(updatesRoot, retainedRoots = []) {
+  const resolvedRoot = path.resolve(String(updatesRoot || ''));
+  if (!resolvedRoot || resolvedRoot === path.parse(resolvedRoot).root) return;
+  const retained = new Set((retainedRoots || []).map(value => path.resolve(String(value || ''))));
+  let entries;
+  try {
+    entries = fs.readdirSync(resolvedRoot, { withFileTypes: true });
+  } catch (_error) {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !/^staging-[0-9a-f-]{36}$/i.test(entry.name)) continue;
+    const candidate = path.join(resolvedRoot, entry.name);
+    if (retained.has(path.resolve(candidate))) continue;
+    fs.rmSync(candidate, { recursive: true, force: true });
   }
 }
 
@@ -539,10 +599,13 @@ module.exports = {
   GITHUB_LATEST_URL,
   applyStagedUpdate,
   checkForUpdate,
+  cleanupOrphanStageRoots,
   confirmUpdate,
   getApplyGate,
   getManagedContext,
   handleUpdateRequest,
   isUpdateMethod,
-  rollbackUpdate
+  rollbackUpdate,
+  stageCandidate,
+  syncManagedMarkerVersions
 };

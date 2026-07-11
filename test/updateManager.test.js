@@ -8,6 +8,7 @@ const {
   GITHUB_LATEST_URL,
   applyStagedUpdate,
   checkForUpdate,
+  cleanupOrphanStageRoots,
   confirmUpdate,
   getApplyGate,
   handleUpdateRequest,
@@ -29,10 +30,22 @@ function createAppliedUpdateFixture() {
     version: '1.9.0',
     background: { service_worker: 'bootstrap/background.js' }
   }, null, 2) + '\n');
+  fs.writeFileSync(path.join(extensionRoot, '.codex-overleaf-managed-extension.json'), JSON.stringify({
+    managedBy: 'codex-overleaf-link',
+    kind: 'extension',
+    bootstrapProtocol: 1,
+    version: '1.9.0'
+  }, null, 2) + '\n');
   fs.mkdirSync(path.join(nativeRoot, 'versions', '1.8.9'), { recursive: true });
   fs.mkdirSync(path.join(nativeRoot, 'versions', '1.9.0'), { recursive: true });
   fs.writeFileSync(path.join(nativeRoot, 'active-version'), '1.9.0\n');
   fs.writeFileSync(path.join(nativeRoot, 'previous-version'), '1.8.9\n');
+  fs.writeFileSync(path.join(nativeRoot, '.codex-overleaf-managed-native.json'), JSON.stringify({
+    managedBy: 'codex-overleaf-link',
+    kind: 'native',
+    bootstrapProtocol: 1,
+    version: '1.9.0'
+  }, null, 2) + '\n');
   fs.mkdirSync(path.join(payloadRoot, 'extension-runtime'), { recursive: true });
   fs.writeFileSync(path.join(payloadRoot, 'extension-runtime', 'new.js'), 'new\n');
   fs.mkdirSync(path.join(payloadRoot, 'native-runtime'), { recursive: true });
@@ -113,6 +126,8 @@ test('a committed update restores its source manifest without retaining the fail
       getWorkState: () => ({ projectLocks: 0, runControllers: 0 })
     });
     assert.equal(applied.state, 'awaiting_health');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(fixture.context.extensionRoot, '.codex-overleaf-managed-extension.json'), 'utf8')).version, '1.9.1');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(fixture.context.nativeRoot, '.codex-overleaf-managed-native.json'), 'utf8')).version, '1.9.1');
     confirmUpdate(fixture.context, {
       transactionId: 'fixture',
       extensionVersion: '1.9.1',
@@ -125,7 +140,27 @@ test('a committed update restores its source manifest without retaining the fail
     assert.equal(fs.existsSync(path.join(fixture.context.extensionRoot, 'runtime', 'old.js')), true);
     assert.equal(fs.readFileSync(path.join(fixture.context.nativeRoot, 'active-version'), 'utf8').trim(), '1.9.0');
     assert.equal(fs.existsSync(path.join(fixture.context.nativeRoot, 'previous-version')), false);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(fixture.context.extensionRoot, '.codex-overleaf-managed-extension.json'), 'utf8')).version, '1.9.0');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(fixture.context.nativeRoot, '.codex-overleaf-managed-native.json'), 'utf8')).version, '1.9.0');
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('orphan staging cleanup retains only the active transaction directory', () => {
+  const updatesRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-update-staging-'));
+  const retained = path.join(updatesRoot, 'staging-11111111-1111-4111-8111-111111111111');
+  const orphan = path.join(updatesRoot, 'staging-22222222-2222-4222-8222-222222222222');
+  const unrelated = path.join(updatesRoot, 'candidate-cache');
+  fs.mkdirSync(retained);
+  fs.mkdirSync(orphan);
+  fs.mkdirSync(unrelated);
+  try {
+    cleanupOrphanStageRoots(updatesRoot, [retained]);
+    assert.equal(fs.existsSync(retained), true);
+    assert.equal(fs.existsSync(orphan), false);
+    assert.equal(fs.existsSync(unrelated), true);
+  } finally {
+    fs.rmSync(updatesRoot, { recursive: true, force: true });
   }
 });

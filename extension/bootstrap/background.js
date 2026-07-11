@@ -16,6 +16,7 @@ let runtimeLoadError = null;
 try {
   globalThis.__CODEX_OVERLEAF_RUNTIME_BASE__ = 'runtime';
   importScripts(
+    chrome.runtime.getURL('bootstrap/updateStatus.js'),
     chrome.runtime.getURL('runtime/src/shared/compatibility.js'),
     chrome.runtime.getURL('runtime/src/background.js')
   );
@@ -118,10 +119,13 @@ async function checkAndStage(options = {}) {
   if (APPLYING_STATES.has(current.state)) {
     return current;
   }
+  if (['staged', 'waiting_for_idle'].includes(current.state) && current.transactionId) {
+    return tryApplyStagedUpdate();
+  }
   if (!options.manual && Number(current.postponeUntil || 0) > Date.now()) {
     return current;
   }
-  await setUpdateState({ ...current, state: 'checking', code: '', message: '' });
+  await setUpdateState({ ...current, state: 'checking', blocker: '', blockers: [], code: '', message: '' });
   const checked = await requestInternal({
     method: 'update.check',
     params: {
@@ -170,7 +174,9 @@ async function checkAndStage(options = {}) {
     currentVersion: chrome.runtime.getManifest().version,
     latestVersion: staged.result.targetVersion,
     transactionId: staged.result.transactionId,
-    stagedAt: Date.now()
+    stagedAt: Date.now(),
+    blocker: '',
+    blockers: []
   });
   await broadcastUpdateState('staged');
   chrome.alarms.create(IDLE_ALARM, { delayInMinutes: 0.1 });
@@ -187,20 +193,25 @@ async function tryApplyStagedUpdate() {
   }
   const tabs = await chrome.tabs.query({ url: OVERLEAF_MATCHES });
   const probes = await Promise.all(tabs.map(tab => probeTabIdle(tab)));
-  const tabBlocker = probes.find(probe => probe.idle !== true);
-  const nativeGate = await requestInternal({ method: 'update.canApply', params: {} });
-  if (tabBlocker || !nativeGate?.ok || nativeGate.result?.idle !== true) {
+  const nativeGate = await requestInternal({ method: 'update.canApply', params: {} }).catch(error => ({
+    ok: false,
+    error: { code: safeCode(error), message: safeMessage(error) }
+  }));
+  const blockers = globalThis.CodexOverleafUpdateStatus?.collectBlockers(probes, nativeGate)
+    || ['busy'];
+  if (blockers.length) {
     const waiting = await setUpdateState({
       ...state,
       state: 'waiting_for_idle',
-      blocker: tabBlocker?.blockers?.[0] || nativeGate?.result?.blockers?.[0] || 'busy'
+      blocker: blockers[0],
+      blockers
     });
     chrome.alarms.create(IDLE_ALARM, { delayInMinutes: 1 });
     return waiting;
   }
 
   await chrome.storage.local.set({ [UPDATE_RELOAD_TABS_KEY]: tabs.map(tab => tab.id).filter(Number.isInteger) });
-  await setUpdateState({ ...state, state: 'applying', blocker: '' });
+  await setUpdateState({ ...state, state: 'applying', blocker: '', blockers: [] });
   await broadcastUpdateState('applying');
   const applied = await requestInternal({
     method: 'update.apply',
@@ -353,6 +364,9 @@ async function getUpdateState() {
 }
 
 async function setUpdateState(next) {
+  const blockers = globalThis.CodexOverleafUpdateStatus?.normalizeBlockers(
+    Array.isArray(next.blockers) ? next.blockers : (next.blocker ? [next.blocker] : [])
+  ) || [];
   const value = {
     state: next.state || 'idle',
     managed: next.managed !== false,
@@ -363,7 +377,8 @@ async function setUpdateState(next) {
     stagedAt: Number(next.stagedAt || 0),
     postponeUntil: Number(next.postponeUntil || 0),
     transactionId: next.transactionId || '',
-    blocker: next.blocker || '',
+    blocker: blockers[0] || '',
+    blockers,
     code: next.code || '',
     message: String(next.message || '').slice(0, 300)
   };
