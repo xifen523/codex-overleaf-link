@@ -230,7 +230,10 @@
 
     const state = currentView?.state || {};
     const stateName = state.state || 'idle';
-    const currentVersion = state.currentVersion || chrome.runtime.getManifest().version || '';
+    const manifestVersion = typeof chrome.runtime.getManifest === 'function'
+      ? chrome.runtime.getManifest().version
+      : '';
+    const currentVersion = state.currentVersion || manifestVersion || '';
     const latestVersion = state.latestVersion || '';
     const activeStates = ['downloading', 'staged', 'waiting_for_idle', 'applying', 'awaiting_health'];
     let summaryText = tx(
