@@ -301,7 +301,9 @@ test('§17.3.1 — "Source changed while Codex was working" → stale_source_cha
     readActiveEditorText: () => 'user changed',
     replaceActiveEditorPatches: () => ({ ok: true }),
     replaceActiveEditorText: () => ({ ok: true }),
-    delay: () => Promise.resolve(),
+    // Keep the production retry loop paced. An immediate Promise turns its
+    // wall-clock deadline into a busy loop and can saturate Windows CI stdout.
+    delay: ms => new Promise(resolve => setTimeout(resolve, ms)),
     treeOperations: {
       getActiveFilePath: () => 'main.tex',
       projectPathExists: () => true,
