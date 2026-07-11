@@ -84,12 +84,13 @@
 
   function buildInstallCommand(version = BUILD_TARGET_VERSION, platform, extensionId) {
     const normalized = normalizeReleaseVersion(version) || BUILD_TARGET_VERSION;
+    const npmCommand = normalizePlatform(platform) === 'windows' ? 'npm.cmd' : 'npm';
     const allowedExtensionId = normalizeInstallExtensionId(extensionId);
     const extensionIdArg = allowedExtensionId && allowedExtensionId !== DEFAULT_CHROME_EXTENSION_ID
       ? ` --extension-id ${allowedExtensionId}`
       : '';
 
-    return `npm exec --yes codex-overleaf-link@${normalized} -- install-native${extensionIdArg}`;
+    return `${npmCommand} exec --yes codex-overleaf-link@${normalized} -- install-native${extensionIdArg}`;
   }
 
   function buildReleaseUrl(version = BUILD_TARGET_VERSION) {

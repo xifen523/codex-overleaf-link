@@ -10,6 +10,7 @@ const {
 
 const DEFAULT_REASONING_EFFORTS = Object.freeze(['low', 'medium', 'high', 'xhigh']);
 const DEFAULT_SPEED_TIERS = Object.freeze(['standard']);
+const MODEL_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function resolveCodexModels(params = {}, env = process.env) {
   const cacheResult = resolveModelsFromCodexCache(params, env);
@@ -34,11 +35,13 @@ function resolveModelsFromCodexCache(params, env) {
     if (!models.length) {
       continue;
     }
+    const cacheStale = isModelsCacheStale(parsed.modifiedAtMs);
     return {
-      models,
-      source: 'codex-cache',
+      models: cacheStale ? mergeModelEntries(models, buildFallbackModels()) : models,
+      source: cacheStale ? 'codex-cache-stale' : 'codex-cache',
       fetchedAt: getString(parsed.value?.fetched_at) || getString(parsed.value?.fetchedAt) || new Date().toISOString(),
-      clientVersion: getString(parsed.value?.client_version) || getString(parsed.value?.clientVersion) || ''
+      clientVersion: getString(parsed.value?.client_version) || getString(parsed.value?.clientVersion) || '',
+      cacheStale
     };
   }
   return null;
@@ -79,7 +82,8 @@ function readModelsCache(cachePath) {
     }
     return {
       cachePath,
-      value: JSON.parse(fs.readFileSync(cachePath, 'utf8'))
+      value: JSON.parse(fs.readFileSync(cachePath, 'utf8')),
+      modifiedAtMs: stat.mtimeMs
     };
   } catch {
     return null;
@@ -236,6 +240,23 @@ function buildFallbackModels() {
     speedTiers: DEFAULT_SPEED_TIERS,
     defaultSpeedTier: 'standard'
   }));
+}
+
+function isModelsCacheStale(modifiedAtMs) {
+  return !Number.isFinite(modifiedAtMs) || Date.now() - modifiedAtMs > MODEL_CACHE_MAX_AGE_MS;
+}
+
+function mergeModelEntries(primaryModels, secondaryModels) {
+  const seen = new Set();
+  const merged = [];
+  for (const model of [...primaryModels, ...secondaryModels]) {
+    if (!model?.id || seen.has(model.id)) {
+      continue;
+    }
+    seen.add(model.id);
+    merged.push(model);
+  }
+  return merged;
 }
 
 function getString(value) {

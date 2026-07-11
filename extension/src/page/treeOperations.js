@@ -192,7 +192,7 @@
   }
 
   async function openFileByPath(filePath, options = {}) {
-    const normalizedPath = normalizeSafeProjectPath(filePath);
+    const normalizedPath = resolveProjectPath(filePath);
     if (!normalizedPath) {
       return {
         ok: false,
@@ -282,7 +282,7 @@
   }
 
   function buildManagerOpenArgs(filePath) {
-    const normalizedPath = normalizeSafeProjectPath(filePath);
+    const normalizedPath = resolveProjectPath(filePath);
     const record = collectDocRecords({ includeWindowGlobals: true }).find(item => item.path === normalizedPath);
     const args = [
       { type: 'path', value: normalizedPath }
@@ -699,7 +699,7 @@
     if (!filePath) {
       return false;
     }
-    const normalizedPath = normalizeSafeProjectPath(filePath);
+    const normalizedPath = resolveProjectPath(filePath);
     if (!normalizedPath) {
       return false;
     }
@@ -710,6 +710,24 @@
       return true;
     }
     return collectDocRecords().some(record => record.path === normalizedPath);
+  }
+
+  // Codex can run on a Windows workspace, where paths are case-insensitive,
+  // while Overleaf requires the exact case stored in the project tree. Prefer
+  // an exact match; otherwise accept a single case-insensitive match. A project
+  // containing both variants remains ambiguous and is deliberately not guessed.
+  function resolveProjectPath(filePath) {
+    const normalizedPath = normalizeSafeProjectPath(filePath);
+    if (!normalizedPath) {
+      return '';
+    }
+    const knownPaths = collectProjectTextPaths(getActiveFilePath());
+    if (knownPaths.includes(normalizedPath)) {
+      return normalizedPath;
+    }
+    const foldedPath = normalizedPath.toLowerCase();
+    const matches = knownPaths.filter(path => path.toLowerCase() === foldedPath);
+    return matches.length === 1 ? matches[0] : normalizedPath;
   }
 
   function collectProjectTextPaths(activePath) {
@@ -1565,6 +1583,7 @@
       navigateToFile,
       openFileByPath,
       projectPathExists,
+      resolveProjectPath,
       readProjectPathFromNode,
       renameFile,
       waitForActiveEditorText,

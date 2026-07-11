@@ -113,6 +113,32 @@ test('native runtime env merges Windows Path and PATH while resolving PATHEXT ex
   }
 });
 
+test('native runtime env discovers the Codex Desktop managed CLI on Windows', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-win-desktop-'));
+  const localAppData = path.join(root, 'AppData', 'Local');
+  const codexBin = path.join(localAppData, 'OpenAI', 'Codex', 'bin', 'release');
+  fs.mkdirSync(codexBin, { recursive: true });
+  fs.writeFileSync(path.join(codexBin, 'codex.exe'), 'MZ', { mode: 0o755 });
+
+  try {
+    const env = buildNativeRuntimeEnv({
+      HOME: root,
+      LOCALAPPDATA: localAppData,
+      PATH: '',
+      PATHEXT: '.EXE;.CMD'
+    }, {
+      platform: 'win32',
+      delimiter: ';',
+      readLoginShellEnv: () => null
+    });
+
+    assert.equal(env.CODEX_OVERLEAF_CODEX_PATH, path.join(codexBin, 'codex.exe'));
+    assert.equal(env.PATH.split(';').includes(codexBin), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('resolveExecutable finds Windows PATHEXT commands from an injected Windows PATH', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-win-pathext-'));
   const bin = path.join(root, 'bin');

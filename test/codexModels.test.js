@@ -70,6 +70,25 @@ test('resolveCodexModels reads the Codex models cache before fallback models', (
   });
 });
 
+test('resolveCodexModels supplements an old cache with current fallback models', () => {
+  withTempHome(home => {
+    const cachePath = path.join(home, '.codex', 'models_cache.json');
+    writeJson(cachePath, {
+      models: [{ slug: 'gpt-stale-cache', display_name: 'GPT Stale Cache', visibility: 'list' }]
+    });
+    fs.utimesSync(cachePath, new Date(0), new Date(Date.now() - 2 * 24 * 60 * 60 * 1000));
+
+    const result = resolveCodexModels({}, { HOME: home });
+
+    assert.equal(result.source, 'codex-cache-stale');
+    assert.equal(result.cacheStale, true);
+    assert.equal(result.models[0].id, 'gpt-stale-cache');
+    assert.equal(result.models.some(model => model.id === 'gpt-5.6-sol'), true);
+    assert.equal(result.models.some(model => model.id === 'gpt-5.6-terra'), true);
+    assert.equal(result.models.some(model => model.id === 'gpt-5.6-luna'), true);
+  });
+});
+
 test('resolveCodexModels prefers the explicit CODEX_HOME models cache', () => {
   withTempHome(home => {
     const userCodexHome = path.join(home, '.codex');

@@ -28,6 +28,37 @@ test('tree operations resolves nested DOM basename nodes through Overleaf doc id
   assert.equal(harness.ops.readProjectPathFromNode(nestedNode), 'sections/main.tex');
 });
 
+test('tree operations canonicalizes a unique case-mismatched Overleaf path', () => {
+  const harness = createTreeOperationsHarness({
+    selectedPath: 'main.tex',
+    nodes: [],
+    docs: [
+      { path: 'main.tex', id: '333333333333333333333333' },
+      { path: 'tex_content/related_work.tex', id: '444444444444444444444444' }
+    ]
+  });
+
+  assert.equal(
+    harness.ops.resolveProjectPath('Tex_content/related_work.tex'),
+    'tex_content/related_work.tex'
+  );
+  assert.equal(harness.ops.projectPathExists('Tex_content/related_work.tex'), true);
+});
+
+test('tree operations refuses to canonicalize ambiguous case-mismatched paths', () => {
+  const requestedPath = 'Tex_content/related_work.tex';
+  const harness = createTreeOperationsHarness({
+    selectedPath: 'main.tex',
+    nodes: [],
+    docs: [
+      { path: 'tex_content/related_work.tex', id: '555555555555555555555555' },
+      { path: 'TEX_CONTENT/related_work.tex', id: '666666666666666666666666' }
+    ]
+  });
+
+  assert.equal(harness.ops.resolveProjectPath(requestedPath), requestedPath);
+  assert.equal(harness.ops.projectPathExists(requestedPath), false);
+});
 test('tree operations infers nested basename file paths from folder DOM ancestry', () => {
   const fileNode = makeDomNode({
     tagName: 'LI',

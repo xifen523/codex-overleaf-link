@@ -98,6 +98,14 @@
       return treeOperations.projectPathExists?.(filePath) === true;
     }
 
+    function resolveExistingProjectPath(filePath) {
+      const normalizedPath = normalizeSafeProjectPath(filePath);
+      if (!normalizedPath) {
+        return '';
+      }
+      return treeOperations.resolveProjectPath?.(normalizedPath) || normalizedPath;
+    }
+
     // Distinct from `projectPathExists` (which boolean-collapses an
     // unavailable implementation): returns true only when the underlying
     // treeOperations actually exposes a projectPathExists hook. Used by
@@ -1608,11 +1616,18 @@
     if (!operation || typeof operation !== 'object') {
       return operation;
     }
+    const normalizedPath = typeof operation.path === 'string'
+      ? normalizeSafeProjectPath(operation.path)
+      : operation.path;
     const normalized = {
       ...operation,
-      path: typeof operation.path === 'string'
-        ? normalizeSafeProjectPath(operation.path)
-        : operation.path,
+      // A local Codex workspace on Windows may preserve a path with casing
+      // different from Overleaf. Resolve edit targets to Overleaf's canonical
+      // path before stale checks and navigation; other operations keep their
+      // exact requested path so create/rename semantics stay case-sensitive.
+      path: operation.type === 'edit' && typeof normalizedPath === 'string'
+        ? resolveExistingProjectPath(normalizedPath)
+        : normalizedPath,
       to: typeof operation.to === 'string'
         ? normalizeSafeProjectPath(operation.to)
         : operation.to

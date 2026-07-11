@@ -7,6 +7,9 @@ const {
 } = require('../extension/src/shared/models');
 
 const FALLBACK_IDS = [
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'gpt-5.6-luna',
   'gpt-5.5',
   'gpt-5.4',
   'gpt-5.4-mini',
@@ -18,6 +21,9 @@ const FALLBACK_IDS = [
 test('fallback model ids keep the v0.1.1 UI order', () => {
   assert.deepEqual(FALLBACK_MODELS.map(model => model.id), FALLBACK_IDS);
   assert.deepEqual(FALLBACK_MODELS.map(model => model.label), [
+    'GPT-5.6 Sol',
+    'GPT-5.6 Terra',
+    'GPT-5.6 Luna',
     'GPT-5.5',
     'GPT-5.4',
     'GPT-5.4 Mini',

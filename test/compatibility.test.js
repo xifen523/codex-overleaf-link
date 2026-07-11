@@ -166,7 +166,11 @@ test('buildInstallCommand returns release-pinned npm native update commands', ()
   );
   assert.equal(
     compatibility.buildInstallCommand('1.3.0', 'win32'),
-    'npm exec --yes codex-overleaf-link@1.3.0 -- install-native'
+    'npm.cmd exec --yes codex-overleaf-link@1.3.0 -- install-native'
+  );
+  assert.equal(
+    compatibility.buildInstallCommand('1.3.0', 'windows'),
+    'npm.cmd exec --yes codex-overleaf-link@1.3.0 -- install-native'
   );
 });
 
@@ -185,7 +189,7 @@ test('buildInstallCommand omits bundled id but embeds a custom extension id', ()
   );
   assert.equal(
     compatibility.buildInstallCommand('1.3.0', 'win32', extensionId),
-    `npm exec --yes codex-overleaf-link@1.3.0 -- install-native --extension-id ${extensionId}`
+    `npm.cmd exec --yes codex-overleaf-link@1.3.0 -- install-native --extension-id ${extensionId}`
   );
 });
 

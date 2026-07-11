@@ -146,7 +146,11 @@ function getDefaultPathSegments(env = process.env, options = {}) {
   }
 
   if (platform === 'win32') {
-    return commonSegments;
+    return [
+      ...commonSegments.slice(0, 4),
+      ...getWindowsCodexPathSegments(env, home),
+      ...commonSegments.slice(4)
+    ];
   }
 
   return [
@@ -160,6 +164,30 @@ function getDefaultPathSegments(env = process.env, options = {}) {
     '/opt/homebrew/sbin',
     ...commonSegments.slice(4)
   ];
+}
+
+function getWindowsCodexPathSegments(env, home) {
+  const localAppData = env.LOCALAPPDATA || path.win32.join(home, 'AppData', 'Local');
+  const codexBinRoot = path.win32.join(localAppData, 'OpenAI', 'Codex', 'bin');
+  const candidates = [
+    path.win32.join(localAppData, 'Microsoft', 'WindowsApps')
+  ];
+
+  try {
+    for (const entry of fs.readdirSync(codexBinRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+      const directory = path.win32.join(codexBinRoot, entry.name);
+      if (fs.existsSync(path.win32.join(directory, 'codex.exe'))) {
+        candidates.push(directory);
+      }
+    }
+  } catch {
+    // Codex Desktop has not created its managed CLI directory on this machine.
+  }
+
+  return candidates;
 }
 
 function mergePathSegments(values, options = {}) {
