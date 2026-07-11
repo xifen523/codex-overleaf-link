@@ -6,7 +6,11 @@
     let stableSavedSince = 0;
     let applying = false;
     const documentRef = options.document || root.document;
-    const noteActivity = () => { lastUserActivityAt = Date.now(); stableSavedSince = 0; };
+    const noteActivity = event => {
+      if (event?.target?.closest?.('#codex-overleaf-panel')) return;
+      lastUserActivityAt = Date.now();
+      stableSavedSince = 0;
+    };
     for (const eventName of ['input', 'keydown', 'pointerdown']) {
       documentRef?.addEventListener?.(eventName, noteActivity, true);
     }

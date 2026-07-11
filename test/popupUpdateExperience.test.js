@@ -46,9 +46,9 @@ test('automatic runtime checks are check-only and installation delegates to the 
   assert.match(coordinatorSource, /update_revoke_too_late[\s\S]*return getView\(\)/);
 });
 
-test('managed update actions trust the dedicated Update Center without widening extension access', () => {
+test('managed update actions trust exact Overleaf and toolbar senders without a separate update window', () => {
   const senderPolicySource = coordinatorSource.match(
-    /function isAllowedSender\(sender\) \{[\s\S]*?\n  \}(?=\n\n  async function openUpdateCenter)/
+    /function isAllowedSender\(sender\) \{[\s\S]*?\n  \}(?=\n\n  function currentVersion)/
   )[0];
   const runtimeId = 'codex-overleaf-test-extension';
   const extensionRoot = `chrome-extension://${runtimeId}/`;
@@ -66,7 +66,7 @@ test('managed update actions trust the dedicated Update Center without widening 
     id: runtimeId,
     url: `${extensionRoot}bootstrap/update.html?action=install`,
     tab: { url: `${extensionRoot}bootstrap/update.html?action=install` }
-  }), true);
+  }), false);
   assert.equal(isAllowedSender({
     id: runtimeId,
     url: `${extensionRoot}bootstrap/popup.html`
@@ -102,7 +102,12 @@ test('panel notice loads after the idle gate and before content runtime', () => 
   assert.match(noticeSource, /waiting_for_idle/);
   assert.match(noticeSource, /aria-valuetext/);
   assert.match(noticeSource, /options\.getLocale/);
-  assert.match(noticeSource, /consent-update-open-center/);
+  assert.match(noticeSource, /consent-update-install/);
+  assert.doesNotMatch(noticeSource, /consent-update-open-center/);
+  assert.doesNotMatch(coordinatorSource, /chrome\.windows\.create/);
+  assert.match(noticeSource, /save_state_unverified/);
+  assert.match(bootstrapSource, /FAST_IDLE_RETRY_MS\s*=\s*4000/);
+  assert.match(bootstrapSource, /idleApplyPromise/);
   assert.match(noticeSource, /data-check-updates/);
   assert.match(settingsSource, /data-i18n="softwareUpdatesTitle"/);
   assert.match(settingsSource, /data-check-updates/);

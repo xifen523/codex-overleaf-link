@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.9.9 - 2026-07-12
+
+### Fixed
+
+- Kept update installation, safe-point progress, retry, failure, and completion controls inside the active Overleaf tab without opening a separate Update Center window.
+- Prevented clicks inside the Codex panel from resetting the editor-idle timer, and added bounded save verification with fast transient retries.
+- Serialized safe-point application attempts so the retry timer and Chrome alarm cannot apply the same staged update concurrently.
+- Reported every concrete tab, save-state, Codex, review-action, and Native Host blocker instead of a generic waiting message.
+
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.9.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.9.zip`, `codex-overleaf-native-host-v1.9.9.tar.gz`, and `codex-overleaf-link-1.9.9.tgz`.
+- Native protocol `1` remains the compatibility contract between the Extension and Native Host.
+
 ## v1.9.8 - 2026-07-12
 
 ### Fixed

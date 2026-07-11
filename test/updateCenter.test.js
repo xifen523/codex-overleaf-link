@@ -6,43 +6,36 @@ const test = require('node:test');
 const repoRoot = path.resolve(__dirname, '..');
 const read = relativePath => fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 
-test('dedicated update center exposes a persistent, staged update experience', () => {
-  const html = read('extension/bootstrap/update.html');
-  const css = read('extension/bootstrap/update.css');
+test('Overleaf tab exposes the persistent staged update experience', () => {
+  const notice = read('extension/src/content/updateNotice.js');
 
-  assert.match(html, /id="update-title"/);
-  assert.match(html, /id="progress-track"[^>]*role="progressbar"/);
-  assert.match(html, /data-stage="download"/);
-  assert.match(html, /data-stage="safe-point"/);
-  assert.match(html, /data-stage="restart"/);
-  assert.match(html, /id="technical-details"/);
-  assert.match(html, /id="update-actions"/);
-  assert.match(css, /\.update-stages li\[data-state="active"\]/);
-  assert.match(css, /\.progress-track\[data-indeterminate="true"\]/);
-  assert.match(css, /prefers-reduced-motion/);
+  assert.match(notice, /waiting_for_idle/);
+  assert.match(notice, /codex-update-notice-progress/);
+  assert.match(notice, /role', 'progressbar'/);
+  assert.match(notice, /Update in progress/);
+  assert.match(notice, /state === 'committed'/);
+  assert.match(notice, /id: 'dismiss'/);
 });
 
-test('update center restores persisted progress and survives managed restarts', () => {
-  const source = read('extension/bootstrap/update.js');
+test('Overleaf update notice restores persisted progress after managed restarts', () => {
+  const source = read('extension/src/content/updateNotice.js');
 
   assert.match(source, /consent-update-get-state/);
   assert.match(source, /consent-update-check/);
   assert.match(source, /consent-update-install/);
   assert.match(source, /consent-update-later/);
-  assert.match(source, /chrome\.storage\.onChanged\.addListener/);
-  assert.match(source, /Reconnecting after restart/);
-  assert.match(source, /new URLSearchParams\(window\.location\.search\)/);
-  assert.match(source, /window\.history\.replaceState/);
-  assert.doesNotMatch(source, /label: 'Check latest'/);
+  assert.match(source, /consent-update-dismiss/);
+  assert.match(source, /consent-update-state/);
 });
 
-test('Overleaf update surfaces route install and retry actions into the persistent update center', () => {
+test('Overleaf update actions stay in the current tab and never create an update window', () => {
   const notice = read('extension/src/content/updateNotice.js');
   const coordinator = read('extension/src/backgroundUpdateCoordinator.js');
 
-  assert.match(notice, /consent-update-open-center/);
-  assert.match(notice, /action === 'install' \|\| action === 'retry'/);
-  assert.match(coordinator, /function openUpdateCenter/);
-  assert.match(coordinator, /bootstrap\/update\.html/);
-  assert.match(coordinator, /chrome\.windows\.create/);
+  assert.match(notice, /install: 'codex-overleaf\/consent-update-install'/);
+  assert.match(notice, /retry: 'codex-overleaf\/consent-update-check'/);
+  assert.doesNotMatch(notice, /consent-update-open-center/);
+  assert.doesNotMatch(coordinator, /function openUpdateCenter/);
+  assert.doesNotMatch(coordinator, /bootstrap\/update\.html/);
+  assert.doesNotMatch(coordinator, /chrome\.windows\.create/);
 });

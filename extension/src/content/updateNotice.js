@@ -5,7 +5,6 @@
   let currentView = null;
   let mountedPanel = null;
   let actionInFlight = false;
-  let completionTimer = null;
   let listenerInstalled = false;
   let getLocale = () => '';
   let settingsRoot = null;
@@ -63,13 +62,12 @@
     actionInFlight = true;
     render();
     try {
-      if (action === 'install' || action === 'retry') {
-        await openUpdateCenter(action);
-      } else {
-        currentView = await request({
-          later: 'codex-overleaf/consent-update-later'
-        }[action]);
-      }
+      currentView = await request({
+        install: 'codex-overleaf/consent-update-install',
+        retry: 'codex-overleaf/consent-update-check',
+        later: 'codex-overleaf/consent-update-later',
+        dismiss: 'codex-overleaf/consent-update-dismiss'
+      }[action]);
     } catch (error) {
       currentView = {
         ...(currentView || {}),
@@ -99,19 +97,6 @@
     return response.result;
   }
 
-  async function openUpdateCenter(action = '') {
-    const response = await chrome.runtime.sendMessage({
-      type: 'codex-overleaf/consent-update-open-center',
-      action
-    });
-    if (!response?.ok) {
-      const error = new Error(response?.error?.message || tx('Could not open Update Center.', '无法打开更新中心。'));
-      error.code = response?.error?.code || 'update_center_open_failed';
-      throw error;
-    }
-    return response.result;
-  }
-
   function bindSettingsControls(panel) {
     settingsRoot = panel;
     const button = panel.querySelector?.('[data-check-updates]');
@@ -129,13 +114,13 @@
     const stateName = currentView?.state?.state || 'idle';
     try {
       if (stateName === 'update_available') {
-        await openUpdateCenter('install');
+        currentView = await request('codex-overleaf/consent-update-install');
       } else if (['failed', 'rolled_back'].includes(stateName)) {
-        await openUpdateCenter('retry');
-      } else if (['downloading', 'staged', 'waiting_for_idle', 'applying', 'awaiting_health'].includes(stateName)) {
-        await openUpdateCenter('');
-      } else {
         currentView = await request('codex-overleaf/consent-update-check');
+      } else if (!['downloading', 'staged', 'waiting_for_idle', 'applying', 'awaiting_health'].includes(stateName)) {
+        currentView = await request('codex-overleaf/consent-update-check');
+      } else {
+        return;
       }
     } catch (error) {
       currentView = {
@@ -159,7 +144,6 @@
     if (!currentView) return;
     renderSettings();
     if (!notice) return;
-    clearTimeout(completionTimer);
     if (!currentView.showPanel) {
       notice.hidden = true;
       notice.replaceChildren();
@@ -214,11 +198,6 @@
     if (focusedAction) {
       notice.querySelector('[data-update-notice-action="' + focusedAction + '"]:not(:disabled)')?.focus();
     }
-    if (state.state === 'committed') {
-      completionTimer = setTimeout(() => {
-        if (notice?.dataset.state === 'committed') notice.hidden = true;
-      }, 5000);
-    }
   }
 
   function renderSettings() {
@@ -252,7 +231,7 @@
       buttonText = tx('Update now', '立即更新');
     } else if (activeStates.includes(stateName)) {
       statusText = getCopy(state).detail;
-      buttonText = tx('View update', '查看更新');
+      buttonText = tx('Update in progress', '更新进行中');
     } else if (stateName === 'failed' || stateName === 'rolled_back') {
       statusText = state.message || getCopy(state).detail;
       buttonText = tx('Retry', '重试');
@@ -265,7 +244,7 @@
     status.textContent = statusText;
     status.hidden = !statusText;
     button.textContent = buttonText;
-    button.disabled = settingsActionInFlight || stateName === 'checking';
+    button.disabled = settingsActionInFlight || stateName === 'checking' || activeStates.includes(stateName);
   }
 
   function visibleActions(state) {
@@ -282,12 +261,15 @@
     if (['failed', 'rolled_back'].includes(state)) {
       return [{ id: 'retry', label: tx('Retry', '重试'), primary: true }];
     }
+    if (state === 'committed') {
+      return [{ id: 'dismiss', label: tx('Done', '完成'), primary: true }];
+    }
     return [];
   }
 
   function getCopy(state) {
     const target = state.latestVersion ? 'v' + state.latestVersion : '';
-    const blocker = blockerCopy(state.blocker);
+    const blocker = blockersCopy(state.blockers?.length ? state.blockers : [state.blocker]);
     return {
       update_available: {
         eyebrow: tx('Update available', '发现新版本'),
@@ -341,13 +323,33 @@
     return {
       unsaved: tx('Overleaf has not confirmed that this document is saved.', 'Overleaf 尚未确认当前文档已保存。'),
       active_run: tx('A Codex task is still running.', 'Codex 任务仍在运行。'),
+      run: tx('A Codex task is still running in an Overleaf tab.', '某个 Overleaf 标签页中的 Codex 任务仍在运行。'),
       cancelling: tx('Cancellation is still settling.', '取消操作仍在收尾。'),
       storage_write: tx('Extension state is still being saved.', '扩展状态仍在保存。'),
+      storage: tx('Extension state is still being saved.', '扩展状态仍在保存。'),
       review_action: tx('Accept or Undo is still running.', '接受或撤销操作仍在进行。'),
+      reviewAction: tx('Accept or Undo is still running.', '接受或撤销操作仍在进行。'),
       dialog_open: tx('A confirmation dialog is open.', '确认对话框仍处于打开状态。'),
+      dialog: tx('A confirmation dialog is open.', '确认对话框仍处于打开状态。'),
+      recent_user_activity: tx('Waiting briefly after the latest editor activity.', '正在等待最近一次编辑操作稳定下来。'),
+      save_state_not_stable: tx('The saved state is being confirmed.', '正在确认稳定的已保存状态。'),
+      save_state_unverified: tx('An Overleaf tab has not verified its saved state yet.', '某个 Overleaf 标签页尚未验证已保存状态。'),
+      tab_probe_timeout: tx('An Overleaf tab did not answer the safety check. Reload that tab if this persists.', '某个 Overleaf 标签页未响应安全检查；若持续出现，请刷新该标签页。'),
+      tab_probe_unavailable: tx('An Overleaf tab needs to be reloaded before it can join the safety check.', '某个 Overleaf 标签页需要刷新后才能参与安全检查。'),
+      tab_unavailable: tx('An Overleaf tab is unavailable for the safety check.', '某个 Overleaf 标签页当前无法完成安全检查。'),
+      idle_probe_failed: tx('The Overleaf safety check failed. Reload the affected tab and retry.', 'Overleaf 安全检查失败；请刷新受影响的标签页后重试。'),
       native_project_locked: tx('Native Host still holds a project lock.', 'Native Host 仍持有项目锁。'),
-      native_run_active: tx('Native Host is still processing a task.', 'Native Host 仍在处理任务。')
+      native_run_active: tx('Native Host is still processing a task.', 'Native Host 仍在处理任务。'),
+      busy: tx('A component is still busy.', '某个组件仍处于忙碌状态。')
     }[value] || tx('Waiting until every Overleaf tab is saved and idle.', '正在等待所有 Overleaf 标签页完成保存并进入空闲状态。');
+  }
+
+  function blockersCopy(values = []) {
+    const messages = [...new Set(values.filter(Boolean).map(blockerCopy))];
+    return messages.join(' ') || tx(
+      'Waiting until every Overleaf tab is saved and idle.',
+      '正在等待所有 Overleaf 标签页完成保存并进入空闲状态。'
+    );
   }
 
   function tx(english, chinese) {

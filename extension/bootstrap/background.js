@@ -16,6 +16,13 @@ const OVERLEAF_MATCHES = [
   ...OVERLEAF_EDITOR_MATCHES
 ];
 const APPLYING_STATES = new Set(['applying', 'awaiting_health', 'rolling_back']);
+const FAST_IDLE_RETRY_BLOCKERS = new Set(['recent_user_activity', 'save_state_not_stable']);
+const FAST_IDLE_RETRY_MS = 4000;
+const SLOW_IDLE_RETRY_MS = 15000;
+const IDLE_RETRY_ALARM_MINUTES = 0.5;
+
+let idleRetryTimer = null;
+let idleApplyPromise = null;
 
 let runtimeLoadError = null;
 try {
@@ -85,7 +92,7 @@ async function initializeBootstrap() {
   chrome.alarms.create(CHECK_ALARM, { delayInMinutes: 0.5, periodInMinutes: 24 * 60 });
   const state = await getUpdateState();
   if (state.state === 'staged' || state.state === 'waiting_for_idle') {
-    chrome.alarms.create(IDLE_ALARM, { delayInMinutes: 0.1 });
+    scheduleIdleRetry(state.blockers);
   }
 }
 
@@ -188,13 +195,22 @@ async function checkAndStage(options = {}) {
     blockers: []
   });
   await broadcastUpdateState('staged');
-  chrome.alarms.create(IDLE_ALARM, { delayInMinutes: 0.1 });
   return tryApplyStagedUpdate();
 }
 
-async function tryApplyStagedUpdate() {
+function tryApplyStagedUpdate() {
+  if (idleApplyPromise) return idleApplyPromise;
+  idleApplyPromise = tryApplyStagedUpdateCore().finally(() => {
+    idleApplyPromise = null;
+  });
+  return idleApplyPromise;
+}
+
+async function tryApplyStagedUpdateCore() {
+  cancelIdleRetryTimer();
   const state = await getUpdateState();
   if (!['staged', 'waiting_for_idle'].includes(state.state)) {
+    await clearIdleRetry();
     return state;
   }
   if (Number(state.postponeUntil || 0) > Date.now()) {
@@ -215,10 +231,12 @@ async function tryApplyStagedUpdate() {
       blocker: blockers[0],
       blockers
     });
-    chrome.alarms.create(IDLE_ALARM, { delayInMinutes: 1 });
+    await broadcastUpdateState('waiting_for_idle');
+    scheduleIdleRetry(blockers);
     return waiting;
   }
 
+  await clearIdleRetry();
   await chrome.storage.local.set({ [UPDATE_RELOAD_TABS_KEY]: tabs.map(tab => tab.id).filter(Number.isInteger) });
   await setUpdateState({ ...state, state: 'applying', blocker: '', blockers: [] });
   await broadcastUpdateState('applying');
@@ -232,6 +250,30 @@ async function tryApplyStagedUpdate() {
   await setUpdateState({ ...state, state: 'awaiting_health', latestVersion: applied.result.targetVersion });
   chrome.runtime.reload();
   return { state: 'awaiting_health' };
+}
+
+function scheduleIdleRetry(blockers = []) {
+  cancelIdleRetryTimer();
+  const values = Array.isArray(blockers) ? blockers.filter(Boolean) : [];
+  const onlyFastBlockers = values.length > 0 && values.every(value => FAST_IDLE_RETRY_BLOCKERS.has(value));
+  const delayMs = onlyFastBlockers ? FAST_IDLE_RETRY_MS : SLOW_IDLE_RETRY_MS;
+  idleRetryTimer = setTimeout(() => {
+    idleRetryTimer = null;
+    tryApplyStagedUpdate().catch(() => {});
+  }, delayMs);
+  chrome.alarms.create(IDLE_ALARM, { delayInMinutes: IDLE_RETRY_ALARM_MINUTES });
+}
+
+function cancelIdleRetryTimer() {
+  if (idleRetryTimer !== null) {
+    clearTimeout(idleRetryTimer);
+    idleRetryTimer = null;
+  }
+}
+
+async function clearIdleRetry() {
+  cancelIdleRetryTimer();
+  await chrome.alarms.clear(IDLE_ALARM).catch(() => {});
 }
 
 async function probeTabIdle(tab) {

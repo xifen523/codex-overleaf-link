@@ -715,7 +715,11 @@
       reviewAction: trackedChangeInFlight.size > 0,
       dialog: Boolean(activePluginConfirmResolve)
     }),
-    checkSaved: () => callPageBridge('waitForSaveState', { deadlineMs: 0, pollIntervalMs: 1 }),
+    checkSaved: () => callPageBridge('waitForSaveState', {
+      deadlineMs: 1500,
+      pollIntervalMs: 100,
+      requirePositiveSignal: true
+    }),
     onApplyingChange: applying => { if (panel) panel.dataset.updating = applying ? 'true' : 'false'; },
     showToast: (...args) => showPluginToast(...args),
     getStateMessage: state => ({

@@ -20,14 +20,12 @@
     'codex-overleaf/consent-update-check',
     'codex-overleaf/consent-update-install',
     'codex-overleaf/consent-update-later',
-    'codex-overleaf/consent-update-dismiss',
-    'codex-overleaf/consent-update-open-center'
+    'codex-overleaf/consent-update-dismiss'
   ]);
 
   const policy = root.CodexOverleafUpdateConsent;
   let nativeBridge = null;
   let initialized = false;
-  let updateCenterWindowId = null;
   let policyTail = Promise.resolve();
 
   function init(options = {}) {
@@ -84,8 +82,6 @@
         return postponeUpdate();
       case 'codex-overleaf/consent-update-dismiss':
         return dismissCompletedUpdate();
-      case 'codex-overleaf/consent-update-open-center':
-        return openUpdateCenter(message.action);
       default:
         throw codedError('unknown_update_action', 'Unknown update action.');
     }
@@ -423,8 +419,7 @@
       const url = new URL(sender?.url || sender?.tab?.url || '');
       const extensionRoot = new URL(chrome.runtime.getURL(''));
       if (url.origin === extensionRoot.origin) {
-        return url.pathname === '/bootstrap/popup.html' ||
-          url.pathname === '/bootstrap/update.html';
+        return url.pathname === '/bootstrap/popup.html';
       }
       return url.protocol === 'https:' &&
         (url.hostname === 'www.overleaf.com' || url.hostname === 'overleaf.com') &&
@@ -432,42 +427,6 @@
     } catch (_error) {
       return false;
     }
-  }
-
-  async function openUpdateCenter(requestedAction = '') {
-    const action = String(requestedAction || '');
-    if (action && action !== 'install' && action !== 'retry') {
-      throw codedError('invalid_update_center_action', 'Unsupported Update Center action.');
-    }
-    const url = new URL(chrome.runtime.getURL('bootstrap/update.html'));
-    if (action) url.searchParams.set('action', action);
-
-    if (Number.isInteger(updateCenterWindowId)) {
-      try {
-        const existing = await chrome.windows.get(updateCenterWindowId, { populate: true });
-        await chrome.windows.update(updateCenterWindowId, { focused: true });
-        const tabId = existing?.tabs?.[0]?.id;
-        if (action && Number.isInteger(tabId)) {
-          await chrome.tabs.update(tabId, { url: url.href });
-        }
-        return { opened: true, focused: true, windowId: updateCenterWindowId };
-      } catch (_error) {
-        updateCenterWindowId = null;
-      }
-    }
-
-    const created = await chrome.windows.create({
-      url: url.href,
-      type: 'popup',
-      width: 420,
-      height: 560,
-      focused: true
-    });
-    if (!Number.isInteger(created?.id)) {
-      throw codedError('update_center_open_failed', 'Could not open Update Center.');
-    }
-    updateCenterWindowId = created.id;
-    return { opened: true, focused: true, windowId: created.id };
   }
 
   function currentVersion() {
