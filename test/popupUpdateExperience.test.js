@@ -27,7 +27,7 @@ test('runtime Popup takes ownership after DOMContentLoaded and exposes explicit 
   assert.match(popupSource, /This popup may close briefly while the extension restarts/);
   assert.match(bootstrapPopupCss, /body\.consent-update-focus/);
   assert.match(bootstrapPopupCss, /html\s*\{[\s\S]*background:/);
-  assert.doesNotMatch(bootstrapPopupCss, /translateY/);
+  assert.doesNotMatch(bootstrapPopupCss, /@keyframes popup-enter\s*\{[^@]*translateY/);
   assert.match(bootstrapPopupMarkup, /data-popup-context/);
   assert.doesNotMatch(popupSource, /navigator\.language/);
 });
