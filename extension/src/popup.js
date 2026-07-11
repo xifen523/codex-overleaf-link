@@ -248,6 +248,7 @@
 
   function scheduleConsentUpdateUi() {
     const start = () => {
+      if (typeof document.querySelector !== 'function') return;
       document.querySelector('.updates')?.remove();
       document.body?.classList?.remove('consent-update-focus');
     };
