@@ -167,10 +167,12 @@ function getDefaultPathSegments(env = process.env, options = {}) {
 }
 
 function getWindowsCodexPathSegments(env, home) {
-  const localAppData = env.LOCALAPPDATA || path.win32.join(home, 'AppData', 'Local');
-  const codexBinRoot = path.win32.join(localAppData, 'OpenAI', 'Codex', 'bin');
+  // These paths are inspected by the host filesystem. Using the host path
+  // implementation also keeps injected Windows environments testable on POSIX.
+  const localAppData = env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+  const codexBinRoot = path.join(localAppData, 'OpenAI', 'Codex', 'bin');
   const candidates = [
-    path.win32.join(localAppData, 'Microsoft', 'WindowsApps')
+    path.join(localAppData, 'Microsoft', 'WindowsApps')
   ];
 
   try {
@@ -178,8 +180,8 @@ function getWindowsCodexPathSegments(env, home) {
       if (!entry.isDirectory()) {
         continue;
       }
-      const directory = path.win32.join(codexBinRoot, entry.name);
-      if (fs.existsSync(path.win32.join(directory, 'codex.exe'))) {
+      const directory = path.join(codexBinRoot, entry.name);
+      if (fs.existsSync(path.join(directory, 'codex.exe'))) {
         candidates.push(directory);
       }
     }
