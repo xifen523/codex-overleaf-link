@@ -413,10 +413,10 @@ function writeReleaseFixture(rootDir, overrides = {}) {
 releaseTest('CHANGELOG documents the current release metadata alignment in release tooling format', async () => {
   const version = readJson(path.join(repoRoot, 'package.json')).version;
   const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
-  const heading = `## v${version} - 2026-07-11`;
+  const heading = `## v${version} - 2026-07-12`;
   const start = changelog.indexOf(heading);
   assert.notEqual(start, -1, `CHANGELOG.md should contain ${heading}`);
-  assert.equal(changelog.includes(`## [${version}] - 2026-07-11`), false);
+  assert.equal(changelog.includes(`## [${version}] - 2026-07-12`), false);
   assert.equal(changelog.indexOf(heading, start + heading.length), -1, 'CHANGELOG.md should not duplicate the current release heading');
 
   const { extractReleaseNotes } = await importScriptModule('scripts/build-release.mjs');
