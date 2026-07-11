@@ -146,6 +146,18 @@
               <p class="codex-set-row-help" data-i18n="languageHelp">Panel display language.</p>
             </div>
           </details>
+          <details class="codex-set-group" data-set-group="updates" open>
+            <summary class="codex-set-group-head">
+              <span class="codex-set-group-title">${codexSetIcon('appearance')}<span data-i18n="softwareUpdatesTitle">Software updates</span></span>
+            </summary>
+            <div class="codex-set-card" data-update-settings>
+              <div class="codex-set-row">
+                <p class="codex-set-row-help" data-update-settings-summary data-i18n="softwareUpdatesHelp">Automatically checks signed stable releases for the Extension and Native Host.</p>
+                <p class="codex-set-note" data-update-settings-state aria-live="polite" hidden></p>
+                <button type="button" class="codex-set-btn" data-check-updates data-i18n="checkForUpdates">Check for updates</button>
+              </div>
+            </div>
+          </details>
           <details class="codex-set-group" data-set-group="storage" data-storage-card>
             <summary class="codex-set-group-head">
               <span class="codex-set-group-title">${codexSetIcon('database')}<span data-i18n="storageTitle">History &amp; storage</span></span>

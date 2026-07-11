@@ -248,39 +248,8 @@
 
   function scheduleConsentUpdateUi() {
     const start = () => {
-      if (typeof document.createElement !== 'function') return;
-      injectConsentUpdateStyles();
-      const section = ensureUpdateSection();
-      let actionInFlight = false;
-      let currentView = null;
-
-      section.addEventListener('click', async event => {
-        const action = event.target?.closest?.('[data-update-action]')?.dataset?.updateAction;
-        if (!action || actionInFlight) return;
-        actionInFlight = true;
-        renderUpdateSection(section, currentView, { busyAction: action });
-        try {
-          currentView = await sendConsentAction(action);
-        } catch (error) {
-          currentView = failedUpdateView(currentView, error);
-        } finally {
-          actionInFlight = false;
-          renderUpdateSection(section, currentView);
-        }
-      });
-
-      chrome.runtime.onMessage.addListener(message => {
-        if (message?.type !== 'codex-overleaf/consent-update-state') return;
-        currentView = message.view;
-        if (!actionInFlight) renderUpdateSection(section, currentView);
-      });
-
-      sendConsentAction('get')
-        .then(view => {
-          currentView = view;
-          renderUpdateSection(section, view);
-        })
-        .catch(error => renderUpdateSection(section, failedUpdateView(null, error)));
+      document.querySelector('.updates')?.remove();
+      document.body?.classList?.remove('consent-update-focus');
     };
 
     if (document.readyState === 'loading') {

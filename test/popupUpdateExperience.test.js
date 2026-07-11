@@ -11,22 +11,17 @@ const noticeSource = fs.readFileSync(path.join(root, 'extension/src/content/upda
 const bootstrapSource = fs.readFileSync(path.join(root, 'extension/bootstrap/background.js'), 'utf8');
 const bootstrapPopupCss = fs.readFileSync(path.join(root, 'extension/bootstrap/popup.css'), 'utf8');
 const bootstrapPopupMarkup = fs.readFileSync(path.join(root, 'extension/bootstrap/popup.html'), 'utf8');
+const settingsSource = fs.readFileSync(path.join(root, 'extension/src/content/settingsPanel.js'), 'utf8');
+const extensionManifest = require('../extension/manifest.json');
 const runtimeManifest = require('../extension/runtime-manifest.json');
 
-test('runtime Popup takes ownership after DOMContentLoaded and exposes explicit consent actions', () => {
-  assert.match(popupSource, /DOMContentLoaded/);
-  assert.match(popupSource, /section\.replaceChildren/);
-  assert.match(popupSource, /codex-overleaf\/consent-update-install/);
-  assert.match(popupSource, /codex-overleaf\/consent-update-later/);
-  assert.match(popupSource, /codex-overleaf\/consent-update-dismiss/);
-  assert.match(popupSource, /role', 'progressbar'/);
-  assert.match(popupSource, /aria-valuetext/);
-  assert.match(popupSource, /copy\.phase !== copy\.detail/);
-  assert.match(popupSource, /if \(showPhaseText\) card\.append\(phase\)/);
-  assert.match(popupSource, /consent-update-focus/);
-  assert.match(popupSource, /createUpdateSteps/);
-  assert.match(popupSource, /This popup may close briefly while the extension restarts/);
-  assert.match(bootstrapPopupCss, /body\.consent-update-focus/);
+test('toolbar Popup stays focused on connection status and removes duplicate update controls', () => {
+  const schedule = popupSource.match(/function scheduleConsentUpdateUi\(\) \{[\s\S]*?\n  \}(?=\n\n  function ensureUpdateSection)/)[0];
+  assert.match(schedule, /querySelector\('\.updates'\)\?\.remove\(\)/);
+  assert.doesNotMatch(schedule, /sendConsentAction|renderUpdateSection/);
+  assert.doesNotMatch(bootstrapPopupMarkup, /class="updates"/);
+  assert.doesNotMatch(bootstrapPopupMarkup, /id="check-update"/);
+  assert.doesNotMatch(bootstrapPopupMarkup, /<script src="popup\.js"><\/script>/);
   assert.match(bootstrapPopupCss, /html\s*\{[\s\S]*background:/);
   assert.doesNotMatch(bootstrapPopupCss, /@keyframes popup-enter\s*\{[^@]*translateY/);
   assert.match(bootstrapPopupMarkup, /data-popup-context/);
@@ -53,7 +48,7 @@ test('automatic runtime checks are check-only and installation delegates to the 
 
 test('managed update actions trust the dedicated Update Center without widening extension access', () => {
   const senderPolicySource = coordinatorSource.match(
-    /function isAllowedSender\(sender\) \{[\s\S]*?\n  \}(?=\n\n  function currentVersion)/
+    /function isAllowedSender\(sender\) \{[\s\S]*?\n  \}(?=\n\n  async function openUpdateCenter)/
   )[0];
   const runtimeId = 'codex-overleaf-test-extension';
   const extensionRoot = `chrome-extension://${runtimeId}/`;
@@ -83,6 +78,11 @@ test('managed update actions trust the dedicated Update Center without widening 
   }), true);
   assert.equal(isAllowedSender({
     id: runtimeId,
+    url: 'https://www.overleaf.com/project',
+    tab: { url: 'https://www.overleaf.com/project' }
+  }), true);
+  assert.equal(isAllowedSender({
+    id: runtimeId,
     url: `${extensionRoot}bootstrap/background.js`,
     tab: { url: `${extensionRoot}bootstrap/background.js` }
   }), false);
@@ -102,5 +102,13 @@ test('panel notice loads after the idle gate and before content runtime', () => 
   assert.match(noticeSource, /waiting_for_idle/);
   assert.match(noticeSource, /aria-valuetext/);
   assert.match(noticeSource, /options\.getLocale/);
+  assert.match(noticeSource, /consent-update-open-center/);
+  assert.match(noticeSource, /data-check-updates/);
+  assert.match(settingsSource, /data-i18n="softwareUpdatesTitle"/);
+  assert.match(settingsSource, /data-check-updates/);
+  assert.equal(runtimeManifest.matches.includes('https://www.overleaf.com/project'), true);
+  assert.equal(extensionManifest.content_scripts[0].matches.includes('https://www.overleaf.com/project'), true);
+  assert.equal(extensionManifest.host_permissions.includes('https://www.overleaf.com/project'), true);
+  assert.match(bootstrapSource, /OVERLEAF_EDITOR_MATCHES/);
   assert.doesNotMatch(noticeSource, /navigator\.language/);
 });

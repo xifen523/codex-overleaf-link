@@ -13,18 +13,6 @@
     </div>
     <button id="open-panel" data-popup-context>Open panel in Overleaf</button>
     <p id="status" data-popup-context>Use this on an Overleaf project tab.</p>
-    <section class="updates" aria-labelledby="updates-title">
-      <div class="section-head">
-        <strong id="updates-title">Stable updates</strong>
-        <span id="update-state" class="update-state">Checking</span>
-      </div>
-      <p id="update-versions">Current unknown · Latest unknown</p>
-      <p id="update-detail" class="muted">Automatic updates apply when Overleaf is saved and idle.</p>
-      <div class="update-actions">
-        <button id="check-update" class="secondary" type="button">Check now</button>
-        <button id="postpone-update" class="quiet" type="button" hidden>Later</button>
-      </div>
-    </section>
     <div id="native-install" class="install" data-popup-context hidden>
       <strong>Native host attention required</strong>
       <p>Run this command in Terminal, then reload this extension in Chrome.</p>
@@ -34,6 +22,5 @@
     <script src="../runtime/src/shared/compatibility.js"></script>
     <script src="../runtime/src/popup.js"></script>
     <script src="updateStatus.js"></script>
-    <script src="popup.js"></script>
   </body>
 </html>

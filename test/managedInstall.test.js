@@ -23,6 +23,7 @@ test('builds a loadable managed extension with stable Bootstrap and replaceable 
     assert.equal(manifest.version, packageJson.version);
     assert.equal(manifest.background.service_worker, 'bootstrap/background.js');
     assert.equal(manifest.permissions.includes('scripting'), true);
+    assert.equal(manifest.host_permissions.includes('https://www.overleaf.com/project'), true);
     assert.equal(fs.existsSync(path.join(root, 'runtime/runtime-manifest.json')), true);
     assert.equal(fs.existsSync(path.join(root, 'runtime/src/content/contentRuntime.js')), true);
     assert.equal(fs.existsSync(path.join(root, 'bootstrap/update.html')), true);

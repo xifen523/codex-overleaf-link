@@ -17,6 +17,8 @@
     "storage"
   ],
   "host_permissions": [
+    "https://www.overleaf.com/project",
+    "https://overleaf.com/project",
     "https://www.overleaf.com/project/*",
     "https://overleaf.com/project/*"
   ],

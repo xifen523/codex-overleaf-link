@@ -33,13 +33,16 @@ test('update center restores persisted progress and survives managed restarts', 
   assert.match(source, /Reconnecting after restart/);
   assert.match(source, /new URLSearchParams\(window\.location\.search\)/);
   assert.match(source, /window\.history\.replaceState/);
+  assert.doesNotMatch(source, /label: 'Check latest'/);
 });
 
-test('toolbar popup routes install and retry actions into one named update center', () => {
-  const source = read('extension/src/popup.js');
+test('Overleaf update surfaces route install and retry actions into the persistent update center', () => {
+  const notice = read('extension/src/content/updateNotice.js');
+  const coordinator = read('extension/src/backgroundUpdateCoordinator.js');
 
-  assert.match(source, /function openUpdateCenter/);
-  assert.match(source, /codex-overleaf-update-center/);
-  assert.match(source, /bootstrap\/update\.html/);
-  assert.match(source, /action === 'install' \|\| action === 'retry' \|\| action === 'center'/);
+  assert.match(notice, /consent-update-open-center/);
+  assert.match(notice, /action === 'install' \|\| action === 'retry'/);
+  assert.match(coordinator, /function openUpdateCenter/);
+  assert.match(coordinator, /bootstrap\/update\.html/);
+  assert.match(coordinator, /chrome\.windows\.create/);
 });

@@ -176,10 +176,7 @@
     if (ACTIVE_PHASES.has(phase)) {
       return [{ id: 'close', label: 'Close window', kind: 'quiet' }];
     }
-    return [
-      { id: 'close', label: 'Close', kind: 'quiet' },
-      { id: 'check', label: 'Check latest', kind: 'primary' }
-    ];
+    return [{ id: 'close', label: 'Close', kind: 'quiet' }];
   }
 
   function renderActions(phase) {

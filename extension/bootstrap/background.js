@@ -6,9 +6,14 @@ const UPDATE_STATE_KEY = 'codex-overleaf-managed-update-state-v1';
 const UPDATE_RELOAD_TABS_KEY = 'codex-overleaf-managed-update-tabs-v1';
 const CHECK_ALARM = 'codex-overleaf-stable-update-check';
 const IDLE_ALARM = 'codex-overleaf-staged-update-idle';
-const OVERLEAF_MATCHES = [
+const OVERLEAF_EDITOR_MATCHES = [
   'https://www.overleaf.com/project/*',
   'https://overleaf.com/project/*'
+];
+const OVERLEAF_MATCHES = [
+  'https://www.overleaf.com/project',
+  'https://overleaf.com/project',
+  ...OVERLEAF_EDITOR_MATCHES
 ];
 const APPLYING_STATES = new Set(['applying', 'awaiting_health', 'rolling_back']);
 
@@ -195,7 +200,7 @@ async function tryApplyStagedUpdate() {
   if (Number(state.postponeUntil || 0) > Date.now()) {
     return state;
   }
-  const tabs = await chrome.tabs.query({ url: OVERLEAF_MATCHES });
+  const tabs = await chrome.tabs.query({ url: OVERLEAF_EDITOR_MATCHES });
   const probes = await Promise.all(tabs.map(tab => probeTabIdle(tab)));
   const nativeGate = await requestInternal({ method: 'update.canApply', params: {} }).catch(error => ({
     ok: false,

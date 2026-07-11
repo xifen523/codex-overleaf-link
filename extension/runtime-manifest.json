@@ -1,6 +1,8 @@
 {
   "schemaVersion": 1,
   "matches": [
+    "https://www.overleaf.com/project",
+    "https://overleaf.com/project",
     "https://www.overleaf.com/project/*",
     "https://overleaf.com/project/*"
   ],
