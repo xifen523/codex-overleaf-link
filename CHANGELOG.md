@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.10.0 - 2026-07-11
+
+Windows and Overleaf writeback stabilization release for the xifen523 fork.
+
+### Fixed
+
+- Windows PowerShell guidance and generated recovery commands use `npm.cmd` when script execution policy blocks `npm.ps1`.
+- Native Codex Desktop discovery finds versioned Windows installations under `%LOCALAPPDATA%\OpenAI\Codex\bin`.
+- Overleaf writeback resolves a unique case-mismatched local path such as `Tex_content/related_work.tex` to the canonical project path `tex_content/related_work.tex`; ambiguous collisions remain blocked.
+
+### Added
+
+- GPT-5.6 model variants `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` are exposed in the model picker and native discovery fallback.
+- GitHub-only fork release assets and pinned tarball install commands for users who do not have access to the upstream npm package or signing secrets.
+
+Native protocol `1` remains unchanged. The fork does not publish `codex-overleaf-link@1.10.0` to npm and does not replace the upstream signed auto-update channel.
+
+### Release
+
+- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking now resolve to `1.10.0`.
+- Release artifacts resolve to `codex-overleaf-link-extension-v1.10.0.zip`, `codex-overleaf-native-host-v1.10.0.tar.gz`, `codex-overleaf-link-1.10.0.tgz`, and `codex-overleaf-update-v1.10.0.tar.gz`.
+
 ## v1.9.2 - 2026-07-11
 
 - Native command trust boundary: Auto mode no longer approves `awk` or `sed` interpreters, and LaTeX commands reject shell escape, external output directories, unsafe Lua execution, and executable `latexmk` configuration paths.

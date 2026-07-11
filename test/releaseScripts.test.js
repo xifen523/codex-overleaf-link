@@ -355,7 +355,7 @@ function writeReleaseFixture(rootDir, overrides = {}) {
       ? overrides.repository
       : {
           type: 'git',
-          url: 'git+https://github.com/Ghqqqq/codex-overleaf-link.git'
+          url: 'git+https://github.com/xifen523/codex-overleaf-link.git'
         },
     packageManager
   };
@@ -394,7 +394,7 @@ function writeReleaseFixture(rootDir, overrides = {}) {
     path.join(rootDir, 'README.md'),
     overrides.readmeText || [
       `<img src="https://img.shields.io/badge/version-${readmeVersion}-blue" alt="version">`,
-      `npm exec --yes codex-overleaf-link@${packageVersion} -- install-native`
+      `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v${packageVersion}/codex-overleaf-link-${packageVersion}.tgz codex-overleaf-link -- install-native`
     ].join('\n')
   );
   fs.writeFileSync(
@@ -612,6 +612,21 @@ releaseTest('release workflow publishes generated notes and built artifacts', ()
   assert.match(workflow, /^\s+overwrite_files:\s+false\s*$/m);
 });
 
+releaseTest('fork release excludes unsigned automatic-update assets', () => {
+  const workflow = readReleaseWorkflow();
+  const manualReleaseStart = workflow.indexOf('name: Publish manual fork GitHub release');
+
+  assert.notEqual(manualReleaseStart, -1);
+  assert.match(workflow, /name: Verify manual fork release artifacts[\s\S]*npm run verify:release-artifacts/);
+  assert.match(workflow, /if: github\.repository != 'Ghqqqq\/codex-overleaf-link'/);
+  assert.match(workflow, /rm -f "\$\{release_dir\}\/codex-overleaf-update-\$\{GITHUB_REF_NAME\}\.tar\.gz" "\$\{release_dir\}\/release-manifest\.json"/);
+
+  const manualRelease = workflow.slice(manualReleaseStart);
+  assert.match(manualRelease, /codex-overleaf-link-extension-/);
+  assert.match(manualRelease, /codex-overleaf-native-host-/);
+  assert.doesNotMatch(manualRelease, /codex-overleaf-update-/);
+  assert.doesNotMatch(manualRelease, /release-manifest\.(?:json|sig)/);
+});
 releaseTest('release workflow upload artifact gate rejects extra explicit files', () => {
   const workflow = readReleaseWorkflow();
   const workflowWithExtraUpload = workflow.replace(
@@ -745,7 +760,7 @@ releaseTest('release verifier requires npm package metadata, lockfile, exact man
     assert.ok(errors.some((error) => /package\.json must define repository\.url/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /package-lock\.json lockfileVersion <missing> must be 3/i.test(error)), errors.join('\n'));
     assert.ok(errors.some((error) => /package-lock\.json version 1\.2\.2 must match package\.json version 1\.2\.3/i.test(error)), errors.join('\n'));
-    assert.ok(errors.some((error) => /README\.md.*npm exec --yes codex-overleaf-link@1\.2\.3 -- install-native/i.test(error)), errors.join('\n'));
+    assert.ok(errors.some((error) => /README\.md.*npm exec --yes --package=https:\/\/github\.com\/xifen523\/codex-overleaf-link\/releases\/download\/v1\.2\.3\/codex-overleaf-link-1\.2\.3\.tgz codex-overleaf-link -- install-native/i.test(error)), errors.join('\n'));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

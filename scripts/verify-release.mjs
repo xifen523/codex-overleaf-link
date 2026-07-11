@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const EXPECTED_PACKAGE_NAME = 'codex-overleaf-link';
+const EXPECTED_REPOSITORY_URL = 'git+https://github.com/xifen523/codex-overleaf-link.git';
 const EXPECTED_PACKAGE_LOCK_VERSION = 3;
 export const FORBIDDEN_TRACKED_PATH_PATTERNS = [
   /^\.local\//,
@@ -84,7 +85,8 @@ export function collectReleaseVerificationErrors(options = {}) {
       errors.push(`README.md must contain the release badge fragment "${expectedBadge}".`);
     }
 
-    const pinnedNpmInstallCommand = `npm exec --yes ${EXPECTED_PACKAGE_NAME}@${version} -- install-native`;
+    const releasePackageUrl = `https://github.com/xifen523/codex-overleaf-link/releases/download/v${version}/${EXPECTED_PACKAGE_NAME}-${version}.tgz`;
+    const pinnedNpmInstallCommand = `npm exec --yes --package=${releasePackageUrl} ${EXPECTED_PACKAGE_NAME} -- install-native`;
     if (!readme.includes(pinnedNpmInstallCommand)) {
       errors.push(`README.md must contain the pinned npm install command "${pinnedNpmInstallCommand}".`);
     }
@@ -115,8 +117,8 @@ function collectPackageMetadataErrors({ rootDir, pkg, packageLock }) {
   if (typeof pkg.packageManager !== 'string' || pkg.packageManager.trim() === '') {
     errors.push('package.json must define packageManager for reproducible npm release tooling.');
   }
-  if (!pkg.repository || pkg.repository.type !== 'git' || pkg.repository.url !== 'git+https://github.com/Ghqqqq/codex-overleaf-link.git') {
-    errors.push('package.json must define repository.url as git+https://github.com/Ghqqqq/codex-overleaf-link.git for npm provenance.');
+  if (!pkg.repository || pkg.repository.type !== 'git' || pkg.repository.url !== EXPECTED_REPOSITORY_URL) {
+    errors.push(`package.json must define repository.url as ${EXPECTED_REPOSITORY_URL}.`);
   }
   if (packageLock.lockfileVersion !== EXPECTED_PACKAGE_LOCK_VERSION) {
     errors.push(

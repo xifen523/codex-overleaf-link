@@ -36,8 +36,8 @@ function canonicalInstallCommand(platform) {
   return compatibility.buildInstallCommand(compatibility.BUILD_TARGET_VERSION, platform);
 }
 
-test('release version metadata is aligned for v1.9.2 while native protocol stays unchanged', async () => {
-  assert.equal(packageJson.version, '1.9.2');
+test('release version metadata is aligned for v1.10.0 while native protocol stays unchanged', async () => {
+  assert.equal(packageJson.version, '1.10.0');
   assert.equal(extensionManifest.version, packageJson.version);
   assert.equal(compatibility.BUILD_TARGET_VERSION, packageJson.version);
   assert.equal(compatibility.MIN_COMPATIBLE_NATIVE_VERSION, '1.0.0');
@@ -55,10 +55,10 @@ test('release version metadata is aligned for v1.9.2 while native protocol stays
 });
 
 test('buildBridgePingParams returns v1.3 extension protocol metadata', () => {
-  assert.equal(compatibility.BUILD_TARGET_VERSION, '1.9.2');
+  assert.equal(compatibility.BUILD_TARGET_VERSION, '1.10.0');
   assert.equal(compatibility.EXTENSION_PROTOCOL_VERSION, 1);
-  assert.deepEqual(compatibility.buildBridgePingParams({ version: '1.9.2' }), {
-    extensionVersion: '1.9.2',
+  assert.deepEqual(compatibility.buildBridgePingParams({ version: '1.10.0' }), {
+    extensionVersion: '1.10.0',
     extensionProtocolVersion: 1,
     supportedNativeProtocol: { min: 1, max: 1 },
     requiredCapabilities: REQUIRED_CAPABILITIES
@@ -66,16 +66,16 @@ test('buildBridgePingParams returns v1.3 extension protocol metadata', () => {
 });
 
 test('classifyNativeCompatibility returns compatible for minimum-or-newer protocol 1 hosts with all required capabilities', () => {
-  const result = compatibility.evaluateNativeCompatibility(nativeResponse(), { version: '1.9.2' });
+  const result = compatibility.evaluateNativeCompatibility(nativeResponse(), { version: '1.10.0' });
 
-  assert.equal(compatibility.classifyNativeCompatibility(nativeResponse(), '1.9.2'), 'compatible');
+  assert.equal(compatibility.classifyNativeCompatibility(nativeResponse(), '1.10.0'), 'compatible');
   assert.equal(result.status, 'ok');
   assert.equal(result.classification, 'compatible');
   assert.equal(result.requiredVersion, '1.0.0');
-  assert.equal(result.recommendedVersion, '1.9.2');
+  assert.equal(result.recommendedVersion, '1.10.0');
   assert.equal(result.updateAvailable, false);
   assert.equal(result.updateCommand, canonicalInstallCommand('darwin'));
-  assert.equal(result.releaseUrl, 'https://github.com/Ghqqqq/codex-overleaf-link/releases/tag/v1.9.2');
+  assert.equal(result.releaseUrl, 'https://github.com/xifen523/codex-overleaf-link/releases/tag/v1.10.0');
 });
 
 test('classifyNativeCompatibility keeps v1.0 protocol 1 hosts with required capabilities operational under v1.3', () => {
@@ -83,16 +83,16 @@ test('classifyNativeCompatibility keeps v1.0 protocol 1 hosts with required capa
     version: '1.0.0',
     minExtensionVersion: '1.0.0'
   });
-  const result = compatibility.evaluateNativeCompatibility(response, { version: '1.9.2' });
+  const result = compatibility.evaluateNativeCompatibility(response, { version: '1.10.0' });
 
-  assert.equal(compatibility.classifyNativeCompatibility(response, '1.9.2'), 'compatible');
+  assert.equal(compatibility.classifyNativeCompatibility(response, '1.10.0'), 'compatible');
   assert.equal(result.status, 'ok');
   assert.equal(result.classification, 'compatible');
   assert.equal(result.minimumNativeVersion, '1.0.0');
   assert.equal(result.requiredVersion, '1.0.0');
-  assert.equal(result.recommendedVersion, '1.9.2');
+  assert.equal(result.recommendedVersion, '1.10.0');
   assert.equal(result.updateAvailable, true);
-  assert.equal(result.updateCommand, compatibility.buildInstallCommand('1.9.2', 'darwin'));
+  assert.equal(result.updateCommand, compatibility.buildInstallCommand('1.10.0', 'darwin'));
   assert.equal(compatibility.isNativeMethodAllowed('codex.run', result), true);
 });
 
@@ -158,19 +158,19 @@ test('classifyNativeCompatibility returns incompatible for missing native, unsup
 test('buildInstallCommand returns release-pinned npm native update commands', () => {
   assert.equal(
     compatibility.buildInstallCommand('1.3.0', 'darwin'),
-    'npm exec --yes codex-overleaf-link@1.3.0 -- install-native'
+    'npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.3.0/codex-overleaf-link-1.3.0.tgz codex-overleaf-link -- install-native'
   );
   assert.equal(
     compatibility.buildInstallCommand('v1.3.0', 'linux'),
-    'npm exec --yes codex-overleaf-link@1.3.0 -- install-native'
+    'npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.3.0/codex-overleaf-link-1.3.0.tgz codex-overleaf-link -- install-native'
   );
   assert.equal(
     compatibility.buildInstallCommand('1.3.0', 'win32'),
-    'npm.cmd exec --yes codex-overleaf-link@1.3.0 -- install-native'
+    'npm.cmd exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.3.0/codex-overleaf-link-1.3.0.tgz codex-overleaf-link -- install-native'
   );
   assert.equal(
     compatibility.buildInstallCommand('1.3.0', 'windows'),
-    'npm.cmd exec --yes codex-overleaf-link@1.3.0 -- install-native'
+    'npm.cmd exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.3.0/codex-overleaf-link-1.3.0.tgz codex-overleaf-link -- install-native'
   );
 });
 
@@ -181,15 +181,15 @@ test('buildInstallCommand omits bundled id but embeds a custom extension id', ()
 
   assert.equal(
     compatibility.buildInstallCommand('1.3.0', 'darwin', bundledExtensionId),
-    'npm exec --yes codex-overleaf-link@1.3.0 -- install-native'
+    'npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.3.0/codex-overleaf-link-1.3.0.tgz codex-overleaf-link -- install-native'
   );
   assert.equal(
     compatibility.buildInstallCommand('1.3.0', 'darwin', extensionId),
-    `npm exec --yes codex-overleaf-link@1.3.0 -- install-native --extension-id ${extensionId}`
+    `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.3.0/codex-overleaf-link-1.3.0.tgz codex-overleaf-link -- install-native --extension-id ${extensionId}`
   );
   assert.equal(
     compatibility.buildInstallCommand('1.3.0', 'win32', extensionId),
-    `npm.cmd exec --yes codex-overleaf-link@1.3.0 -- install-native --extension-id ${extensionId}`
+    `npm.cmd exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.3.0/codex-overleaf-link-1.3.0.tgz codex-overleaf-link -- install-native --extension-id ${extensionId}`
   );
 });
 

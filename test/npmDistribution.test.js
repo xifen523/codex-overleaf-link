@@ -188,12 +188,12 @@ function bridgePathForHome(tempDir) {
 
 test('package metadata is configured for npm distribution', () => {
   assert.equal(packageJson.name, 'codex-overleaf-link');
-  assert.equal(packageJson.version, '1.9.2');
+  assert.equal(packageJson.version, '1.10.0');
   assert.equal(packageJson.bin['codex-overleaf-link'], 'bin/codex-overleaf-link.mjs');
   assert.match(packageJson.packageManager, /^npm@/);
   assert.deepEqual(packageJson.repository, {
     type: 'git',
-    url: 'git+https://github.com/Ghqqqq/codex-overleaf-link.git'
+    url: 'git+https://github.com/xifen523/codex-overleaf-link.git'
   });
   assert.ok(packageJson.files.includes('bin/'));
 });

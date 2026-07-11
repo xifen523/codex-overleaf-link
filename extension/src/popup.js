@@ -6,7 +6,7 @@
     undefined,
     undefined,
     getCurrentExtensionId()
-  ) || 'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash -s -- --extension-id <chrome-extension-id>';
+  ) || 'curl -fsSL https://raw.githubusercontent.com/xifen523/codex-overleaf-link/main/install.sh | bash -s -- --extension-id <chrome-extension-id>';
   const button = document.getElementById('open-panel');
   const status = document.getElementById('status');
   const compatStatusIcon = document.getElementById('compat-status-icon');

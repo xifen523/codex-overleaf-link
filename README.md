@@ -3,11 +3,11 @@
   <h1>Codex Overleaf Link</h1>
   <p><strong>Empower Overleaf with Codex.</strong></p>
   <p>
-    <img src="https://img.shields.io/badge/version-1.9.2-blue" alt="version">
+    <img src="https://img.shields.io/badge/version-1.10.0-blue" alt="version">
     <img src="https://img.shields.io/badge/platform-macOS%20%2F%20Windows%20%2F%20Linux-lightgrey" alt="platform">
     <img src="https://img.shields.io/badge/chrome-MV3-green" alt="chrome manifest v3">
     <img src="https://img.shields.io/badge/node-%3E%3D20-brightgreen" alt="node version">
-    <a href="https://github.com/Ghqqqq/codex-overleaf-link/actions/workflows/test.yml"><img src="https://github.com/Ghqqqq/codex-overleaf-link/actions/workflows/test.yml/badge.svg" alt="tests"></a>
+    <a href="https://github.com/xifen523/codex-overleaf-link/actions/workflows/test.yml"><img src="https://github.com/xifen523/codex-overleaf-link/actions/workflows/test.yml/badge.svg" alt="tests"></a>
     <img src="https://img.shields.io/badge/dependencies-0-orange" alt="zero dependencies">
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="license">
   </p>
@@ -33,19 +33,19 @@ Either way, the final **Load unpacked** click is manual — Chrome does not let 
 
 ### Option A — installer script (recommended)
 
-One command installs the managed native host **and** managed extension runtime. On macOS/Linux it also creates the visible `~/Codex Overleaf Link Extension` shortcut pointing to the managed extension, copies that path to your clipboard, and opens `chrome://extensions` for you. Future signed stable updates target this same managed directory.
+One command installs the managed native host **and** managed extension runtime. On macOS/Linux it also creates the visible `~/Codex Overleaf Link Extension` shortcut pointing to the managed extension, copies that path to your clipboard, and opens `chrome://extensions` for you. Fork releases are installed manually from the pinned GitHub tag; the upstream signed auto-update channel is not used by this fork.
 
 macOS / Linux:
 
 ```bash
-CODEX_OVERLEAF_REF=v1.9.2 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.9.2/install.sh)"
+CODEX_OVERLEAF_REF=v1.10.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/xifen523/codex-overleaf-link/v1.10.0/install.sh)"
 ```
 
 Windows PowerShell:
 
 ```powershell
-iwr https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.9.2/install.ps1 -OutFile install.ps1
-$env:CODEX_OVERLEAF_REF='v1.9.2'
+iwr https://raw.githubusercontent.com/xifen523/codex-overleaf-link/v1.10.0/install.ps1 -OutFile install.ps1
+$env:CODEX_OVERLEAF_REF='v1.10.0'
 powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
@@ -53,10 +53,16 @@ Then, in the `chrome://extensions` tab the script opened: enable **Developer mod
 
 ### Option B — npm managed install
 
-`npm exec` installs the same managed native host and extension runtime without keeping a source checkout. Use it if you prefer a pinned npm package.
+The fork does not publish the upstream npm package name. `npm exec` can install the same managed native host and extension runtime directly from the pinned GitHub Release tarball.
 
 ```bash
-npm exec --yes codex-overleaf-link@1.9.2 -- install-managed
+npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-managed
+```
+
+Windows PowerShell:
+
+```powershell
+npm.cmd exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-managed
 ```
 
 Then, in `chrome://extensions`, enable **Developer mode**, click **Load unpacked**, and select the managed extension path printed by the command. The Release extension zip remains available for explicitly unmanaged/manual installations.
@@ -71,7 +77,7 @@ The bundled extension key gives the official build a stable id, so normal instal
 <summary><strong>Manual checkout install</strong> (custom location)</summary>
 
 ```bash
-git clone https://github.com/Ghqqqq/codex-overleaf-link.git
+git clone https://github.com/xifen523/codex-overleaf-link.git
 cd codex-overleaf-link
 npm run install:native
 ```
@@ -86,25 +92,25 @@ npm installs, updates, and uninstalls the coordinated managed extension/native p
 
 | Action | Command |
 |--------|---------|
-| Install / update | `npm exec --yes codex-overleaf-link@1.9.2 -- install-managed` |
-| Diagnose | `npm exec --yes codex-overleaf-link@1.9.2 -- doctor` |
-| Uninstall | `npm exec --yes codex-overleaf-link@1.9.2 -- uninstall-managed` |
+| Install / update | `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-managed` |
+| Diagnose | `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- doctor` |
+| Uninstall | `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- uninstall-managed` |
 
 Use `--extension-id <chrome-extension-id>` only for a custom/dev unpacked extension id that differs from the official bundled id.
 
 ## Update
 
-Managed installations discover signed stable updates automatically and apply them only while all Overleaf tabs and the native host are idle. Re-run `install-managed` only for recovery or migration, including when the panel reports **Native host update required**. Explicitly unmanaged installations still require a manual extension/native update. After recovery, reload the extension in `chrome://extensions` and refresh Overleaf.
+The upstream managed updater only trusts signed releases from the original repository. For this fork, rerun the pinned GitHub installer when a new fork release is published. Re-run `install-managed` only for recovery or migration, including when the panel reports **Native host update required**. Explicitly unmanaged installations still require a manual extension/native update. After recovery, reload the extension in `chrome://extensions` and refresh Overleaf.
 
 ## GitHub Release Artifacts
 
-The v1.9.2 GitHub Release contains:
+The v1.10.0 GitHub Release contains:
 
-- `codex-overleaf-link-extension-v1.9.2.zip`: loadable Chrome extension package for manual unpacked installation.
-- `codex-overleaf-native-host-v1.9.2.tar.gz`: native host runtime files used by the installer and release verification.
-- `codex-overleaf-link-1.9.2.tgz`: npm native host CLI package for pinned install, doctor, and uninstall flows.
-- `install.sh`: release-pinned macOS / Linux installer that defaults to `v1.9.2` when run directly from the release artifact.
-- `install.ps1`: release-pinned Windows PowerShell installer that defaults to `v1.9.2` when run directly from the release artifact.
+- `codex-overleaf-link-extension-v1.10.0.zip`: loadable Chrome extension package for manual unpacked installation.
+- `codex-overleaf-native-host-v1.10.0.tar.gz`: native host runtime files used by the installer and release verification.
+- `codex-overleaf-link-1.10.0.tgz`: npm native host CLI package for pinned install, doctor, and uninstall flows.
+- `install.sh`: release-pinned macOS / Linux installer that defaults to `v1.10.0` when run directly from the release artifact.
+- `install.ps1`: release-pinned Windows PowerShell installer that defaults to `v1.10.0` when run directly from the release artifact.
 - `uninstall-native-host.mjs`: native host uninstaller that removes the Chrome Native Messaging manifest, bridge executable, and runtime copy.
 - `nativeHostPlatform.js`, `manifest.js`, `runtimeInstaller.js`: helper files required by the loose uninstaller asset.
 - `SHA256SUMS` and `release-manifest.json`: checksum and artifact metadata for release verification.
@@ -115,7 +121,7 @@ The v1.9.2 GitHub Release contains:
 Remove the native host (use `--browser chromium` on Linux Chromium):
 
 ```bash
-npm exec --yes codex-overleaf-link@1.9.2 -- uninstall-managed
+npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- uninstall-managed
 ```
 
 The same command works on Windows PowerShell. If you installed from a manual checkout or source installer, you can also run `npm run uninstall:native` inside the repo, use `node ~/.codex-overleaf/source/scripts/uninstall-native-host.mjs` on macOS / Linux, or use `node $env:LOCALAPPDATA\CodexOverleaf\source\scripts\uninstall-native-host.mjs` on Windows PowerShell.
@@ -150,13 +156,13 @@ Then remove the extension from `chrome://extensions`. To delete local data: on m
 Linux Chromium install or update:
 
 ```bash
-CODEX_OVERLEAF_REF=v1.9.2 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/v1.9.2/install.sh)" -- --browser chromium
+CODEX_OVERLEAF_REF=v1.10.0 bash -c "$(curl -fsSL https://raw.githubusercontent.com/xifen523/codex-overleaf-link/v1.10.0/install.sh)" -- --browser chromium
 ```
 
 Linux Chromium uninstall:
 
 ```bash
-npm exec --yes codex-overleaf-link@1.9.2 -- uninstall-managed --browser chromium
+npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- uninstall-managed --browser chromium
 ```
 
 ## Features
@@ -291,7 +297,13 @@ Composer attachments are turn-scoped Codex context. Limits are 8 attachments per
 Re-run any [native host installer](#install), reload the extension in `chrome://extensions`, then refresh the Overleaf tab. This also fixes extension/native version mismatch and native protocol mismatch.
 
 ```bash
-npm exec --yes codex-overleaf-link@1.9.2 -- install-managed
+npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-managed
+```
+
+Windows PowerShell:
+
+```powershell
+npm.cmd exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-managed
 ```
 
 **The Windows popup or panel shows a Bash recovery command**
@@ -340,8 +352,8 @@ Use this matrix for release-candidate signoff and compatibility reports. Record 
 | Browser/channel/version | Google Chrome channel and version. | Google Chrome channel and version. | Google Chrome channel and version. | Chromium channel/package and version. |
 | Install mode | Manual unpacked extension from GitHub Release zip or checkout. | Manual unpacked extension from GitHub Release zip or checkout. | Manual unpacked extension from GitHub Release zip or checkout. | Manual unpacked extension from GitHub Release zip or checkout; native host installed with `--browser chromium`. |
 | Extension id | Bundled id `illdpneeeopfffmiepaejglgmhpmdhdc`, or actual custom id passed with `--extension-id`. | Bundled id `illdpneeeopfffmiepaejglgmhpmdhdc`, or actual custom id passed with `--extension-id`. | Bundled id `illdpneeeopfffmiepaejglgmhpmdhdc`, or actual custom id passed with `--extension-id`. | Bundled id `illdpneeeopfffmiepaejglgmhpmdhdc`, or actual custom id passed with `--extension-id`. |
-| Installer/update command | `npm exec --yes codex-overleaf-link@1.9.2 -- install-managed` | `npm exec --yes codex-overleaf-link@1.9.2 -- install-managed` | `npm exec --yes codex-overleaf-link@1.9.2 -- install-managed` | `npm exec --yes codex-overleaf-link@1.9.2 -- install-managed --browser chromium` |
-| Uninstall command | `npm exec --yes codex-overleaf-link@1.9.2 -- uninstall-managed` | `npm exec --yes codex-overleaf-link@1.9.2 -- uninstall-managed` | `npm exec --yes codex-overleaf-link@1.9.2 -- uninstall-managed` | `npm exec --yes codex-overleaf-link@1.9.2 -- uninstall-managed --browser chromium` |
+| Installer/update command | `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-managed` | `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-managed` | `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-managed` | `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-managed --browser chromium` |
+| Uninstall command | `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- uninstall-managed` | `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- uninstall-managed` | `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- uninstall-managed` | `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- uninstall-managed --browser chromium` |
 | Manifest/registry path | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.codex.overleaf.json` | `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.codex.overleaf` -> `%LOCALAPPDATA%\CodexOverleaf\native-host-runtime\com.codex.overleaf.json` | `~/.config/google-chrome/NativeMessagingHosts/com.codex.overleaf.json` | `~/.config/chromium/NativeMessagingHosts/com.codex.overleaf.json` |
 | Bridge/runtime/source path | Bridge `~/.codex-overleaf/codex-overleaf-bridge`; runtime `~/.codex-overleaf/native-host-runtime`; source `~/.codex-overleaf/source`. | Bridge `%LOCALAPPDATA%\CodexOverleaf\codex-overleaf-bridge.cmd`; runtime `%LOCALAPPDATA%\CodexOverleaf\native-host-runtime`; source `%LOCALAPPDATA%\CodexOverleaf\source`. | Bridge `~/.codex-overleaf/codex-overleaf-bridge`; runtime `~/.codex-overleaf/native-host-runtime`; source `~/.codex-overleaf/source`. | Bridge `~/.codex-overleaf/codex-overleaf-bridge`; runtime `~/.codex-overleaf/native-host-runtime`; source `~/.codex-overleaf/source`. |
 | Node/Git/Codex/TeX | Node.js >= 20; Git; Codex CLI installed and logged in; TeX optional. | Node.js >= 20; Git; Codex CLI installed and logged in; TeX optional. | Node.js >= 20; Git; Codex CLI installed and logged in; TeX optional. | Node.js >= 20; Git; Codex CLI installed and logged in; TeX optional. |
@@ -377,7 +389,13 @@ Contributions are welcome. Please open an issue before submitting large changes 
 The recommended v1.9 installation owns one stable unpacked-extension directory and a versioned native-host directory:
 
 ```bash
-npm exec --yes codex-overleaf-link@1.9.2 -- install-managed
+npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-managed
+```
+
+Windows PowerShell:
+
+```powershell
+npm.cmd exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-managed
 ```
 
 Load the printed extension path once from `chrome://extensions`. Starting with the next signed stable release, Codex Overleaf Link checks GitHub Releases automatically, downloads and verifies the coordinated extension/native-host bundle, waits until every connected Overleaf tab is saved and idle, and then updates both components together. A failed health check restores the previous version automatically.
@@ -387,11 +405,11 @@ The stable updater ignores drafts and prereleases, performs no telemetry, and ca
 The legacy native-only installer remains available for source or unmanaged extension directories:
 
 ```bash
-npm exec --yes codex-overleaf-link@1.9.2 -- install-native
+npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- install-native
 ```
 
 Legacy native-only installations can be removed with:
 
 ```bash
-npm exec --yes codex-overleaf-link@1.9.2 -- uninstall-native
+npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/v1.10.0/codex-overleaf-link-1.10.0.tgz codex-overleaf-link -- uninstall-native
 ```

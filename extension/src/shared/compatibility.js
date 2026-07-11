@@ -12,7 +12,8 @@
   const MIN_NATIVE_VERSION = '1.0.0';
   const MIN_COMPATIBLE_NATIVE_VERSION = '1.0.0';
   const MIN_COMPATIBLE_EXTENSION_VERSION = '1.0.0';
-  const BUILD_TARGET_VERSION = '1.9.2';
+  const BUILD_TARGET_VERSION = '1.10.0';
+  const RELEASE_REPOSITORY = 'xifen523/codex-overleaf-link';
   const DEFAULT_CHROME_EXTENSION_ID = 'illdpneeeopfffmiepaejglgmhpmdhdc';
   const REQUIRED_CAPABILITIES = Object.freeze([
     'bridgePing',
@@ -90,12 +91,13 @@
       ? ` --extension-id ${allowedExtensionId}`
       : '';
 
-    return `${npmCommand} exec --yes codex-overleaf-link@${normalized} -- install-native${extensionIdArg}`;
+    const packageUrl = `https://github.com/${RELEASE_REPOSITORY}/releases/download/v${normalized}/codex-overleaf-link-${normalized}.tgz`;
+    return `${npmCommand} exec --yes --package=${packageUrl} codex-overleaf-link -- install-native${extensionIdArg}`;
   }
 
   function buildReleaseUrl(version = BUILD_TARGET_VERSION) {
     const normalized = normalizeReleaseVersion(version) || BUILD_TARGET_VERSION;
-    return `https://github.com/Ghqqqq/codex-overleaf-link/releases/tag/v${normalized}`;
+    return `https://github.com/${RELEASE_REPOSITORY}/releases/tag/v${normalized}`;
   }
 
   function isMethodAllowed(method, classification) {

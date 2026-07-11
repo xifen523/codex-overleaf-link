@@ -63,7 +63,7 @@
     undefined,
     undefined,
     getCurrentExtensionId()
-  ) || 'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash -s -- --extension-id <chrome-extension-id>';
+  ) || 'curl -fsSL https://raw.githubusercontent.com/xifen523/codex-overleaf-link/main/install.sh | bash -s -- --extension-id <chrome-extension-id>';
   const PAGE_BRIDGE_SCRIPT_REVISION = '2026-05-21-editor-readiness-v10';
   const PAGE_BRIDGE_CAPABILITY = createPageBridgeCapability();
   const pageBridgeReady = injectPageBridge();

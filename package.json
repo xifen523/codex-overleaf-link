@@ -1,17 +1,17 @@
 {
   "name": "codex-overleaf-link",
-  "version": "1.9.2",
+  "version": "1.10.0",
   "description": "Cross-platform Chrome bridge that connects Codex to the active Overleaf project.",
   "license": "MIT",
   "type": "commonjs",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Ghqqqq/codex-overleaf-link.git"
+    "url": "git+https://github.com/xifen523/codex-overleaf-link.git"
   },
   "bugs": {
-    "url": "https://github.com/Ghqqqq/codex-overleaf-link/issues"
+    "url": "https://github.com/xifen523/codex-overleaf-link/issues"
   },
-  "homepage": "https://github.com/Ghqqqq/codex-overleaf-link#readme",
+  "homepage": "https://github.com/xifen523/codex-overleaf-link#readme",
   "scripts": {
     "agent:codex": "node scripts/codex-json-agent.mjs",
     "test": "node scripts/run-tests.mjs",

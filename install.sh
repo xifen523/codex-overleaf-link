@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_URL="${CODEX_OVERLEAF_REPO_URL:-https://github.com/Ghqqqq/codex-overleaf-link.git}"
+REPO_URL="${CODEX_OVERLEAF_REPO_URL:-https://github.com/xifen523/codex-overleaf-link.git}"
 REF="${CODEX_OVERLEAF_REF:-main}"
 INSTALL_DIR="${CODEX_OVERLEAF_INSTALL_DIR:-$HOME/.codex-overleaf/source}"
 

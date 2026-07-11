@@ -32,11 +32,11 @@ const {
 
 const CURRENT_PACKAGE_VERSION = require('../package.json').version;
 const CURRENT_RELEASE_REF = `v${CURRENT_PACKAGE_VERSION}`;
-const CANONICAL_RELEASE_INSTALL_COMMAND = `CODEX_OVERLEAF_REF=${CURRENT_RELEASE_REF} bash -c "$(curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${CURRENT_RELEASE_REF}/install.sh)"`;
+const CANONICAL_RELEASE_INSTALL_COMMAND = `CODEX_OVERLEAF_REF=${CURRENT_RELEASE_REF} bash -c "$(curl -fsSL https://raw.githubusercontent.com/xifen523/codex-overleaf-link/${CURRENT_RELEASE_REF}/install.sh)"`;
 const CANONICAL_WINDOWS_RELEASE_REF_COMMAND = `$env:CODEX_OVERLEAF_REF='${CURRENT_RELEASE_REF}'`;
-const CANONICAL_WINDOWS_RELEASE_INSTALL_URL = `https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/${CURRENT_RELEASE_REF}/install.ps1`;
+const CANONICAL_WINDOWS_RELEASE_INSTALL_URL = `https://raw.githubusercontent.com/xifen523/codex-overleaf-link/${CURRENT_RELEASE_REF}/install.ps1`;
 const CANONICAL_WINDOWS_RELEASE_RUN_COMMAND = 'powershell -ExecutionPolicy Bypass -File install.ps1';
-const CANONICAL_NPM_EXEC_PREFIX = `npm exec --yes codex-overleaf-link@${CURRENT_PACKAGE_VERSION} --`;
+const CANONICAL_NPM_EXEC_PREFIX = `npm exec --yes --package=https://github.com/xifen523/codex-overleaf-link/releases/download/${CURRENT_RELEASE_REF}/codex-overleaf-link-${CURRENT_PACKAGE_VERSION}.tgz codex-overleaf-link --`;
 
 function writeFakeRegistryCommand(tempDir, options = {}) {
   const scriptPath = path.join(tempDir, 'fake-reg.js');
@@ -919,7 +919,7 @@ test('repository ships a one-command Windows installer', () => {
   assert.match(installer, /CODEX_OVERLEAF_REF/);
   assert.match(installer, /CODEX_OVERLEAF_REPO_URL/);
   assert.match(installer, /CODEX_OVERLEAF_EXTENSION_ID/);
-  assert.match(installer, /github\.com\/Ghqqqq\/codex-overleaf-link\.git/);
+  assert.match(installer, /github\.com\/xifen523\/codex-overleaf-link\.git/);
   assert.match(installer, /Get-Command\s+git/);
   assert.match(installer, /Get-Command\s+node/);
   assert.match(installer, /git clone/);
@@ -1365,7 +1365,7 @@ test('repository ships a one-command macOS installer', () => {
 
   assert.match(installer, /CODEX_OVERLEAF_INSTALL_DIR/);
   assert.match(installer, /CODEX_OVERLEAF_REF/);
-  assert.match(installer, /github\.com\/Ghqqqq\/codex-overleaf-link\.git/);
+  assert.match(installer, /github\.com\/xifen523\/codex-overleaf-link\.git/);
   assert.match(installer, /scripts\/install-managed\.mjs/);
   assert.doesNotMatch(installer, /rm -rf "\$INSTALL_DIR"/);
   assert.match(installer, /Package version/);
@@ -1378,7 +1378,7 @@ test('repository ships a one-command macOS installer', () => {
   assert.match(installer, /pbcopy/);
   assert.match(installer, /open -a "Google Chrome" "chrome:\/\/extensions"/);
   assert.match(installer, /open -R/);
-  assert.match(readme, new RegExp(`CODEX_OVERLEAF_REF=${escapeRegExp(CURRENT_RELEASE_REF)}\\s+bash -c "\\$\\(curl -fsSL https://raw\\.githubusercontent\\.com/Ghqqqq/codex-overleaf-link/${escapeRegExp(CURRENT_RELEASE_REF)}/install\\.sh\\)"`));
+  assert.match(readme, new RegExp(`CODEX_OVERLEAF_REF=${escapeRegExp(CURRENT_RELEASE_REF)}\\s+bash -c "\\$\\(curl -fsSL https://raw\\.githubusercontent\\.com/xifen523/codex-overleaf-link/${escapeRegExp(CURRENT_RELEASE_REF)}/install\\.sh\\)"`));
   assert.match(readme, new RegExp(`codex-overleaf-link-extension-${escapeRegExp(CURRENT_RELEASE_REF)}\\.zip`));
   assert.doesNotMatch(readme, /select `~\/\.codex-overleaf\/source\/extension`/);
 });
@@ -1386,9 +1386,9 @@ test('repository ships a one-command macOS installer', () => {
 test('README documents current cross-platform manual install, uninstall, release artifacts, and bundled extension id flow', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
 
-  assert.match(readme, new RegExp(`CODEX_OVERLEAF_REF=${escapeRegExp(CURRENT_RELEASE_REF)}\\s+bash -c "\\$\\(curl -fsSL https://raw\\.githubusercontent\\.com/Ghqqqq/codex-overleaf-link/${escapeRegExp(CURRENT_RELEASE_REF)}/install\\.sh\\)"`));
+  assert.match(readme, new RegExp(`CODEX_OVERLEAF_REF=${escapeRegExp(CURRENT_RELEASE_REF)}\\s+bash -c "\\$\\(curl -fsSL https://raw\\.githubusercontent\\.com/xifen523/codex-overleaf-link/${escapeRegExp(CURRENT_RELEASE_REF)}/install\\.sh\\)"`));
   assert.ok(readme.includes(CANONICAL_RELEASE_INSTALL_COMMAND));
-  assert.match(readme, new RegExp(`iwr\\s+https://raw\\.githubusercontent\\.com/Ghqqqq/codex-overleaf-link/${escapeRegExp(CURRENT_RELEASE_REF)}/install\\.ps1`, 'i'));
+  assert.match(readme, new RegExp(`iwr\\s+https://raw\\.githubusercontent\\.com/xifen523/codex-overleaf-link/${escapeRegExp(CURRENT_RELEASE_REF)}/install\\.ps1`, 'i'));
   assert.match(readme, /powershell\s+-ExecutionPolicy\s+Bypass\s+-File\s+install\.ps1/i);
   assert.match(readme, /macOS\s+\/\s+Linux/i);
   assert.match(readme, /Windows/i);

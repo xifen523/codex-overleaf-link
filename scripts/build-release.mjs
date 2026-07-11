@@ -107,7 +107,7 @@ export function buildRelease(options = {}) {
   ];
   const manifest = {
     schemaVersion: 2,
-    repository: 'Ghqqqq/codex-overleaf-link',
+    repository: 'xifen523/codex-overleaf-link',
     channel: 'stable',
     version,
     tag: `v${version}`,

@@ -789,7 +789,7 @@
   // A missing `codex` binary is fixed in the terminal, not the panel — the
   // action opens the README troubleshooting section (PATH / login checks).
   const CODEX_INSTALL_FAILURE_CODES = new Set(['codex_not_found']);
-  const CODEX_CLI_TROUBLESHOOTING_URL = 'https://github.com/Ghqqqq/codex-overleaf-link#faq-and-troubleshooting';
+  const CODEX_CLI_TROUBLESHOOTING_URL = 'https://github.com/xifen523/codex-overleaf-link#faq-and-troubleshooting';
 
   function buildRecoveryButton(failureCode, label, title) {
     const button = document.createElement('button');

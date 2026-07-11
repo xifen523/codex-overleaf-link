@@ -86,12 +86,18 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             echo "GitHub Release ${GITHUB_REF_NAME} already exists; release assets are immutable."
             exit 1
           fi
+
+      - name: Ensure upstream npm version is unpublished
+        if: github.repository == 'Ghqqqq/codex-overleaf-link'
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
           if npm view "codex-overleaf-link@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
             echo "codex-overleaf-link@${PACKAGE_VERSION} is already published; use a new patch version."
             exit 1
@@ -101,20 +107,28 @@ jobs:
         run: npm run build:release
 
       - name: Sign coordinated update manifest
+        if: github.repository == 'Ghqqqq/codex-overleaf-link'
         env:
           CODEX_OVERLEAF_UPDATE_SIGNING_KEY_B64: ${{ secrets.CODEX_OVERLEAF_UPDATE_SIGNING_KEY_B64 }}
         run: npm run sign:release
 
       - name: Verify release artifact contents
+        if: github.repository == 'Ghqqqq/codex-overleaf-link'
         run: npm run verify:release-artifacts -- --require-signature
 
+      - name: Verify manual fork release artifacts
+        if: github.repository != 'Ghqqqq/codex-overleaf-link'
+        run: npm run verify:release-artifacts
+
       - name: Publish npm package
+        if: github.repository == 'Ghqqqq/codex-overleaf-link'
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish "${LOCAL_TGZ}" --access public --provenance
 
       - name: Verify npm package is published
+        if: github.repository == 'Ghqqqq/codex-overleaf-link'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         shell: bash
@@ -140,6 +154,7 @@ jobs:
           fi
 
       - name: Publish GitHub release
+        if: github.repository == 'Ghqqqq/codex-overleaf-link'
         uses: softprops/action-gh-release@v2
         with:
           draft: false
@@ -159,6 +174,46 @@ jobs:
             dist/releases/${{ github.ref_name }}/runtimeInstaller.js
             dist/releases/${{ github.ref_name }}/release-manifest.json
             dist/releases/${{ github.ref_name }}/release-manifest.sig
+            dist/releases/${{ github.ref_name }}/release-notes.md
+            dist/releases/${{ github.ref_name }}/SHA256SUMS
+          fail_on_unmatched_files: true
+          overwrite_files: false
+
+      - name: Prepare manual fork release assets
+        if: github.repository != 'Ghqqqq/codex-overleaf-link'
+        shell: bash
+        run: |
+          release_dir="dist/releases/${GITHUB_REF_NAME}"
+          rm -f "${release_dir}/codex-overleaf-update-${GITHUB_REF_NAME}.tar.gz" "${release_dir}/release-manifest.json"
+          (
+            cd "${release_dir}"
+            sha256sum \
+              "codex-overleaf-link-extension-${GITHUB_REF_NAME}.zip" \
+              "codex-overleaf-native-host-${GITHUB_REF_NAME}.tar.gz" \
+              "codex-overleaf-link-${PACKAGE_VERSION}.tgz" \
+              install.sh install.ps1 uninstall-native-host.mjs \
+              nativeHostPlatform.js manifest.js runtimeInstaller.js release-notes.md \
+              > SHA256SUMS
+          )
+
+      - name: Publish manual fork GitHub release
+        if: github.repository != 'Ghqqqq/codex-overleaf-link'
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          name: ${{ github.ref_name }}
+          body_path: dist/releases/${{ github.ref_name }}/release-notes.md
+          files: |
+            dist/releases/${{ github.ref_name }}/codex-overleaf-link-extension-${{ github.ref_name }}.zip
+            dist/releases/${{ github.ref_name }}/codex-overleaf-native-host-${{ github.ref_name }}.tar.gz
+            dist/releases/${{ github.ref_name }}/codex-overleaf-link-${{ env.PACKAGE_VERSION }}.tgz
+            dist/releases/${{ github.ref_name }}/install.sh
+            dist/releases/${{ github.ref_name }}/install.ps1
+            dist/releases/${{ github.ref_name }}/uninstall-native-host.mjs
+            dist/releases/${{ github.ref_name }}/nativeHostPlatform.js
+            dist/releases/${{ github.ref_name }}/manifest.js
+            dist/releases/${{ github.ref_name }}/runtimeInstaller.js
             dist/releases/${{ github.ref_name }}/release-notes.md
             dist/releases/${{ github.ref_name }}/SHA256SUMS
           fail_on_unmatched_files: true

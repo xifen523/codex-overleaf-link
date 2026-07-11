@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$DefaultRepoUrl = 'https://github.com/Ghqqqq/codex-overleaf-link.git'
+$DefaultRepoUrl = 'https://github.com/xifen523/codex-overleaf-link.git'
 $DefaultRef = 'main'
 
 $RepoUrl = if ($env:CODEX_OVERLEAF_REPO_URL) { $env:CODEX_OVERLEAF_REPO_URL } else { $DefaultRepoUrl }
