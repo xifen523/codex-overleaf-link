@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const root = path.resolve(__dirname, '..');
 const popupSource = fs.readFileSync(path.join(root, 'extension/src/popup.js'), 'utf8');
@@ -48,6 +49,48 @@ test('automatic runtime checks are check-only and installation delegates to the 
   assert.match(bootstrapSource, /installAuthorizedUpdate:\s*\(\)\s*=>\s*checkAndStage\(\{ manual: true \}\)/);
   assert.match(coordinatorSource, /Number\.MAX_SAFE_INTEGER/);
   assert.match(coordinatorSource, /update_revoke_too_late[\s\S]*return getView\(\)/);
+});
+
+test('managed update actions trust the dedicated Update Center without widening extension access', () => {
+  const senderPolicySource = coordinatorSource.match(
+    /function isAllowedSender\(sender\) \{[\s\S]*?\n  \}(?=\n\n  function currentVersion)/
+  )[0];
+  const runtimeId = 'codex-overleaf-test-extension';
+  const extensionRoot = `chrome-extension://${runtimeId}/`;
+  const isAllowedSender = vm.runInNewContext(`(${senderPolicySource})`, {
+    URL,
+    chrome: {
+      runtime: {
+        id: runtimeId,
+        getURL: relativePath => extensionRoot + relativePath
+      }
+    }
+  });
+
+  assert.equal(isAllowedSender({
+    id: runtimeId,
+    url: `${extensionRoot}bootstrap/update.html?action=install`,
+    tab: { url: `${extensionRoot}bootstrap/update.html?action=install` }
+  }), true);
+  assert.equal(isAllowedSender({
+    id: runtimeId,
+    url: `${extensionRoot}bootstrap/popup.html`
+  }), true);
+  assert.equal(isAllowedSender({
+    id: runtimeId,
+    url: 'https://www.overleaf.com/project/example',
+    tab: { url: 'https://www.overleaf.com/project/example' }
+  }), true);
+  assert.equal(isAllowedSender({
+    id: runtimeId,
+    url: `${extensionRoot}bootstrap/background.js`,
+    tab: { url: `${extensionRoot}bootstrap/background.js` }
+  }), false);
+  assert.equal(isAllowedSender({
+    id: 'another-extension',
+    url: `${extensionRoot}bootstrap/update.html`
+  }), false);
+  assert.equal(isAllowedSender({ id: runtimeId }), false);
 });
 
 test('panel notice loads after the idle gate and before content runtime', () => {

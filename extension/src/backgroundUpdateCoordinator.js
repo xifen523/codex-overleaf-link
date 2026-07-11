@@ -412,10 +412,14 @@
   }
 
   function isAllowedSender(sender) {
-    if (sender?.id && sender.id !== chrome.runtime.id) return false;
-    if (!sender?.tab) return true;
+    if (sender?.id !== chrome.runtime.id) return false;
     try {
-      const url = new URL(sender.tab.url || '');
+      const url = new URL(sender?.url || sender?.tab?.url || '');
+      const extensionRoot = new URL(chrome.runtime.getURL(''));
+      if (url.origin === extensionRoot.origin) {
+        return url.pathname === '/bootstrap/popup.html' ||
+          url.pathname === '/bootstrap/update.html';
+      }
       return url.protocol === 'https:' &&
         (url.hostname === 'www.overleaf.com' || url.hostname === 'overleaf.com') &&
         url.pathname.startsWith('/project/');
