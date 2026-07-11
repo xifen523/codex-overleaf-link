@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.9.6 - 2026-07-11
+
+- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking now resolve to v1.9.6; native protocol `1` remains unchanged. Release artifacts resolve to codex-overleaf-link-extension-v1.9.6.zip, codex-overleaf-native-host-v1.9.6.tar.gz, and codex-overleaf-link-1.9.6.tgz.
+
 ## v1.9.5 - 2026-07-11
 
 - Consent-update validation release: runtime behavior is unchanged from v1.9.4; this version exists as the first real target for the check, prompt, authorization, progress, coordinated apply, and health-confirmation flow.
