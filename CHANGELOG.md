@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.4 - 2026-07-11
+
+- Consent-driven stable updates: automatic checks now stop at a signed update offer; downloading and installation require an explicit target-bound **Update now** authorization.
+- Update experience: Runtime takes over the Popup update card, adds an Overleaf panel banner, truthful phase progress, concrete safe-point blockers, a persistent action badge, and a 24-hour target-bound **Later** action.
+- Release metadata alignment and Native transaction safety: update.authorize and update.revoke bind consent to one source/target pair, serialize revoke against apply, clean staged artifacts before reporting a snooze, and retain coordinated health-confirmation rollback.
+- Package, extension manifest, compatibility target, README commands, and release tracking now resolve to v1.9.4; native protocol `1` remains unchanged. Release artifacts resolve to codex-overleaf-link-extension-v1.9.4.zip, codex-overleaf-native-host-v1.9.4.tar.gz, and codex-overleaf-link-1.9.4.tgz.
+
 ## v1.9.3 - 2026-07-11
 
 - Update wait visibility: the stable-update popup now reports every concrete Overleaf and native-host idle blocker instead of showing an opaque waiting state.

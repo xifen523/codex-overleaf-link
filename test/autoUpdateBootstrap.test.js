@@ -22,9 +22,10 @@ test('managed Bootstrap owns alarms, scripting and native messaging while runtim
 
 test('runtime manifest preserves content order and places idle probe before content runtime', () => {
   const idle = runtimeManifest.js.indexOf('src/content/updateIdle.js');
+  const notice = runtimeManifest.js.indexOf('src/content/updateNotice.js');
   const runtime = runtimeManifest.js.indexOf('src/content/contentRuntime.js');
   const entry = runtimeManifest.js.indexOf('src/contentScript.js');
-  assert.equal(idle >= 0 && idle < runtime && runtime < entry, true);
+  assert.equal(idle >= 0 && idle < notice && notice < runtime && runtime < entry, true);
 });
 
 test('health confirmation waits for the replacement content runtime to answer from Overleaf', () => {

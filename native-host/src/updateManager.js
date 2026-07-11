@@ -19,20 +19,26 @@ const NATIVE_MARKER = '.codex-overleaf-managed-native.json';
 const JOURNAL_FILE = 'transaction.json';
 const CANDIDATE_FILE = 'candidate.json';
 const COOLDOWN_FILE = 'cooldowns.json';
+const AUTHORIZATION_FILE = 'authorization.json';
+const AUTHORIZATION_TTL_MS = 2 * 60 * 60 * 1000;
+const CONSENT_MIGRATION_TARGET_VERSION = '1.9.4';
 const UPDATE_METHODS = new Set([
   'update.status',
   'update.check',
+  'update.authorize',
   'update.stage',
   'update.canApply',
   'update.apply',
   'update.confirm',
-  'update.rollback'
+  'update.rollback',
+  'update.revoke'
 ]);
 const RELEASE_ASSET_HOSTS = new Set([
   'github.com',
   'objects.githubusercontent.com',
   'release-assets.githubusercontent.com'
 ]);
+let updateMutationTail = Promise.resolve();
 
 function isUpdateMethod(method) {
   return UPDATE_METHODS.has(method);
@@ -49,25 +55,35 @@ async function handleUpdateRequest(request, options = {}) {
     }
     switch (request.method) {
       case 'update.status':
-        return okResponse(request.id, recoverAndReadStatus(context));
+        return okResponse(request.id, await withUpdateMutex(() => recoverAndReadStatus(context)));
       case 'update.check':
-        return okResponse(request.id, await checkForUpdate(context, request.params || {}, options));
+        return okResponse(request.id, await withUpdateMutex(() => checkForUpdate(context, request.params || {}, options)));
+      case 'update.authorize':
+        return okResponse(request.id, await withUpdateMutex(() => authorizeUpdate(context, request.params || {})));
       case 'update.stage':
-        return okResponse(request.id, await stageCandidate(context, options));
+        return okResponse(request.id, await withUpdateMutex(() => stageCandidate(context, options)));
       case 'update.canApply':
         return okResponse(request.id, getApplyGate(options));
       case 'update.apply':
-        return okResponse(request.id, applyStagedUpdate(context, request.params || {}, options));
+        return okResponse(request.id, await withUpdateMutex(() => applyStagedUpdate(context, request.params || {}, options)));
       case 'update.confirm':
-        return okResponse(request.id, confirmUpdate(context, request.params || {}));
+        return okResponse(request.id, await withUpdateMutex(() => confirmUpdate(context, request.params || {})));
       case 'update.rollback':
-        return okResponse(request.id, rollbackUpdate(context, request.params || {}));
+        return okResponse(request.id, await withUpdateMutex(() => rollbackUpdate(context, request.params || {})));
+      case 'update.revoke':
+        return okResponse(request.id, await withUpdateMutex(() => revokeUpdate(context, request.params || {})));
       default:
         throw updateError('unknown_update_method', 'Unknown managed update method.');
     }
   } catch (error) {
     return errorResponse(request.id, safeErrorCode(error), safeErrorMessage(error));
   }
+}
+
+function withUpdateMutex(action) {
+  const result = updateMutationTail.then(action, action);
+  updateMutationTail = result.catch(() => {});
+  return result;
 }
 
 async function checkForUpdate(context, params = {}, options = {}) {
@@ -160,6 +176,53 @@ function buildReleaseAssetUrl(tag, assetName) {
   return GITHUB_RELEASE_DOWNLOAD_ROOT + '/' + tag + '/' + encodeURIComponent(assetName);
 }
 
+function authorizeUpdate(context, params = {}) {
+  const authorizationId = String(params.authorizationId || '');
+  const targetVersion = String(params.targetVersion || '');
+  const requestedCurrentVersion = String(params.currentVersion || '');
+  if (!isUuid(authorizationId)) {
+    throw updateError('update_authorization_invalid', 'Update authorization id is invalid.');
+  }
+  const candidate = readJsonSafe(path.join(context.updatesRoot, CANDIDATE_FILE), null);
+  if (!candidate) {
+    throw updateError('update_candidate_missing', 'Check for an update before authorizing it.');
+  }
+  const manifest = verifySignedReleaseManifest(
+    Buffer.from(candidate.manifestBase64 || '', 'base64'),
+    Buffer.from(candidate.signatureBase64 || '', 'base64')
+  );
+  const activeVersion = readVersionPointer(context.nativeRoot, 'active-version');
+  if (requestedCurrentVersion !== activeVersion ||
+      targetVersion !== candidate.latestVersion ||
+      targetVersion !== manifest.version ||
+      !isNewerStableVersion(targetVersion, activeVersion)) {
+    throw updateError('update_consent_mismatch', 'Update authorization does not match the active signed candidate.');
+  }
+  const existing = readAuthorization(context);
+  if (existing?.id === authorizationId &&
+      existing.targetVersion === targetVersion &&
+      ['authorized', 'bound'].includes(existing.state) &&
+      (!existing.expiresAt || Date.parse(existing.expiresAt) > Date.now())) {
+    return publicAuthorization(existing);
+  }
+  if (existing && ['authorized', 'bound'].includes(existing.state)) {
+    throw updateError('update_authorization_in_progress', 'Another update authorization is already active.');
+  }
+  const grantedAt = new Date();
+  const authorization = {
+    schemaVersion: 1,
+    id: authorizationId,
+    targetVersion,
+    sourceVersion: activeVersion,
+    state: 'authorized',
+    grantedAt: grantedAt.toISOString(),
+    expiresAt: new Date(grantedAt.getTime() + AUTHORIZATION_TTL_MS).toISOString(),
+    transactionId: ''
+  };
+  writeAuthorization(context, authorization);
+  return publicAuthorization(authorization);
+}
+
 async function stageCandidate(context, options = {}) {
   const candidate = readJsonSafe(path.join(context.updatesRoot, CANDIDATE_FILE), null);
   if (!candidate) {
@@ -172,10 +235,16 @@ async function stageCandidate(context, options = {}) {
   if (!isNewerStableVersion(manifest.version, activeVersion)) {
     throw updateError('update_candidate_stale', 'The staged update is no longer newer than the active version.');
   }
+  const authorization = requireAuthorization(context, manifest.version, ['authorized', 'bound']);
   const existingJournal = readJournal(context);
   if (existingJournal?.state === 'staged' && existingJournal.targetVersion === manifest.version) {
+    if (existingJournal.authorizationId !== authorization.id ||
+        (authorization.transactionId && authorization.transactionId !== existingJournal.id)) {
+      throw updateError('update_consent_mismatch', 'Staged transaction does not match the active authorization.');
+    }
     try {
       verifyStagedPair(existingJournal.payloadRoot, manifest.version);
+      bindAuthorization(context, authorization, existingJournal.id);
       return {
         transactionId: existingJournal.id,
         targetVersion: existingJournal.targetVersion,
@@ -189,38 +258,51 @@ async function stageCandidate(context, options = {}) {
   if (existingJournal && ['applying', 'awaiting_health'].includes(existingJournal.state)) {
     throw updateError('update_transaction_in_progress', 'A managed update transaction is already being applied.');
   }
+  if (authorization.state === 'bound') {
+    throw updateError('update_consent_mismatch', 'Bound authorization has no reusable staged transaction.');
+  }
   const transactionId = crypto.randomUUID();
   const stageRoot = path.join(context.updatesRoot, 'staging-' + transactionId);
   fs.mkdirSync(stageRoot, { recursive: true, mode: 0o700 });
-  const archivePath = path.join(stageRoot, manifest.updateBundle.name);
-  const fetchImpl = options.fetch || globalThis.fetch;
-  const bundleBytes = await fetchReleaseAsset(fetchImpl, candidate.bundleUrl, manifest.updateBundle.size + 1);
-  if (bundleBytes.length !== manifest.updateBundle.size) {
-    throw updateError('update_bundle_size_mismatch', 'Downloaded update bundle size does not match the signed manifest.');
+  try {
+    const archivePath = path.join(stageRoot, manifest.updateBundle.name);
+    const fetchImpl = options.fetch || globalThis.fetch;
+    const bundleBytes = await fetchReleaseAsset(fetchImpl, candidate.bundleUrl, manifest.updateBundle.size + 1);
+    if (bundleBytes.length !== manifest.updateBundle.size) {
+      throw updateError('update_bundle_size_mismatch', 'Downloaded update bundle size does not match the signed manifest.');
+    }
+    const hash = crypto.createHash('sha256').update(bundleBytes).digest('hex');
+    if (hash !== manifest.updateBundle.sha256) {
+      throw updateError('update_bundle_hash_mismatch', 'Downloaded update bundle hash does not match the signed manifest.');
+    }
+    fs.writeFileSync(archivePath, bundleBytes, { mode: 0o600 });
+    const payloadRoot = path.join(stageRoot, 'payload');
+    extractVerifiedUpdateBundle({ archivePath, destinationRoot: payloadRoot });
+    verifyStagedPair(payloadRoot, manifest.version);
+    const journal = {
+      id: transactionId,
+      authorizationId: authorization.id,
+      state: 'staged',
+      sourceVersion: activeVersion,
+      sourcePreviousVersion: readVersionPointer(context.nativeRoot, 'previous-version'),
+      targetVersion: manifest.version,
+      stageRoot,
+      payloadRoot,
+      manifestSha256: crypto.createHash('sha256').update(manifestBytes).digest('hex'),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    writeJournal(context, journal);
+    bindAuthorization(context, authorization, transactionId);
+    cleanupOrphanStageRoots(context.updatesRoot, [stageRoot]);
+    return { transactionId, targetVersion: manifest.version, state: journal.state };
+  } catch (error) {
+    cleanupStage(stageRoot);
+    const journal = readJournal(context);
+    if (journal?.id === transactionId) removeJournal(context);
+    settleAuthorization(context, authorization.id, 'revoked');
+    throw error;
   }
-  const hash = crypto.createHash('sha256').update(bundleBytes).digest('hex');
-  if (hash !== manifest.updateBundle.sha256) {
-    throw updateError('update_bundle_hash_mismatch', 'Downloaded update bundle hash does not match the signed manifest.');
-  }
-  fs.writeFileSync(archivePath, bundleBytes, { mode: 0o600 });
-  const payloadRoot = path.join(stageRoot, 'payload');
-  extractVerifiedUpdateBundle({ archivePath, destinationRoot: payloadRoot });
-  verifyStagedPair(payloadRoot, manifest.version);
-  const journal = {
-    id: transactionId,
-    state: 'staged',
-    sourceVersion: activeVersion,
-    sourcePreviousVersion: readVersionPointer(context.nativeRoot, 'previous-version'),
-    targetVersion: manifest.version,
-    stageRoot,
-    payloadRoot,
-    manifestSha256: crypto.createHash('sha256').update(manifestBytes).digest('hex'),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-  writeJournal(context, journal);
-  cleanupOrphanStageRoots(context.updatesRoot, [stageRoot]);
-  return { transactionId, targetVersion: manifest.version, state: journal.state };
 }
 
 function getApplyGate(options = {}) {
@@ -245,6 +327,10 @@ function applyStagedUpdate(context, params = {}, options = {}) {
   if (params.transactionId && params.transactionId !== journal.id) {
     throw updateError('update_transaction_mismatch', 'Update transaction id does not match the staged update.');
   }
+  const authorization = requireAuthorization(context, journal.targetVersion, ['bound']);
+  if (journal.authorizationId !== authorization.id || authorization.transactionId !== journal.id) {
+    throw updateError('update_consent_mismatch', 'Apply transaction does not match the bound authorization.');
+  }
   assertManagedMarkers(context);
   const extensionRuntime = path.join(context.extensionRoot, 'runtime');
   const previousRuntime = path.join(context.extensionRoot, 'slots', 'previous', 'runtime');
@@ -268,6 +354,7 @@ function applyStagedUpdate(context, params = {}, options = {}) {
     syncManagedMarkerVersions(context, journal.targetVersion);
   } catch (error) {
     rollbackFiles(context, { ...journal, previousManifest });
+    settleAuthorization(context, journal.authorizationId, 'revoked');
     throw updateError('update_apply_failed', 'Managed update could not be applied atomically.', { cause: error });
   }
   const awaiting = {
@@ -289,6 +376,14 @@ function confirmUpdate(context, params = {}) {
   if (params.transactionId !== journal.id || params.extensionVersion !== journal.targetVersion || params.nativeVersion !== journal.targetVersion) {
     throw updateError('update_health_version_mismatch', 'Extension and native host did not confirm the same target version.');
   }
+  if (!isLegacyInboundConsentMigration(journal)) {
+    const authorization = requireAuthorization(context, journal.targetVersion, ['bound'], {
+      activeVersion: journal.sourceVersion
+    });
+    if (journal.authorizationId !== authorization.id || authorization.transactionId !== journal.id) {
+      throw updateError('update_consent_mismatch', 'Health confirmation does not match the bound authorization.');
+    }
+  }
   const manifest = readJsonSafe(path.join(context.extensionRoot, 'manifest.json'), null);
   if (readVersionPointer(context.nativeRoot, 'active-version') !== journal.targetVersion || manifest?.version !== journal.targetVersion) {
     throw updateError('update_health_version_mismatch', 'Managed files do not match the confirmed target version.');
@@ -299,6 +394,7 @@ function confirmUpdate(context, params = {}) {
     confirmedAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   });
+  settleAuthorization(context, journal.authorizationId, 'consumed');
   pruneNativeVersions(context.nativeRoot, new Set([journal.targetVersion, journal.sourceVersion]));
   cleanupStage(journal.stageRoot);
   cleanupOrphanStageRoots(context.updatesRoot);
@@ -325,9 +421,48 @@ function rollbackUpdate(context, params = {}) {
     updatedAt: new Date().toISOString(),
     previousManifest: undefined
   });
+  settleAuthorization(context, journal.authorizationId, 'revoked');
   cleanupStage(journal.stageRoot);
   cleanupOrphanStageRoots(context.updatesRoot);
   return { version: journal.sourceVersion, state: 'rolled_back' };
+}
+
+function revokeUpdate(context, params = {}) {
+  const authorizationId = String(params.authorizationId || '');
+  const targetVersion = String(params.targetVersion || '');
+  const transactionId = String(params.transactionId || '');
+  if (!isUuid(authorizationId) || !parseSemver(targetVersion)) {
+    throw updateError('update_authorization_invalid', 'Update revocation parameters are invalid.');
+  }
+  const journal = readJournal(context);
+  if (journal?.targetVersion === targetVersion &&
+      ['applying', 'awaiting_health', 'committed'].includes(journal.state)) {
+    throw updateError('update_revoke_too_late', 'The update is already being applied.');
+  }
+  const authorization = readAuthorization(context);
+  if (!authorization) {
+    if (!journal || journal.targetVersion !== targetVersion) {
+      return { state: 'already_revoked', targetVersion };
+    }
+    if (journal.authorizationId !== authorizationId) {
+      throw updateError('update_consent_mismatch', 'Revocation does not match the staged transaction.');
+    }
+  } else if (authorization.id !== authorizationId || authorization.targetVersion !== targetVersion) {
+    throw updateError('update_consent_mismatch', 'Revocation does not match the active authorization.');
+  }
+  if (transactionId && journal?.id !== transactionId) {
+    throw updateError('update_transaction_mismatch', 'Revocation transaction id does not match the staged update.');
+  }
+  if (authorization) {
+    writeAuthorization(context, { ...authorization, state: 'revoked', revokedAt: new Date().toISOString() });
+  }
+  if (journal?.state === 'staged') {
+    cleanupStage(journal.stageRoot);
+    removeJournal(context);
+  }
+  cleanupOrphanStageRoots(context.updatesRoot);
+  fs.rmSync(path.join(context.updatesRoot, AUTHORIZATION_FILE), { force: true });
+  return { state: 'revoked', targetVersion };
 }
 
 function rollbackFiles(context, journal) {
@@ -397,6 +532,7 @@ function recoverAndReadStatus(context) {
     rollbackFiles(context, journal);
     journal = { ...journal, state: 'rolled_back', reasonCode: 'update_interrupted', updatedAt: new Date().toISOString() };
     writeJournal(context, journal);
+    settleAuthorization(context, journal.authorizationId, 'revoked');
   }
   if (journal?.state === 'rolled_back') {
     pruneNativeVersions(context.nativeRoot, new Set([
@@ -408,7 +544,8 @@ function recoverAndReadStatus(context) {
     managed: true,
     activeVersion: readVersionPointer(context.nativeRoot, 'active-version'),
     previousVersion: readVersionPointer(context.nativeRoot, 'previous-version'),
-    transaction: journal ? publicTransaction(journal) : null
+    transaction: journal ? publicTransaction(journal) : null,
+    authorization: publicAuthorization(readAuthorization(context))
   };
 }
 
@@ -542,12 +679,78 @@ function publicTransaction(journal) {
   };
 }
 
+function publicAuthorization(authorization) {
+  if (!authorization) return null;
+  return {
+    state: authorization.state,
+    targetVersion: authorization.targetVersion,
+    sourceVersion: authorization.sourceVersion,
+    transactionId: authorization.transactionId || '',
+    grantedAt: authorization.grantedAt,
+    expiresAt: authorization.expiresAt
+  };
+}
+
 function readJournal(context) {
   return readJsonSafe(path.join(context.updatesRoot, JOURNAL_FILE), null);
 }
 
 function writeJournal(context, journal) {
   atomicWriteJson(path.join(context.updatesRoot, JOURNAL_FILE), journal);
+}
+
+function removeJournal(context) {
+  fs.rmSync(path.join(context.updatesRoot, JOURNAL_FILE), { force: true });
+}
+
+function readAuthorization(context) {
+  return readJsonSafe(path.join(context.updatesRoot, AUTHORIZATION_FILE), null);
+}
+
+function writeAuthorization(context, authorization) {
+  atomicWriteJson(path.join(context.updatesRoot, AUTHORIZATION_FILE), authorization);
+}
+
+function requireAuthorization(context, targetVersion, allowedStates, options = {}) {
+  const authorization = readAuthorization(context);
+  if (!authorization) {
+    throw updateError('update_consent_required', 'Choose Update now before downloading or installing this update.');
+  }
+  const expectedActiveVersion = options.activeVersion || readVersionPointer(context.nativeRoot, 'active-version');
+  if (authorization.targetVersion !== targetVersion || authorization.sourceVersion !== expectedActiveVersion) {
+    throw updateError('update_consent_mismatch', 'Update authorization does not match this source and target version.');
+  }
+  if (!allowedStates.includes(authorization.state)) {
+    throw updateError('update_consent_required', 'Update authorization is not active.');
+  }
+  if (authorization.state === 'authorized' &&
+      (!authorization.expiresAt || Date.parse(authorization.expiresAt) <= Date.now())) {
+    settleAuthorization(context, authorization.id, 'revoked');
+    throw updateError('update_consent_required', 'Update authorization expired. Choose Update now again.');
+  }
+  return authorization;
+}
+
+function bindAuthorization(context, authorization, transactionId) {
+  const bound = {
+    ...authorization,
+    state: 'bound',
+    transactionId,
+    boundAt: authorization.boundAt || new Date().toISOString()
+  };
+  writeAuthorization(context, bound);
+  return bound;
+}
+
+function settleAuthorization(context, authorizationId, state) {
+  const authorization = readAuthorization(context);
+  if (!authorization || (authorizationId && authorization.id !== authorizationId)) return;
+  writeAuthorization(context, {
+    ...authorization,
+    state,
+    settledAt: new Date().toISOString()
+  });
+  fs.rmSync(path.join(context.updatesRoot, AUTHORIZATION_FILE), { force: true });
 }
 
 function atomicWriteJson(target, value) {
@@ -579,6 +782,21 @@ function normalizeReasonCode(value) {
   return /^[a-z0-9_]{1,80}$/.test(String(value || '')) ? String(value) : 'update_health_failed';
 }
 
+function isUuid(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ''));
+}
+
+function isLegacyInboundConsentMigration(journal) {
+  return Boolean(
+    journal &&
+    !journal.authorizationId &&
+    journal.state === 'awaiting_health' &&
+    journal.targetVersion === CONSENT_MIGRATION_TARGET_VERSION &&
+    parseSemver(journal.sourceVersion) &&
+    compareSemver(journal.sourceVersion, CONSENT_MIGRATION_TARGET_VERSION) < 0
+  );
+}
+
 function safeErrorCode(error) {
   return /^[a-z0-9_]{1,80}$/.test(String(error?.code || '')) ? error.code : 'update_internal_error';
 }
@@ -598,6 +816,7 @@ function errorResponse(id, code, message) {
 module.exports = {
   GITHUB_LATEST_URL,
   applyStagedUpdate,
+  authorizeUpdate,
   checkForUpdate,
   cleanupOrphanStageRoots,
   confirmUpdate,
@@ -605,6 +824,7 @@ module.exports = {
   getManagedContext,
   handleUpdateRequest,
   isUpdateMethod,
+  revokeUpdate,
   rollbackUpdate,
   stageCandidate,
   syncManagedMarkerVersions

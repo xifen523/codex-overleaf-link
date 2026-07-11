@@ -530,3 +530,23 @@ if (!globalThis.CodexOverleafCompatibility) {
     return true;
   }
 })();
+
+(function loadConsentDrivenUpdateRuntime(root) {
+  'use strict';
+
+  try {
+    const workerPath = chrome.runtime.getManifest().background?.service_worker || '';
+    const runtimePrefix = workerPath.startsWith('bootstrap/') ? 'runtime/' : '';
+    if (!root.CodexOverleafUpdateConsent) {
+      importScripts(chrome.runtime.getURL(runtimePrefix + 'src/shared/updateConsent.js'));
+    }
+    if (!root.CodexOverleafUpdateCoordinator) {
+      importScripts(chrome.runtime.getURL(runtimePrefix + 'src/backgroundUpdateCoordinator.js'));
+    }
+    root.CodexOverleafUpdateCoordinator?.init?.({
+      nativeBridge: root.CodexOverleafNativeBridge
+    });
+  } catch (error) {
+    console.error('Consent-driven updater failed to initialize:', error?.message || String(error));
+  }
+})(globalThis);

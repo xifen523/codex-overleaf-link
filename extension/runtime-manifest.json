@@ -52,6 +52,7 @@
     "src/content/writebackOrchestrator.js",
     "src/content/panelMaintenance.js",
     "src/content/updateIdle.js",
+    "src/content/updateNotice.js",
     "src/content/contentRuntime.js",
     "src/contentScript.js"
   ],
