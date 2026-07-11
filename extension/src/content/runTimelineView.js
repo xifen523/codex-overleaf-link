@@ -30,6 +30,7 @@
       renderMarkdownBlockText,
       sanitizeAssistantVisibleText,
       sanitizeAssistantVisibleValue,
+      stripEmptyHtmlCommentPlaceholders = value => value,
       buildMarkdownInlineNodes,
       getPanel,
       getState,
@@ -504,14 +505,18 @@
   }
 
   function sanitizeRunEventForRender(event = {}) {
+    const streamRole = sanitizeAssistantVisibleText(event.streamRole);
+    const title = sanitizeAssistantVisibleText(event.title);
     return {
       ...event,
-      title: sanitizeAssistantVisibleText(event.title),
+      title: streamRole === 'reasoning'
+        ? stripEmptyHtmlCommentPlaceholders(title)
+        : title,
       status: sanitizeAssistantVisibleText(event.status),
       detail: sanitizeAssistantVisibleValue(event.detail),
       technicalDetail: sanitizeAssistantVisibleValue(event.technicalDetail),
       streamKey: sanitizeAssistantVisibleText(event.streamKey),
-      streamRole: sanitizeAssistantVisibleText(event.streamRole)
+      streamRole
     };
   }
   function renderActivityLine(input) {

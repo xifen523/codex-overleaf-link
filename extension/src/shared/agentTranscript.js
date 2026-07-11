@@ -355,7 +355,10 @@
       return mapThreadItemEvent(params.item, method === 'item/started', event, locale);
     }
     if (method === 'item/agentMessage/delta' || method === 'item/reasoning/summaryTextDelta') {
-      const title = cleanStreamDeltaText(params.delta || '');
+      const title = cleanStreamDeltaText(
+        params.delta || '',
+        method === 'item/reasoning/summaryTextDelta'
+      );
       if (!title.length) {
         return technicalOnly(event, locale);
       }
@@ -458,7 +461,7 @@
       }
     }
     if (item.type === 'reasoning') {
-      const summary = normalizeStringList(item.summary).at(-1);
+      const summary = stripEmptyHtmlCommentPlaceholders(normalizeStringList(item.summary).at(-1));
       if (!started && summary) {
         return {
           kind: 'stream',
@@ -1140,10 +1143,20 @@
     return String(text || '').replace(/\s+/g, ' ').trim();
   }
 
-  function cleanStreamDeltaText(text) {
-    return String(text || '')
+  function cleanStreamDeltaText(text, stripReasoningPlaceholders = false) {
+    const normalized = String(text || '')
       .replace(/\r\n?/g, '\n')
       .replace(/\u00a0/g, ' ');
+    return stripReasoningPlaceholders
+      ? stripEmptyHtmlCommentPlaceholders(normalized)
+      : normalized;
+  }
+
+  function stripEmptyHtmlCommentPlaceholders(text) {
+    return String(text || '')
+      .replace(/<!--[\t \r\n]*-->/g, '')
+      .replace(/(^|\n)[\t ]*<!--[\t ]*$/g, '$1')
+      .replace(/(^|\n)[\t ]*-->[\t ]*$/g, '$1');
   }
 
   function cleanVisibleMarkdownText(text) {
@@ -1571,6 +1584,7 @@
     formatFailureBlock,
     formatHumanReport,
     mapAgentEventToActivity,
+    stripEmptyHtmlCommentPlaceholders,
     translateRawError
   };
 });

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.9.1 - 2026-07-11
+
+- Reasoning stream display: removes empty `<!-- -->` placeholders emitted by current Codex reasoning-summary events before they reach the visible run timeline.
+- Historical-session cleanup: applies the same reasoning-only sanitizer while rendering persisted events, including placeholders split across stream-delta boundaries.
+- Safe rendering remains unchanged: assistant messages and meaningful HTML comments are preserved, and visible text continues to use text nodes rather than HTML injection.
+- Release metadata alignment: package, extension manifest, compatibility target, README badge/commands, and release tracking metadata now resolve to `1.9.1`; native protocol `1` remains unchanged.
+- Release artifacts remain `codex-overleaf-link-extension-v1.9.1.zip`, `codex-overleaf-native-host-v1.9.1.tar.gz`, `codex-overleaf-link-1.9.1.tgz`, the coordinated update bundle, and the detached signed manifest.
+
 ## v1.9.0 - 2026-07-10
 
 - Managed automatic updates: introduced a stable Manifest V3 Bootstrap, replaceable extension runtime, versioned native runtime, coordinated idle-only apply, health confirmation, and automatic rollback foundation.

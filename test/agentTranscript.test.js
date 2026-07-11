@@ -6,6 +6,7 @@ const {
   buildStructuredHumanReport,
   formatHumanReport,
   mapAgentEventToActivity,
+  stripEmptyHtmlCommentPlaceholders,
   translateRawError
 } = require('../extension/src/shared/agentTranscript');
 
@@ -244,6 +245,37 @@ test('preserves spaces at Codex stream delta boundaries', () => {
   assert.equal(second.kind, 'stream');
   assert.equal(first.title, 'Deciding on file deletion ');
   assert.equal(second.title, 'I’m wondering if main.pdf existed before');
+});
+
+test('removes empty HTML comment placeholders from reasoning streams only', () => {
+  const reasoning = mapAgentEventToActivity({
+    type: 'codex.session.event',
+    title: 'item/reasoning/summaryTextDelta',
+    detail: {
+      method: 'item/reasoning/summaryTextDelta',
+      params: { itemId: 'reason_1', delta: 'Checking current line ending\n\n<!-- -->' }
+    }
+  });
+  const assistant = mapAgentEventToActivity({
+    type: 'codex.session.event',
+    title: 'item/agentMessage/delta',
+    detail: {
+      method: 'item/agentMessage/delta',
+      params: { itemId: 'msg_1', delta: 'HTML example: <!-- -->' }
+    }
+  });
+
+  assert.equal(reasoning.title, 'Checking current line ending\n\n');
+  assert.equal(assistant.title, 'HTML example: <!-- -->');
+});
+
+test('reasoning placeholder cleanup handles split stream fragments and preserves meaningful comments', () => {
+  const first = stripEmptyHtmlCommentPlaceholders('Including economic constraints\n\n<!--');
+  const accumulated = stripEmptyHtmlCommentPlaceholders(first + ' -->');
+
+  assert.equal(first, 'Including economic constraints\n\n');
+  assert.equal(accumulated, 'Including economic constraints\n\n');
+  assert.equal(stripEmptyHtmlCommentPlaceholders('Keep <!-- reviewer note --> here'), 'Keep <!-- reviewer note --> here');
 });
 
 test('maps Codex command events to visible natural progress without raw commands', () => {

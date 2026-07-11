@@ -88,11 +88,8 @@
     buildSnapshotRestoreUndo,
     buildUndoCheckpoint
   } = window.CodexOverleafUndoOperations;
-  const {
-    buildHumanCompletionReport,
-    mapAgentEventToActivity,
-    translateRawError
-  } = window.CodexOverleafAgentTranscript;
+  const { buildHumanCompletionReport, mapAgentEventToActivity, stripEmptyHtmlCommentPlaceholders,
+    translateRawError } = window.CodexOverleafAgentTranscript;
   const i18n = window.CodexOverleafI18n;
   const nativeChannel = window.CodexOverleafNativeChannel.create({
     chrome,
@@ -7040,19 +7037,24 @@
     const existing = [...events].reverse().find(item => item.kind === 'stream' && item.streamKey === streamKey);
     if (existing) {
       const nextTitle = sanitizeAssistantVisibleText(event.title);
-      existing.title = event.replaceText
+      const nextRole = sanitizeAssistantVisibleText(event.streamRole) || existing.streamRole;
+      const combinedTitle = event.replaceText
         ? nextTitle
         : sanitizeAssistantVisibleText(appendStreamText(existing.title, nextTitle));
+      existing.title = nextRole === 'reasoning' ? stripEmptyHtmlCommentPlaceholders(combinedTitle) : combinedTitle;
       existing.status = sanitizeAssistantVisibleText(event.status) || existing.status || 'running';
       existing.timestamp = event.timestamp || existing.timestamp;
-      existing.streamRole = sanitizeAssistantVisibleText(event.streamRole) || existing.streamRole;
+      existing.streamRole = nextRole;
       return existing;
     }
 
+    const streamRole = sanitizeAssistantVisibleText(event.streamRole);
+    const title = sanitizeAssistantVisibleText(event.title);
     const next = {
       ...event,
       streamKey,
-      title: sanitizeAssistantVisibleText(event.title)
+      streamRole,
+      title: streamRole === 'reasoning' ? stripEmptyHtmlCommentPlaceholders(title) : title
     };
     delete next.appendText;
     delete next.replaceText;
