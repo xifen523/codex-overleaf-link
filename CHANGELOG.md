@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.9.8 - 2026-07-12
+
+### Fixed
+
+- Authorized the dedicated Update Center as an exact trusted extension surface, including the browser-window sender shape.
+- Removed duplicate update controls from the Chrome toolbar Popup and moved manual update checks into Overleaf Settings.
+- Added the exact Overleaf `/project` dashboard route to the managed runtime so update notices also appear on the project homepage.
+- Kept dashboard tabs out of editor save-state probes so an open homepage cannot block a safe update.
+
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.8.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.8.zip`, `codex-overleaf-native-host-v1.9.8.tar.gz`, and `codex-overleaf-link-1.9.8.tgz`.
+- Native protocol `1` remains the compatibility contract between the Extension and Native Host.
+
 ## v1.9.7 - 2026-07-12
 
 ### Added
