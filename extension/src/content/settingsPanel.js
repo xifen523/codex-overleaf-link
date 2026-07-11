@@ -10,7 +10,8 @@
       history: '<path d="M4.2 3.4h7.6"/><path d="M4.2 8h7.6"/><path d="M4.2 12.6h4.6"/><path d="M2.2 3.4h.1"/><path d="M2.2 8h.1"/><path d="M2.2 12.6h.1"/>',
       lock: '<rect x="3.6" y="7" width="8.8" height="6.2" rx="1.2"/><path d="M5.6 7V5.3a2.4 2.4 0 0 1 4.8 0V7"/><path d="M8 9.6v1.2"/>',
       pen: '<path d="M3.2 12.8 4 9.7l6.6-6.6a1.4 1.4 0 0 1 2 2L6 11.7z"/><path d="m9.6 4.1 2.3 2.3"/>',
-      shield: '<path d="M8 2.1 12.4 4v3.5c0 2.9-1.8 5.1-4.4 6.4-2.6-1.3-4.4-3.5-4.4-6.4V4z"/><path d="M6.1 8.1 7.5 9.5 10.2 6.6"/>'
+      shield: '<path d="M8 2.1 12.4 4v3.5c0 2.9-1.8 5.1-4.4 6.4-2.6-1.3-4.4-3.5-4.4-6.4V4z"/><path d="M6.1 8.1 7.5 9.5 10.2 6.6"/>',
+      software: '<rect x="5.1" y="5.1" width="5.8" height="5.8" rx="1.2"/><path d="M12.9 7.1A5.2 5.2 0 0 0 4.1 4.2"/><path d="M4.1 2.2v2h2"/><path d="M3.1 8.9a5.2 5.2 0 0 0 8.8 2.9"/><path d="M11.9 13.8v-2h-2"/>'
     };
     const safeName = Object.prototype.hasOwnProperty.call(icons, name) ? name : 'appearance';
     return `<span class="codex-icon codex-icon-${safeName}" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false">${icons[safeName]}</svg></span>`;
@@ -148,7 +149,7 @@
           </details>
           <details class="codex-set-group" data-set-group="updates" open>
             <summary class="codex-set-group-head">
-              <span class="codex-set-group-title">${codexSetIcon('appearance')}<span data-i18n="softwareUpdatesTitle">Software updates</span></span>
+              <span class="codex-set-group-title">${codexSetIcon('software')}<span data-i18n="softwareUpdatesTitle">Software updates</span></span>
             </summary>
             <div class="codex-set-card" data-update-settings>
               <div class="codex-set-row">

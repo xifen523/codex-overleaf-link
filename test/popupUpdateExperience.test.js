@@ -110,10 +110,15 @@ test('panel notice loads after the idle gate and before content runtime', () => 
   assert.match(bootstrapSource, /idleApplyPromise/);
   assert.match(noticeSource, /data-check-updates/);
   assert.match(settingsSource, /data-i18n="softwareUpdatesTitle"/);
+  assert.match(settingsSource, /software:\s*'<rect/);
+  assert.match(settingsSource, /codexSetIcon\('software'\)/);
   assert.match(settingsSource, /data-check-updates/);
   assert.equal(runtimeManifest.matches.includes('https://www.overleaf.com/project'), true);
   assert.equal(extensionManifest.content_scripts[0].matches.includes('https://www.overleaf.com/project'), true);
   assert.equal(extensionManifest.host_permissions.includes('https://www.overleaf.com/project'), true);
   assert.match(bootstrapSource, /OVERLEAF_EDITOR_MATCHES/);
+  assert.match(noticeSource, /isRuntimeRestartError/);
+  assert.match(noticeSource, /buildRestartingView/);
+  assert.match(noticeSource, /consent-update-get-state/);
   assert.doesNotMatch(noticeSource, /navigator\.language/);
 });

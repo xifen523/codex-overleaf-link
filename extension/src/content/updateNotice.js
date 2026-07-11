@@ -9,6 +9,7 @@
   let getLocale = () => '';
   let settingsRoot = null;
   let settingsActionInFlight = false;
+  const ACTIVE_UPDATE_STATES = new Set(['downloading', 'staged', 'waiting_for_idle', 'applying', 'awaiting_health']);
 
   function mount(panelLike, options = {}) {
     if (typeof options.getLocale === 'function') {
@@ -69,17 +70,10 @@
         dismiss: 'codex-overleaf/consent-update-dismiss'
       }[action]);
     } catch (error) {
-      currentView = {
-        ...(currentView || {}),
-        state: {
-          ...(currentView?.state || {}),
-          state: 'failed',
-          code: error?.code || 'update_failed',
-          message: error?.message || tx('Update failed.', '更新失败。')
-        },
-        progress: { value: 0, determinate: true, phase: 'failed' },
-        showPanel: true
-      };
+      currentView = await reconcileAfterActionError(error, {
+        action,
+        fallbackMessage: tx('Update failed.', '更新失败。')
+      });
     } finally {
       actionInFlight = false;
       render();
@@ -97,6 +91,49 @@
     return response.result;
   }
 
+  async function reconcileAfterActionError(error, options = {}) {
+    if (options.action === 'install' && isRuntimeRestartError(error)) {
+      return buildRestartingView();
+    }
+    try {
+      const authoritativeView = await request('codex-overleaf/consent-update-get-state');
+      if (authoritativeView?.state) return authoritativeView;
+    } catch (_stateError) {
+      // The local fallback below is used only when the global coordinator is unavailable too.
+    }
+    return {
+      ...(currentView || {}),
+      state: {
+        ...(currentView?.state || {}),
+        state: 'failed',
+        code: error?.code || 'update_failed',
+        message: error?.message || options.fallbackMessage || tx('Update failed.', '更新失败。')
+      },
+      progress: { value: 0, determinate: true, phase: 'failed' },
+      showPanel: true
+    };
+  }
+
+  function isRuntimeRestartError(error) {
+    return /extension context invalidated|message (?:port|channel) closed|receiving end does not exist|could not establish connection|disconnected port/i.test(
+      String(error?.message || error || '')
+    );
+  }
+
+  function buildRestartingView() {
+    return {
+      ...(currentView || {}),
+      state: {
+        ...(currentView?.state || {}),
+        state: 'awaiting_health',
+        code: '',
+        message: ''
+      },
+      progress: { value: 90, determinate: false, phase: 'awaiting_health' },
+      showPanel: true
+    };
+  }
+
   function bindSettingsControls(panel) {
     settingsRoot = panel;
     const button = panel.querySelector?.('[data-check-updates]');
@@ -112,28 +149,23 @@
     settingsActionInFlight = true;
     renderSettings();
     const stateName = currentView?.state?.state || 'idle';
+    let requestedAction = 'check';
     try {
       if (stateName === 'update_available') {
+        requestedAction = 'install';
         currentView = await request('codex-overleaf/consent-update-install');
       } else if (['failed', 'rolled_back'].includes(stateName)) {
         currentView = await request('codex-overleaf/consent-update-check');
-      } else if (!['downloading', 'staged', 'waiting_for_idle', 'applying', 'awaiting_health'].includes(stateName)) {
+      } else if (!ACTIVE_UPDATE_STATES.has(stateName)) {
         currentView = await request('codex-overleaf/consent-update-check');
       } else {
         return;
       }
     } catch (error) {
-      currentView = {
-        ...(currentView || {}),
-        state: {
-          ...(currentView?.state || {}),
-          state: 'failed',
-          code: error?.code || 'update_failed',
-          message: error?.message || tx('Update check failed.', '更新检查失败。')
-        },
-        progress: { value: 0, determinate: true, phase: 'failed' },
-        showPanel: true
-      };
+      currentView = await reconcileAfterActionError(error, {
+        action: requestedAction,
+        fallbackMessage: tx('Update check failed.', '更新检查失败。')
+      });
     } finally {
       settingsActionInFlight = false;
       render();
@@ -214,7 +246,6 @@
       : '';
     const currentVersion = state.currentVersion || manifestVersion || '';
     const latestVersion = state.latestVersion || '';
-    const activeStates = ['downloading', 'staged', 'waiting_for_idle', 'applying', 'awaiting_health'];
     let summaryText = tx(
       `Current v${currentVersion}. Signed stable releases are checked automatically.`,
       `当前版本 v${currentVersion}。系统会自动检查签名稳定版本。`
@@ -229,7 +260,7 @@
       summaryText = tx(`Stable v${latestVersion} is available.`, `稳定版本 v${latestVersion} 已可用。`);
       statusText = tx('Ready to download and verify.', '已可下载并验证。');
       buttonText = tx('Update now', '立即更新');
-    } else if (activeStates.includes(stateName)) {
+    } else if (ACTIVE_UPDATE_STATES.has(stateName)) {
       statusText = getCopy(state).detail;
       buttonText = tx('Update in progress', '更新进行中');
     } else if (stateName === 'failed' || stateName === 'rolled_back') {
@@ -244,7 +275,7 @@
     status.textContent = statusText;
     status.hidden = !statusText;
     button.textContent = buttonText;
-    button.disabled = settingsActionInFlight || stateName === 'checking' || activeStates.includes(stateName);
+    button.disabled = settingsActionInFlight || stateName === 'checking' || ACTIVE_UPDATE_STATES.has(stateName);
   }
 
   function visibleActions(state) {

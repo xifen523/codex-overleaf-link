@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.9.10 - 2026-07-12
+
+### Fixed
+
+- Added a dedicated Software Updates icon built from a software package and coordinated update loop instead of reusing the Appearance icon.
+- Restricted save-state safety probes to real `/project/<project-id>` editors while keeping the Overleaf project homepage available as an update surface.
+- Recovered stale loaded editor tabs by reinjecting the managed runtime without reloading or bypassing save verification, and excluded Chrome-discarded tabs from active-editor gating.
+- Reloaded every loaded Overleaf surface after coordinated replacement so project homepages and editors converge on the same committed state.
+- Treated the expected message-channel disconnect during Extension restart as health verification in progress and reconciled ordinary errors against the authoritative background state before showing Retry.
+
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.10.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.10.zip`, `codex-overleaf-native-host-v1.9.10.tar.gz`, and `codex-overleaf-link-1.9.10.tgz`.
+- Native protocol `1` remains the compatibility contract between the Extension and Native Host.
+
 ## v1.9.9 - 2026-07-12
 
 ### Fixed

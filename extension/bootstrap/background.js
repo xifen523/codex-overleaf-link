@@ -20,9 +20,11 @@ const FAST_IDLE_RETRY_BLOCKERS = new Set(['recent_user_activity', 'save_state_no
 const FAST_IDLE_RETRY_MS = 4000;
 const SLOW_IDLE_RETRY_MS = 15000;
 const IDLE_RETRY_ALARM_MINUTES = 0.5;
+const RUNTIME_RECOVERY_SETTLE_MS = 250;
 
 let idleRetryTimer = null;
 let idleApplyPromise = null;
+let managedRuntimeAssets = null;
 
 let runtimeLoadError = null;
 try {
@@ -103,6 +105,10 @@ async function registerManagedRuntime() {
   }
   const manifest = await response.json();
   validateRuntimeManifest(manifest);
+  managedRuntimeAssets = {
+    js: ['bootstrap/runtimeContext.js', ...manifest.js.map(value => 'runtime/' + value)],
+    css: manifest.css.map(value => 'runtime/' + value)
+  };
   const registered = await chrome.scripting.getRegisteredContentScripts({ ids: [RUNTIME_SCRIPT_ID] });
   if (registered.length) {
     await chrome.scripting.unregisterContentScripts({ ids: [RUNTIME_SCRIPT_ID] });
@@ -110,8 +116,8 @@ async function registerManagedRuntime() {
   await chrome.scripting.registerContentScripts([{
     id: RUNTIME_SCRIPT_ID,
     matches: manifest.matches,
-    js: ['bootstrap/runtimeContext.js', ...manifest.js.map(value => 'runtime/' + value)],
-    css: manifest.css.map(value => 'runtime/' + value),
+    js: managedRuntimeAssets.js,
+    css: managedRuntimeAssets.css,
     runAt: manifest.runAt || 'document_idle',
     persistAcrossSessions: true
   }]);
@@ -216,8 +222,10 @@ async function tryApplyStagedUpdateCore() {
   if (Number(state.postponeUntil || 0) > Date.now()) {
     return state;
   }
-  const tabs = await chrome.tabs.query({ url: OVERLEAF_EDITOR_MATCHES });
-  const probes = await Promise.all(tabs.map(tab => probeTabIdle(tab)));
+  const surfaceTabs = await chrome.tabs.query({ url: OVERLEAF_MATCHES });
+  const activeTabs = surfaceTabs.filter(tab => isEditorProjectTab(tab) && !tab.discarded && tab.status !== 'unloaded');
+  const refreshTabs = surfaceTabs.filter(tab => !tab.discarded && tab.status !== 'unloaded');
+  const probes = await Promise.all(activeTabs.map(tab => probeTabIdle(tab)));
   const nativeGate = await requestInternal({ method: 'update.canApply', params: {} }).catch(error => ({
     ok: false,
     error: { code: safeCode(error), message: safeMessage(error) }
@@ -237,7 +245,7 @@ async function tryApplyStagedUpdateCore() {
   }
 
   await clearIdleRetry();
-  await chrome.storage.local.set({ [UPDATE_RELOAD_TABS_KEY]: tabs.map(tab => tab.id).filter(Number.isInteger) });
+  await chrome.storage.local.set({ [UPDATE_RELOAD_TABS_KEY]: refreshTabs.map(tab => tab.id).filter(Number.isInteger) });
   await setUpdateState({ ...state, state: 'applying', blocker: '', blockers: [] });
   await broadcastUpdateState('applying');
   const applied = await requestInternal({
@@ -280,14 +288,55 @@ async function probeTabIdle(tab) {
   if (!Number.isInteger(tab?.id)) {
     return { idle: false, blockers: ['tab_unavailable'] };
   }
+  if (!isEditorProjectTab(tab)) {
+    return { idle: true, saved: true, ignored: true, blockers: [] };
+  }
+  if (tab.discarded || tab.status === 'unloaded') {
+    return { idle: true, saved: true, ignored: true, blockers: [] };
+  }
+  const firstProbe = await sendTabIdleProbe(tab.id);
+  if (firstProbe) return firstProbe;
+  if (await injectManagedRuntimeIntoTab(tab.id)) {
+    const recoveredProbe = await sendTabIdleProbe(tab.id);
+    if (recoveredProbe) return recoveredProbe;
+  }
+  return { idle: false, blockers: ['tab_probe_unavailable'] };
+}
+
+function isEditorProjectTab(tab) {
+  try {
+    const url = new URL(tab?.url || '');
+    return url.protocol === 'https:' &&
+      (url.hostname === 'www.overleaf.com' || url.hostname === 'overleaf.com') &&
+      /^\/project\/[^/]+(?:\/|$)/.test(url.pathname);
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function sendTabIdleProbe(tabId) {
   try {
     return await withTimeout(
-      chrome.tabs.sendMessage(tab.id, { type: 'codex-overleaf/update-idle-probe' }),
+      chrome.tabs.sendMessage(tabId, { type: 'codex-overleaf/update-idle-probe' }),
       3500,
       { idle: false, blockers: ['tab_probe_timeout'] }
     );
   } catch (_error) {
-    return { idle: false, blockers: ['tab_probe_unavailable'] };
+    return null;
+  }
+}
+
+async function injectManagedRuntimeIntoTab(tabId) {
+  if (!managedRuntimeAssets) return false;
+  try {
+    if (managedRuntimeAssets.css.length) {
+      await chrome.scripting.insertCSS({ target: { tabId }, files: managedRuntimeAssets.css });
+    }
+    await chrome.scripting.executeScript({ target: { tabId }, files: managedRuntimeAssets.js });
+    await new Promise(resolve => setTimeout(resolve, RUNTIME_RECOVERY_SETTLE_MS));
+    return true;
+  } catch (_error) {
+    return false;
   }
 }
 

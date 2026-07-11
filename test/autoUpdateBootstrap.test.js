@@ -20,6 +20,24 @@ test('managed Bootstrap owns alarms, scripting and native messaging while runtim
   assert.match(source, /chrome\.runtime\.reload\(\)/);
 });
 
+test('safe-point probing recovers stale runtime tabs without reloading editor documents', () => {
+  assert.match(source, /isEditorProjectTab\(tab\)/);
+  assert.match(source, /\^\\\/project\\\/\[\^\/\]\+/);
+  assert.match(source, /tab\.discarded \|\| tab\.status === 'unloaded'/);
+  assert.match(source, /injectManagedRuntimeIntoTab/);
+  assert.match(source, /chrome\.scripting\.insertCSS/);
+  assert.match(source, /chrome\.scripting\.executeScript/);
+  assert.match(source, /const recoveredProbe = await sendTabIdleProbe/);
+  assert.doesNotMatch(source.match(/async function probeTabIdle[\s\S]*?\n}\n\nasync function confirmPendingUpdate/)?.[0] || '', /chrome\.tabs\.reload/);
+});
+
+test('safe-point editors and post-update Overleaf refresh surfaces are tracked separately', () => {
+  assert.match(source, /const surfaceTabs = await chrome\.tabs\.query\(\{ url: OVERLEAF_MATCHES \}\)/);
+  assert.match(source, /const activeTabs = surfaceTabs\.filter\(tab => isEditorProjectTab\(tab\)/);
+  assert.match(source, /const refreshTabs = surfaceTabs\.filter\(tab => !tab\.discarded/);
+  assert.match(source, /UPDATE_RELOAD_TABS_KEY\]: refreshTabs\.map/);
+});
+
 test('runtime manifest preserves content order and places idle probe before content runtime', () => {
   const idle = runtimeManifest.js.indexOf('src/content/updateIdle.js');
   const notice = runtimeManifest.js.indexOf('src/content/updateNotice.js');
