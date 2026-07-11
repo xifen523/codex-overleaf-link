@@ -7,6 +7,7 @@
   const CHECK_INTERVAL_MINUTES = 24 * 60;
   const SNOOZE_MS = 24 * 60 * 60 * 1000;
   const CANDIDATE_MAX_AGE_MS = 5 * 60 * 1000;
+  const CHECK_REQUEST_TIMEOUT_MS = 15 * 1000;
   const LEGACY_GUARD = Number.MAX_SAFE_INTEGER;
   const OVERLEAF_MATCHES = [
     'https://www.overleaf.com/project/*',
@@ -16,7 +17,8 @@
     'codex-overleaf/consent-update-get-state',
     'codex-overleaf/consent-update-check',
     'codex-overleaf/consent-update-install',
-    'codex-overleaf/consent-update-later'
+    'codex-overleaf/consent-update-later',
+    'codex-overleaf/consent-update-dismiss'
   ]);
 
   const policy = root.CodexOverleafUpdateConsent;
@@ -60,6 +62,7 @@
       delayInMinutes: 0.5,
       periodInMinutes: CHECK_INTERVAL_MINUTES
     });
+    await recoverInterruptedCheck();
     await settleTerminalConsent();
     await armLegacyGuard();
     await publishView();
@@ -75,6 +78,8 @@
         return installUpdate();
       case 'codex-overleaf/consent-update-later':
         return postponeUpdate();
+      case 'codex-overleaf/consent-update-dismiss':
+        return dismissCompletedUpdate();
       default:
         throw codedError('unknown_update_action', 'Unknown update action.');
     }
@@ -95,10 +100,14 @@
     });
 
     try {
-      const result = await requestNative('update.check', {
-        currentVersion: currentVersion(),
-        etag: currentState.etag || ''
-      });
+      const result = await withTimeout(
+        requestNative('update.check', {
+          currentVersion: currentVersion(),
+          etag: currentState.etag || ''
+        }),
+        CHECK_REQUEST_TIMEOUT_MS,
+        codedError('update_check_timeout', 'The managed update check did not complete in time.')
+      );
       const checkedAt = Date.now();
       if (result.available) {
         const nextConsent = result.latestVersion !== consent.snoozedVersion
@@ -158,6 +167,41 @@
     }
   }
 
+  async function recoverInterruptedCheck() {
+    const state = await getUpdateState();
+    if (state.state !== 'checking') return;
+    const nextState = policy.compareStableVersions(state.latestVersion, currentVersion()) > 0
+      ? 'update_available'
+      : 'idle';
+    await setUpdateState({
+      ...state,
+      state: nextState,
+      blocker: '',
+      blockers: [],
+      code: '',
+      message: ''
+    });
+  }
+
+  async function dismissCompletedUpdate() {
+    const state = await getUpdateState();
+    if (state.state !== 'committed') return getView();
+    const version = state.latestVersion || state.currentVersion || currentVersion();
+    await setUpdateState({
+      ...state,
+      state: 'idle',
+      currentVersion: version,
+      latestVersion: version,
+      transactionId: '',
+      stagedAt: 0,
+      blocker: '',
+      blockers: [],
+      code: '',
+      message: ''
+    });
+    return getView();
+  }
+
   async function installUpdate() {
     let state = await getUpdateState();
     let consent = await getConsentState();
@@ -189,10 +233,11 @@
     await setUpdateState({ ...state, postponeUntil: 0, code: '', message: '' });
 
     try {
-      const result = await chrome.runtime.sendMessage({ type: 'codex-overleaf/update-check-now' });
-      if (result === undefined) {
+      const executor = root.CodexOverleafManagedUpdateExecutor;
+      if (typeof executor?.installAuthorizedUpdate !== 'function') {
         throw codedError('update_executor_unavailable', 'The managed update executor is unavailable.');
       }
+      await executor.installAuthorizedUpdate();
       return getView();
     } catch (error) {
       await bestEffortRevoke({
@@ -391,6 +436,22 @@
     const error = new Error(message);
     error.code = code;
     return error;
+  }
+
+  function withTimeout(promise, timeoutMs, timeoutError) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(timeoutError), timeoutMs);
+      Promise.resolve(promise).then(
+        value => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        error => {
+          clearTimeout(timer);
+          reject(error);
+        }
+      );
+    });
   }
 
   function safeError(error) {

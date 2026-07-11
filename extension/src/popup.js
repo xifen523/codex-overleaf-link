@@ -309,6 +309,7 @@
       check: 'codex-overleaf/consent-update-check',
       install: 'codex-overleaf/consent-update-install',
       later: 'codex-overleaf/consent-update-later',
+      dismiss: 'codex-overleaf/consent-update-dismiss',
       retry: 'codex-overleaf/consent-update-check'
     }[action];
     const response = await chrome.runtime.sendMessage({ type });
@@ -339,8 +340,19 @@
     const state = view?.state || { state: 'idle' };
     const progress = view?.progress || { value: 0, determinate: true, phase: 'idle' };
     const copy = getUpdateCopy(state, view);
+    const stateName = state.state || 'idle';
+    const focusMode = Boolean(
+      options.busyAction === 'install' ||
+      view.execution ||
+      ['committed', 'rolled_back', 'failed'].includes(stateName)
+    );
+    section.classList.toggle('is-quiet', stateName === 'idle');
+    section.classList.toggle('is-offer', stateName === 'update_available');
+    section.classList.toggle('is-focus', focusMode);
+    section.classList.toggle('is-result', ['committed', 'rolled_back', 'failed'].includes(stateName));
+    document.body.classList.toggle('consent-update-focus', focusMode);
     const card = document.createElement('div');
-    card.className = 'consent-update-card state-' + (state.state || 'idle');
+    card.className = 'consent-update-card state-' + stateName;
 
     const head = document.createElement('div');
     head.className = 'consent-update-head';
@@ -349,6 +361,14 @@
     const version = document.createElement('span');
     version.textContent = copy.version;
     head.append(title, version);
+
+    const route = document.createElement('div');
+    route.className = 'consent-update-route';
+    const currentVersion = state.currentVersion ? 'v' + state.currentVersion : '';
+    const latestVersion = state.latestVersion ? 'v' + state.latestVersion : '';
+    route.textContent = currentVersion && latestVersion && currentVersion !== latestVersion
+      ? currentVersion + ' → ' + latestVersion
+      : latestVersion || currentVersion;
 
     const detail = document.createElement('p');
     detail.className = 'consent-update-detail';
@@ -369,6 +389,9 @@
     const phase = document.createElement('div');
     phase.className = 'consent-update-phase';
     phase.textContent = copy.phase;
+    const showPhaseText = Boolean(copy.phase && copy.phase !== copy.detail);
+    const steps = createUpdateSteps(stateName);
+    const footnote = createUpdateFootnote(stateName);
 
     const actions = document.createElement('div');
     actions.className = 'consent-update-actions';
@@ -387,10 +410,15 @@
     live.setAttribute('aria-live', 'polite');
     live.textContent = ['committed', 'rolled_back', 'failed'].includes(state.state) ? copy.phase : '';
 
-    card.append(head, detail);
+    card.append(head);
+    if ((focusMode || stateName === 'update_available') && route.textContent) card.append(route);
+    card.append(detail);
     if (!['idle', 'update_available'].includes(state.state) || options.busyAction === 'check') {
-      card.append(progressEl, phase);
+      card.append(progressEl);
+      if (showPhaseText) card.append(phase);
     }
+    if (steps) card.append(steps);
+    if (footnote) card.append(footnote);
     card.append(actions, live);
     if (state.state === 'failed' && (state.code || state.message)) {
       const details = document.createElement('details');
@@ -405,6 +433,57 @@
     if (focusedAction) {
       section.querySelector('[data-update-action="' + focusedAction + '"]:not(:disabled)')?.focus();
     }
+  }
+
+  function createUpdateSteps(state) {
+    const activeIndex = {
+      downloading: 0,
+      staged: 1,
+      waiting_for_idle: 1,
+      applying: 2,
+      awaiting_health: 2,
+      committed: 3,
+      rolled_back: 2
+    }[state];
+    if (!Number.isInteger(activeIndex)) return null;
+    const labels = [
+      utx('Download and verify', '下载并验证'),
+      utx('Wait for a safe point', '等待安全时机'),
+      utx('Restart and health check', '重启并健康检查')
+    ];
+    const list = document.createElement('ol');
+    list.className = 'consent-update-steps';
+    labels.forEach((label, index) => {
+      const item = document.createElement('li');
+      const status = state === 'committed'
+        ? 'done'
+        : state === 'rolled_back' && index === 2
+          ? 'error'
+          : index < activeIndex
+            ? 'done'
+            : index === activeIndex
+              ? 'active'
+              : 'pending';
+      item.className = 'is-' + status;
+      const marker = document.createElement('span');
+      marker.className = 'consent-update-step-marker';
+      marker.textContent = String(index + 1);
+      const text = document.createElement('span');
+      text.textContent = label;
+      item.append(marker, text);
+      list.append(item);
+    });
+    return list;
+  }
+
+  function createUpdateFootnote(state) {
+    if (!['downloading', 'staged', 'waiting_for_idle', 'applying', 'awaiting_health'].includes(state)) return null;
+    const note = document.createElement('p');
+    note.className = 'consent-update-footnote';
+    note.textContent = ['applying', 'awaiting_health'].includes(state)
+      ? utx('This popup may close briefly while the extension restarts.', '扩展重启时此窗口可能会短暂关闭。')
+      : utx('You can close this popup. The update continues in the background.', '可以关闭此窗口，更新会在后台继续。');
+    return note;
   }
 
   function getVisibleActions(view = {}, busyAction = '') {
@@ -422,6 +501,9 @@
       return [{ id: 'later', label: utx('Later', '稍后提醒'), primary: false }];
     }
     if (['downloading', 'applying', 'awaiting_health', 'checking'].includes(state)) return [];
+    if (state === 'committed') {
+      return [{ id: 'dismiss', label: utx('Done', '完成'), primary: true }];
+    }
     if (['failed', 'rolled_back'].includes(state)) {
       return [{ id: 'retry', label: utx('Retry', '重试'), primary: true }];
     }
@@ -434,6 +516,7 @@
       retry: utx('Checking...', '正在检查...'),
       install: utx('Starting update...', '正在启动更新...'),
       later: utx('Saving...', '正在保存...')
+      , dismiss: utx('Closing...', '正在关闭...')
     }[action] || utx('Working...', '处理中...');
   }
 
@@ -442,7 +525,7 @@
     const latest = state.latestVersion ? 'v' + state.latestVersion : '';
     const blocker = formatBlocker(state.blocker);
     const map = {
-      idle: [utx('Stable updates', '稳定版更新'), utx('Up to date', '已是最新版'), utx('Automatically checks signed stable releases.', '自动检查经过签名验证的稳定版本。')],
+      idle: [utx('Updates', '更新'), utx('Up to date', '已是最新版'), utx('Signed stable channel.', '签名稳定版通道。')],
       checking: [utx('Checking for updates', '正在检查更新'), '', utx('Checking the latest signed stable release', '正在检查最新签名稳定版本')],
       update_available: [utx('Update available', '发现新版本'), latest, view.snoozed ? utx('Reminder paused. Update remains ready here.', '提醒已暂停，仍可随时从这里更新。') : utx('Signed stable update for the extension and Native Host.', '扩展与 Native Host 的签名稳定更新。')],
       downloading: [utx('Downloading update', '正在下载更新'), latest, utx('Downloading and verifying the coordinated update', '正在下载并验证协调更新')],
@@ -450,7 +533,7 @@
       waiting_for_idle: [utx('Waiting for a safe point', '正在等待安全时机'), latest, blocker],
       applying: [utx('Installing update', '正在安装更新'), latest, utx('Installing extension and Native Host', '正在安装扩展与 Native Host')],
       awaiting_health: [utx('Checking updated components', '正在检查更新后的组件'), latest, utx('Restarting and checking both components', '正在重启并检查两个组件')],
-      committed: [utx('Update complete', '更新完成'), latest || current, utx('Extension and Native Host were updated together.', '扩展与 Native Host 已同步更新。')],
+      committed: [utx('Update complete', '更新完成'), latest || current, utx('Extension and Native Host are healthy.', '扩展与 Native Host 均运行正常。')],
       rolled_back: [utx('Previous version restored', '已恢复上一版本'), current, utx('Health check failed, so the previous coordinated pair was restored.', '健康检查失败，已恢复上一组协调版本。')],
       failed: [utx('Update could not continue', '更新无法继续'), latest, state.message || utx('Check the details and retry.', '请查看详情后重试。')]
     };
@@ -482,6 +565,7 @@
     const style = document.createElement('style');
     style.id = 'codex-overleaf-consent-update-styles';
     style.textContent = [
+      'html { overflow:hidden; background:#171918; }',
       'body { width:344px; padding:16px; background:#171918; color:#eceeec; font-family:"Avenir Next","Segoe UI",sans-serif; }',
       'h1 { font-size:16px; letter-spacing:-.01em; }',
       '.version-status { color:#a8ada9; }',
@@ -504,6 +588,31 @@
       '.consent-update-actions button:focus-visible { outline:2px solid #79b8f2; outline-offset:2px; }',
       '.consent-update-live { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }',
       '.consent-update-card details { margin-top:10px; color:#a9aea9; font-size:11px; } .consent-update-card details code { background:#202320; color:#c9ceca; }',
+      'body .consent-updates { margin-top:16px; padding:13px 0 0; border:0; border-top:1px solid #303733; border-radius:0; background:transparent; }',
+      'body .consent-update-card { border:0; padding:0; background:transparent; box-shadow:none; }',
+      'body .consent-updates.is-quiet .consent-update-card { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:6px 12px; }',
+      'body .consent-updates.is-quiet .consent-update-detail { display:none; }',
+      'body .consent-updates.is-quiet .consent-update-actions { grid-column:2; grid-row:1; margin:0; }',
+      'body .consent-updates.is-quiet .consent-update-actions button { width:auto; min-width:0; padding:5px 9px; border-color:transparent; background:transparent; color:#aeb7b1; }',
+      'body .consent-updates.is-offer, body .consent-updates.is-focus { padding-top:0; border-top:0; }',
+      'body .consent-updates.is-offer .consent-update-card { padding:15px; border:1px solid #34433b; border-radius:12px; background:linear-gradient(145deg,#202622,#1b201d); box-shadow:0 12px 32px rgba(0,0,0,.16); }',
+      'body.consent-update-focus { width:340px; min-height:340px; padding:20px; }',
+      'body.consent-update-focus > .version-status, body.consent-update-focus > #open-panel, body.consent-update-focus > #status, body.consent-update-focus > .install { display:none !important; }',
+      'body.consent-update-focus > h1 { margin-bottom:18px; }',
+      'body.consent-update-focus .consent-updates { margin-top:0; padding:0; border:0; }',
+      'body.consent-update-focus .consent-update-card { min-height:274px; padding:18px; border:1px solid #35443d; border-radius:14px; background:radial-gradient(circle at 95% 0,rgba(79,158,232,.12),transparent 42%),linear-gradient(150deg,#202522,#1a1e1c); box-shadow:0 18px 42px rgba(0,0,0,.24); }',
+      '.consent-update-route { margin:9px 0 0; color:#d9e6dd; font:600 13px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:-.02em; }',
+      '.consent-update-steps { display:grid; gap:10px; margin:16px 0 0; padding:0; list-style:none; }',
+      '.consent-update-steps li { display:grid; grid-template-columns:24px minmax(0,1fr); align-items:center; gap:9px; color:#8f9892; font-size:12px; }',
+      '.consent-update-step-marker { display:inline-flex; width:22px; height:22px; align-items:center; justify-content:center; border:1px solid #3a413d; border-radius:999px; color:#89918c; font:700 10px/1 ui-monospace,monospace; }',
+      '.consent-update-steps li.is-done { color:#aeb9b2; }',
+      '.consent-update-steps li.is-done .consent-update-step-marker { border-color:#42694f; color:#8bd79e; background:#21392a; }',
+      '.consent-update-steps li.is-active { color:#edf2ef; }',
+      '.consent-update-steps li.is-active .consent-update-step-marker { border-color:#68a8e2; color:#eef7ff; background:#2d669a; box-shadow:0 0 0 3px rgba(98,168,232,.12); }',
+      '.consent-update-steps li.is-error .consent-update-step-marker { border-color:#9d554f; color:#ffd9d5; background:#542b28; }',
+      '.consent-update-footnote { margin:15px 0 0; padding-top:12px; border-top:1px solid #303733; color:#929b95; font-size:11px; }',
+      'body .consent-updates.is-result .consent-update-progress { margin-top:18px; }',
+      'body .consent-updates.is-focus .consent-update-actions { margin-top:18px; }',
       '@keyframes consent-progress { 0% { transform:translateX(-110%); } 100% { transform:translateX(240%); } }',
       '@media (prefers-reduced-motion:reduce) { .consent-update-progress.is-indeterminate span { animation:none; width:65% !important; } }'
     ].join('\n');

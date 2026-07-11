@@ -6,13 +6,13 @@
     <link rel="stylesheet" href="popup.css">
   </head>
   <body>
-    <h1>Codex Overleaf Link</h1>
-    <div class="version-status">
+    <h1 class="popup-brand">Codex Overleaf Link</h1>
+    <div class="version-status" data-popup-context>
       <span id="compat-status-icon" class="status-icon incompatible" title="Native host incompatible">X</span>
       <span id="version-pair">Extension unknown / Native unknown</span>
     </div>
-    <button id="open-panel">Open panel in Overleaf</button>
-    <p id="status">Use this on an Overleaf project tab.</p>
+    <button id="open-panel" data-popup-context>Open panel in Overleaf</button>
+    <p id="status" data-popup-context>Use this on an Overleaf project tab.</p>
     <section class="updates" aria-labelledby="updates-title">
       <div class="section-head">
         <strong id="updates-title">Stable updates</strong>
@@ -25,7 +25,7 @@
         <button id="postpone-update" class="quiet" type="button" hidden>Later</button>
       </div>
     </section>
-    <div id="native-install" class="install" hidden>
+    <div id="native-install" class="install" data-popup-context hidden>
       <strong>Native host attention required</strong>
       <p>Run this command in Terminal, then reload this extension in Chrome.</p>
       <code id="install-command"></code>

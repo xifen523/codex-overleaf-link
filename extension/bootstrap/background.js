@@ -24,6 +24,10 @@ try {
   runtimeLoadError = error;
 }
 
+globalThis.CodexOverleafManagedUpdateExecutor = Object.freeze({
+  installAuthorizedUpdate: () => checkAndStage({ manual: true })
+});
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'codex-overleaf/update-get-state') {
     getUpdateState().then(sendResponse);
