@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.9.7] - 2026-07-12
+
+### Added
+
+- Added a dedicated Update Center that stays open when focus moves away from the toolbar popup.
+- Added a persistent three-stage view for download verification, safe-point waiting, and restart health checks.
+
+### Changed
+
+- Routed update and retry actions from the toolbar popup into one named Update Center window.
+- Restored update progress from saved state after runtime restarts and made transient reconnects explicit.
+- Required Update Center assets in managed installs and verified release archives.
+
 ## v1.9.6 - 2026-07-11
 
 - Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking now resolve to v1.9.6; native protocol `1` remains unchanged. Release artifacts resolve to codex-overleaf-link-extension-v1.9.6.zip, codex-overleaf-native-host-v1.9.6.tar.gz, and codex-overleaf-link-1.9.6.tgz.
