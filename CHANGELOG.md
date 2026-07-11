@@ -13,6 +13,11 @@
 - Restored update progress from saved state after runtime restarts and made transient reconnects explicit.
 - Required Update Center assets in managed installs and verified release archives.
 
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.7.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.7.zip`, `codex-overleaf-native-host-v1.9.7.tar.gz`, and `codex-overleaf-link-1.9.7.tgz`.
+
 ## v1.9.6 - 2026-07-11
 
 - Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking now resolve to v1.9.6; native protocol `1` remains unchanged. Release artifacts resolve to codex-overleaf-link-extension-v1.9.6.zip, codex-overleaf-native-host-v1.9.6.tar.gz, and codex-overleaf-link-1.9.6.tgz.
