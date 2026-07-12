@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.9.13 - 2026-07-12
+
+### Fixed
+
+- Stable update discovery now runs once when Chrome/Chromium or the extension starts, so a newly published release is discovered without waiting for the next 24-hour periodic check.
+- Manual checks, the existing periodic check, user consent, safe-point gating, signature verification, and rollback behavior remain unchanged.
+
 ## v1.9.12 - 2026-07-12
 
 ### Changed

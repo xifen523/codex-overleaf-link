@@ -4,6 +4,8 @@
   const UPDATE_STATE_KEY = 'codex-overleaf-managed-update-state-v1';
   const CONSENT_STATE_KEY = 'codex-overleaf-update-consent-v1';
   const CHECK_ALARM = 'codex-overleaf-consent-update-check';
+  const STARTUP_CHECK_SESSION_KEY = 'codex-overleaf-startup-update-check-v1';
+  const STARTUP_CHECK_CLAIMED_FLAG = '__codexOverleafStartupUpdateCheckClaimed';
   const CHECK_INTERVAL_MINUTES = 24 * 60;
   const SNOOZE_MS = 24 * 60 * 60 * 1000;
   const CANDIDATE_MAX_AGE_MS = 5 * 60 * 1000;
@@ -68,6 +70,24 @@
     await settleTerminalConsent();
     await armLegacyGuard();
     await publishView();
+    if (await claimStartupCheck()) {
+      void enqueuePolicyAction(() => checkOnly({ manual: false })).catch(() => {});
+    }
+  }
+
+  async function claimStartupCheck() {
+    if (root[STARTUP_CHECK_CLAIMED_FLAG] === true) return false;
+    root[STARTUP_CHECK_CLAIMED_FLAG] = true;
+    const sessionStorage = chrome.storage?.session;
+    if (!sessionStorage?.get || !sessionStorage?.set) return true;
+    try {
+      const stored = await sessionStorage.get(STARTUP_CHECK_SESSION_KEY);
+      if (stored?.[STARTUP_CHECK_SESSION_KEY] === true) return false;
+      await sessionStorage.set({ [STARTUP_CHECK_SESSION_KEY]: true });
+      return true;
+    } catch (_error) {
+      return true;
+    }
   }
 
   async function handleMessage(message) {

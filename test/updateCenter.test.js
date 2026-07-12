@@ -39,3 +39,14 @@ test('Overleaf update actions stay in the current tab and never create an update
   assert.doesNotMatch(coordinator, /bootstrap\/update\.html/);
   assert.doesNotMatch(coordinator, /chrome\.windows\.create/);
 });
+
+test('consent updater checks once at browser or extension startup without changing periodic checks', () => {
+  const coordinator = read('extension/src/backgroundUpdateCoordinator.js');
+
+  assert.match(coordinator, /STARTUP_CHECK_SESSION_KEY/);
+  assert.match(coordinator, /chrome\.storage\?\.session/);
+  assert.match(coordinator, /if \(await claimStartupCheck\(\)\)/);
+  assert.match(coordinator, /enqueuePolicyAction\(\(\) => checkOnly\(\{ manual: false \}\)\)/);
+  assert.match(coordinator, /delayInMinutes:\s*0\.5/);
+  assert.match(coordinator, /periodInMinutes:\s*CHECK_INTERVAL_MINUTES/);
+});
