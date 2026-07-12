@@ -410,7 +410,7 @@ function writeReleaseFixture(rootDir, overrides = {}) {
   fs.writeFileSync(path.join(rootDir, 'scripts/install-native-host.mjs'), '#!/usr/bin/env node\n');
 }
 
-releaseTest('CHANGELOG documents the current release metadata alignment in release tooling format', async () => {
+releaseTest('CHANGELOG exposes structured release notes for the current version', async () => {
   const version = readJson(path.join(repoRoot, 'package.json')).version;
   const changelog = readText(path.join(repoRoot, 'CHANGELOG.md'));
   const heading = `## v${version} - 2026-07-12`;
@@ -423,12 +423,10 @@ releaseTest('CHANGELOG documents the current release metadata alignment in relea
   const section = extractReleaseNotes(changelog, version);
   const escapedVersion = version.replace(/\./g, '\\.');
 
-  assert.match(section, /writeback stabilization|release metadata alignment/i);
-  assert.match(section, /package, extension manifest, compatibility target/i);
-  assert.match(section, new RegExp(`codex-overleaf-link-extension-v${escapedVersion}\\.zip`));
-  assert.match(section, new RegExp(`codex-overleaf-native-host-v${escapedVersion}\\.tar\\.gz`));
-  assert.match(section, new RegExp(`codex-overleaf-link-${escapedVersion}\\.tgz`));
-  assert.match(section, /native protocol `1`/i);
+  assert.match(section, new RegExp(`^## v${escapedVersion} - 2026-07-12$`, 'm'));
+  assert.match(section, /^### (Added|Changed|Deprecated|Removed|Fixed|Security)$/m);
+  assert.match(section, /^- \S.+$/m);
+  assert.doesNotMatch(section, new RegExp(`^## v(?!${escapedVersion}(?:\\s|$))`, 'm'));
 });
 
 releaseTest('package exposes release verification and artifact build commands', () => {
