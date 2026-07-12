@@ -38,7 +38,7 @@ test('startNewSession reuses an empty idle active session instead of minting a g
 
 test('the active-session header bar exposes inline rename + delete', () => {
   const renderer = repo('extension/src/content/panelRenderer.js');
-  const runtime = repo('extension/src/content/sessionManager.js');
+  const runtime = repo('extension/src/content/sessionMenuView.js');
   // markup
   assert.match(renderer, /data-session-label-text/);
   assert.match(renderer, /data-session-rename-input/);
@@ -90,13 +90,14 @@ test('renaming never promotes the placeholder/auto-derived title to a manual gho
   assert.match(commit, /cleanTitle !== tr\('newSessionFallback'\)/);
   assert.match(commit, /cleanTitle !== derived/);
   assert.match(commit, /titleSource: isCustom \? 'manual' : 'auto'/);
-  const begin = extractFunction(runtime, 'beginActiveSessionRename');
+  const view = repo('extension/src/content/sessionMenuView.js');
+  const begin = extractFunction(view, 'beginActiveSessionRename');
   assert.match(begin, /isDisplayableSession\(active\) \? getSessionDisplayTitle\(active\) : ''/);
   assert.match(begin, /input\.value\.trim\(\) !== seed\.trim\(\)/, 'an unchanged rename is a no-op');
 });
 
 test('header delete is disabled for the sole empty session + rename control is localized', () => {
-  const runtime = repo('extension/src/content/sessionManager.js');
+  const runtime = repo('extension/src/content/sessionMenuView.js');
   const label = extractFunction(runtime, 'applySessionLabel');
   assert.match(label, /soleEmpty/);
   assert.match(label, /\.length <= 1/);
@@ -117,7 +118,7 @@ test('the header title is a session dropdown: list, switch, and New session in p
   assert.match(renderer, /data-session-menu\b/);
   assert.match(renderer, /codex-thread-title-chevron/);
 
-  const manager = repo('extension/src/content/sessionManager.js');
+  const manager = repo('extension/src/content/sessionMenuView.js');
   assert.match(manager, /function toggleSessionMenu\(/);
   assert.match(manager, /function closeSessionMenu\(/);
   const render = extractFunction(manager, 'renderSessionMenu');

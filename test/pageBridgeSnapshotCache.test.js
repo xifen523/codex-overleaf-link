@@ -12,6 +12,10 @@ const pageBridgeSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/pageBridge.js'),
   'utf8'
 );
+const saveStateSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/saveState.js'),
+  'utf8'
+);
 const pageBridgeCapabilityPath = path.join(__dirname, '../extension/src/page/pageBridgeCapability.js');
 const pageBridgeCapabilitySource = fs.existsSync(pageBridgeCapabilityPath)
   ? fs.readFileSync(pageBridgeCapabilityPath, 'utf8')
@@ -1272,6 +1276,7 @@ function createSnapshotHarness({
   });
 
   vm.runInContext(overleafCapabilitiesSource, context, { filename: 'overleafCapabilities.js' });
+  vm.runInContext(saveStateSource, context, { filename: 'saveState.js' });
   vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
   vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
   vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });

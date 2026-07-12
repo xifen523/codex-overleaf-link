@@ -13,6 +13,10 @@ const pageBridgeSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/pageBridge.js'),
   'utf8'
 );
+const saveStateSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/saveState.js'),
+  'utf8'
+);
 const pageBridgeCapabilityPath = path.join(__dirname, '../extension/src/page/pageBridgeCapability.js');
 const pageBridgeCapabilitySource = fs.existsSync(pageBridgeCapabilityPath)
   ? fs.readFileSync(pageBridgeCapabilityPath, 'utf8')
@@ -63,10 +67,11 @@ const overleafRealtimeObserverSource = fs.readFileSync(
 );
 
 test('page bridge save-state source requires tri-state positive verification', () => {
-  assert.doesNotMatch(pageBridgeSource, /assume saved/i);
-  assert.match(pageBridgeSource, /verified_saved/);
-  assert.match(pageBridgeSource, /unknown_timeout/);
-  assert.match(pageBridgeSource, /unavailable/);
+  assert.doesNotMatch(saveStateSource, /assume saved/i);
+  assert.match(saveStateSource, /verified_saved/);
+  assert.match(saveStateSource, /unknown_timeout/);
+  assert.match(saveStateSource, /unavailable/);
+  assert.match(pageBridgeSource, /CodexOverleafSaveState/);
 });
 
 test('page bridge capability helper validates tokens and locks initialization', () => {
@@ -2891,6 +2896,7 @@ function createPageBridgeHarness({
 
   vm.runInContext(otTextSource, context, { filename: 'otText.js' });
   vm.runInContext(overleafCapabilitiesSource, context, { filename: 'overleafCapabilities.js' });
+  vm.runInContext(saveStateSource, context, { filename: 'saveState.js' });
   vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
   vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
   vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });

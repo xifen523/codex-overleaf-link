@@ -348,6 +348,15 @@ test('page bridge capability guard loads before the page bridge from web accessi
   assert.ok(capabilityIndex < pageBridgeIndex, 'page bridge capability guard should load before pageBridge.js');
 });
 
+test('carved settings, session-menu, and save-state modules load before their consumers', () => {
+  const scripts = extensionManifest.content_scripts[0].js;
+  const resources = extensionManifest.web_accessible_resources[0].resources;
+  assert.ok(scripts.indexOf('src/content/projectSettingsCoordinator.js') < scripts.indexOf('src/content/contentRuntime.js'));
+  assert.ok(scripts.indexOf('src/content/sessionMenuView.js') < scripts.indexOf('src/content/sessionManager.js'));
+  assert.ok(resources.includes('src/page/saveState.js'));
+  assert.ok(resources.indexOf('src/page/saveState.js') < resources.indexOf('src/pageBridge.js'));
+});
+
 test('manifest loads and exposes read-only OT page dependencies', () => {
   const scripts = extensionManifest.content_scripts[0].js;
   const resources = extensionManifest.web_accessible_resources[0].resources;

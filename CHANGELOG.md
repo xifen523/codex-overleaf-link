@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.9.12 - 2026-07-12
+
+### Changed
+
+- Extracted Overleaf save-state detection from the page bridge into a dedicated factory-injected page module while preserving `verified_saved`, `verified_quiet`, timeout, and unavailable semantics.
+- Extracted project instructions, governance rules, skill toggles, settings navigation, and theme coordination from the content runtime into a dedicated coordinator.
+- Extracted the active-session menu, header state, and inline rename surface from the session lifecycle manager into a dedicated view module.
+- Tightened architecture budgets around the smaller orchestration modules and updated production load order plus browser VM fixtures for the new seams.
+
+### Fixed
+
+- Removed a dormant undefined local-skill normalizer from the new settings seam after local managed-install verification exposed it as an eager startup dependency that prevented the panel from mounting.
+
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.12.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.12.zip`, `codex-overleaf-native-host-v1.9.12.tar.gz`, and `codex-overleaf-link-1.9.12.tgz`.
+- Native protocol `1` remains the compatibility contract between the Extension and Native Host.
+
 ## v1.9.11 - 2026-07-12
 
 ### Fixed

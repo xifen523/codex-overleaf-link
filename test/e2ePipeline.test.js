@@ -14,6 +14,10 @@ const pageBridgeSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/pageBridge.js'),
   'utf8'
 );
+const saveStateSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/saveState.js'),
+  'utf8'
+);
 const pageBridgeCapabilitySource = fs.readFileSync(
   path.join(__dirname, '../extension/src/page/pageBridgeCapability.js'),
   'utf8'
@@ -179,6 +183,7 @@ function createMinimalPageBridgeHarness({ activePath, files }) {
     console
   });
   vm.runInContext(overleafCapabilitiesSource, context, { filename: 'overleafCapabilities.js' });
+  vm.runInContext(saveStateSource, context, { filename: 'saveState.js' });
   vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
   vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
   vm.runInContext(treeOperationsSource, context, { filename: 'treeOperations.js' });

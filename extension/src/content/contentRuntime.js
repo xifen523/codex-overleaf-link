@@ -64,7 +64,7 @@
     undefined,
     getCurrentExtensionId()
   ) || 'curl -fsSL https://raw.githubusercontent.com/Ghqqqq/codex-overleaf-link/main/install.sh | bash -s -- --extension-id <chrome-extension-id>';
-  const PAGE_BRIDGE_SCRIPT_REVISION = '2026-05-21-editor-readiness-v10';
+  const PAGE_BRIDGE_SCRIPT_REVISION = '2026-05-21-editor-readiness-v11';
   const PAGE_BRIDGE_CAPABILITY = createPageBridgeCapability();
   const pageBridgeReady = injectPageBridge();
   const {
@@ -171,6 +171,64 @@
     normalizeReferencePathForRuntime,
     hasUnsafeRuntimePathSegments
   } = markdownText;
+
+  const projectSettingsCoordinator = window.CodexOverleafProjectSettingsCoordinator.create({
+    CodexOverleafTheme: window.CodexOverleafTheme,
+    GovernanceRules,
+    SettingsPanel,
+    closeContextTray: () => closeContextTray(),
+    closeDiagnosticsMenu: () => closeDiagnosticsMenu(),
+    closeDiagnosticsResult: () => closeDiagnosticsResult(),
+    closeModelConfigPopover: () => closeModelConfigPopover(),
+    closeSlashMenu: () => closeSlashMenu(),
+    getCurrentProjectId: () => getCurrentProjectId(),
+    getLocalSkillsPanel: () => localSkillsPanel,
+    getLocale: () => getLocale(),
+    getPanel: () => panel,
+    getPanelRendererInstance: () => panelRendererInstance,
+    getSettingsPanelInstance: () => settingsPanelInstance,
+    getState: () => state,
+    isProjectEditorRoute,
+    refreshStorageUsageSummary: () => refreshStorageUsageSummary(),
+    renderAuditHistoryPanel: () => renderAuditHistoryPanel(),
+    renderRecentProjectsVariant: (...args) => renderRecentProjectsVariant(...args),
+    saveStateSoon: () => saveStateSoon(),
+    setState: next => { state = next; },
+    tr,
+    tx,
+    window
+  });
+  const {
+    applyPanelTheme,
+    clearProjectSettingsStatus,
+    closeCustomInstructionsSettings,
+    closeSkillsView,
+    getCodexOverleafSkillEnabled,
+    getCustomInstructionsForCurrentProject,
+    getGovernanceRulesForCurrentProject,
+    getSkillLoadingSettings,
+    getThemePreference,
+    isCodexOverleafSkillEnabled,
+    normalizeCustomInstructionsByProject,
+    normalizeGovernanceRules,
+    normalizeGovernanceRulesByProject,
+    normalizeProjectPreferenceKey,
+    openCustomInstructionsSettings,
+    openSkillsView,
+    readGovernanceRulesFromSettings,
+    readSkillLoadingSettingsFromSettings,
+    refreshLocalSkills,
+    renderLocalSkillList,
+    setCodexOverleafSkillEnabled,
+    setCustomInstructionsForProject,
+    setGovernanceRulesForCurrentProject,
+    setProjectSettingsStatus,
+    setSkillLoadingSettings,
+    syncCustomInstructionsEditorForProject,
+    syncProjectSettingsEditorForProject,
+    toggleCustomInstructionsSettings,
+    updateSkillsEntrySummary
+  } = projectSettingsCoordinator;
 
   const otWarmMirror = window.CodexOverleafOtWarmMirror.create({
     tr,
@@ -702,8 +760,6 @@
   let slashCodexOverleafSkillsLoaded = false;
   let slashCodexOverleafSkillsLoading = false;
   let renderedSlashCommands = new Map();
-  let customInstructionsEditorProjectId = '';
-  let customInstructionsEditorValue = '';
   let runCancellationRequested = false;
   let activePluginConfirmResolve = null;
   const updateIdleClient = root.CodexOverleafUpdateIdle?.create({
@@ -1173,328 +1229,6 @@
 
   function closeDiagnosticsMenu() {
     DiagnosticsPanel.closeMenu(diagnosticsPanelInstance);
-  }
-
-  function normalizeCustomInstructionsByProject(value) {
-    const result = {};
-    const textMaxChars = 12000;
-    const keyMaxChars = 160;
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return result;
-    }
-    for (const rawKey of Object.keys(value)) {
-      const key = typeof rawKey === 'string' ? rawKey.trim() : '';
-      if (!key) {
-        continue;
-      }
-      const normalizedKey = key.length <= keyMaxChars ? key : key.slice(0, keyMaxChars - 1) + '…';
-      const rawText = typeof value[rawKey] === 'string' ? value[rawKey] : '';
-      result[normalizedKey] = rawText.length <= textMaxChars
-        ? rawText
-        : rawText.slice(0, textMaxChars - 1) + '…';
-    }
-    return result;
-  }
-
-  function getCustomInstructionsForCurrentProject() {
-    const projectId = getCurrentProjectId();
-    const normalizedProject = normalizeCustomInstructionsByProject({ [projectId]: '' });
-    const normalizedProjectId = Object.keys(normalizedProject)[0] || '';
-    if (!normalizedProjectId) {
-      return '';
-    }
-    return normalizeCustomInstructionsByProject(state?.customInstructionsByProject)[normalizedProjectId] || '';
-  }
-
-  function setCustomInstructionsForProject(projectId, value) {
-    const normalizedProject = normalizeCustomInstructionsByProject({ [projectId]: value });
-    const normalizedProjectId = Object.keys(normalizedProject)[0] || '';
-    if (!normalizedProjectId) {
-      return;
-    }
-    state = {
-      ...state,
-      customInstructionsByProject: {
-        ...normalizeCustomInstructionsByProject(state?.customInstructionsByProject),
-        [normalizedProjectId]: normalizedProject[normalizedProjectId]
-      }
-    };
-  }
-
-
-  function openCustomInstructionsSettings() {
-    if (!settingsPanelInstance) {
-      return;
-    }
-    closeDiagnosticsMenu();
-    closeDiagnosticsResult();
-    closeModelConfigPopover();
-    closeContextTray();
-    if (typeof closeSlashMenu === 'function') {
-      closeSlashMenu();
-    }
-    clearProjectSettingsStatus();
-    syncCustomInstructionsEditorForProject(getCurrentProjectId(), { force: true });
-    syncProjectSettingsEditorForProject();
-    panelRendererInstance?.setView?.('settings');
-    SettingsPanel.show(settingsPanelInstance);
-    refreshStorageUsageSummary();
-    // A history card left expanded re-loads on every settings open; the
-    // toggle listener only fires on the closed->open transition.
-    if (settingsPanelInstance?.container?.querySelector('[data-history-card]')?.open) {
-      renderAuditHistoryPanel();
-    }
-    if (typeof refreshLocalSkills === 'function') {
-      refreshLocalSkills().catch(error => setProjectSettingsStatus(tx(`Could not list local skills: ${error.message}`, `无法列出本地技能：${error.message}`), 'failed'));
-    }
-  }
-
-  function toggleCustomInstructionsSettings() {
-    if (SettingsPanel.isVisible(settingsPanelInstance)) {
-      closeCustomInstructionsSettings();
-      return;
-    }
-    openCustomInstructionsSettings();
-  }
-
-  function closeCustomInstructionsSettings() {
-    SettingsPanel.hide(settingsPanelInstance);
-    // Back from settings must return to the variant that matches the current
-    // route, not unconditionally to the per-project session view. On a
-    // non-project URL (e.g. /project, /project/, account / billing) the
-    // session view is meaningless and shows an empty per-project conversation
-    // UI; the user expects to return to the Recent-projects variant they
-    // came from. Mirror the SPA route hook's variant dispatch.
-    if (isProjectEditorRoute(window.location)) {
-      panelRendererInstance?.setView?.('session');
-    } else {
-      renderRecentProjectsVariant().catch(() => { /* swallow */ });
-    }
-  }
-
-  // Skills sub-page: reached from the settings screen's Codex Overleaf skills
-  // entry row. Its in-memory view-state is the panel root's data-view="skills".
-  function openSkillsView() {
-    if (!settingsPanelInstance) {
-      return;
-    }
-    panelRendererInstance?.setView?.('skills');
-    refreshLocalSkills().catch(error => setProjectSettingsStatus(tx(`Could not list local skills: ${error.message}`, `无法列出本地技能：${error.message}`), 'failed'));
-  }
-
-  function closeSkillsView() {
-    // The skills screen's back button returns to the settings screen.
-    panelRendererInstance?.setView?.('settings');
-  }
-
-  function updateSkillsEntrySummary() {
-    if (!settingsPanelInstance) {
-      return;
-    }
-    const summary = getSkillLoadingSettings().loadCodexOverleafSkills === false
-      ? tr('codexOverleafSkillsSummaryOff')
-      : tr('codexOverleafSkillsSummaryCount', { count: countEnabledCodexOverleafSkills() });
-    SettingsPanel.setSkillsSummary(settingsPanelInstance, summary);
-  }
-
-  function countEnabledCodexOverleafSkills() {
-    const skills = Array.isArray(state?.codexOverleafSkills) ? state.codexOverleafSkills : [];
-    return skills.reduce((total, skill) => {
-      const id = String(skill?.id || '').trim();
-      return id && isCodexOverleafSkillEnabled(id) ? total + 1 : total;
-    }, 0);
-  }
-
-  function syncCustomInstructionsEditorForProject(projectId = getCurrentProjectId(), options) {
-    const syncOptions = options || {};
-    const input = panel?.querySelector('[data-custom-instructions-input]');
-    if (!input) {
-      return;
-    }
-    const normalizedProject = normalizeCustomInstructionsByProject({ [projectId]: '' });
-    const normalizedProjectId = Object.keys(normalizedProject)[0] || '';
-    const storedValue = normalizedProjectId
-      ? normalizeCustomInstructionsByProject(state?.customInstructionsByProject)[normalizedProjectId] || ''
-      : '';
-    input.placeholder = tr('customInstructionsPlaceholder');
-    const editorIsOpen = panel?.dataset?.view === 'settings' || panel?.dataset?.view === 'skills';
-    const editorIsDirty = normalizedProjectId
-      && customInstructionsEditorProjectId === normalizedProjectId
-      && input.value !== customInstructionsEditorValue;
-    if (!syncOptions.force && editorIsOpen && editorIsDirty) {
-      return;
-    }
-    input.value = storedValue;
-    customInstructionsEditorProjectId = normalizedProjectId;
-    customInstructionsEditorValue = storedValue;
-  }
-
-  function normalizeGovernanceRulesByProject(value) {
-    const result = {};
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return result;
-    }
-    for (const rawKey of Object.keys(value)) {
-      const key = normalizeProjectPreferenceKey(rawKey);
-      if (!key) {
-        continue;
-      }
-      result[key] = normalizeGovernanceRules(value[rawKey]);
-    }
-    return result;
-  }
-
-  function normalizeSelectedLocalSkillIdsByProject(value) {
-    const result = {};
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return result;
-    }
-    for (const rawKey of Object.keys(value)) {
-      const key = normalizeProjectPreferenceKey(rawKey);
-      if (!key) {
-        continue;
-      }
-      result[key] = normalizeSelectedLocalSkillIds(value[rawKey]);
-    }
-    return result;
-  }
-
-  function normalizeProjectPreferenceKey(value) {
-    const text = String(value || '').trim();
-    return text.length <= 160 ? text : text.slice(0, 159) + '…';
-  }
-
-  function normalizeGovernanceRules(value = {}) {
-    if (GovernanceRules?.normalizeGovernanceRules) {
-      return GovernanceRules.normalizeGovernanceRules(value);
-    }
-    return {
-      readonlyPatterns: normalizePatternTextList(value.readonlyPatterns),
-      writablePatterns: normalizePatternTextList(value.writablePatterns),
-      sensitiveCheckEnabled: value.sensitiveCheckEnabled !== false,
-      sensitiveConfirmAllowed: value.sensitiveConfirmAllowed === true
-    };
-  }
-
-  function normalizePatternTextList(value) {
-    if (Array.isArray(value)) {
-      return value.map(item => String(item || '').trim()).filter(Boolean);
-    }
-    return String(value || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean);
-  }
-
-  function getGovernanceRulesForCurrentProject() {
-    const projectId = normalizeProjectPreferenceKey(getCurrentProjectId());
-    return normalizeGovernanceRulesByProject(state?.governanceRulesByProject)[projectId] || normalizeGovernanceRules({});
-  }
-
-  function setGovernanceRulesForCurrentProject(rules) {
-    const projectId = normalizeProjectPreferenceKey(getCurrentProjectId());
-    if (!projectId) {
-      return;
-    }
-    state = {
-      ...state,
-      governanceRulesByProject: {
-        ...normalizeGovernanceRulesByProject(state?.governanceRulesByProject),
-        [projectId]: normalizeGovernanceRules(rules)
-      }
-    };
-  }
-
-  // Theme: a global preference (dark / light / auto) applied to the panel root
-  // via themeController. 'auto' resolves through prefers-color-scheme; the
-  // disposer detaches the OS-change listener when switching away from auto.
-  let themeAutoDisposer = null;
-  function getThemePreference() {
-    return CodexOverleafTheme.normalizeThemePreference(state?.theme);
-  }
-  function applyPanelTheme(preference) {
-    const normalized = CodexOverleafTheme.normalizeThemePreference(preference);
-    CodexOverleafTheme.applyTheme(normalized, panel);
-    if (themeAutoDisposer) {
-      themeAutoDisposer();
-      themeAutoDisposer = null;
-    }
-    themeAutoDisposer = CodexOverleafTheme.watchAuto(normalized, panel);
-  }
-
-  function getSkillLoadingSettings() {
-    return {
-      loadCodexLocalSkills: state?.loadCodexLocalSkills !== false,
-      loadCodexOverleafSkills: state?.loadCodexOverleafSkills !== false
-    };
-  }
-
-  function setSkillLoadingSettings(settings = {}) {
-    state = {
-      ...state,
-      loadCodexLocalSkills: settings.loadCodexLocalSkills !== false,
-      loadCodexOverleafSkills: settings.loadCodexOverleafSkills !== false
-    };
-  }
-
-  function getCodexOverleafSkillEnabled() {
-    const map = state?.codexOverleafSkillEnabled;
-    return map && typeof map === 'object' && !Array.isArray(map) ? map : {};
-  }
-
-  function isCodexOverleafSkillEnabled(skillId) {
-    const map = getCodexOverleafSkillEnabled();
-    if (!Object.prototype.hasOwnProperty.call(map, skillId)) {
-      return true; // absent means enabled (default true)
-    }
-    return map[skillId] !== false;
-  }
-
-  function setCodexOverleafSkillEnabled(skillId, enabled) {
-    const map = getCodexOverleafSkillEnabled();
-    state = {
-      ...state,
-      codexOverleafSkillEnabled: {
-        ...map,
-        [skillId]: Boolean(enabled)
-      }
-    };
-    saveStateSoon();
-    renderLocalSkillList();
-  }
-
-  function readSkillLoadingSettingsFromSettings() {
-    return SettingsPanel.readState(settingsPanelInstance).skillToggles;
-  }
-
-  function readGovernanceRulesFromSettings() {
-    return normalizeGovernanceRules(SettingsPanel.readState(settingsPanelInstance).governanceRules);
-  }
-
-  function syncProjectSettingsEditorForProject() {
-    SettingsPanel.loadState(settingsPanelInstance, {
-      governanceRules: getGovernanceRulesForCurrentProject(),
-      skillToggles: getSkillLoadingSettings(),
-      theme: getThemePreference(),
-      language: getLocale()
-    });
-    renderLocalSkillList();
-  }
-
-  function setProjectSettingsStatus(text, status = 'info') {
-    SettingsPanel.setStatus(settingsPanelInstance, text, status);
-  }
-
-  function clearProjectSettingsStatus() {
-    SettingsPanel.clearStatus(settingsPanelInstance);
-  }
-
-  async function refreshLocalSkills() {
-    return localSkillsPanel.refreshLocalSkills();
-  }
-
-  function renderLocalSkillList() {
-    localSkillsPanel.renderLocalSkillList();
-    // Keep the settings-screen entry-row summary in sync with the skill list:
-    // it reflects the enabled-skill count (or "Off" when the master is off).
-    updateSkillsEntrySummary();
   }
 
   function handleComposerPaste(event) {
@@ -6082,6 +5816,7 @@
     await injectScriptOnce('src/shared/governanceRules.js', 'codex-overleaf-governance-rules-script');
     await injectScriptOnce('src/shared/sensitiveScan.js', 'codex-overleaf-sensitive-scan-script');
     await injectScriptOnce('src/shared/auditRecords.js', 'codex-overleaf-audit-records-script');
+    await injectScriptOnce('src/page/saveState.js', 'codex-overleaf-save-state-script', { force: true });
     await injectScriptOnce('src/page/overleafCapabilities.js', 'codex-overleaf-capabilities-script');
     await injectScriptOnce('src/page/compileBridge.js', 'codex-overleaf-compile-bridge-script');
     await injectScriptOnce('src/page/overleafEditor.js', 'codex-overleaf-editor-script');
