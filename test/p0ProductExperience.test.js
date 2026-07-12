@@ -577,7 +577,7 @@ test('project settings expose governed rules and local skills without Overleaf a
   assert.doesNotMatch(contentScript, /uploadSelectedAssets/);
   assert.doesNotMatch(contentScript, /getAssetUploadBaseline/);
   assert.match(contentScript, /function normalizeGovernanceRulesByProject/);
-  assert.match(contentScript, /function normalizeSelectedLocalSkillIdsByProject/);
+  assert.doesNotMatch(contentScript, /function normalizeSelectedLocalSkillIdsByProject/);
   assert.match(contentScript, /function readSkillLoadingSettingsFromSettings/);
   assert.match(contentScript, /loadCodexLocalSkills/);
   assert.match(contentScript, /loadCodexOverleafSkills/);
