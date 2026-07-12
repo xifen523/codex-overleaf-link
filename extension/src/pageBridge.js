@@ -1308,8 +1308,11 @@
   async function waitForSaveState(params = {}) {
     const deadlineMs = Number.isFinite(Number(params.deadlineMs)) ? Number(params.deadlineMs) : 5000;
     const pollInterval = Number.isFinite(Number(params.pollIntervalMs)) ? Number(params.pollIntervalMs) : 100;
+    const quietFallbackMs = Number.isFinite(Number(params.quietFallbackMs)) ? Number(params.quietFallbackMs) : 1000;
     const deadline = Date.now() + Math.max(0, deadlineMs);
     let lastState = { state: 'unknown', reason: 'Overleaf save state has not been checked yet.' };
+    let quietSignature = '';
+    let quietSince = 0;
 
     do {
       let current;
@@ -1331,6 +1334,25 @@
           state: 'unavailable',
           reason: current.reason || 'Overleaf save state is unavailable.'
         };
+      }
+      const quietEligible = params.allowQuietEditorFallback === true
+        && current.state === 'unknown'
+        && /save indicator was not found/i.test(current.reason || '')
+        && window.navigator?.onLine !== false
+        && detectEditor()?.ok === true;
+      if (quietEligible) {
+        const text = String(readActiveEditorText() || '');
+        const signature = `${getActiveFilePath()}:${text.length}:${text.slice(0, 80)}:${text.slice(-80)}`;
+        if (signature === quietSignature && Date.now() - quietSince >= Math.max(0, quietFallbackMs)) {
+          return { ok: true, state: 'verified_quiet', evidence: 'stable_editor_snapshot_without_save_indicator' };
+        }
+        if (signature !== quietSignature) {
+          quietSignature = signature;
+          quietSince = Date.now();
+        }
+      } else {
+        quietSignature = '';
+        quietSince = 0;
       }
       lastState = current;
       if (Date.now() >= deadline) {

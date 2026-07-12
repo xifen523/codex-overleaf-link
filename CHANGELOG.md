@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.9.11 - 2026-07-12
+
+### Fixed
+
+- Added an update-only `verified_quiet` save-state proof for current Overleaf editors that no longer expose a Saved/Saving DOM indicator.
+- Required the browser to be online, the editor to be readable, the visible save indicator to be completely absent, and the editor text signature to remain stable before accepting quiet evidence.
+- Kept the existing 30-second user-activity window, three-second cross-probe stability window, busy-operation gates, and Native Host lock gate around the new proof.
+- Left writeback and compile save verification on the stricter `verified_saved` contract; the quiet fallback is opt-in only for coordinated update safety.
+
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.11.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.11.zip`, `codex-overleaf-native-host-v1.9.11.tar.gz`, and `codex-overleaf-link-1.9.11.tgz`.
+- Native protocol `1` remains the compatibility contract between the Extension and Native Host.
+
 ## v1.9.10 - 2026-07-12
 
 ### Fixed

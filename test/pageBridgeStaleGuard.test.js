@@ -114,6 +114,24 @@ test('page bridge maps a missing save indicator to unknown timeout', async () =>
   assert.match(result.reason, /save/i);
 });
 
+test('page bridge can opt into stable editor evidence when the save indicator is absent', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: { 'main.tex': 'stable content' }
+  });
+
+  const result = await bridge.call('waitForSaveState', {
+    deadlineMs: 20,
+    pollIntervalMs: 1,
+    allowQuietEditorFallback: true,
+    quietFallbackMs: 1
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'verified_quiet');
+  assert.equal(result.evidence, 'stable_editor_snapshot_without_save_indicator');
+});
+
 test('page bridge only returns ok true for a verified saved indicator', async () => {
   const verifiedIndicators = [
     'All changes saved',

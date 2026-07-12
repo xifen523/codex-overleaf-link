@@ -41,7 +41,7 @@
       } catch (_error) {
         saveResult = { ok: false, state: 'unavailable' };
       }
-      const saved = saveResult?.ok === true && saveResult?.state === 'verified_saved';
+      const saved = saveResult?.ok === true && ['verified_saved', 'verified_quiet'].includes(saveResult?.state);
       if (saved) {
         stableSavedSince = stableSavedSince || Date.now();
       } else {

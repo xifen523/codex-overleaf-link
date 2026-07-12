@@ -6,6 +6,7 @@ const test = require('node:test');
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'extension/bootstrap/background.js'), 'utf8');
 const contentRuntimeSource = fs.readFileSync(path.join(root, 'extension/src/content/contentRuntime.js'), 'utf8');
+const updateIdleSource = fs.readFileSync(path.join(root, 'extension/src/content/updateIdle.js'), 'utf8');
 const manifest = require('../extension/bootstrap/manifest.template.json');
 const runtimeManifest = require('../extension/runtime-manifest.json');
 
@@ -36,6 +37,9 @@ test('safe-point editors and post-update Overleaf refresh surfaces are tracked s
   assert.match(source, /const activeTabs = surfaceTabs\.filter\(tab => isEditorProjectTab\(tab\)/);
   assert.match(source, /const refreshTabs = surfaceTabs\.filter\(tab => !tab\.discarded/);
   assert.match(source, /UPDATE_RELOAD_TABS_KEY\]: refreshTabs\.map/);
+  assert.match(contentRuntimeSource, /allowQuietEditorFallback:\s*true/);
+  assert.match(contentRuntimeSource, /quietFallbackMs:\s*1000/);
+  assert.match(updateIdleSource, /'verified_saved', 'verified_quiet'/);
 });
 
 test('runtime manifest preserves content order and places idle probe before content runtime', () => {
