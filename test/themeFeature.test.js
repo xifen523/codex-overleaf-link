@@ -43,11 +43,12 @@ test('settingsPanel renders a wired theme selector (dark/light/auto)', () => {
 });
 
 test('contentRuntime applies the theme on render and persists the global preference', () => {
-  const src = repo('extension/src/content/contentRuntime.js');
-  assert.match(src, /function applyPanelTheme\(/);
-  assert.match(src, /applyPanelTheme\(getThemePreference\(\)\)/, 'theme must apply in applyStateToPanel');
-  assert.match(src, /CodexOverleafTheme\.applyTheme/);
-  assert.match(src, /state\.theme = themePref/, 'settings change must persist theme onto state');
+  const runtime = repo('extension/src/content/contentRuntime.js');
+  const settingsCoordinator = repo('extension/src/content/projectSettingsCoordinator.js');
+  assert.match(settingsCoordinator, /function applyPanelTheme\(/);
+  assert.match(runtime, /applyPanelTheme\(getThemePreference\(\)\)/, 'theme must apply in applyStateToPanel');
+  assert.match(settingsCoordinator, /CodexOverleafTheme\.applyTheme/);
+  assert.match(runtime, /state\.theme = themePref/, 'settings change must persist theme onto state');
 });
 
 test('panel state defaults, normalizes, and persists the theme preference', () => {
