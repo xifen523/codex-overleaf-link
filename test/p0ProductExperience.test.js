@@ -565,7 +565,7 @@ test('project settings expose governed rules and local skills without Overleaf a
   assert.match(settingsSource, /data-load-codex-overleaf-skills/);
   assert.match(settingsSource, /data-local-skill-list/);
   assert.match(contentScript, /CodexOverleafLocalSkillsPanel/);
-  assert.match(contentScript, /localSkillsPanel\.refreshLocalSkills/);
+  assert.match(contentScript, /getLocalSkillsPanel\(\)\.refreshLocalSkills/);
   assert.match(localSkillsPanel, /codexOverleafSkills/);
   assert.match(localSkillsPanel, /function getCodexOverleafSkillsForSettings/);
   assert.match(localSkillsPanel, /function removeCodexOverleafSkill/);
@@ -2046,7 +2046,7 @@ test('completion report is structured around user outcomes rather than a one-lin
   assert.match(agentTranscript, /下一步/);
   assert.doesNotMatch(contentScript, /nextStep: response\.error\.message/);
   assert.doesNotMatch(contentScript, /本地 Codex 返回错误/);
-  assert.doesNotMatch(contentScript, /Summary:/);
+  assert.doesNotMatch(extractFromContentScript('appendCompletionReport'), /Summary:/);
 });
 
 test('writeback completion report keeps Codex final summary as the conclusion', () => {
@@ -3543,6 +3543,11 @@ test('project custom instructions editor auto-saves on change and restores by pr
     const panelRendererInstance = {
       setView(v) { panel.dataset.view = v; }
     };
+    function getPanel() { return panel; }
+    function getState() { return state; }
+    function setState(next) { state = next; }
+    function getSettingsPanelInstance() { return settingsPanelInstance; }
+    function getPanelRendererInstance() { return panelRendererInstance; }
     function getCurrentProjectId() { return currentProjectId; }
     let lastExperimentalOtProjectId = '';
     function getSkillLoadingSettings() {
@@ -3671,6 +3676,11 @@ test('project settings gear toggles the settings panel closed when already open'
       loadState() {}
     };
     const panelRendererInstance = null;
+    function getPanel() { return panel; }
+    function getState() { return state; }
+    function setState(next) { state = next; }
+    function getSettingsPanelInstance() { return settingsPanelInstance; }
+    function getPanelRendererInstance() { return panelRendererInstance; }
     function getCurrentProjectId() { return currentProjectId; }
     // Stub the route-aware branch of closeCustomInstructionsSettings; this
     // toggle test pins the in-project flow (per-project session view).
@@ -3763,6 +3773,11 @@ test('project settings transient status is cleared when reopening the panel', ()
       loadState() {}
     };
     const panelRendererInstance = null;
+    function getPanel() { return panel; }
+    function getState() { return state; }
+    function setState(next) { state = next; }
+    function getSettingsPanelInstance() { return settingsPanelInstance; }
+    function getPanelRendererInstance() { return panelRendererInstance; }
     function getCurrentProjectId() { return currentProjectId; }
     // The transient-status test pins the in-project flow (registry stubs keep
     // isProjectEditorRoute true so closeCustomInstructionsSettings exercises
