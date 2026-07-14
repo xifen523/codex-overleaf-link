@@ -1,11 +1,17 @@
 (function initStorageDb(root, factory) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = factory();
+    module.exports = factory(require('./storageRunActions'));
   } else {
-    root.CodexOverleafStorageDb = factory();
+    root.CodexOverleafStorageDb = factory(root.CodexOverleafStorageRunActions);
   }
-})(typeof globalThis !== 'undefined' ? globalThis : window, function storageDbFactory() {
+})(typeof globalThis !== 'undefined' ? globalThis : window, function storageDbFactory(StorageRunActions) {
   'use strict';
+
+  if (!StorageRunActions ||
+      typeof StorageRunActions.compactRunsForStorage !== 'function' ||
+      typeof StorageRunActions.compactRunActionPayload !== 'function') {
+    throw new Error('Codex Overleaf storage run-action helpers are unavailable.');
+  }
 
   // IndexedDB versions are monotonic. v2.0 RC has already opened production
   // profiles at version 3, so lowering this value makes indexedDB.open throw a
@@ -633,89 +639,17 @@
       });
   }
 
-  var MAX_PERSISTED_ACTION_RUNS_PER_SESSION = 2;
-  var MAX_PERSISTED_ACTION_BYTES_PER_RUN = 320 * 1024;
-
   function compactRunsForStorage(runs, options) {
-    var selectedRuns = (Array.isArray(runs) ? runs : [])
-      .filter(function (run) { return run && typeof run.id === 'string'; })
-      .slice(-SESSION_STORAGE_LIMITS.maxRunsPerSession);
-    var actionRunIds = new Set();
-    if (options && options.preserveRunActionPayload === true) {
-      for (var index = selectedRuns.length - 1;
-        index >= 0 && actionRunIds.size < MAX_PERSISTED_ACTION_RUNS_PER_SESSION;
-        index -= 1) {
-        if (hasReloadableRunActionPayload(selectedRuns[index])) {
-          actionRunIds.add(selectedRuns[index].id);
-        }
-      }
-    }
-    return selectedRuns.map(function (run) {
-      return compactRunForStorage(run, actionRunIds.has(run.id));
-    });
-  }
-
-  function hasReloadableRunActionPayload(run) {
-    var trackedStatus = run && run.trackedChangeStatus;
-    var trackedLifecycle = (trackedStatus === 'pending' || trackedStatus === 'needs_review')
-      && Array.isArray(run.undoTrackedChanges) && run.undoTrackedChanges.length > 0
-      && Array.isArray(run.undoExpectedFiles) && run.undoExpectedFiles.length > 0
-      && Array.isArray(run.appliedOperations) && run.appliedOperations.length > 0;
-    var legacyUndo = Array.isArray(run && run.undoOperations) && run.undoOperations.length > 0;
-    return trackedLifecycle || legacyUndo;
-  }
-
-  function cloneSerializableArray(value) {
-    if (!Array.isArray(value)) {
-      return [];
-    }
-    try {
-      var clone = JSON.parse(JSON.stringify(value));
-      return Array.isArray(clone) ? clone : [];
-    } catch (_error) {
-      return [];
-    }
-  }
-
-  function getUtf8ByteLength(value) {
-    if (typeof TextEncoder === 'function') {
-      return new TextEncoder().encode(value).byteLength;
-    }
-    return value.length * 2;
-  }
-
-  function compactRunActionPayload(run, keepActionPayload) {
-    var empty = {
-      appliedOperations: [],
-      undoOperations: [],
-      undoBaseFiles: [],
-      undoTrackedChanges: [],
-      undoExpectedFiles: []
-    };
-    if (!keepActionPayload || !hasReloadableRunActionPayload(run)) {
-      return empty;
-    }
-    var payload = {
-      appliedOperations: cloneSerializableArray(run.appliedOperations),
-      undoOperations: cloneSerializableArray(run.undoOperations),
-      undoBaseFiles: cloneSerializableArray(run.undoBaseFiles),
-      undoTrackedChanges: cloneSerializableArray(run.undoTrackedChanges),
-      undoExpectedFiles: cloneSerializableArray(run.undoExpectedFiles)
-    };
-    var serialized;
-    try {
-      serialized = JSON.stringify(payload);
-    } catch (_error) {
-      return empty;
-    }
-    if (getUtf8ByteLength(serialized) > MAX_PERSISTED_ACTION_BYTES_PER_RUN) {
-      return empty;
-    }
-    return payload;
+    return StorageRunActions.compactRunsForStorage(
+      runs,
+      options,
+      SESSION_STORAGE_LIMITS.maxRunsPerSession,
+      compactRunForStorage
+    );
   }
 
   function compactRunForStorage(run, keepActionPayload) {
-    var actionPayload = compactRunActionPayload(run, keepActionPayload);
+    var actionPayload = StorageRunActions.compactRunActionPayload(run, keepActionPayload);
     var compact = {
       id: run.id,
       task: normalizeDisplayTextForStorage(run.task || 'untitled task', SESSION_STORAGE_LIMITS.taskChars),

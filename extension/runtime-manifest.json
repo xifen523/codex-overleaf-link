@@ -20,6 +20,7 @@
     "src/shared/sessionState.js",
     "src/shared/storageKeys.js",
     "src/shared/staleGuard.js",
+    "src/shared/storageRunActions.js",
     "src/shared/storageDb.js",
     "src/shared/storageMigration.js",
     "src/shared/compileAdapter.js",
