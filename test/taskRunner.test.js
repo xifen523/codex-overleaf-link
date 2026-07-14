@@ -134,7 +134,7 @@ test('bridge.ping returns bridge metadata', async () => {
   assert.equal(response.result.host, 'com.codex.overleaf');
   assert.equal(response.result.platform, process.platform);
   assert.equal(response.result.version, packageJson.version);
-  assert.deepEqual(response.result.supportedProtocol, { min: 1, max: 1 });
+  assert.deepEqual(response.result.supportedProtocol, { min: 1, max: 2 });
   assert.deepEqual(
     response.result.capabilities,
     Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true]))
