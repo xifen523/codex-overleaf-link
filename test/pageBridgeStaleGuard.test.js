@@ -1408,10 +1408,11 @@ test('page bridge routes acceptTrackedChanges to the writeback router: editor-un
   assert.equal(bridge.isReviewingActive(), false);
 });
 
-test('page bridge acceptTrackedChanges bails without re-writing when editor content has drifted', async () => {
-  // The editor-undo cannot reach the pre-write content (the user manually
-  // edited after the run). Accept All must bail WITHOUT re-writing so it never
-  // makes the document worse — same safety stance as Undo.
+test('page bridge acceptTrackedChanges preserves a unique unrelated suffix while replaying the run', async () => {
+  // The editor-undo cannot reach the pre-write content after a reload or a
+  // later edit. When the exact post-write checkpoint still occurs once, the
+  // snapshot fallback may safely preserve its surrounding prefix/suffix while
+  // accepting only this run's change.
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
     reviewingOk: true,
@@ -1442,8 +1443,8 @@ test('page bridge acceptTrackedChanges bails without re-writing when editor cont
   });
   assert.equal(write.ok, true, write.error || JSON.stringify(write));
 
-  // The user edits the document after the run; the post-write content the run
-  // hands Accept All no longer matches what is in the editor.
+  // The user appends unrelated content after the run. The run checkpoint is
+  // still present exactly once, so it can be rebased without guessing.
   bridge.setFile('main.tex', 'alpha delta gamma plus user edit');
 
   const accept = await bridge.call('acceptTrackedChanges', {
@@ -1456,10 +1457,11 @@ test('page bridge acceptTrackedChanges bails without re-writing when editor cont
     ]
   });
 
-  assert.equal(accept.ok, false, JSON.stringify(accept));
-  // The drifted document is left untouched — no re-write.
+  assert.equal(accept.ok, true, JSON.stringify(accept));
+  assert.equal(accept.skipped.length, 0, JSON.stringify(accept));
+  // The tracked run edit is replayed untracked while the later suffix remains.
   assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma plus user edit');
-  assert.equal(bridge.getEditorUndoClickCount(), 0, 'a drifted post-write content is detected before any undo');
+  assert.equal(bridge.getEditorUndoClickCount(), 0, 'snapshot fallback is used when native undo cannot prove the checkpoint');
 });
 
 test('page bridge rejects unsafe tracked-change paths before clicking reject controls', async () => {
