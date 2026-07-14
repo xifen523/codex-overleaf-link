@@ -1433,6 +1433,20 @@
 
 
 
+  function diffTrackedChangeRefs(before = [], after = []) {
+    const beforeKeys = new Set((before || []).map(ref => ref.key).filter(Boolean));
+    const seen = new Set();
+    const added = [];
+    for (const ref of after || []) {
+      if (!ref?.key || beforeKeys.has(ref.key) || seen.has(ref.key)) {
+        continue;
+      }
+      seen.add(ref.key);
+      added.push(ref);
+    }
+    return added;
+  }
+
   async function waitForTrackedChangeDiff(trackedBefore, paths, options = {}) {
     const waitMs = Number.isFinite(Number(options.waitMs)) ? Number(options.waitMs) : 3000;
     const intervalMs = Number.isFinite(Number(options.intervalMs)) ? Number(options.intervalMs) : 180;

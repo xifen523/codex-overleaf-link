@@ -1705,20 +1705,6 @@
   }
 
 
-  function diffTrackedChangeRefs(before = [], after = []) {
-    const beforeKeys = new Set((before || []).map(ref => ref.key).filter(Boolean));
-    const seen = new Set();
-    const added = [];
-    for (const ref of after || []) {
-      if (!ref?.key || beforeKeys.has(ref.key) || seen.has(ref.key)) {
-        continue;
-      }
-      seen.add(ref.key);
-      added.push(ref);
-    }
-    return added;
-  }
-
   function mergeTrackedChangeRefs(refs = []) {
     return normalizeTrackedChangeRefs(refs);
   }
