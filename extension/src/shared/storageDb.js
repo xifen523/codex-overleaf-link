@@ -9,7 +9,6 @@
   if (!StorageRunActions?.compactRunsForStorage || !StorageRunActions?.compactRunActionPayload) {
     throw new Error('Codex Overleaf storage run-action helpers are unavailable.');
   }
-
   // IndexedDB versions are monotonic; v2.0 RC profiles have already opened v3.
   // Lowering it hides otherwise-intact session history behind fallback state.
   var TARGET_SCHEMA_VERSION = 3;
