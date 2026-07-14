@@ -6090,7 +6090,7 @@
           focusFiles: Array.isArray(session.focusFiles) ? session.focusFiles : [],
           createdAt: session.createdAt,
           updatedAt: session.updatedAt
-        })
+        }, { preserveRunActionPayload: true })
       ));
       if (sessionRecords.length) {
         await StorageDb.putRecords('sessions', sessionRecords);

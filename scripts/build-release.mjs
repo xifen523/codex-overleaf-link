@@ -43,6 +43,15 @@ export function buildRelease(options = {}) {
   if (!version) {
     throw new Error('package.json must define a version.');
   }
+  const stableReleaseRef = `v${version}`;
+  const releaseRef = String(
+    options.releaseRef || process.env.CODEX_OVERLEAF_RELEASE_REF || stableReleaseRef
+  ).trim();
+  const escapedVersion = escapeRegExp(version);
+  if (!new RegExp(`^v${escapedVersion}(?:-rc\\.[1-9]\\d*)?$`).test(releaseRef)) {
+    throw new Error(`Release ref ${releaseRef || '(empty)'} must be ${stableReleaseRef} or an ${stableReleaseRef}-rc.N tag.`);
+  }
+  const releaseChannel = releaseRef === stableReleaseRef ? 'stable' : 'prerelease';
 
   const outputDir = path.resolve(options.outputDir || getDefaultReleaseOutputDir({ rootDir, version }));
   const extensionZipName = `codex-overleaf-link-extension-v${version}.zip`;
@@ -78,12 +87,12 @@ export function buildRelease(options = {}) {
   writeVersionPinnedInstallScript({
     sourcePath: path.join(rootDir, 'install.sh'),
     targetPath: copiedInstallPath,
-    version
+    releaseRef
   });
   writeVersionPinnedPowerShellInstallScript({
     sourcePath: path.join(rootDir, 'install.ps1'),
     targetPath: copiedWindowsInstallPath,
-    version
+    releaseRef
   });
   writeTopLevelUninstallScript({
     rootDir,
@@ -108,9 +117,9 @@ export function buildRelease(options = {}) {
   const manifest = {
     schemaVersion: 2,
     repository: 'Ghqqqq/codex-overleaf-link',
-    channel: 'stable',
+    channel: releaseChannel,
     version,
-    tag: `v${version}`,
+    tag: releaseRef,
     bootstrapProtocol: 1,
     gitCommit: getGitCommit(rootDir),
     createdAt: new Date().toISOString(),
@@ -132,6 +141,7 @@ export function buildRelease(options = {}) {
   return {
     outputDir,
     version,
+    releaseRef,
     artifacts: [
       ...payloadArtifactNames,
       'release-manifest.json',
@@ -595,8 +605,7 @@ function appendNpmReleaseGuidance(releaseNotes, version) {
     '```\n';
 }
 
-function writeVersionPinnedInstallScript({ sourcePath, targetPath, version }) {
-  const releaseRef = `v${version}`;
+function writeVersionPinnedInstallScript({ sourcePath, targetPath, releaseRef }) {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const patched = source.replace(
     'REF="${CODEX_OVERLEAF_REF:-main}"',
@@ -610,8 +619,7 @@ function writeVersionPinnedInstallScript({ sourcePath, targetPath, version }) {
   fs.chmodSync(targetPath, fs.statSync(sourcePath).mode & 0o777);
 }
 
-function writeVersionPinnedPowerShellInstallScript({ sourcePath, targetPath, version }) {
-  const releaseRef = `v${version}`;
+function writeVersionPinnedPowerShellInstallScript({ sourcePath, targetPath, releaseRef }) {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const patched = source.replace(
     "$DefaultRef = 'main'",

@@ -7,12 +7,12 @@
 })(typeof globalThis !== 'undefined' ? globalThis : window, function compatibilityFactory() {
   'use strict';
 
-  const EXTENSION_PROTOCOL_VERSION = 1;
-  const SUPPORTED_NATIVE_PROTOCOL = Object.freeze({ min: 1, max: 1 });
+  const EXTENSION_PROTOCOL_VERSION = 2;
+  const SUPPORTED_NATIVE_PROTOCOL = Object.freeze({ min: 1, max: 2 });
   const MIN_NATIVE_VERSION = '1.0.0';
   const MIN_COMPATIBLE_NATIVE_VERSION = '1.0.0';
   const MIN_COMPATIBLE_EXTENSION_VERSION = '1.0.0';
-  const BUILD_TARGET_VERSION = '1.9.13';
+  const BUILD_TARGET_VERSION = '2.0.0';
   const DEFAULT_CHROME_EXTENSION_ID = 'illdpneeeopfffmiepaejglgmhpmdhdc';
   const REQUIRED_CAPABILITIES = Object.freeze([
     'bridgePing',
@@ -153,7 +153,7 @@
       return { status: 'native_too_old', classification: 'incompatible' };
     }
 
-    if (!reportsProtocolOne(native)) {
+    if (!reportsSupportedProtocol(native)) {
       return { status: 'protocol_unsupported', classification: 'incompatible' };
     }
 
@@ -233,8 +233,10 @@
     return requiredCapabilities.filter(capability => capabilities[capability] !== true);
   }
 
-  function reportsProtocolOne(native) {
-    if (native.protocolVersion !== EXTENSION_PROTOCOL_VERSION) {
+  function reportsSupportedProtocol(native) {
+    if (!Number.isInteger(native.protocolVersion) ||
+        native.protocolVersion < SUPPORTED_NATIVE_PROTOCOL.min ||
+        native.protocolVersion > SUPPORTED_NATIVE_PROTOCOL.max) {
       return false;
     }
     if (native.supportedProtocol === undefined || native.supportedProtocol === null) {

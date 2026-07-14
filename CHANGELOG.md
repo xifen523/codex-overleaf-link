@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.0.0 - 2026-07-14
+
+Release candidate focused on preserving user state and making Reviewing-mode lifecycle actions reliable across reloads. The Extension and Native Host move to protocol `2` while retaining protocol `1` compatibility during the transition.
+
+### Fixed
+
+- Preserved actionable Accept and Undo payloads for recent runs when session records are migrated into IndexedDB, so a reload no longer strips lifecycle controls from otherwise recoverable runs.
+- Kept the IndexedDB schema at monotonic version `3`, preventing profiles already opened by the RC from falling back to compact storage and appearing to lose session history.
+- Added a guarded snapshot fallback when Overleaf's in-memory editor undo history disappears after refresh; the fallback verifies the persisted post-write checkpoint before restoring or replaying content.
+- Rebased exact run checkpoints when Overleaf wraps the tracked edit with unrelated prefix or suffix text, while refusing ambiguous or drifted content.
+- Waited for asynchronously rendered Reviewing markers after normal writes, removing the intermittent state where Undo appeared without Accept.
+- Propagated the run project identity through lifecycle writeback so stale tabs cannot replay Accept or Undo into another Overleaf project.
+
+### Changed
+
+- Advanced the Extension and Native Host handshake to protocol `2`; protocol `1` hosts remain accepted when they provide the required capabilities.
+- Published the candidate as GitHub prerelease `v2.0.0-rc.1`. npm publication and stable-update discovery remain withheld until long-running local signoff is complete.
+
 ## v1.9.13 - 2026-07-12
 
 ### Fixed

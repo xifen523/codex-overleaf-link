@@ -10,14 +10,14 @@ const packageLock = require('../package-lock.json');
 const extensionManifest = require('../extension/manifest.json');
 const compatibility = require('../extension/src/shared/compatibility');
 
-test('current release version surfaces are aligned for v1.9.13 packaging', () => {
-  assert.equal(packageJson.version, '1.9.13');
+test('current release version surfaces are aligned for v2.0.0 packaging', () => {
+  assert.equal(packageJson.version, '2.0.0');
   assert.equal(packageLock.version, packageJson.version);
   assert.equal(packageLock.packages[''].version, packageJson.version);
   assert.equal(extensionManifest.version, packageJson.version);
   assert.equal(compatibility.BUILD_TARGET_VERSION, packageJson.version);
-  assert.equal(compatibility.EXTENSION_PROTOCOL_VERSION, 1);
-  assert.deepEqual(compatibility.SUPPORTED_NATIVE_PROTOCOL, { min: 1, max: 1 });
+  assert.equal(compatibility.EXTENSION_PROTOCOL_VERSION, 2);
+  assert.deepEqual(compatibility.SUPPORTED_NATIVE_PROTOCOL, { min: 1, max: 2 });
 });
 
 function readGitTrackedFiles() {

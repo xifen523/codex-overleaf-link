@@ -1309,6 +1309,39 @@ test('page bridge records and rejects Overleaf tracked changes for Reviewing wri
   assert.equal(bridge.getRejectClickCount(), 1);
 });
 
+test('page bridge waits for delayed Overleaf tracked-change markers after a Reviewing write', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    trackedChangeRenderDelayMs: 250,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+  assert.equal(write.trackedChanges.length, 1);
+  assert.equal(write.trackedChanges[0].path, 'main.tex');
+});
+
 test('page bridge routes acceptTrackedChanges to the writeback router: editor-undo then untracked replay', async () => {
   // Accept All no longer hunts per-change Accept controls. It editor-undoes the
   // run's tracked writeback back to its pre-write content, then re-applies the
@@ -2731,6 +2764,7 @@ function createPageBridgeHarness({
   saveIndicatorNodes = null,
   dispatchApplies = true,
   trackChangesOnDispatch = false,
+  trackedChangeRenderDelayMs = 0,
   realtimeObserverFactory = null,
   rerenderTrackedChangeIdsOnReject = false,
   editorUndoTargets = {},
@@ -2755,6 +2789,7 @@ function createPageBridgeHarness({
 }) {
   const fileMap = new Map(Object.entries(files));
   const trackedChanges = [];
+  let nextTrackedChangeId = 1;
   let selectedPath = activePath;
   let editorPath = initialEditorPath;
   let listener = null;
@@ -3082,12 +3117,17 @@ function createPageBridgeHarness({
           const before = fileMap.get(editorPath) || '';
           fileMap.set(editorPath, applyEditorChanges(fileMap.get(editorPath) || '', transaction.changes));
           if (reviewingActive && trackChangesOnDispatch) {
-            trackedChanges.push({
-              id: `change-${trackedChanges.length + 1}`,
+            const trackedChange = {
+              id: `change-${nextTrackedChangeId++}`,
               path: editorPath,
               before,
               after: fileMap.get(editorPath) || ''
-            });
+            };
+            if (trackedChangeRenderDelayMs > 0) {
+              setTimeout(() => trackedChanges.push(trackedChange), trackedChangeRenderDelayMs);
+            } else {
+              trackedChanges.push(trackedChange);
+            }
           }
         }
       }

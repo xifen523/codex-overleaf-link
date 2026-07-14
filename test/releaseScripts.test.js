@@ -161,11 +161,12 @@ function getReleaseWorkflowUploadFiles(workflow) {
 }
 
 function getExpectedReleaseWorkflowUploadFiles() {
-  const releaseDir = 'dist/releases/${{ github.ref_name }}';
+  const releaseDir = '${{ env.RELEASE_DIR }}';
+  const releaseAssetTag = '${{ env.RELEASE_ASSET_TAG }}';
   const checksumCoveredUploads = [
-    `${releaseDir}/codex-overleaf-link-extension-` + '${{ github.ref_name }}.zip',
-    `${releaseDir}/codex-overleaf-native-host-` + '${{ github.ref_name }}.tar.gz',
-    `${releaseDir}/codex-overleaf-update-` + '${{ github.ref_name }}.tar.gz',
+    `${releaseDir}/codex-overleaf-link-extension-${releaseAssetTag}.zip`,
+    `${releaseDir}/codex-overleaf-native-host-${releaseAssetTag}.tar.gz`,
+    `${releaseDir}/codex-overleaf-update-${releaseAssetTag}.tar.gz`,
     `${releaseDir}/codex-overleaf-link-` + '${{ env.PACKAGE_VERSION }}.tgz',
     `${releaseDir}/install.sh`,
     `${releaseDir}/install.ps1`,
@@ -496,14 +497,14 @@ releaseTest('release workflow grants publish permission and builds/verifies arti
   ]);
 });
 
-releaseTest('release workflow fails early when tag and package version differ', () => {
+releaseTest('release workflow accepts the stable tag or a numbered RC and rejects other tags', () => {
   const workflow = readReleaseWorkflow();
 
-  assert.match(workflow, /package_version="\$\(node -p "require\('\.\/package\.json'\)\.version"\)"/);
-  assert.match(workflow, /expected_tag="v\$\{package_version\}"/);
-  assert.match(workflow, /\[ "\$\{GITHUB_REF_NAME\}" != "\$\{expected_tag\}" \]/);
-  assert.match(workflow, /Release tag \$\{GITHUB_REF_NAME\} does not match package version \$\{expected_tag\}\./);
+  assert.match(workflow, /stable_tag="v\$\{package_version\}"/);
+  assert.match(workflow, /-rc\\\.\[1-9\]\[0-9\]\*/);
+  assert.match(workflow, /Release tag \$\{GITHUB_REF_NAME\} must be \$\{stable_tag\} or \$\{stable_tag\}-rc\.N\./);
   assert.match(workflow, /echo "PACKAGE_VERSION=\$\{package_version\}" >> "\$\{GITHUB_ENV\}"/);
+  assert.match(workflow, /echo "RELEASE_PRERELEASE=\$\{release_prerelease\}" >> "\$\{GITHUB_ENV\}"/);
   assertContainsInOrder(workflow, [
     'npm run verify:release -- --release-date',
     'name: Verify release tag matches package version',
@@ -602,12 +603,13 @@ releaseTest('release workflow publishes generated notes and built artifacts', ()
 
   assert.match(workflow, /uses:\s+softprops\/action-gh-release@v2/);
   assert.match(workflow, /^\s+draft:\s+false\s*$/m);
-  assert.match(workflow, /^\s+prerelease:\s+false\s*$/m);
+  assert.match(workflow, /^\s+prerelease:\s+\$\{\{ env\.RELEASE_PRERELEASE == 'true' \}\}\s*$/m);
   assert.match(workflow, /^\s+name:\s+\$\{\{ github\.ref_name \}\}\s*$/m);
   assert.match(
     workflow,
-    /^\s+body_path:\s+dist\/releases\/\$\{\{ github\.ref_name \}\}\/release-notes\.md\s*$/m
+    /^\s+body_path:\s+\$\{\{ env\.RELEASE_DIR \}\}\/release-notes\.md\s*$/m
   );
+  assert.match(workflow, /if:\s+env\.RELEASE_PRERELEASE != 'true'/);
   assertReleaseWorkflowUploadsExactArtifactSet(workflow);
   assert.match(workflow, /^\s+fail_on_unmatched_files:\s+true\s*$/m);
   assert.match(workflow, /^\s+overwrite_files:\s+false\s*$/m);
@@ -617,7 +619,7 @@ releaseTest('release workflow upload artifact gate rejects extra explicit files'
   const workflow = readReleaseWorkflow();
   const workflowWithExtraUpload = workflow.replace(
     /^(\s+fail_on_unmatched_files:)/m,
-    '            dist/releases/${{ github.ref_name }}/unchecked-extra.txt\n$1'
+    '            ${{ env.RELEASE_DIR }}/unchecked-extra.txt\n$1'
   );
 
   assert.throws(

@@ -88,7 +88,9 @@
         skipped
       };
     }
-    const snapshotUndo = await restoreExpectedFilesWithNoTraceUndo(expectedFiles, postFiles);
+    const snapshotUndo = await restoreExpectedFilesWithNoTraceUndo(expectedFiles, postFiles, {
+      runProjectId: params.runProjectId
+    });
     if (snapshotUndo.attempted) {
       applied.push(...snapshotUndo.applied);
       skipped.push(...snapshotUndo.skipped);
@@ -291,6 +293,7 @@
       .filter(file => file?.path && typeof file.content === 'string')
       .map(file => [normalizeSafeProjectPath(file.path), file.content])
       .filter(([path]) => path));
+    let snapshotContextRebased = false;
     const paths = Array.from(expectedByPath.keys()).filter(path => postByPath.has(path));
     if (!paths.length) {
       return {
@@ -313,30 +316,63 @@
     // the reject path relies on (its primary path).
     const appliedBeforeUndo = applied.length;
     const editorUndo = await rejectTrackedChangesViaEditorUndo(expectedFiles, postFiles, applied);
+    let undoReady = editorUndo.ok === true;
+    let snapshotUndo = null;
+    // A page refresh preserves the run checkpoint but clears CodeMirror's
+    // in-memory undo history. When the native editor undo made no progress,
+    // reuse Undo's guarded snapshot path: it first verifies that every file is
+    // still exactly at this run's post-write content, then restores the
+    // persisted pre-write content with Track Changes disabled. The normal
+    // Accept replay below can then apply the post-write patch untracked.
+    if (!undoReady && applied.length === appliedBeforeUndo) {
+      snapshotUndo = await restoreExpectedFilesWithNoTraceUndo(expectedFiles, postFiles, {
+        runProjectId: params.runProjectId
+      });
+      if (snapshotUndo.ok) {
+        applied.push(...snapshotUndo.applied);
+        for (const file of snapshotUndo.rebasedExpectedFiles || []) {
+          expectedByPath.set(file.path, file.content);
+        }
+        for (const file of snapshotUndo.rebasedPostFiles || []) {
+          if (postByPath.get(file.path) !== file.content) {
+            snapshotContextRebased = true;
+          }
+          postByPath.set(file.path, file.content);
+        }
+        undoReady = true;
+      }
+    }
     pushDiagnostic('editorUndo', {
-      ok: editorUndo.ok === true,
+      ok: undoReady,
       attempted: editorUndo.attempted === true,
       code: editorUndo.code || '',
       reason: editorUndo.reason || '',
-      pathsProcessed: applied.length - appliedBeforeUndo
+      pathsProcessed: applied.length - appliedBeforeUndo,
+      snapshotFallbackAttempted: snapshotUndo?.attempted === true,
+      snapshotFallbackOk: snapshotUndo?.ok === true,
+      snapshotFallbackApplied: snapshotUndo?.applied?.length || 0,
+      snapshotFallbackSkipped: snapshotUndo?.skipped?.length || 0
     });
-    if (!editorUndo.ok) {
-      // Drift bail: the editor-undo could not reach the pre-write state. Do NOT
-      // re-write — that would only make the document worse. Return not-ok so the
-      // run stays pending and the user can retry, same as Undo.
+    if (!undoReady) {
+      // Drift or a partial editor undo still bails. The snapshot fallback is
+      // allowed only when editor undo made no progress, and its own post-state
+      // verification prevents overwriting edits made after this run.
+      const snapshotFailure = snapshotUndo?.skipped?.[0]?.result;
       return {
         ok: false,
-        applied: [],
-        skipped: [{
-          trackedChange: null,
-          result: editorUndo.attempted || editorUndo.code
-            ? editorUndo
-            : {
-              ok: false,
-              code: 'accept_editor_undo_unavailable',
-              reason: '没有可执行的 Overleaf 原生撤销来清掉本轮留痕；Codex 没有接受这轮改动。'
-            }
-        }],
+        applied: snapshotUndo?.applied || [],
+        skipped: snapshotUndo?.skipped?.length
+          ? snapshotUndo.skipped
+          : [{
+            trackedChange: null,
+            result: snapshotFailure || (editorUndo.attempted || editorUndo.code
+              ? editorUndo
+              : {
+                ok: false,
+                code: 'accept_editor_undo_unavailable',
+                reason: '没有可执行的 Overleaf 原生撤销或安全快照回滚来清掉本轮留痕；Codex 没有接受这轮改动。'
+              })
+          }],
         diagnostics
       };
     }
@@ -417,7 +453,12 @@
     // applyOperationsCore — never a whole-file replaceAll, which would clobber
     // any unrelated content and produce one giant tracked change if anything
     // about the mode switch were imperfect.
-    const operationsResult = buildAcceptReplayOperations(paths, expectedByPath, postByPath, params.appliedOperations);
+    const operationsResult = buildAcceptReplayOperations(
+      paths,
+      expectedByPath,
+      postByPath,
+      snapshotContextRebased ? [] : params.appliedOperations
+    );
     if (!operationsResult.ok) {
       if (weToggledOff) {
         await setReviewingEnabled(true, { waitMs: 1800 });
@@ -975,7 +1016,7 @@
     return { ok: true, attempted: true };
   }
 
-  async function restoreExpectedFilesWithNoTraceUndo(expectedFiles, postFiles) {
+  async function restoreExpectedFilesWithNoTraceUndo(expectedFiles, postFiles, options = {}) {
     const expectedByPath = new Map((expectedFiles || [])
       .filter(file => file?.path && typeof file.content === 'string')
       .map(file => [normalizeSafeProjectPath(file.path), file.content])
@@ -985,12 +1026,16 @@
       .map(file => [normalizeSafeProjectPath(file.path), file.content])
       .filter(([path]) => path));
     const paths = Array.from(expectedByPath.keys()).filter(path => postByPath.has(path));
+    const rebasedExpectedByPath = new Map();
+    const rebasedPostByPath = new Map();
     if (!paths.length) {
       return {
         ok: false,
         attempted: false,
         applied: [],
-        skipped: []
+        skipped: [],
+        rebasedExpectedFiles: [],
+        rebasedPostFiles: []
       };
     }
 
@@ -1008,30 +1053,40 @@
           };
         }
       }
-      const ready = await waitForActiveEditorExpectedText(path, postByPath.get(path), 1500);
+      const ready = await waitForActiveEditorCheckpoint(
+        path,
+        expectedByPath.get(path),
+        postByPath.get(path),
+        1500
+      );
       if (!ready.ok) {
         return {
           ok: false,
           attempted: false,
           applied: [],
           skipped: [],
+          rebasedExpectedFiles: [],
+          rebasedPostFiles: [],
           code: 'snapshot_undo_current_mismatch',
           reason: `${path} 当前内容已经不是本轮写入后的内容；为避免覆盖你的后续修改，Codex 不执行快照撤销。`
         };
       }
+      rebasedExpectedByPath.set(path, ready.expectedContent);
+      rebasedPostByPath.set(path, ready.postContent);
     }
 
     const operations = paths.map(path => ({
       type: 'edit',
       path,
-      replaceAll: expectedByPath.get(path),
+      replaceAll: rebasedExpectedByPath.get(path),
       reason: 'Undo tracked edit'
     }));
     const result = await applyOperationsWithNoTraceUndo(operations, {
       baseFiles: paths.map(path => ({
         path,
-        content: postByPath.get(path)
-      }))
+        content: rebasedPostByPath.get(path)
+      })),
+      runProjectId: typeof options.runProjectId === 'string' ? options.runProjectId : ''
     });
     const toTrackedResult = item => ({
       trackedChange: {
@@ -1046,7 +1101,66 @@
       ok: !(result.skipped || []).length,
       attempted: true,
       applied: (result.applied || []).map(toTrackedResult),
-      skipped: (result.skipped || []).map(toTrackedResult)
+      skipped: (result.skipped || []).map(toTrackedResult),
+      rebasedExpectedFiles: paths.map(path => ({
+        path,
+        content: rebasedExpectedByPath.get(path)
+      })),
+      rebasedPostFiles: paths.map(path => ({
+        path,
+        content: rebasedPostByPath.get(path)
+      }))
+    };
+  }
+
+  async function waitForActiveEditorCheckpoint(filePath, expectedContent, postContent, timeoutMs) {
+    const deadline = Date.now() + Math.max(0, Number(timeoutMs) || 0);
+    let actual = readActiveEditorText();
+    while (Date.now() < deadline) {
+      const activeFileMatches = !filePath || getActiveFilePath() === filePath;
+      actual = readActiveEditorText();
+      if (activeFileMatches) {
+        const rebased = rebaseCheckpointPair(actual, expectedContent, postContent);
+        if (rebased.ok) {
+          return rebased;
+        }
+      }
+      await delay(60);
+    }
+    return {
+      ok: false,
+      text: actual
+    };
+  }
+
+  function rebaseCheckpointPair(actualContent, expectedContent, postContent) {
+    const actual = String(actualContent ?? '');
+    const expected = String(expectedContent ?? '');
+    const post = String(postContent ?? '');
+    if (actual === post) {
+      return {
+        ok: true,
+        expectedContent: expected,
+        postContent: post,
+        prefixLength: 0,
+        suffixLength: 0
+      };
+    }
+    if (!post) {
+      return { ok: false };
+    }
+    const matchIndex = actual.indexOf(post);
+    if (matchIndex < 0 || actual.indexOf(post, matchIndex + 1) >= 0) {
+      return { ok: false };
+    }
+    const prefix = actual.slice(0, matchIndex);
+    const suffix = actual.slice(matchIndex + post.length);
+    return {
+      ok: true,
+      expectedContent: prefix + expected + suffix,
+      postContent: actual,
+      prefixLength: prefix.length,
+      suffixLength: suffix.length
     };
   }
 

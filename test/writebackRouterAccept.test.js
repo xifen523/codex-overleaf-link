@@ -274,7 +274,7 @@ test('acceptTrackedChanges bails without re-writing when the editor-undo cannot 
   assert.equal(harness.state.editingActivations, 0);
 });
 
-test('acceptTrackedChanges bails when no editor-undo control is available', async () => {
+test('acceptTrackedChanges uses persisted snapshots after refresh clears editor undo history', async () => {
   const harness = createAcceptHarness({
     preContent: 'before\n',
     postContent: 'after\n',
@@ -287,9 +287,79 @@ test('acceptTrackedChanges bails when no editor-undo control is available', asyn
     postFiles: [{ path: harness.path, content: harness.postContent }]
   });
 
-  assert.equal(result.ok, false);
-  assert.deepEqual(harness.state.writes, []);
-  assert.equal(result.skipped.length, 1);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(harness.state.undoClicks, 0, 'refresh left no native undo control to click');
+  assert.equal(harness.state.editorText, harness.postContent);
+  assert.deepEqual(
+    harness.state.writes.map(write => write.kind),
+    ['replaceAll', 'patches'],
+    'snapshot restores pre-write text, then Accept replays the targeted patch untracked'
+  );
+  assert.equal(
+    result.applied.some(item => item.trackedChange?.key === `snapshot-undo:${harness.path}`),
+    true,
+    'result records the guarded snapshot fallback'
+  );
+  assert.equal(result.skipped.length, 0);
+});
+
+test('acceptTrackedChanges preserves a unique editor envelope added during tracked-change reload', async () => {
+  const prefix = '\n\n\n\n';
+  const harness = createAcceptHarness({
+    preContent: 'before\n',
+    postContent: 'after\n',
+    startContent: prefix + 'after\n',
+    noUndoControl: true
+  });
+
+  const result = await harness.router.acceptTrackedChanges({
+    runProjectId: 'refresh-project',
+    expectedFiles: [{ path: harness.path, content: harness.preContent }],
+    postFiles: [{ path: harness.path, content: harness.postContent }]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(harness.state.editorText, prefix + harness.postContent);
+  assert.deepEqual(
+    harness.state.writes.map(write => ({ kind: write.kind, text: write.text })),
+    [
+      { kind: 'replaceAll', text: prefix + harness.preContent },
+      { kind: 'patches', text: prefix + harness.postContent }
+    ],
+    'snapshot rollback and targeted replay preserve the surrounding editor context'
+  );
+  assert.equal(result.skipped.length, 0);
+});
+
+test('acceptTrackedChanges recomputes insertion offsets after checkpoint context rebasing', async () => {
+  const prefix = '\n\n\n\n';
+  const harness = createAcceptHarness({
+    preContent: 'abc\n',
+    postContent: 'abcX\n',
+    startContent: prefix + 'abcX\n',
+    noUndoControl: true
+  });
+
+  const result = await harness.router.acceptTrackedChanges({
+    runProjectId: 'refresh-project',
+    expectedFiles: [{ path: harness.path, content: harness.preContent }],
+    postFiles: [{ path: harness.path, content: harness.postContent }],
+    appliedOperations: [{
+      type: 'edit',
+      path: harness.path,
+      patches: [{ from: 3, to: 3, expected: '', insert: 'X' }]
+    }]
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(harness.state.editorText, prefix + harness.postContent);
+  assert.equal(harness.state.patchWrites.length, 1);
+  assert.equal(
+    harness.state.patchWrites[0][0].from,
+    prefix.length + 3,
+    'replay patch offset includes the preserved editor prefix'
+  );
+  assert.equal(result.skipped.length, 0);
 });
 
 test('acceptTrackedChanges bails without re-writing when Editing mode cannot be confirmed', async () => {

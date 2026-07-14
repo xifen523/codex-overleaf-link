@@ -48,7 +48,7 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
     return okResponse(request.id, {
       host: HOST_NAME,
       platform: getNativeRuntimePlatform({ env }),
-      protocolVersion: 1,
+      protocolVersion: 2,
       supportedProtocol: { ...SUPPORTED_NATIVE_PROTOCOL },
       capabilities: Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true])),
       minExtensionVersion: MIN_COMPATIBLE_EXTENSION_VERSION,
