@@ -6,17 +6,12 @@
   }
 })(typeof globalThis !== 'undefined' ? globalThis : window, function storageDbFactory(StorageRunActions) {
   'use strict';
-
-  if (!StorageRunActions ||
-      typeof StorageRunActions.compactRunsForStorage !== 'function' ||
-      typeof StorageRunActions.compactRunActionPayload !== 'function') {
+  if (!StorageRunActions?.compactRunsForStorage || !StorageRunActions?.compactRunActionPayload) {
     throw new Error('Codex Overleaf storage run-action helpers are unavailable.');
   }
 
-  // IndexedDB versions are monotonic. v2.0 RC has already opened production
-  // profiles at version 3, so lowering this value makes indexedDB.open throw a
-  // VersionError and hides otherwise-intact session history behind the compact
-  // fallback state.
+  // IndexedDB versions are monotonic; v2.0 RC profiles have already opened v3.
+  // Lowering it hides otherwise-intact session history behind fallback state.
   var TARGET_SCHEMA_VERSION = 3;
   var DB_NAME = 'codex-overleaf';
   var CUSTOM_INSTRUCTIONS_MAX_CHARS = 12000;
