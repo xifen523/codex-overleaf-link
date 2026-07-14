@@ -58,7 +58,8 @@ function validateReleaseManifest(manifest, options = {}) {
     throw updateError('update_manifest_origin_mismatch', 'Update manifest repository or channel does not match this installation.');
   }
   const version = parseSemver(manifest.version);
-  if (!version || manifest.tag !== 'v' + manifest.version) {
+  const expectedTag = options.tag || 'v' + manifest.version;
+  if (!version || manifest.tag !== expectedTag) {
     throw updateError('update_manifest_version_invalid', 'Update manifest version or tag is invalid.');
   }
   if (!Number.isInteger(manifest.bootstrapProtocol) || manifest.bootstrapProtocol !== bootstrapProtocol) {

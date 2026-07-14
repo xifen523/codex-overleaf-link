@@ -171,13 +171,29 @@ function verifyUpdateBundle(filePath, errors) {
 
 function verifyReleaseSignature(releaseDir, errors) {
   try {
+    const manifestBytes = fs.readFileSync(path.join(releaseDir, 'release-manifest.json'));
+    const manifest = JSON.parse(manifestBytes.toString('utf8'));
+    const stableTag = `v${manifest.version}`;
+    const rcPattern = new RegExp(`^v${escapeRegExp(manifest.version)}-rc\\.[1-9]\\d*$`);
+    const channel = manifest.tag === stableTag ? 'stable' : 'prerelease';
+    if (manifest.tag !== stableTag && !rcPattern.test(String(manifest.tag || ''))) {
+      throw new Error('Release manifest tag is neither stable nor a numbered RC.');
+    }
+    if (manifest.channel !== channel) {
+      throw new Error('Release manifest channel does not match its tag.');
+    }
     verifySignedReleaseManifest(
-      fs.readFileSync(path.join(releaseDir, 'release-manifest.json')),
-      fs.readFileSync(path.join(releaseDir, 'release-manifest.sig'))
+      manifestBytes,
+      fs.readFileSync(path.join(releaseDir, 'release-manifest.sig')),
+      { channel, tag: manifest.tag }
     );
   } catch (error) {
     errors.push(`Release manifest signature is invalid: ${error.message}`);
   }
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function verifyNpmTarball(filePath, errors) {
