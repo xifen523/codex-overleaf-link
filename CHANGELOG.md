@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.10.2 - 2026-07-15
+
+- Retry transient Codex network failures up to five full session attempts with bounded exponential backoff.
+- Retry only gateway, timeout, connection-reset, and similar transport failures; authentication, authorization, and unsupported-model errors still fail immediately.
+- Stop retrying and mark the mirror dirty if a failed attempt changed local project files, preventing duplicate edits or unsafe writeback.
+
+Codex network and writeback stabilization patch. Native protocol `1` remains unchanged.
+
+### Release
+
+- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking resolve to `1.10.2`.
+- Release artifacts resolve to `codex-overleaf-link-extension-v1.10.2.zip`, `codex-overleaf-native-host-v1.10.2.tar.gz`, and `codex-overleaf-link-1.10.2.tgz`.
 ## v1.10.1 - 2026-07-15
 
 - Fixed Windows startup after Codex Desktop updates or system restarts by discovering the managed CLI under `%LOCALAPPDATA%\OpenAI\Codex\bin\<version>\codex.exe`.

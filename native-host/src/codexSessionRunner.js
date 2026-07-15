@@ -1,5 +1,4 @@
 'use strict';
-
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -9,6 +8,7 @@ const { computeLineDiff } = require('./diffEngine');
 const { computeTextPatches } = require('./textPatch');
 const { buildCodexHomeEnv } = require('./codexHome');
 const { buildCodexSpeedArgs } = require('./codexArgs');
+const { runCodexWithNetworkRetries } = require('./codexNetworkRetry');
 const { truncateText } = require('./debugLog');
 const { enforceNativeOkResponseBudget } = require('./nativeResponseBudget');
 const { buildCodexTurnPrompt: buildCodexPromptParts } = require('./codexPromptAssembly');
@@ -19,17 +19,11 @@ const {
   loadSelectedProjectSkills
 } = require('./localSkills');
 const { createSubagentBroker } = require('./subagentBroker');
-
 const PARALLEL_SUBAGENTS_SKILL_ID = 'parallel-subagents';
-
 const TURN_ATTACHMENTS_DIR = '.codex-overleaf-attachments';
 const MAX_TURN_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 const MAX_TURN_ATTACHMENTS = 8;
 const MAX_TURN_ATTACHMENT_TOTAL_BYTES = MAX_TURN_ATTACHMENT_BYTES * MAX_TURN_ATTACHMENTS;
-const DEFAULT_NETWORK_RETRY_ATTEMPTS = 5;
-const MAX_NETWORK_RETRY_ATTEMPTS = 5;
-const DEFAULT_NETWORK_RETRY_BASE_MS = 1000;
-
 async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex, signal } = {}) {
   throwIfAborted(signal);
   const projectId = params.projectId || params.project?.projectId || params.project?.id || params.project?.url || 'overleaf-project';
@@ -284,100 +278,6 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
   return response;
 }
 
-async function runCodexWithNetworkRetries({
-  runner,
-  runnerInput,
-  env = process.env,
-  emit = () => {},
-  signal,
-  canRetry = true,
-  projectId,
-  rootDir
-}) {
-  const maxAttempts = Math.min(
-    parseOptionalPositiveInteger(env.CODEX_OVERLEAF_NETWORK_RETRY_ATTEMPTS) || DEFAULT_NETWORK_RETRY_ATTEMPTS,
-    MAX_NETWORK_RETRY_ATTEMPTS
-  );
-  const baseDelayMs = parseOptionalNonNegativeInteger(env.CODEX_OVERLEAF_NETWORK_RETRY_BASE_MS)
-    ?? DEFAULT_NETWORK_RETRY_BASE_MS;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    throwIfAborted(signal);
-    try {
-      return await runner(runnerInput);
-    } catch (error) {
-      const retryable = canRetry
-        && attempt < maxAttempts
-        && isTransientCodexNetworkError(error);
-      if (!retryable) {
-        throw error;
-      }
-
-      const collected = await collectMirrorChangesDetailed({ projectId, rootDir });
-      const hasLocalChanges = Boolean(collected.changes?.length || collected.unsupportedChanges?.length);
-      if (hasLocalChanges) {
-        markMirrorDirty({
-          projectId,
-          rootDir,
-          reason: 'codex_run_failed_with_local_changes'
-        });
-        emitCodexEvent(emit, 'codex.session.retry_skipped', 'Network retry skipped because the local workspace changed', {
-          attempt,
-          maxAttempts,
-          changedCount: collected.changes?.length || 0,
-          unsupportedCount: collected.unsupportedChanges?.length || 0
-        }, 'failed');
-        throw error;
-      }
-
-      const delayMs = baseDelayMs * (2 ** (attempt - 1));
-      emitCodexEvent(emit, 'codex.session.retry', `Transient Codex network failure; retrying session (${attempt + 1}/${maxAttempts})`, {
-        attempt,
-        nextAttempt: attempt + 1,
-        maxAttempts,
-        delayMs,
-        error: truncateText(error?.message || String(error), 500)
-      }, 'running');
-      await waitForRetryDelay(delayMs, signal);
-    }
-  }
-  throw new Error('Codex network retry loop exhausted unexpectedly');
-}
-
-function isTransientCodexNetworkError(error = {}) {
-  const message = String(error?.message || error || '');
-  if (/\b(?:401|403)\b|invalid api key|unauthori[sz]ed|forbidden|unsupported model/i.test(message)) {
-    return false;
-  }
-  return /\b(?:408|429|502|503|504)\b|bad gateway|gateway timeout|service unavailable|econnreset|econnrefused|etimedout|socket hang up|stream disconnected|connection (?:failed|reset|refused|closed)|error sending request|fetch failed/i.test(message);
-}
-
-function waitForRetryDelay(delayMs, signal) {
-  if (!delayMs) {
-    throwIfAborted(signal);
-    return Promise.resolve();
-  }
-  return new Promise((resolve, reject) => {
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      reject(getAbortReason(signal));
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, delayMs);
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
-}
-
-function parseOptionalNonNegativeInteger(value) {
-  if (value === undefined || value === null || value === '') {
-    return null;
-  }
-  const parsed = Number.parseInt(String(value), 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-}
 function buildCodexTurnPrompt(params = {}, mirror = {}, projectLocalSkills, turnAttachments = [], codexSkillInvocationContext = null) {
   const prompt = buildCodexPromptParts({
     params,
