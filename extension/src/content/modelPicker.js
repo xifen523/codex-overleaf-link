@@ -23,6 +23,14 @@
       getPanel,
       getState
     } = deps;
+    const Support = window.CodexOverleafModelPickerSupport;
+    const {
+      formatCompactModelLabel,
+      normalizeModelOptionId,
+      normalizeReasoningEffortsForSelect,
+      normalizeSpeedTiersForSelect,
+      retainSelectedModel
+    } = Support;
 
   let modelDiscovery = { status: 'fallback', source: 'fallback', fetchedAt: '' };
 
@@ -78,6 +86,7 @@
       reasoningSelect.value = choice.dataset.reasoningChoice;
     } else if (choice.dataset.modelChoice && modelSelect) {
       modelSelect.value = choice.dataset.modelChoice;
+      renderReasoningOptions(getRenderedModelEntries());
       renderSpeedOptions(getRenderedModelEntries());
     } else if (choice.dataset.speedChoice && speedSelect) {
       speedSelect.value = choice.dataset.speedChoice;
@@ -101,9 +110,18 @@
       const hasDiscoveredModels = response?.ok
         && Array.isArray(response.result?.models)
         && response.result.models.length > 0;
+      if (!hasDiscoveredModels && !Support.shouldUseBuiltInFallback(response)) {
+        applyUnavailableModelOptions(response?.error);
+        return;
+      }
       const sourceModels = hasDiscoveredModels ? response.result.models : fallbackModels;
-      const normalized = modelCatalog.normalizeDiscoveredModels({ models: sourceModels, selectedModel: currentSelectedModel });
-      renderModelOptions(normalized.models, currentSelectedModel);
+      const retainedSelectedModel = retainSelectedModel(sourceModels, currentSelectedModel);
+      const normalized = modelCatalog.normalizeDiscoveredModels({ models: sourceModels, selectedModel: retainedSelectedModel });
+      if (normalized.usedFallback && response.result?.providerId && response.result.providerId !== 'builtin') {
+        applyUnavailableModelOptions({ code: 'provider_model_catalog_invalid', message: 'The active provider returned no usable models.' });
+        return;
+      }
+      renderModelOptions(normalized.models, retainedSelectedModel);
       modelDiscovery = {
         status: hasDiscoveredModels && !normalized.usedFallback ? 'discovered' : 'fallback',
         source: hasDiscoveredModels ? response.result?.source || 'unknown' : 'fallback',
@@ -113,16 +131,43 @@
       };
       updateModelDisplay();
     } catch (error) {
-      applyFallbackModelOptions(resolveSelectedModel() || selectedModel, error);
+      applyUnavailableModelOptions(error);
     }
+  }
+
+  function applyUnavailableModelOptions(error) {
+    const modelSelect = getPanel()?.querySelector('[data-model]');
+    if (modelSelect) {
+      modelSelect.textContent = '';
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = tx('Models unavailable', '模型不可用');
+      option.disabled = true;
+      modelSelect.append(option);
+      modelSelect.value = '';
+      modelSelect.disabled = true;
+    }
+    if (getState()) getState().model = '';
+    modelDiscovery = {
+      status: 'unavailable',
+      source: 'custom-provider',
+      fetchedAt: '',
+      errorCode: error?.code || '',
+      errorMessage: error?.message || (error ? String(error) : '')
+    };
+    renderReasoningOptions([]);
+    renderSpeedOptions([]);
+    renderModelConfigChoices();
+    updateModelDisplay();
   }
 
   function applyFallbackModelOptions(selectedModel, error) {
     const modelCatalog = getModelCatalog();
     const fallbackModels = modelCatalog.FALLBACK_MODELS;
     const sourceModels = fallbackModels;
-    const normalized = modelCatalog.normalizeDiscoveredModels({ models: sourceModels, selectedModel });
-    renderModelOptions(normalized.models, selectedModel);
+    const retainedSelectedModel = retainSelectedModel(sourceModels, selectedModel);
+    const normalized = modelCatalog.normalizeDiscoveredModels({ models: sourceModels, selectedModel: retainedSelectedModel });
+    renderModelOptions(normalized.models, retainedSelectedModel);
     modelDiscovery = {
       status: 'fallback',
       source: 'fallback',
@@ -134,86 +179,7 @@
   }
 
   function getModelCatalog() {
-    const shared = window.CodexOverleafModels;
-    if (Array.isArray(shared?.FALLBACK_MODELS) && typeof shared?.normalizeDiscoveredModels === 'function') {
-      return shared;
-    }
-
-    return {
-      FALLBACK_MODELS: buildDomModelCatalogFallback(),
-      normalizeDiscoveredModels: normalizeDiscoveredModelsFallback
-    };
-  }
-
-  function buildDomModelCatalogFallback() {
-    const modelSelect = getPanel()?.querySelector('[data-model]');
-    const domModels = Array.from(modelSelect?.options || [])
-      .map(option => ({
-        id: normalizeModelOptionId(option.value),
-        label: option.textContent || option.value
-      }))
-      .filter(model => model.id);
-
-    return domModels.length ? domModels : [
-      { id: 'gpt-5.5', label: 'GPT-5.5' },
-      { id: 'gpt-5.4', label: 'GPT-5.4' },
-      { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-      { id: 'gpt-5.3-codex', label: 'GPT-5.3 Codex' },
-      { id: 'gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark' },
-      { id: 'gpt-5.2', label: 'GPT-5.2' }
-    ];
-  }
-
-  function normalizeDiscoveredModelsFallback({ models, selectedModel } = {}) {
-    const normalized = normalizeModelCatalogEntries(models);
-    const usedFallback = normalized.length === 0;
-    const resultModels = usedFallback ? buildDomModelCatalogFallback().map(model => ({ ...model })) : normalized;
-    const selectedId = normalizeModelOptionId(selectedModel);
-
-    if (selectedId && !resultModels.some(model => model.id === selectedId)) {
-      resultModels.push({
-        id: selectedId,
-        label: `${selectedId} (custom)`,
-        unverified: true
-      });
-    }
-
-    return {
-      models: resultModels,
-      usedFallback
-    };
-  }
-
-  function normalizeModelCatalogEntries(models) {
-    if (!Array.isArray(models)) {
-      return [];
-    }
-
-    const seen = new Set();
-    const result = [];
-
-    for (const model of models) {
-      const id = normalizeModelOptionId(typeof model === 'string' ? model : model?.id);
-      if (!id || seen.has(id)) {
-        continue;
-      }
-      seen.add(id);
-      const normalized = {
-        id,
-        label: typeof model?.label === 'string' && model.label.length > 0 ? model.label : id,
-        reasoningEfforts: Array.isArray(model?.reasoningEfforts) ? model.reasoningEfforts.slice() : [],
-        speedTiers: normalizeSpeedTiersForSelect(model?.speedTiers)
-      };
-      if (Object.prototype.hasOwnProperty.call(Object(model), 'defaultReasoningEffort')) {
-        normalized.defaultReasoningEffort = model.defaultReasoningEffort;
-      }
-      if (Object.prototype.hasOwnProperty.call(Object(model), 'defaultSpeedTier')) {
-        normalized.defaultSpeedTier = model.defaultSpeedTier;
-      }
-      result.push(normalized);
-    }
-
-    return result;
+    return Support.getModelCatalog({ getPanel });
   }
 
   function renderModelOptions(models, selectedModel) {
@@ -224,6 +190,7 @@
 
     const selectedId = normalizeModelOptionId(selectedModel);
     modelSelect.textContent = '';
+    modelSelect.disabled = false;
     let renderedSelected = false;
     let firstModelId = '';
 
@@ -238,6 +205,9 @@
       const option = document.createElement('option');
       option.value = id;
       option.textContent = model.label;
+      option.dataset.reasoningEfforts = normalizeReasoningEffortsForSelect(model.reasoningEfforts).join(',');
+      option.dataset.defaultReasoningEffort = model.defaultReasoningEffort || '';
+      option.dataset.reasoningPresentation = model.reasoningPresentation || '';
       option.dataset.speedTiers = normalizeSpeedTiersForSelect(model.speedTiers).join(',');
       option.dataset.defaultSpeedTier = model.defaultSpeedTier || 'standard';
       if (model.unverified) {
@@ -253,6 +223,9 @@
       const option = document.createElement('option');
       option.value = selectedId;
       option.textContent = `${selectedId} (custom)`;
+      option.dataset.reasoningEfforts = '';
+      option.dataset.defaultReasoningEffort = '';
+      option.dataset.reasoningPresentation = 'none';
       option.dataset.speedTiers = 'standard';
       option.dataset.defaultSpeedTier = 'standard';
       option.dataset.unverified = 'true';
@@ -265,6 +238,7 @@
     } else if (firstModelId) {
       modelSelect.value = firstModelId;
     }
+    renderReasoningOptions(models);
     renderSpeedOptions(models);
     renderModelConfigChoices();
     updateModelDisplay();
@@ -296,6 +270,37 @@
     renderModelConfigChoices();
   }
 
+  function renderReasoningOptions(models) {
+    const reasoningSelect = getPanel()?.querySelector('[data-reasoning]');
+    const modelSelect = getPanel()?.querySelector('[data-model]');
+    if (!reasoningSelect || !modelSelect) {
+      return;
+    }
+
+    const selectedModel = normalizeModelOptionId(modelSelect.value);
+    const model = (Array.isArray(models) ? models : []).find(item => normalizeModelOptionId(item?.id) === selectedModel);
+    const presentation = model?.reasoningPresentation || 'effort';
+    let efforts = normalizeReasoningEffortsForSelect(model?.reasoningEfforts);
+    if (!efforts.length) {
+      efforts = presentation === 'none' ? ['none'] : ['low', 'medium', 'high', 'xhigh'];
+    }
+    const current = reasoningSelect.value || getState()?.reasoningEffort || '';
+    const fallback = efforts.includes(model?.defaultReasoningEffort)
+      ? model.defaultReasoningEffort
+      : efforts.includes('high') ? 'high' : efforts[0];
+
+    reasoningSelect.textContent = '';
+    for (const effort of efforts) {
+      const option = document.createElement('option');
+      option.value = effort;
+      option.textContent = formatReasoningEffortLabel(effort, presentation);
+      reasoningSelect.append(option);
+    }
+    reasoningSelect.value = efforts.includes(current) ? current : fallback;
+    reasoningSelect.disabled = presentation === 'none';
+    reasoningSelect.dataset.presentation = presentation;
+  }
+
   function renderModelConfigChoices() {
     renderReasoningChoices();
     renderModelChoices();
@@ -310,10 +315,15 @@
       return;
     }
     list.textContent = '';
+    const hidden = reasoningSelect.dataset.presentation === 'none';
+    list.hidden = hidden;
+    if (list.nextElementSibling?.classList?.contains('codex-model-config-divider')) {
+      list.nextElementSibling.hidden = hidden;
+    }
     for (const option of Array.from(reasoningSelect.options || [])) {
       list.append(createModelConfigChoice({
         value: option.value,
-        label: formatReasoningEffortLabel(option.value),
+        label: option.textContent || formatReasoningEffortLabel(option.value, reasoningSelect.dataset.presentation),
         datasetName: 'reasoningChoice'
       }));
     }
@@ -394,39 +404,33 @@
     }
   }
 
-  function normalizeSpeedTiersForSelect(speedTiers) {
-    const tiers = Array.isArray(speedTiers)
-      ? speedTiers.map(tier => normalizeModelOptionId(tier)).filter(Boolean)
-      : ['standard'];
-    return tiers.includes('standard') ? tiers : ['standard', ...tiers];
-  }
-
   function formatSpeedTierLabel(tier) {
     return tier === 'fast' ? tx('Fast', '快速') : tx('Standard', '标准');
   }
 
-  function formatReasoningEffortLabel(effort) {
+  function formatReasoningEffortLabel(effort, presentation = '') {
+    if (presentation === 'toggle') {
+      return effort === 'none' ? tx('Off', '关闭') : tx('On', '开启');
+    }
+    if (presentation === 'deepseek') {
+      if (effort === 'none') return tx('Off', '关闭');
+      if (effort === 'xhigh') return 'Max';
+    }
     const labels = getLocale() === 'zh'
-      ? { low: '低', medium: '中', high: '高', xhigh: '超高' }
-      : { low: 'Low', medium: 'Medium', high: 'High', xhigh: 'XHigh' };
+      ? { none: '关闭', minimal: '最小', low: '低', medium: '中', high: '高', xhigh: '超高' }
+      : { none: 'Off', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'XHigh' };
     return labels[effort] || effort || '';
-  }
-
-  function formatCompactModelLabel(label) {
-    return String(label || '').replace(/^gpt[-\s]*/i, '');
   }
 
   function resolveSelectedModel() {
     return getPanel()?.querySelector('[data-model]')?.value || getState()?.model || '';
   }
 
-  function normalizeModelOptionId(id) {
-    return typeof id === 'string' ? id.trim() : '';
-  }
-
   function getModelDiscoverySourceLabel() {
     if (modelDiscovery.errorCode || modelDiscovery.errorMessage) {
-      return `${tr('modelSourceFailed')} (${tr('modelSourceFallback')})`;
+      return modelDiscovery.status === 'fallback'
+        ? `${tr('modelSourceFailed')} (${tr('modelSourceFallback')})`
+        : tr('modelSourceFailed');
     }
     if (modelDiscovery.source === 'fallback') {
       return tr('modelSourceFallback');
@@ -454,7 +458,12 @@
     });
     modelDisplay.title = sourceTitle;
     if (reasoningDisplay) {
-      reasoningDisplay.textContent = formatReasoningEffortLabel(getPanel()?.querySelector('[data-reasoning]')?.value || getState()?.reasoningEffort || '');
+      const reasoningSelect = getPanel()?.querySelector('[data-reasoning]');
+      const presentation = reasoningSelect?.dataset.presentation || '';
+      reasoningDisplay.hidden = presentation === 'none';
+      reasoningDisplay.textContent = presentation === 'none'
+        ? ''
+        : formatReasoningEffortLabel(reasoningSelect?.value || getState()?.reasoningEffort || '', presentation);
     }
     if (speedIndicator) {
       speedIndicator.hidden = readSelectedSpeedInput() !== 'fast';
@@ -475,8 +484,10 @@
       handleModelConfigChoiceClick,
       loadModelOptions,
       applyFallbackModelOptions,
+      applyUnavailableModelOptions,
       getModelCatalog,
       renderModelOptions,
+      renderReasoningOptions,
       renderSpeedOptions,
       renderModelConfigChoices,
       resolveSelectedModel,

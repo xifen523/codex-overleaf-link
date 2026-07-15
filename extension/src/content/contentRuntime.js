@@ -37,6 +37,12 @@
     'mirror.status',
     'codex.models',
     'codex.run',
+    'codex.providers.list',
+    'codex.providers.test',
+    'codex.providers.test.cancel',
+    'codex.providers.upsert',
+    'codex.providers.activate',
+    'codex.providers.delete',
     'task.run',
     'task.confirm',
     'mirror.sync',
@@ -49,6 +55,12 @@
     'skills.remove'
   ]);
   const CANCELLABLE_PAGE_BRIDGE_METHODS = new Set([
+    'getProjectSnapshot',
+    'getProjectFileList',
+    'getCompileLog',
+    'ensureReviewing',
+    'ensureEditing',
+    'waitForSaveState',
     'applyOperations',
     'acceptTrackedChanges',
     'rejectTrackedChanges'
@@ -343,6 +355,7 @@
     saveState: (...args) => saveState(...args),
     saveStateSoon: () => saveStateSoon(),
     autosizeTaskTextarea: () => autosizeTaskTextarea(),
+    syncComposerSendAvailability: () => syncComposerSendAvailability(),
     applyStateToPanel: () => applyStateToPanel(),
     normalizePanelState,
     openCustomInstructionsSettings: () => openCustomInstructionsSettings(),
@@ -575,12 +588,28 @@
     applyFallbackModelOptions,
     getModelCatalog,
     renderModelOptions,
+    renderReasoningOptions,
     renderSpeedOptions,
     renderModelConfigChoices,
     resolveSelectedModel,
     normalizeModelOptionId,
     updateModelDisplay
   } = modelPicker;
+
+  const providerSettingsCoordinator = window.CodexOverleafProviderSettingsCoordinator.create({
+    tx,
+    sendBackgroundNative,
+    document,
+    window,
+    getSettingsPanelInstance: () => settingsPanelInstance,
+    onProviderChanged: async () => {
+      if (state) {
+        state.model = '';
+      }
+      await loadModelOptions();
+      await persistPanelInputs();
+    }
+  });
 
   // v1.8.1 D3: the dashboard was a one-shot render — another tab finishing a
   // run, clearing history or creating sessions never showed up. Refresh it
@@ -761,6 +790,7 @@
   let slashCodexOverleafSkillsLoading = false;
   let renderedSlashCommands = new Map();
   let runCancellationRequested = false;
+  let runCancellationController = null;
   let activePluginConfirmResolve = null;
   const updateIdleClient = root.CodexOverleafUpdateIdle?.create({
     document,
@@ -1109,6 +1139,7 @@
           onInputChange: () => persistPanelInputs(),
           onSkillsOpen: () => openSkillsView(),
           onSkillsBack: () => closeSkillsView(),
+          onProvidersOpen: () => providerSettingsCoordinator.open(),
           onClearAllHistory: () => clearAllHistoryWithConfirm(),
           onHistoryOpen: () => renderAuditHistoryPanel(),
           onHistoryFilter: () => applyAuditHistoryFilter(),
@@ -1117,6 +1148,7 @@
           onOtToggleClick: handleExperimentalOtToggleClick
         }
       });
+      providerSettingsCoordinator.refreshSummary().catch(() => {});
 
       sessionPanelInstance = SessionPanel.create({
         container: panelRendererInstance.sessionSlot,
@@ -1643,6 +1675,7 @@
     }
 
     runCancellationRequested = false;
+    runCancellationController = new AbortController();
     setRunning(true);
     currentRunView = startRunView({
       task,
@@ -1654,36 +1687,37 @@
       skillInvocation: submittedSkillInvocation
     });
     const runSessionId = currentRunView.sessionId;
-    let runAuditDraft = await createAuditDraftForRun({
-      task,
-      sessionId: runSessionId,
-      mode: submittedMode,
-      focusFiles: getActiveFocusFiles()
-    });
-    announceCrossTabRunStart();
-    // Keep attachments across turns (v1.7.5): screenshots and files usually
-    // anchor several follow-up questions. The tray keeps them visible and
-    // hand-removable; only the task text resets after submit.
-    clearTaskComposer({ keepAttachments: true });
-    appendRunEvent({
-      title: submittedSkillInvocation?.id === 'skill-installer'
-        ? tx('I will use the Codex skill installer for this request.', '我会用 Codex skill installer 处理这个请求。')
-        : tx('I will first understand your request, then inspect the relevant Overleaf files.', '我会先理解你的请求，再检查相关 Overleaf 文件。'),
-      status: 'running',
-      detail: {
-        [tr('mode')]: formatModeLabel(submittedMode),
-        [tx('Model', '模型')]: state.model,
-        [tx('Reasoning effort', '推理强度')]: state.reasoningEffort,
-        [tx('Speed', '速度')]: state.speedTier,
-        [tx('Track required', '要求留痕')]: submittedRequireReviewing ? tx('yes', '是') : tx('no', '否'),
-        [tx('Skill', '技能')]: submittedSkillInvocation?.title || tr('noneValue'),
-        [tx('Attachments', '附件')]: submittedAttachments.map(attachment => attachment.name).join(listSeparator()) || tr('noneValue'),
-        '@context': formatContextItems(getActiveFocusFiles())
-      }
-    });
+    let runAuditDraft = null;
     try {
+      runAuditDraft = await awaitRunStep(createAuditDraftForRun({
+        task,
+        sessionId: runSessionId,
+        mode: submittedMode,
+        focusFiles: getActiveFocusFiles()
+      }));
+      announceCrossTabRunStart();
+      // Keep attachments across turns (v1.7.5): screenshots and files usually
+      // anchor several follow-up questions. The tray keeps them visible and
+      // hand-removable; only the task text resets after submit.
+      clearTaskComposer({ keepAttachments: true });
+      appendRunEvent({
+        title: submittedSkillInvocation?.id === 'skill-installer'
+          ? tx('I will use the Codex skill installer for this request.', '我会用 Codex skill installer 处理这个请求。')
+          : tx('I will first understand your request, then inspect the relevant Overleaf files.', '我会先理解你的请求，再检查相关 Overleaf 文件。'),
+        status: 'running',
+        detail: {
+          [tr('mode')]: formatModeLabel(submittedMode),
+          [tx('Model', '模型')]: state.model,
+          [tx('Reasoning effort', '推理强度')]: state.reasoningEffort,
+          [tx('Speed', '速度')]: state.speedTier,
+          [tx('Track required', '要求留痕')]: submittedRequireReviewing ? tx('yes', '是') : tx('no', '否'),
+          [tx('Skill', '技能')]: submittedSkillInvocation?.title || tr('noneValue'),
+          [tx('Attachments', '附件')]: submittedAttachments.map(attachment => attachment.name).join(listSeparator()) || tr('noneValue'),
+          '@context': formatContextItems(getActiveFocusFiles())
+        }
+      });
       if (submittedSkillInvocation?.id === 'skill-installer') {
-        await runSkillInstallerTask({
+        await awaitRunStep(runSkillInstallerTask({
           task,
           runSessionId,
           runAuditDraft,
@@ -1692,7 +1726,7 @@
           submittedSkillLoadingSettings,
           submittedAttachments,
           submittedSkillInvocation
-        });
+        }));
         return;
       }
       appendRunEvent({
@@ -1707,11 +1741,11 @@
         status: 'completed'
       });
 
-      await pauseOtWarmMirror('run-start');
-      const writeSafety = await preflightWriteSafety({
+      await awaitRunStep(pauseOtWarmMirror('run-start'));
+      const writeSafety = await awaitRunStep(preflightWriteSafety({
         mode: submittedMode,
         requireReviewing: submittedRequireReviewing
-      });
+      }));
       if (!writeSafety.ok) {
         await finalizeAuditRecord(runAuditDraft, {
           resultStatus: 'blocked',
@@ -1721,7 +1755,7 @@
       }
 
       let focusFiles = getActiveFocusFiles();
-      const warmStart = await resolveWarmRunStart({ focusFiles, mode: submittedMode });
+      const warmStart = await awaitRunStep(resolveWarmRunStart({ focusFiles, mode: submittedMode }));
       let project = warmStart.project || null;
       let useExistingMirror = warmStart.useExistingMirror;
       let fileOverlays = warmStart.fileOverlays || null;
@@ -1731,7 +1765,7 @@
           title: tx('Syncing the Overleaf project to the local Codex workspace.', '正在同步 Overleaf 项目到本地 Codex workspace。'),
           status: 'running'
         });
-        project = await getRunProjectSnapshot();
+        project = await awaitRunStep(getRunProjectSnapshot());
       }
       throwIfRunCancellationRequested();
       if (!useExistingMirror) {
@@ -1743,11 +1777,11 @@
         : getProjectSnapshotWarnings(project);
       const warmMirrorReuse = useExistingMirror
         ? warmStart
-        : await resolveWarmMirrorReuse(project, {
+        : await awaitRunStep(resolveWarmMirrorReuse(project, {
           snapshotWarnings,
           focusFiles,
           mode: submittedMode
-        });
+        }));
       const focusedPartialSnapshot = runController.canUseFocusedPartialSnapshot({
         project,
         snapshotWarnings,
@@ -1827,7 +1861,7 @@
       let compileLogContext = null;
       if (/(^|[^\w])@compile-log\b/i.test(task)) {
         appendRunEvent({ title: tx('Fetching compile log (@compile-log).', '正在获取编译日志 (@compile-log)。'), status: 'running' });
-        compileLogContext = await resolveCompileLogContext();
+        compileLogContext = await awaitRunStep(resolveCompileLogContext());
         if (compileLogContext.available) {
           appendRunEvent({
             title: tx(
@@ -1856,12 +1890,12 @@
         }
       }
 
-      const sensitiveFindings = await runSensitivePreflight({
+      const sensitiveFindings = await awaitRunStep(runSensitivePreflight({
         task,
         project,
         rules: getGovernanceRulesForCurrentProject(),
         useExistingMirror
-      });
+      }));
       if (sensitiveFindings.blocked) {
         await finalizeAuditRecord(runAuditDraft, {
           resultStatus: 'blocked_sensitive',
@@ -1878,9 +1912,9 @@
         runAuditDraft = await updateAuditSensitiveFindings(runAuditDraft, sensitiveFindings.findings);
       }
 
-      await settleMirrorPrefetchBeforeRun();
+      await awaitRunStep(settleMirrorPrefetchBeforeRun());
       appendRunEvent({ title: tx('Local Codex session is starting.', '本地 Codex session 开始运行。'), status: 'running' });
-      let response = await sendNative({
+      let response = await awaitRunStep(sendNative({
         method: 'codex.run',
         params: buildCodexRunParams({
           task,
@@ -1898,15 +1932,15 @@
           skillInvocation: submittedSkillInvocation,
           submittedMode
         })
-      });
+      }));
 
       // Handle mirror_stale error by retrying with full sync
       if (!response.ok && response.error?.code === 'mirror_stale' && useExistingMirror) {
         appendRunEvent({ title: tr('warmMirrorStaleRetryTitle'), status: 'running' });
-        const staleRetry = await prepareMirrorStaleRetry({
-          project: await getRunProjectSnapshot(),
+        const staleRetry = await awaitRunStep(prepareMirrorStaleRetry({
+          project: await awaitRunStep(getRunProjectSnapshot()),
           focusFiles
-        });
+        }));
         if (!staleRetry.ok) {
           return;
         }
@@ -1916,7 +1950,7 @@
         fileOverlays = null;
         otWarmStart = false;
         restrictToFocusFiles = staleRetry.restrictToFocusFiles;
-        response = await sendNative({
+        response = await awaitRunStep(sendNative({
           method: 'codex.run',
           params: buildCodexRunParams({
             task,
@@ -1934,7 +1968,7 @@
             skillInvocation: submittedSkillInvocation,
             submittedMode
           })
-        });
+        }));
       }
 
       if (!response.ok && response.error?.code === 'thread_resume_failed') {
@@ -1980,8 +2014,8 @@
       if (!response.ok) {
         if (runCancellationRequested || isRunCancellationError(response.error)) {
           appendRunCancelledReport();
-          await finalizeAuditRecord(runAuditDraft, { resultStatus: 'cancelled' });
           finishRunView(tx('Cancelled', '已中断'), 'rejected');
+          void finalizeAuditRecord(runAuditDraft, { resultStatus: 'cancelled' });
           return;
         }
         const translated = translateRawError(response.error.message, { mode: submittedMode, locale: getLocale() });
@@ -2225,8 +2259,8 @@
     } catch (error) {
       if (runCancellationRequested || isRunCancellationError(error)) {
         appendRunCancelledReport();
-        await finalizeAuditRecord(runAuditDraft, { resultStatus: 'cancelled' });
         finishRunView(tx('Cancelled', '已中断'), 'rejected');
+        void finalizeAuditRecord(runAuditDraft, { resultStatus: 'cancelled' });
         return;
       }
       // codexReturned: assistantMessage arrived on the stream before the
@@ -2282,6 +2316,7 @@
       stopRunElapsedTick();
       currentRunView = null;
       runCancellationRequested = false;
+      runCancellationController = null;
       if (isExperimentalOtEnabled()) {
         await resumeOtWarmMirror('run-settled');
       }
@@ -2531,6 +2566,7 @@
       nativeChannel.clearActiveRequest();
       stopRunElapsedTick();
       currentRunView = null;
+      runCancellationController = null;
       console.error('[codex-overleaf] failed to start task', error);
       appendPlainLog(tx(`Could not start Codex task: ${error.message}`, `无法启动 Codex 任务：${error.message}`));
     });
@@ -2541,6 +2577,7 @@
       return;
     }
     runCancellationRequested = true;
+    runCancellationController?.abort();
     cancelActivePageBridgeRequests();
     panel.dataset.cancelling = 'true';
     setRunning(true);
@@ -2647,12 +2684,32 @@
   }
 
   function throwIfRunCancellationRequested() {
-    if (!runCancellationRequested) {
-      return;
-    }
-    const error = new Error('Codex run was cancelled by the user');
-    error.code = 'codex_cancelled';
-    throw error;
+    if (runCancellationRequested) throw createRunCancellationError();
+  }
+
+  function createRunCancellationError() {
+    const error = Object.assign(new Error('Codex run was cancelled by the user'), {
+      code: 'codex_cancelled', cancelled: true
+    });
+    return error;
+  }
+
+  function awaitRunStep(value) {
+    const signal = runCancellationController?.signal;
+    if (!signal) return Promise.resolve(value);
+    if (signal.aborted || runCancellationRequested) return Promise.reject(createRunCancellationError());
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const settle = (callback, result) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        callback(result);
+      };
+      const onAbort = () => settle(reject, createRunCancellationError());
+      signal.addEventListener('abort', onAbort, { once: true });
+      Promise.resolve(value).then(result => settle(resolve, result), error => settle(reject, error));
+    });
   }
 
   function isRunCancellationError(error = {}) {
@@ -2851,7 +2908,7 @@
     skillInvocation,
     submittedMode
   } = {}) {
-    return runController.buildCodexRunParams({
+    const params = runController.buildCodexRunParams({
       currentProjectId: getCurrentProjectId(),
       state,
       task,
@@ -2876,6 +2933,10 @@
       compileLogContext,
       submittedMode
     });
+    return {
+      ...params,
+      providerSelection: providerSettingsCoordinator.getRunSelection()
+    };
   }
 
   async function createAuditDraftForRun(input = {}) {
@@ -6253,8 +6314,9 @@
       saveStateSoon();
       return;
     }
-    readPanelInputs();
+    renderReasoningOptions(getRenderedModelEntries());
     renderSpeedOptions(getRenderedModelEntries());
+    readPanelInputs();
     renderModelConfigChoices();
     updateModelDisplay();
     // Save feedback is per-card now (settingsPanel flashSaved); the global
@@ -6269,6 +6331,9 @@
     return Array.from(panel?.querySelector('[data-model]')?.options || []).map(option => ({
       id: option.value,
       label: option.textContent,
+      reasoningEfforts: (option.dataset.reasoningEfforts || '').split(',').filter(Boolean),
+      defaultReasoningEffort: option.dataset.defaultReasoningEffort || '',
+      reasoningPresentation: option.dataset.reasoningPresentation || '',
       speedTiers: (option.dataset.speedTiers || 'standard').split(',').filter(Boolean),
       defaultSpeedTier: option.dataset.defaultSpeedTier || 'standard'
     }));
@@ -6392,13 +6457,13 @@
       renderModelOptions(getModelCatalog().FALLBACK_MODELS, state.model);
     }
     panel.querySelector('[data-model]').value = state.model;
-    panel.querySelector('[data-reasoning]').value = state.reasoningEffort;
-    renderSpeedOptions(Array.from(panel.querySelector('[data-model]')?.options || []).map(option => ({
-      id: option.value,
-      label: option.textContent,
-      speedTiers: (option.dataset.speedTiers || 'standard').split(',').filter(Boolean),
-      defaultSpeedTier: option.dataset.defaultSpeedTier || 'standard'
-    })));
+    const renderedModels = getRenderedModelEntries();
+    renderReasoningOptions(renderedModels);
+    const reasoningSelect = panel.querySelector('[data-reasoning]');
+    if (Array.from(reasoningSelect?.options || []).some(option => option.value === state.reasoningEffort)) {
+      reasoningSelect.value = state.reasoningEffort;
+    }
+    renderSpeedOptions(renderedModels);
     panel.querySelector('[data-speed]').value = state.speedTier;
     panel.querySelector('[data-mode]').value = state.mode;
     panel.querySelector('[data-task]').value = state.task;

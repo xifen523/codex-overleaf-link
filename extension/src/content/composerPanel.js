@@ -92,9 +92,19 @@
         <div class="codex-context-tray" data-context-tray hidden>
           <div class="codex-context-head">
             <span data-i18n="contextTitle">@ Context</span>
-            <button type="button" class="codex-attach-button" data-attach-file title="Attach files (PDF, images)" aria-label="Attach files (PDF, images)">⌲</button>
-            <input type="file" data-attach-input multiple hidden>
-            <button type="button" data-context-refresh title="Refresh file list" aria-label="Refresh file list">↻</button>
+            <span class="codex-context-actions">
+              <span class="codex-context-sync-status" data-context-sync-status data-state="idle" role="status" aria-live="polite">
+                <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+                  <circle class="codex-context-sync-ring" cx="10" cy="10" r="6.5"></circle>
+                  <path class="codex-context-sync-check" d="M6.1 10.2 8.7 12.8 14.2 7.3"></path>
+                  <path class="codex-context-sync-alert" d="M10 6.2v5.1M10 14h.01"></path>
+                </svg>
+                <span class="codex-context-sync-copy" data-context-sync-copy></span>
+              </span>
+              <button type="button" class="codex-attach-button" data-attach-file title="Attach files (PDF, images)" aria-label="Attach files (PDF, images)">⌲</button>
+              <input type="file" data-attach-input multiple hidden>
+              <button type="button" data-context-refresh title="Refresh file list" aria-label="Refresh file list">↻</button>
+            </span>
           </div>
           <div class="codex-context-selection" data-context-selection></div>
           <div class="codex-context-status" data-context-status>Type @ to add context: @file, @compile-log, @current-section.</div>

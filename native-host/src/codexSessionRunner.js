@@ -19,6 +19,8 @@ const {
   loadSelectedProjectSkills
 } = require('./localSkills');
 const { createSubagentBroker } = require('./subagentBroker');
+const { resolveCodexCommand, shouldUseShellForCommand } = require('./codexCommand');
+const { applyProviderEnvironment, buildProviderConfigArgs, prepareProviderLaunch } = require('./codexProviderLaunch');
 
 const PARALLEL_SUBAGENTS_SKILL_ID = 'parallel-subagents';
 
@@ -27,7 +29,7 @@ const MAX_TURN_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 const MAX_TURN_ATTACHMENTS = 8;
 const MAX_TURN_ATTACHMENT_TOTAL_BYTES = MAX_TURN_ATTACHMENT_BYTES * MAX_TURN_ATTACHMENTS;
 
-async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex, signal } = {}) {
+async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex, providerLaunch, signal } = {}) {
   throwIfAborted(signal);
   const projectId = params.projectId || params.project?.projectId || params.project?.id || params.project?.url || 'overleaf-project';
   const skillInvocation = normalizeSkillInvocation(params.skillInvocation);
@@ -117,6 +119,7 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
         disableCodexOverleafSkillIds: [PARALLEL_SUBAGENTS_SKILL_ID],
         sandboxMode: settings.sandboxMode,
         approvalPolicy: settings.approvalPolicy,
+        providerLaunch,
         env,
         // Worker raw events stay out of the parent timeline (spec §8);
         // lifecycle events come from the broker, full text from result files.
@@ -152,6 +155,7 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
       projectLocalSkills: null,
       sandboxMode: settings.sandboxMode,
       approvalPolicy: settings.approvalPolicy,
+      providerLaunch,
       env,
       emit,
       // While subagent workers are active, the parent idle watchdog resets
@@ -585,7 +589,8 @@ function buildThreadResumeParams(input = {}) {
 
 function buildCodexAppServerArgs(input = {}) {
   const args = [
-    ...buildCodexSpeedArgs(normalizeSpeedTier(input.speedTier))
+    ...buildCodexSpeedArgs(normalizeSpeedTier(input.speedTier)),
+    ...buildProviderConfigArgs(input.providerLaunch)
   ];
   if (input.loadCodexLocalSkills === false) {
     args.push('--disable', 'plugins');
@@ -764,18 +769,27 @@ function supportsReasoningSummary(model) {
   return String(model || '').toLowerCase() !== 'gpt-5.3-codex-spark';
 }
 
-function runCodexAppServerSession(input) {
+async function runCodexAppServerSession(input) {
+  const prepared = await prepareProviderLaunch(input.providerLaunch, { signal: input.signal });
+  try {
+    return await runCodexAppServerProcess({ ...input, providerLaunch: prepared.launch });
+  } finally {
+    await prepared.close();
+  }
+}
+
+function runCodexAppServerProcess(input) {
   return new Promise((resolve, reject) => {
     if (input.signal?.aborted) {
       reject(getAbortReason(input.signal));
       return;
     }
-    const childEnv = buildCodexHomeEnv(input.env || process.env, {
+    const childEnv = applyProviderEnvironment(buildCodexHomeEnv(input.env || process.env, {
       loadCodexLocalSkills: input.loadCodexLocalSkills !== false,
       loadCodexOverleafSkills: input.loadCodexOverleafSkills !== false,
       installCodexOverleafSkillsTarget: input.installCodexOverleafSkillsTarget === true,
       projectLocalSkills: input.projectLocalSkills || null
-    });
+    }), input.providerLaunch);
     const codexCommand = resolveCodexCommand(childEnv);
     if (!codexCommand) {
       reject(new Error('Codex CLI was not found. Install Codex or make sure the `codex` command is available in your login shell.'));
@@ -1376,25 +1390,6 @@ function getAbortReason(signal) {
   const error = new Error('Codex run was cancelled by the user');
   error.code = 'codex_cancelled';
   return error;
-}
-
-function resolveCodexCommand(env = process.env) {
-  if (
-    env.CODEX_OVERLEAF_ENV_READY === '1' ||
-    Object.prototype.hasOwnProperty.call(env, 'CODEX_OVERLEAF_CODEX_PATH')
-  ) {
-    return env.CODEX_OVERLEAF_CODEX_PATH || '';
-  }
-  return 'codex';
-}
-
-function shouldUseShellForCommand(command, env = process.env) {
-  const platform = env.CODEX_OVERLEAF_PLATFORM || process.platform;
-  if (platform !== 'win32') {
-    return false;
-  }
-  const text = String(command || '');
-  return text === 'codex' || /\.(?:cmd|bat)$/i.test(text);
 }
 
 function buildFinalAssistantMessage(messages = new Map(), order = []) {

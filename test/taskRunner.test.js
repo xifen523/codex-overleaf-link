@@ -10,7 +10,7 @@ const {
   patchMirrorFiles,
   syncOverleafToMirror
 } = require('../native-host/src/mirrorWorkspace');
-const { handleRequest } = require('../native-host/src/taskRunner');
+const { handleRequest: handleTaskRunnerRequest } = require('../native-host/src/taskRunner');
 const compatibility = require('../extension/src/shared/compatibility');
 const {
   BUILD_TARGET_VERSION,
@@ -18,6 +18,16 @@ const {
   MIN_NATIVE_VERSION,
   REQUIRED_CAPABILITIES
 } = compatibility;
+
+const TEST_PROVIDER_STORE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-task-providers-'));
+test.after(() => fs.rmSync(TEST_PROVIDER_STORE_DIR, { recursive: true, force: true }));
+
+function handleRequest(request, env = {}, emit) {
+  return handleTaskRunnerRequest(request, {
+    CODEX_OVERLEAF_PROVIDER_STORE_DIR: TEST_PROVIDER_STORE_DIR,
+    ...env
+  }, emit);
+}
 
 const TEST_QUOTAS = {
   maxProjectFiles: 1000,
@@ -55,7 +65,15 @@ function loadTaskRunnerWithFakeRunner(fakeRunner) {
   require.cache[runnerPath].exports = originalRunner;
   delete require.cache[taskRunnerPath];
   delete require.cache[taskRunnerRuntimePath];
-  return taskRunner;
+  return {
+    ...taskRunner,
+    handleRequest(request, env = {}, emit) {
+      return taskRunner.handleRequest(request, {
+        CODEX_OVERLEAF_PROVIDER_STORE_DIR: TEST_PROVIDER_STORE_DIR,
+        ...env
+      }, emit);
+    }
+  };
 }
 
 function makeMirrorStale(projectId, rootDir, ageMs = 10 * 60 * 1000) {

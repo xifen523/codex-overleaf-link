@@ -63,6 +63,7 @@
       id,
       label,
       reasoningEfforts: Array.isArray(model?.reasoningEfforts) ? model.reasoningEfforts.slice() : [],
+      reasoningPresentation: typeof model?.reasoningPresentation === 'string' ? model.reasoningPresentation : '',
       speedTiers: normalizeSpeedTiers(model?.speedTiers)
     };
 

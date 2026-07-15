@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.1.0 - 2026-07-15
+
+Release candidate adding first-class third-party model providers while preserving the built-in Codex path and the v2 writeback safety model.
+
+### Added
+
+- Added a dedicated third-party provider dialog with profile-specific endpoints, models, credentials, reasoning controls, connection testing, and explicit activation from Settings.
+- Added a Native Host provider runtime with redacted profile storage, OpenAI-compatible Chat Completions bridging, provider-aware reasoning translation, model discovery, and Codex app-server launch integration.
+- Added staged project-context loading with file-tree readiness feedback, warmed ZIP snapshots, cache reuse, and resilient snapshot fallbacks.
+
+### Fixed
+
+- Activated a newly saved provider on its first use and kept model choices isolated between providers.
+- Preserved Markdown block headings such as `## Education (main.tex:56-60)` in provider responses and rendered them consistently in run conclusions.
+- Bypassed system proxies for the local provider bridge, preventing intermittent `502` failures when Codex connects to the loopback runtime.
+- Restored prompt cancellation across long asynchronous run stages and kept Edit & resend usable after provider failures.
+- Hardened custom-provider reasoning defaults and response normalization to avoid invalid DeepSeek requests and repeated streamed content.
+
 ## v2.0.0 - 2026-07-14
 
 Release candidate focused on preserving user state and making Reviewing-mode lifecycle actions reliable across reloads. The Extension and Native Host move to protocol `2` while retaining protocol `1` compatibility during the transition.

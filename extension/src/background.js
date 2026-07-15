@@ -15,6 +15,12 @@ if (!globalThis.CodexOverleafCompatibility) {
     'mirror.confirmWriteback',
     'mirror.scanSensitive',
     'codex.history.clearPlugin',
+    'codex.providers.list',
+    'codex.providers.test',
+    'codex.providers.test.cancel',
+    'codex.providers.upsert',
+    'codex.providers.activate',
+    'codex.providers.delete',
     'skills.list',
     'skills.install',
     'skills.remove'

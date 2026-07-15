@@ -93,6 +93,7 @@ test('normalizes missing panel state with defaults and a session id', () => {
   assert.equal(state.locale, 'en');
   assert.equal(state.loadCodexLocalSkills, true);
   assert.equal(state.loadCodexOverleafSkills, true);
+  assert.equal(state.preloadProjectContext, true);
   assert.deepEqual(state.customInstructionsByProject, {});
   assert.match(state.session.id, /^session_/);
   assert.equal(state.sessions.length, 1);
@@ -101,6 +102,7 @@ test('normalizes missing panel state with defaults and a session id', () => {
 
 test('normalizes Codex skill loading toggles as global panel preferences', () => {
   const state = normalizePanelState({
+    preloadProjectContext: false,
     loadCodexLocalSkills: false,
     loadCodexOverleafSkills: false,
     activeSessionId: 'session_a',
@@ -110,6 +112,7 @@ test('normalizes Codex skill loading toggles as global panel preferences', () =>
     ]
   });
 
+  assert.equal(state.preloadProjectContext, false);
   assert.equal(state.loadCodexLocalSkills, false);
   assert.equal(state.loadCodexOverleafSkills, false);
 
@@ -118,6 +121,7 @@ test('normalizes Codex skill loading toggles as global panel preferences', () =>
   assert.equal(switched.loadCodexOverleafSkills, false);
 
   const compact = prepareStateForStorage(switched);
+  assert.equal(compact.preloadProjectContext, false);
   assert.equal(compact.loadCodexLocalSkills, false);
   assert.equal(compact.loadCodexOverleafSkills, false);
 });

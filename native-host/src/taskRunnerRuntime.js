@@ -10,6 +10,13 @@ const {
 } = require('../../extension/src/shared/compatibility');
 const { runCodexSession } = require('./codexSessionRunner');
 const { resolveCodexModels } = require('./codexModels');
+const {
+  handleProviderRequest,
+  isProviderMethod,
+  providerErrorResponse,
+  resolveProviderModels,
+  resolveRunProvider
+} = require('./providerRuntime');
 const { clearPluginCodexHistory } = require('./codexHome');
 const { logDebug, truncateText } = require('./debugLog');
 const { HOST_NAME } = require('./manifest');
@@ -77,8 +84,20 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
     return handleMirrorScanSensitive(request, env);
   }
 
+  if (isProviderMethod(request.method)) {
+    return handleProviderRequest(request, env);
+  }
+
   if (request.method === 'codex.models') {
-    return okResponse(request.id, resolveCodexModels(request.params || {}, env));
+    try {
+      return okResponse(request.id, resolveProviderModels(
+        request.params || {},
+        env,
+        resolveCodexModels
+      ));
+    } catch (error) {
+      return providerErrorResponse(request.id, error);
+    }
   }
 
   if (request.method === 'codex.run') {
@@ -130,7 +149,7 @@ function quotaErrorResponse(id, violation) {
 }
 
 async function handleCodexRun(request, env, emit) {
-  const params = request.params || {};
+  let params = request.params || {};
   if (isCodexMissing(env)) {
     return errorResponse(
       request.id,
@@ -149,7 +168,20 @@ async function handleCodexRun(request, env, emit) {
     activeRunControllers.set(request.id, abortController);
     activeRunByProject.set(projectKey, { id: request.id, controller: abortController });
   }
+  let providerResolution;
   try {
+    try {
+      providerResolution = resolveRunProvider(params, env);
+      params = {
+        ...params,
+        model: providerResolution.modelId,
+        reasoningEffort: providerResolution.reasoningEffort,
+        providerSelection: providerResolution.providerSelection
+      };
+    } catch (error) {
+      return providerErrorResponse(request.id, error);
+    }
+
     if (params.useExistingMirror) {
       const { getMirrorStatus, applyFileOverlays } = require('./mirrorWorkspace');
       const rootDir = env.CODEX_OVERLEAF_MIRROR_ROOT;
@@ -190,6 +222,7 @@ async function handleCodexRun(request, env, emit) {
       env,
       emit,
       rootDir: env.CODEX_OVERLEAF_MIRROR_ROOT,
+      providerLaunch: providerResolution.providerLaunch,
       signal: abortController.signal
     });
     const syncChanges = Array.isArray(result.syncChanges) ? result.syncChanges : [];

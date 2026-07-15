@@ -202,7 +202,7 @@
       return projectSnapshotBridge.getProjectFileList(params);
     }
     if (method === 'invalidateProjectSnapshot') {
-      projectSnapshotBridge.invalidateProjectSnapshot();
+      projectSnapshotBridge.invalidateProjectSnapshot(params);
       return { ok: true };
     }
     if (method === 'createCheckpoint') {

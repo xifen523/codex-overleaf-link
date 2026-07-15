@@ -587,7 +587,7 @@
   }
 
   function isMarkdownHeadingLine(line) {
-    return /^\s*(#{1,6}\s+\S|\*\*[^*]+\*\*:?\s*)$/.test(line);
+    return /^\s*(#{1,6}\s+\S.*|\*\*[^*]+\*\*:?\s*)$/.test(line);
   }
 
 

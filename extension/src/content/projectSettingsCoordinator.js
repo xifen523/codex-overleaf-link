@@ -254,6 +254,7 @@
 
     function getSkillLoadingSettings() {
       return {
+        preloadProjectContext: getState()?.preloadProjectContext !== false,
         loadCodexLocalSkills: getState()?.loadCodexLocalSkills !== false,
         loadCodexOverleafSkills: getState()?.loadCodexOverleafSkills !== false
       };
@@ -262,6 +263,7 @@
     function setSkillLoadingSettings(settings = {}) {
       setState({
         ...getState(),
+        preloadProjectContext: settings.preloadProjectContext !== false,
         loadCodexLocalSkills: settings.loadCodexLocalSkills !== false,
         loadCodexOverleafSkills: settings.loadCodexOverleafSkills !== false
       });
