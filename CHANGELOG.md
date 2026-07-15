@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.10.1 - 2026-07-15
+
+- Fixed Windows startup after Codex Desktop updates or system restarts by discovering the managed CLI under `%LOCALAPPDATA%\OpenAI\Codex\bin\<version>\codex.exe`.
+- Ignore non-launchable Codex binaries exposed from `Program Files\WindowsApps`, which can exist but fail with `Access is denied` when started by the native host.
+- Keep Windows CLI discovery testable on Linux and macOS release runners.
+
 ## v1.10.0 - 2026-07-11
 
 Windows and Overleaf writeback stabilization release for the xifen523 fork.
