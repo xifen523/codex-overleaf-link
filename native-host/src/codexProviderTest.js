@@ -1,6 +1,7 @@
 'use strict';
 
 const { spawn, spawnSync } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -26,6 +27,10 @@ function runProviderConnectionTestProcess({ launch, env = process.env, signal } 
     const workspace = path.join(root, 'workspace');
     fs.mkdirSync(codexHome, { recursive: true, mode: 0o700 });
     fs.mkdirSync(workspace, { recursive: true, mode: 0o700 });
+    const verificationToken = `provider-tool-check-${crypto.randomUUID()}`;
+    const secondFileName = `provider-check-${crypto.randomUUID()}.txt`;
+    fs.writeFileSync(path.join(workspace, 'provider-step-one.txt'), `${secondFileName}\n`, { mode: 0o600 });
+    fs.writeFileSync(path.join(workspace, secondFileName), `${verificationToken}\n`, { mode: 0o600 });
     const childEnv = applyProviderEnvironment({
       ...env,
       CODEX_HOME: codexHome
@@ -42,7 +47,7 @@ function runProviderConnectionTestProcess({ launch, env = process.env, signal } 
       '--skip-git-repo-check',
       '--sandbox',
       'read-only',
-      'Reply only with OK.'
+      'Use the shell tool to read provider-step-one.txt. It contains the name of a second file. Then use a separate shell tool call to read that second file. Reply only with the exact contents of the second file.'
     ];
     const startedAt = Date.now();
     let child;
@@ -73,8 +78,23 @@ function runProviderConnectionTestProcess({ launch, env = process.env, signal } 
     child.stderr.on('data', chunk => appendOutput('stderr', chunk));
     child.on('error', error => finish(providerError('provider_test_spawn_failed', 'Codex could not start the provider connection test.', { cause: error })));
     child.on('close', code => {
+      if (code === 0 && stdout.includes(verificationToken)) {
+        finish(null, {
+          durationMs: Date.now() - startedAt,
+          capabilities: {
+            text: true,
+            streaming: true,
+            agentTools: true,
+            toolRoundTrip: true
+          }
+        });
+        return;
+      }
       if (code === 0) {
-        finish(null, { durationMs: Date.now() - startedAt });
+        finish(providerError(
+          'provider_agent_tools_incompatible',
+          'The provider returned text but did not complete the required Codex tool call.'
+        ));
         return;
       }
       finish(classifyProviderFailure(stderr || stdout, code));
@@ -122,8 +142,11 @@ function classifyProviderFailure(text, exitCode) {
   if (/enotfound|eai_again|name or service not known|dns/i.test(message)) {
     return providerError('provider_dns_failed', 'The provider hostname could not be resolved.');
   }
-  if (/\b404\b|\b405\b|unsupported.{0,30}(endpoint|api|protocol)|responses.{0,30}(unsupported|not found)|chat\/completions.{0,30}(unsupported|not found)/i.test(message)) {
+  if (/\b404\b|\b405\b|cannot\s+(?:post|get)|(?:route|endpoint).{0,40}(?:not found|unsupported)|unsupported.{0,30}(?:endpoint|api|protocol)|responses.{0,30}(?:unsupported|not found)|chat\/completions.{0,30}(?:unsupported|not found)|v1\/messages.{0,30}(?:unsupported|not found)/i.test(message)) {
     return providerError('provider_protocol_incompatible', 'The endpoint is incompatible with this API protocol.');
+  }
+  if (/\b400\b|\b415\b|\b422\b|invalid.{0,30}(?:request|parameter|field)|unknown.{0,20}(?:field|parameter)|unsupported.{0,30}(?:field|parameter|tool|schema)|max[_ -]?tokens|context.{0,30}(?:length|window|limit)/i.test(message)) {
+    return providerError('provider_request_rejected', 'The provider rejected this protocol probe request. Review the model and compatibility settings.');
   }
   if (/timed?\s*out|timeout/i.test(message)) {
     return providerError('provider_connection_timeout', 'The provider connection timed out.');

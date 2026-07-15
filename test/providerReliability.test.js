@@ -4,14 +4,23 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { computeDraftFingerprint } = require('../native-host/src/providerProfile');
+const {
+  computeDraftFingerprint,
+  normalizeProviderDraft
+} = require('../native-host/src/providerProfile');
 const {
   PROVIDER_API_KEY_ENV,
   applyProviderEnvironment
 } = require('../native-host/src/codexProviderLaunch');
 const { sanitizeProviderMessage } = require('../native-host/src/providerRedaction');
 const { getReasoningControl, resolveReasoningAdapter } = require('../native-host/src/providerReasoning');
+const { buildProviderModelCatalogData } = require('../native-host/src/providerModelCatalog');
+const { buildChatRequest } = require('../native-host/src/chatBridgeRequest');
+const { convertChatResponse } = require('../native-host/src/chatBridgeResponse');
+const { buildChatCompletionsUrl, buildUpstreamHeaders } = require('../native-host/src/chatCompletionsBridge');
 const { resolveRunProvider } = require('../native-host/src/providerRuntime');
+const { classifyProviderFailure } = require('../native-host/src/codexProviderTest');
+const { classifyResponsesRoute } = require('../native-host/src/providerBridgeRoutes');
 const {
   getProviderStorePaths,
   listProviders,
@@ -54,7 +63,7 @@ function saveVerifiedProvider(env, draft, options = {}) {
       ? { kind: 'unchanged' }
       : { kind: 'replace', value: secret },
     verifiedDraftFingerprint: computeDraftFingerprint(draft, secret),
-    verifiedWireApi: 'responses',
+    verifiedWireApi: options.verifiedWireApi || 'responses',
     activate: options.activate === true,
     disclosureHost: options.activate === true ? new URL(draft.baseUrl).hostname : ''
   }, env);
@@ -112,6 +121,66 @@ test('provider errors redact the exact API key even when it is unlabelled', () =
   const sanitized = sanitizeProviderMessage(`upstream echoed ${secret} and Bearer ${secret}`, [secret]);
   assert.doesNotMatch(sanitized, /sk-exact-private-value/);
   assert.match(sanitized, /\[redacted\]/);
+});
+
+test('advanced provider fields reject credentials before they enter the public profile', () => {
+  assert.throws(
+    () => normalizeProviderDraft(makeDraft({ customHeaders: { 'x-goog-api-key': 'secret' } })),
+    error => error?.code === 'provider_configuration_invalid'
+  );
+  assert.throws(
+    () => normalizeProviderDraft(makeDraft({ queryParams: { access_token: 'secret' } })),
+    error => error?.code === 'provider_configuration_invalid'
+  );
+  assert.throws(
+    () => normalizeProviderDraft(makeDraft({ bodyOverrides: { vendor: { client_secret: 'secret' } } })),
+    error => error?.code === 'provider_configuration_invalid'
+  );
+  assert.throws(
+    () => normalizeProviderDraft(makeDraft({ customHeaders: { 'x-vendor-token': 'secret' } })),
+    error => error?.code === 'provider_configuration_invalid'
+  );
+  const safe = normalizeProviderDraft(makeDraft({
+    customHeaders: { 'anthropic-version': '2023-06-01' },
+    queryParams: { 'api-version': '2026-01-01' },
+    bodyOverrides: { temperature: 0, prompt_cache_key: 'cache-route' }
+  }));
+  assert.equal(safe.customHeaders['anthropic-version'], '2023-06-01');
+  assert.equal(safe.bodyOverrides.prompt_cache_key, 'cache-route');
+});
+
+test('Auto protocol fallback distinguishes endpoint mismatch from request rejection', () => {
+  assert.equal(classifyProviderFailure('HTTP 404: route not found', 1).code, 'provider_protocol_incompatible');
+  assert.equal(classifyProviderFailure('HTTP 400: max_tokens must be below 8192', 1).code, 'provider_request_rejected');
+  assert.equal(classifyProviderFailure('HTTP 422: unknown field reasoning', 1).code, 'provider_request_rejected');
+  assert.equal(classifyProviderFailure('HTTP 404: model example-model not found', 1).code, 'provider_model_not_found');
+});
+
+test('Auto providers persist a verified Anthropic Messages route', () => {
+  withProviderStore(env => {
+    const catalog = saveVerifiedProvider(env, makeDraft({ wireApiPreference: 'auto' }), {
+      activate: true,
+      verifiedWireApi: 'anthropic'
+    });
+    const profile = catalog.providers.find(provider => provider.id === catalog.activeProviderId);
+    assert.equal(profile.resolvedWireApi, 'anthropic');
+    assert.equal(profile.lastVerified.wireApi, 'anthropic');
+  });
+});
+
+test('unknown custom-model context keeps the 256K product default', () => {
+  const normalized = normalizeProviderDraft(makeDraft());
+  assert.equal(normalized.contextWindow, 262144);
+  assert.equal(normalized.models[0].contextWindow, 262144);
+  const catalog = buildProviderModelCatalogData({ modelId: 'vendor-model' });
+  assert.equal(catalog.models[0].context_window, 262144);
+});
+
+test('local protocol bridges accept Responses Compact aliases', () => {
+  assert.equal(classifyResponsesRoute('POST', '/v1/responses'), 'responses');
+  assert.equal(classifyResponsesRoute('POST', '/v1/responses/compact'), 'compact');
+  assert.equal(classifyResponsesRoute('POST', '/codex/v1/responses/compact/'), 'compact');
+  assert.equal(classifyResponsesRoute('GET', '/v1/responses/compact'), '');
 });
 
 test('DeepSeek endpoints automatically expose the supported reasoning controls', () => {
@@ -177,4 +246,91 @@ test('model discovery fallback is limited to confirmed Built-in Codex catalogs',
     ok: false,
     error: { code: 'provider_not_found' }
   }), false);
+});
+
+test('custom models use the portable shell-only Codex catalog', () => {
+  const catalog = buildProviderModelCatalogData({
+    modelId: 'vendor-model',
+    models: [{
+      id: 'vendor-model',
+      label: 'Vendor model',
+      reasoningEfforts: ['none', 'high'],
+      contextWindow: 131072,
+      inputModalities: ['text']
+    }]
+  });
+  assert.equal(catalog.models[0].slug, 'vendor-model');
+  assert.equal(catalog.models[0].shell_type, 'shell_command');
+  assert.equal(catalog.models[0].supports_search_tool, false);
+  assert.deepEqual(catalog.models[0].experimental_supported_tools, []);
+  assert.equal(catalog.models[0].context_window, 131072);
+});
+
+test('chat compatibility keeps optional request fields capability-gated', () => {
+  const translated = buildChatRequest({
+    requestBody: {
+      model: 'vendor-model',
+      input: 'Inspect the project.',
+      stream: true,
+      parallel_tool_calls: true,
+      tools: [{ type: 'custom', name: 'shell', description: 'Run a shell command.' }]
+    },
+    launch: { modelId: 'vendor-model', bodyOverrides: { enable_thinking: true } }
+  });
+  assert.equal(translated.body.enable_thinking, true);
+  assert.equal('stream_options' in translated.body, false);
+  assert.equal('parallel_tool_calls' in translated.body, false);
+  assert.equal(translated.body.tools[0].function.name, 'shell');
+});
+
+test('chat compatibility restores namespaced tools and structured reasoning', () => {
+  const request = buildChatRequest({
+    requestBody: {
+      model: 'vendor-model',
+      input: 'Use the tool.',
+      stream: false,
+      tools: [{
+        type: 'namespace',
+        name: 'workspace',
+        tools: [{ type: 'function', name: 'read_file', parameters: { type: 'object' } }]
+      }]
+    },
+    launch: { modelId: 'vendor-model' }
+  });
+  const chatName = request.body.tools[0].function.name;
+  const converted = convertChatResponse({
+    id: 'chat-one',
+    model: 'vendor-model',
+    choices: [{ message: {
+      reasoning_details: [{ text: 'Need the file.' }],
+      tool_calls: [{ id: 'call-one', function: { name: chatName, arguments: '{"path":"main.tex"}' } }]
+    }}]
+  }, {
+    model: 'vendor-model',
+    requestBody: {},
+    toolKinds: request.toolKinds,
+    launch: { modelId: 'vendor-model' }
+  });
+  assert.equal(converted.response.output[0].type, 'reasoning');
+  assert.equal(converted.response.output[1].name, 'read_file');
+  assert.equal(converted.response.output[1].namespace, 'workspace');
+});
+
+test('chat endpoint and authentication support provider-specific routing', () => {
+  const launch = {
+    baseUrl: 'https://provider.example/custom/chat',
+    fullEndpoint: true,
+    queryParams: { apiVersion: '2026-01-01' },
+    authMode: 'x-api-key',
+    apiKey: 'secret',
+    customHeaders: { 'anthropic-version': '2023-06-01' }
+  };
+  assert.equal(
+    buildChatCompletionsUrl(launch.baseUrl, launch),
+    'https://provider.example/custom/chat?apiVersion=2026-01-01'
+  );
+  const headers = buildUpstreamHeaders(launch);
+  assert.equal(headers['x-api-key'], 'secret');
+  assert.equal(headers['anthropic-version'], '2023-06-01');
+  assert.equal(headers.authorization, undefined);
 });

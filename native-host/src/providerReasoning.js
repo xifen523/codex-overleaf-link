@@ -4,6 +4,7 @@ const REASONING_ADAPTERS = new Set([
   'auto',
   'none',
   'deepseek',
+  'anthropic',
   'reasoning_effort',
   'openrouter',
   'enable_thinking',
@@ -51,7 +52,7 @@ function resolveReasoningCapability(profile = {}, modelId = '') {
     return configured;
   }
   const adapter = resolveReasoningAdapter(profile, modelId);
-  if (adapter === 'deepseek' || adapter === 'reasoning_effort' || adapter === 'openrouter') {
+  if (adapter === 'deepseek' || adapter === 'anthropic' || adapter === 'reasoning_effort' || adapter === 'openrouter') {
     return 'effort';
   }
   if (adapter === 'enable_thinking' || adapter === 'thinking' || adapter === 'reasoning_split') {
@@ -89,6 +90,13 @@ function getReasoningControl(profile = {}, model = {}) {
     };
   }
   if (adapter === 'openrouter') {
+    return {
+      efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
+      defaultEffort: 'medium',
+      presentation: 'effort'
+    };
+  }
+  if (adapter === 'anthropic') {
     return {
       efforts: ['none', 'low', 'medium', 'high', 'xhigh'],
       defaultEffort: 'medium',
@@ -148,6 +156,9 @@ function supportsToolChoice(launch = {}, modelId = '') {
 }
 
 function detectReasoningAdapter(profile = {}, modelId = '') {
+  if (profile.wireApiPreference === 'anthropic' || profile.wireApi === 'anthropic' || profile.routedWireApi === 'anthropic') {
+    return 'anthropic';
+  }
   const host = normalizeHost(profile.baseUrl);
   if (host === 'openrouter.ai' || host.endsWith('.openrouter.ai')) {
     return 'openrouter';
@@ -155,8 +166,18 @@ function detectReasoningAdapter(profile = {}, modelId = '') {
   if (host === 'api.deepseek.com' || host.endsWith('.deepseek.com')) {
     return 'deepseek';
   }
+  if (host === 'api.anthropic.com' || host.endsWith('.anthropic.com')) {
+    return 'anthropic';
+  }
+  if (host.includes('dashscope') || host.includes('bailian')) {
+    return 'enable_thinking';
+  }
+  if (host.includes('bigmodel') || host.includes('zhipu')) {
+    return 'thinking';
+  }
   const identity = `${profile.providerName || profile.name || ''} ${modelId || profile.modelId || ''}`.toLowerCase();
-  return /\bdeepseek(?:[-_\s]|$)/.test(identity) ? 'deepseek' : '';
+  if (/\bdeepseek(?:[-_\s]|$)/.test(identity)) return 'deepseek';
+  return /\b(?:anthropic|claude)(?:[-_\s]|$)/.test(identity) ? 'anthropic' : '';
 }
 
 function normalizeHost(value) {

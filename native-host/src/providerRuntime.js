@@ -72,7 +72,7 @@ async function testProvider(params, env) {
   activeTests.get(operationId)?.abort?.();
   activeTests.set(operationId, controller);
   const protocols = draft.wireApiPreference === 'auto'
-    ? ['responses', 'chat']
+    ? ['responses', 'chat', 'anthropic']
     : [draft.wireApiPreference];
   try {
     let lastError;
@@ -91,14 +91,15 @@ async function testProvider(params, env) {
           draftFingerprint: fingerprint,
           resolvedWireApi: wireApi,
           testedModelId: draft.defaultModelId,
-          durationMs: result.durationMs
+          durationMs: result.durationMs,
+          capabilities: result.capabilities || { text: true, agentTools: true }
         };
       } catch (error) {
         lastError = error;
-        const canTryChat = draft.wireApiPreference === 'auto'
-          && wireApi === 'responses'
+        const canTryNextProtocol = draft.wireApiPreference === 'auto'
+          && wireApi !== protocols[protocols.length - 1]
           && AUTO_PROTOCOL_FALLBACK_CODES.has(error.code);
-        if (!canTryChat) {
+        if (!canTryNextProtocol) {
           throw error;
         }
       }

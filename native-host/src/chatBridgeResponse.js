@@ -6,12 +6,18 @@ const { requiresReasoningContentReplay } = require('./providerReasoning');
 function convertChatResponse(chat = {}, context = {}) {
   const choice = Array.isArray(chat.choices) ? chat.choices[0] || {} : {};
   const message = choice.message || {};
-  const split = splitReasoning(message.content, message.reasoning_content);
+  const split = splitReasoning(message.content, extractReasoning(message));
   const output = [];
   if (split.reasoning) output.push(buildReasoningItem(split.reasoning));
   if (split.content) output.push(buildMessageItem(split.content));
-  const toolCalls = normalizeToolCalls(message.tool_calls, context.toolKinds);
+  const legacyCall = message.function_call
+    ? [{ id: randomId('call'), type: 'function', function: message.function_call }]
+    : [];
+  const toolCalls = normalizeToolCalls([...(message.tool_calls || []), ...legacyCall], context.toolKinds);
   output.push(...toolCalls.map(call => call.item));
+  if (!output.length) {
+    throw responseError('The provider completed without usable text, reasoning, or tool calls.');
+  }
   const response = buildResponseEnvelope({
     id: responseId(chat.id),
     createdAt: Number(chat.created) || nowSeconds(),
@@ -84,13 +90,17 @@ function processChatChunk(state, res, chunk) {
   if (chunk.usage) state.usage = normalizeUsage(chunk.usage);
   const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : null;
   if (!choice) return;
+  if (choice.finish_reason) state.finishReason = String(choice.finish_reason);
   const delta = choice.delta || choice.message || {};
-  const reasoning = normalizeText(delta.reasoning_content || delta.reasoning);
+  const reasoning = extractReasoning(delta);
   if (reasoning) appendReasoning(state, res, reasoning);
   const content = normalizeStreamContent(delta.content);
   if (content) appendMessage(state, res, content);
   for (const call of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
     appendToolCall(state, res, call);
+  }
+  if (delta.function_call) {
+    appendToolCall(state, res, { index: 0, function: delta.function_call });
   }
 }
 
@@ -162,16 +172,24 @@ function appendToolCall(state, res, delta) {
 function openTool(state, res, tool) {
   tool.callId ||= randomId('call');
   tool.name ||= 'tool';
-  tool.kind = state.context.toolKinds?.get(tool.name) === 'custom' ? 'custom' : 'function';
+  const spec = state.context.toolKinds?.get(tool.name);
+  tool.chatName = tool.name;
+  tool.name = typeof spec === 'object' ? spec.name || tool.name : tool.name;
+  tool.namespace = typeof spec === 'object' ? spec.namespace || '' : '';
+  tool.kind = (typeof spec === 'object' ? spec.kind : spec) === 'custom' ? 'custom' : 'function';
   tool.item = tool.kind === 'custom'
     ? { id: randomId('ct'), type: 'custom_tool_call', status: 'in_progress', call_id: tool.callId, name: tool.name, input: '' }
     : { id: randomId('fc'), type: 'function_call', status: 'in_progress', call_id: tool.callId, name: tool.name, arguments: '' };
+  if (tool.namespace) tool.item.namespace = tool.namespace;
   tool.outputIndex = reserveItem(state, tool.item);
   tool.opened = true;
   emit(state, res, 'response.output_item.added', { output_index: tool.outputIndex, item: tool.item });
 }
 
 function completeStream(state, res) {
+  if (!state.reasoning && !state.message && state.tools.size === 0) {
+    throw responseError(`The provider stream ended without usable output${state.finishReason ? ` (${state.finishReason})` : ''}.`);
+  }
   if (state.reasoning) completeReasoning(state, res);
   if (state.message) completeMessage(state, res);
   const tools = Array.from(state.tools.values()).sort((a, b) => a.index - b.index);
@@ -187,6 +205,7 @@ function completeStream(state, res) {
     assistantMessage: buildAssistantMessage(split, tools.map(tool => ({
       callId: tool.callId,
       name: tool.name,
+      chatName: tool.chatName,
       arguments: tool.arguments,
       kind: tool.kind,
       item: tool.item
@@ -271,6 +290,7 @@ function createStreamState(context) {
     message: null,
     usage: normalizeUsage(),
     sequence: 0
+    ,finishReason: ''
   };
 }
 
@@ -328,11 +348,15 @@ function normalizeToolCalls(values, toolKinds) {
     const name = normalizeText(value?.function?.name) || 'tool';
     const callId = normalizeText(value?.id) || randomId('call');
     const argumentsText = normalizeText(value?.function?.arguments) || '{}';
-    const kind = toolKinds?.get(name) === 'custom' ? 'custom' : 'function';
+    const spec = toolKinds?.get(name);
+    const kind = (typeof spec === 'object' ? spec.kind : spec) === 'custom' ? 'custom' : 'function';
+    const originalName = typeof spec === 'object' ? spec.name || name : name;
+    const namespace = typeof spec === 'object' ? spec.namespace || '' : '';
     const item = kind === 'custom'
-      ? { id: randomId('ct'), type: 'custom_tool_call', status: 'completed', call_id: callId, name, input: unwrapCustomArguments(argumentsText) }
-      : { id: randomId('fc'), type: 'function_call', status: 'completed', call_id: callId, name, arguments: argumentsText };
-    return { callId, name, arguments: argumentsText, kind, item };
+      ? { id: randomId('ct'), type: 'custom_tool_call', status: 'completed', call_id: callId, name: originalName, input: unwrapCustomArguments(argumentsText) }
+      : { id: randomId('fc'), type: 'function_call', status: 'completed', call_id: callId, name: originalName, arguments: argumentsText };
+    if (namespace) item.namespace = namespace;
+    return { callId, name: originalName, chatName: name, namespace, arguments: argumentsText, kind, item };
   });
 }
 
@@ -343,7 +367,7 @@ function buildAssistantMessage(split, toolCalls, launch) {
     assistant.tool_calls = toolCalls.map(call => ({
       id: call.callId,
       type: 'function',
-      function: { name: call.name, arguments: call.arguments || '{}' }
+      function: { name: call.chatName || call.name, arguments: call.arguments || '{}' }
     }));
   }
   const replayReasoning = split.reasoning || (replayRequired ? ' ' : '');
@@ -362,6 +386,25 @@ function splitReasoning(contentValue, reasoningValue) {
     }
   }
   return { content, reasoning };
+}
+
+function extractReasoning(message = {}) {
+  const direct = message.reasoning_content ?? message.reasoning ?? message.thinking;
+  if (typeof direct === 'string') return direct;
+  if (direct && typeof direct === 'object') {
+    const text = normalizeText(direct.text || direct.content || direct.summary);
+    if (text) return text;
+  }
+  return (Array.isArray(message.reasoning_details) ? message.reasoning_details : [])
+    .map(item => typeof item === 'string' ? item : normalizeText(item?.text || item?.content || item?.summary))
+    .filter(Boolean)
+    .join('\n');
+}
+
+function responseError(message) {
+  const error = new Error(message);
+  error.code = 'provider_response_invalid';
+  return error;
 }
 
 function normalizeUsage(value = {}) {

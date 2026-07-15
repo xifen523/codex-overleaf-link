@@ -1,12 +1,15 @@
 'use strict';
 
 const { startChatCompletionsBridge } = require('./chatCompletionsBridge');
+const { startAnthropicMessagesBridge } = require('./anthropicMessagesBridge');
+const { prepareProviderModelCatalog } = require('./providerModelCatalog');
 
 const PROVIDER_CONFIG_ID = 'codex_overleaf_custom';
 const PROVIDER_API_KEY_ENV = 'CODEX_OVERLEAF_PROVIDER_API_KEY';
 const LOOPBACK_NO_PROXY_HOSTS = ['127.0.0.1', 'localhost', '::1'];
 
 function createProviderLaunch({ profile, secret = '', modelId, wireApi, reasoningEffort = '' }) {
+  const model = profile.models.find(item => item.id === modelId) || {};
   return Object.freeze({
     providerId: profile.id,
     providerRevision: profile.revision,
@@ -18,26 +21,66 @@ function createProviderLaunch({ profile, secret = '', modelId, wireApi, reasonin
     reasoningAdapter: profile.reasoningAdapter || 'auto',
     reasoningCapability: profile.reasoningCapability || 'auto',
     reasoningEffort,
+    reasoningEfforts: model.reasoningEfforts?.length
+      ? model.reasoningEfforts.slice()
+      : reasoningEffort
+        ? [reasoningEffort]
+        : [],
+    models: profile.models.map(item => ({ ...item })),
+    contextWindow: model.contextWindow || profile.contextWindow,
+    supportsParallelToolCalls: model.supportsParallelToolCalls ?? profile.supportsParallelToolCalls,
+    supportsStreamOptions: Boolean(profile.supportsStreamOptions),
+    inputModalities: model.inputModalities || profile.inputModalities,
+    authMode: profile.authMode || 'bearer',
+    apiKeyHeaderName: profile.apiKeyHeaderName || '',
+    fullEndpoint: Boolean(profile.fullEndpoint),
+    customHeaders: { ...(profile.customHeaders || {}) },
+    queryParams: { ...(profile.queryParams || {}) },
+    bodyOverrides: { ...(profile.bodyOverrides || {}) },
+    anthropicVersion: profile.anthropicVersion || '2023-06-01',
+    anthropicBeta: profile.anthropicBeta || '',
+    anthropicThinkingMode: profile.anthropicThinkingMode || 'budget',
+    anthropicPromptCaching: profile.anthropicPromptCaching === true,
+    impersonateClaudeCode: profile.impersonateClaudeCode === true,
+    maxOutputTokens: profile.maxOutputTokens || 8192,
     apiKey: secret
   });
 }
 
 async function prepareProviderLaunch(launch, { signal } = {}) {
-  if (!launch || launch.wireApi !== 'chat') {
-    return { launch, close: async () => {} };
+  const catalog = prepareProviderModelCatalog(launch);
+  if (!catalog.launch || !['chat', 'anthropic'].includes(catalog.launch.wireApi)) {
+    return { launch: catalog.launch, close: async () => catalog.close() };
   }
-  const bridge = await startChatCompletionsBridge({ launch, signal });
-  return {
-    launch: Object.freeze({
-      ...launch,
-      upstreamBaseUrl: launch.baseUrl,
-      baseUrl: bridge.baseUrl,
-      wireApi: 'responses',
-      routedWireApi: 'chat',
-      apiKey: bridge.clientToken
-    }),
-    close: bridge.close
-  };
+  try {
+    const routedWireApi = catalog.launch.wireApi;
+    const bridge = routedWireApi === 'anthropic'
+      ? await startAnthropicMessagesBridge({ launch: catalog.launch, signal })
+      : await startChatCompletionsBridge({ launch: catalog.launch, signal });
+    return {
+      launch: Object.freeze({
+        ...catalog.launch,
+        upstreamBaseUrl: catalog.launch.baseUrl,
+        baseUrl: bridge.baseUrl,
+        wireApi: 'responses',
+        routedWireApi,
+        apiKey: bridge.clientToken,
+        authMode: 'bearer',
+        apiKeyHeaderName: '',
+        fullEndpoint: false,
+        customHeaders: {},
+        queryParams: {},
+        bodyOverrides: {}
+      }),
+      close: async () => {
+        await bridge.close();
+        catalog.close();
+      }
+    };
+  } catch (error) {
+    catalog.close();
+    throw error;
+  }
 }
 
 function buildProviderConfigArgs(launch) {
@@ -51,7 +94,7 @@ function buildProviderConfigArgs(launch) {
     [`model_providers.${PROVIDER_CONFIG_ID}.base_url`, launch.baseUrl],
     [`model_providers.${PROVIDER_CONFIG_ID}.wire_api`, launch.wireApi]
   ];
-  if (launch.apiKey) {
+  if (launch.apiKey && (launch.authMode || 'bearer') === 'bearer') {
     values.push([`model_providers.${PROVIDER_CONFIG_ID}.env_key`, PROVIDER_API_KEY_ENV]);
   }
   const args = [];
@@ -59,6 +102,21 @@ function buildProviderConfigArgs(launch) {
     args.push('-c', `${key}=${encodeTomlString(value)}`);
   }
   args.push('-c', `model_providers.${PROVIDER_CONFIG_ID}.requires_openai_auth=false`);
+  if (launch.modelCatalogPath) {
+    args.push('-c', `model_catalog_json=${encodeTomlString(launch.modelCatalogPath)}`);
+  }
+  if (Object.keys(launch.customHeaders || {}).length) {
+    args.push('-c', `model_providers.${PROVIDER_CONFIG_ID}.http_headers=${encodeTomlTable(launch.customHeaders)}`);
+  }
+  if (Object.keys(launch.queryParams || {}).length) {
+    args.push('-c', `model_providers.${PROVIDER_CONFIG_ID}.query_params=${encodeTomlTable(launch.queryParams)}`);
+  }
+  const authHeader = resolveAuthHeader(launch);
+  if (launch.apiKey && authHeader) {
+    args.push('-c', `model_providers.${PROVIDER_CONFIG_ID}.env_http_headers=${encodeTomlTable({
+      [authHeader]: PROVIDER_API_KEY_ENV
+    })}`);
+  }
   return args;
 }
 
@@ -122,6 +180,19 @@ function buildProviderSnapshot(launch) {
 
 function encodeTomlString(value) {
   return JSON.stringify(String(value ?? ''));
+}
+
+function encodeTomlTable(value) {
+  return `{${Object.entries(value || {}).map(([key, item]) => (
+    `${encodeTomlString(key)}=${encodeTomlString(item)}`
+  )).join(',')}}`;
+}
+
+function resolveAuthHeader(launch) {
+  if (!launch || launch.authMode === 'none' || (launch.authMode || 'bearer') === 'bearer') return '';
+  if (launch.authMode === 'x-api-key') return 'x-api-key';
+  if (launch.authMode === 'api-key') return 'api-key';
+  return launch.apiKeyHeaderName || '';
 }
 
 module.exports = {

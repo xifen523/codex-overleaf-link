@@ -53,6 +53,22 @@
       requestTimeoutMs: normalizeInteger(value.requestTimeoutMs) || 30000,
       reasoningAdapter: normalizeReasoningAdapter(value.reasoningAdapter),
       reasoningCapability: normalizeReasoningCapability(value.reasoningCapability),
+      authMode: normalizeAuthMode(value.authMode),
+      apiKeyHeaderName: normalizeText(value.apiKeyHeaderName),
+      fullEndpoint: value.fullEndpoint === true,
+      customHeaders: normalizeRecord(value.customHeaders),
+      queryParams: normalizeRecord(value.queryParams),
+      bodyOverrides: normalizeRecord(value.bodyOverrides),
+      contextWindow: normalizeInteger(value.contextWindow) || 262144,
+      supportsParallelToolCalls: value.supportsParallelToolCalls === true,
+      supportsStreamOptions: value.supportsStreamOptions === true,
+      inputModalities: normalizeInputModalities(value.inputModalities),
+      anthropicVersion: normalizeText(value.anthropicVersion) || '2023-06-01',
+      anthropicBeta: normalizeText(value.anthropicBeta),
+      anthropicThinkingMode: normalizeAnthropicThinkingMode(value.anthropicThinkingMode),
+      anthropicPromptCaching: value.anthropicPromptCaching === true,
+      impersonateClaudeCode: value.impersonateClaudeCode === true,
+      maxOutputTokens: normalizeInteger(value.maxOutputTokens) || 8192,
       hasSecret: value.hasSecret === true,
       secretUpdatedAt: normalizeInteger(value.secretUpdatedAt),
       endpointDisclosureHost: normalizeText(value.endpointDisclosureHost),
@@ -87,7 +103,11 @@
         label: normalizeText(value?.label) || id,
         reasoningEfforts: Array.isArray(value?.reasoningEfforts)
           ? value.reasoningEfforts.map(normalizeText).filter(Boolean)
-          : []
+          : [],
+        contextWindow: normalizeInteger(value?.contextWindow) || 262144,
+        supportsParallelToolCalls: value?.supportsParallelToolCalls === true,
+        inputModalities: normalizeInputModalities(value?.inputModalities),
+        baseInstructions: normalizeText(value?.baseInstructions)
       });
     }
     return result;
@@ -119,6 +139,22 @@
       requestTimeoutMs: 30000,
       reasoningAdapter: 'auto',
       reasoningCapability: 'auto',
+      authMode: 'bearer',
+      apiKeyHeaderName: '',
+      fullEndpoint: false,
+      customHeaders: {},
+      queryParams: {},
+      bodyOverrides: {},
+      contextWindow: 262144,
+      supportsParallelToolCalls: false,
+      supportsStreamOptions: false,
+      inputModalities: ['text'],
+      anthropicVersion: '2023-06-01',
+      anthropicBeta: '',
+      anthropicThinkingMode: 'budget',
+      anthropicPromptCaching: false,
+      impersonateClaudeCode: false,
+      maxOutputTokens: 8192,
       hasSecret: false,
       secretUpdatedAt: 0,
       endpointDisclosureHost: '',
@@ -142,7 +178,7 @@
 
   function normalizeWireApi(value, allowAuto) {
     const normalized = normalizeText(value).toLowerCase();
-    if (normalized === 'responses' || normalized === 'chat') {
+    if (normalized === 'responses' || normalized === 'chat' || normalized === 'anthropic') {
       return normalized;
     }
     return allowAuto ? 'auto' : '';
@@ -150,7 +186,7 @@
 
   function normalizeReasoningAdapter(value) {
     const normalized = normalizeText(value).toLowerCase();
-    return ['auto', 'none', 'deepseek', 'reasoning_effort', 'openrouter', 'enable_thinking', 'thinking', 'reasoning_split'].includes(normalized)
+    return ['auto', 'none', 'deepseek', 'anthropic', 'reasoning_effort', 'openrouter', 'enable_thinking', 'thinking', 'reasoning_split'].includes(normalized)
       ? normalized
       : 'auto';
   }
@@ -158,6 +194,28 @@
   function normalizeReasoningCapability(value) {
     const normalized = normalizeText(value).toLowerCase();
     return ['auto', 'none', 'toggle', 'effort'].includes(normalized) ? normalized : 'auto';
+  }
+
+  function normalizeAuthMode(value) {
+    const normalized = normalizeText(value).toLowerCase();
+    return ['bearer', 'x-api-key', 'api-key', 'custom', 'none'].includes(normalized)
+      ? normalized
+      : 'bearer';
+  }
+
+  function normalizeRecord(value) {
+    return value && typeof value === 'object' && !Array.isArray(value) ? { ...value } : {};
+  }
+
+  function normalizeInputModalities(value) {
+    const values = Array.isArray(value) ? value : ['text'];
+    const result = Array.from(new Set(values.map(normalizeText).filter(item => item === 'text' || item === 'image')));
+    return result.includes('text') ? result : ['text', ...result];
+  }
+
+  function normalizeAnthropicThinkingMode(value) {
+    const normalized = normalizeText(value).toLowerCase();
+    return ['budget', 'adaptive', 'none'].includes(normalized) ? normalized : 'budget';
   }
 
   function normalizeText(value) {

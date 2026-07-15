@@ -243,6 +243,10 @@
       provider_auth_rejected: instance.tx('The provider rejected the API key.', '模型服务拒绝了 API 密钥。'),
       provider_model_not_found: instance.tx('The configured model was not found.', '未找到所配置的模型。'),
       provider_protocol_incompatible: instance.tx('The endpoint is incompatible with the selected API protocol.', '端点与所选 API 协议不兼容。'),
+      provider_request_rejected: instance.tx('The provider rejected the probe request. Review the model and compatibility settings.', '模型服务拒绝了探测请求，请检查模型和兼容设置。'),
+      provider_agent_tools_incompatible: instance.tx('The model answered, but it could not complete the Codex tool-call loop.', '模型能够回答，但无法完成 Codex 工具调用闭环。'),
+      provider_response_invalid: instance.tx('The provider completed without usable text or tool calls.', '模型服务结束了请求，但没有返回可用文本或工具调用。'),
+      provider_configuration_invalid: instance.tx('Review the endpoint, authentication, headers, and compatibility settings.', '请检查端点、鉴权、请求头和兼容设置。'),
       provider_connection_timeout: instance.tx('The provider connection timed out.', '连接模型服务超时。'),
       provider_revision_conflict: instance.tx('This provider changed in another tab. Reload it and retry.', '此模型服务已在其他标签页发生变化，请刷新后重试。'),
       provider_protocol_unverified: instance.tx('Run Test connection before activating Auto protocol.', '启用自动协议前请先测试连接。')

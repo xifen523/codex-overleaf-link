@@ -323,6 +323,11 @@
       fallbackUserMessage: 'The endpoint is incompatible with the selected API protocol.',
       fallbackNextAction: 'Select another protocol or use Auto detection.'
     },
+    provider_request_rejected: {
+      stage: 'codex', severity: 'blocked', defaultRetryable: false,
+      fallbackUserMessage: 'The provider rejected the protocol probe request.',
+      fallbackNextAction: 'Review the model ID, reasoning controls, tool support, and request overrides.'
+    },
     provider_rate_limited: {
       stage: 'codex', severity: 'error', defaultRetryable: true,
       fallbackUserMessage: 'The provider rate limit was reached.',

@@ -7,6 +7,7 @@ const path = require('node:path');
 const {
   computeDraftFingerprint,
   getEndpointHost,
+  isResolvedWireApi,
   normalizeProviderDraft,
   normalizeSecret,
   providerError,
@@ -73,7 +74,7 @@ function upsertProviderUnlocked(params = {}, env = process.env) {
   if (!verified) {
     throw providerError('provider_verification_required', 'Run Test connection again after changing provider settings.');
   }
-  const verifiedWireApi = verified && ['responses', 'chat'].includes(params.verifiedWireApi)
+  const verifiedWireApi = verified && isResolvedWireApi(params.verifiedWireApi)
     ? params.verifiedWireApi
     : '';
   const resolvedWireApi = draft.wireApiPreference === 'auto'
@@ -358,7 +359,7 @@ function normalizeStoredProfile(value) {
     id: normalizeId(value.id),
     revision: Math.max(1, normalizeRevision(value.revision)),
     ...normalized,
-    resolvedWireApi: ['responses', 'chat'].includes(value.resolvedWireApi) ? value.resolvedWireApi : '',
+    resolvedWireApi: isResolvedWireApi(value.resolvedWireApi) ? value.resolvedWireApi : '',
     endpointDisclosureHost: String(value.endpointDisclosureHost || ''),
     endpointDisclosureBaseUrl: String(value.endpointDisclosureBaseUrl || ''),
     endpointDisclosureAcceptedAt: normalizeRevision(value.endpointDisclosureAcceptedAt),

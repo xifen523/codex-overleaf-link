@@ -6,8 +6,11 @@ const {
   normalizeReasoningCapability
 } = require('./providerReasoning');
 
-const ALLOWED_WIRE_APIS = new Set(['auto', 'responses', 'chat']);
+const ALLOWED_WIRE_APIS = new Set(['auto', 'responses', 'chat', 'anthropic']);
 const ALLOWED_REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+const ALLOWED_AUTH_MODES = new Set(['bearer', 'x-api-key', 'api-key', 'custom', 'none']);
+const ALLOWED_INPUT_MODALITIES = new Set(['text', 'image']);
+const DEFAULT_CONTEXT_WINDOW = 262144;
 const UNSAFE_CLI_VALUE = /[\0\r\n"&|<>^%!`]/;
 
 function normalizeProviderDraft(value = {}) {
@@ -32,6 +35,11 @@ function normalizeProviderDraft(value = {}) {
   const requestTimeoutMs = normalizeTimeout(value.requestTimeoutMs);
   const reasoningAdapter = normalizeReasoningAdapter(value.reasoningAdapter);
   const reasoningCapability = normalizeReasoningCapability(value.reasoningCapability);
+  const authMode = normalizeEnum(value.authMode, ALLOWED_AUTH_MODES, 'bearer');
+  const apiKeyHeaderName = normalizeHeaderName(value.apiKeyHeaderName);
+  if (authMode === 'custom' && !apiKeyHeaderName) {
+    throw providerError('provider_configuration_invalid', 'Custom API-key authentication requires a header name.');
+  }
   return {
     name,
     baseUrl,
@@ -40,7 +48,23 @@ function normalizeProviderDraft(value = {}) {
     defaultModelId,
     requestTimeoutMs,
     reasoningAdapter,
-    reasoningCapability
+    reasoningCapability,
+    authMode,
+    apiKeyHeaderName,
+    fullEndpoint: value.fullEndpoint === true,
+    customHeaders: normalizeStringRecord(value.customHeaders, 'Custom headers', { rejectCredentials: true }),
+    queryParams: normalizeStringRecord(value.queryParams, 'Query parameters', { rejectCredentials: true }),
+    bodyOverrides: normalizeBodyOverrides(value.bodyOverrides),
+    contextWindow: normalizeContextWindow(value.contextWindow),
+    supportsParallelToolCalls: value.supportsParallelToolCalls === true,
+    supportsStreamOptions: value.supportsStreamOptions === true,
+    inputModalities: normalizeInputModalities(value.inputModalities),
+    anthropicVersion: normalizeOptionalText(value.anthropicVersion, 64) || '2023-06-01',
+    anthropicBeta: normalizeOptionalText(value.anthropicBeta, 512),
+    anthropicThinkingMode: normalizeAnthropicThinkingMode(value.anthropicThinkingMode),
+    anthropicPromptCaching: value.anthropicPromptCaching === true,
+    impersonateClaudeCode: value.impersonateClaudeCode === true,
+    maxOutputTokens: normalizeMaxOutputTokens(value.maxOutputTokens)
   };
 }
 
@@ -61,7 +85,15 @@ function normalizeModels(values) {
     const reasoningEfforts = Array.isArray(value?.reasoningEfforts)
       ? value.reasoningEfforts.map(normalizeText).filter(effort => ALLOWED_REASONING_EFFORTS.has(effort))
       : [];
-    result.push({ id, label: label.slice(0, 200), reasoningEfforts: Array.from(new Set(reasoningEfforts)) });
+    result.push({
+      id,
+      label: label.slice(0, 200),
+      reasoningEfforts: Array.from(new Set(reasoningEfforts)),
+      contextWindow: normalizeContextWindow(value?.contextWindow),
+      supportsParallelToolCalls: value?.supportsParallelToolCalls === true,
+      inputModalities: normalizeInputModalities(value?.inputModalities),
+      baseInstructions: normalizeOptionalText(value?.baseInstructions, 8000)
+    });
   }
   return result;
 }
@@ -91,13 +123,18 @@ function normalizeBaseUrl(value) {
 
 function normalizeWireApi(value, allowAuto = false) {
   const normalized = normalizeText(value).toLowerCase();
-  if (normalized === 'responses' || normalized === 'chat' || (allowAuto && normalized === 'auto')) {
+  if (ALLOWED_WIRE_APIS.has(normalized) && (allowAuto || normalized !== 'auto')) {
     return normalized;
   }
   if (allowAuto && !normalized) {
     return 'auto';
   }
-  throw providerError('provider_protocol_incompatible', 'API protocol must be Auto, Responses, or Chat Completions.');
+  throw providerError('provider_protocol_incompatible', 'API protocol must be Auto, Responses, Chat Completions, or Anthropic Messages.');
+}
+
+function isResolvedWireApi(value) {
+  return ALLOWED_WIRE_APIS.has(String(value || '').trim().toLowerCase())
+    && String(value || '').trim().toLowerCase() !== 'auto';
 }
 
 function normalizeSecret(value) {
@@ -139,6 +176,22 @@ function sanitizeProfile(profile, hasSecret) {
     requestTimeoutMs: profile.requestTimeoutMs,
     reasoningAdapter: profile.reasoningAdapter || 'auto',
     reasoningCapability: profile.reasoningCapability || 'auto',
+    authMode: profile.authMode || 'bearer',
+    apiKeyHeaderName: profile.apiKeyHeaderName || '',
+    fullEndpoint: profile.fullEndpoint === true,
+    customHeaders: { ...(profile.customHeaders || {}) },
+    queryParams: { ...(profile.queryParams || {}) },
+    bodyOverrides: { ...(profile.bodyOverrides || {}) },
+    contextWindow: normalizeContextWindow(profile.contextWindow),
+    supportsParallelToolCalls: profile.supportsParallelToolCalls === true,
+    supportsStreamOptions: profile.supportsStreamOptions === true,
+    inputModalities: normalizeInputModalities(profile.inputModalities),
+    anthropicVersion: profile.anthropicVersion || '2023-06-01',
+    anthropicBeta: profile.anthropicBeta || '',
+    anthropicThinkingMode: normalizeAnthropicThinkingMode(profile.anthropicThinkingMode),
+    anthropicPromptCaching: profile.anthropicPromptCaching === true,
+    impersonateClaudeCode: profile.impersonateClaudeCode === true,
+    maxOutputTokens: normalizeMaxOutputTokens(profile.maxOutputTokens),
     hasSecret: Boolean(hasSecret),
     secretUpdatedAt: profile.secretUpdatedAt || 0,
     endpointDisclosureHost: profile.endpointDisclosureHost || '',
@@ -163,6 +216,137 @@ function normalizeTimeout(value) {
     return 30000;
   }
   return Math.min(120000, Math.max(5000, Math.floor(number)));
+}
+
+function normalizeEnum(value, allowed, fallback) {
+  const normalized = normalizeText(value).toLowerCase();
+  return allowed.has(normalized) ? normalized : fallback;
+}
+
+function normalizeHeaderName(value) {
+  const normalized = normalizeText(value);
+  if (!normalized) return '';
+  if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(normalized)) {
+    throw providerError('provider_configuration_invalid', 'Custom API-key header name is invalid.');
+  }
+  return normalized;
+}
+
+function parseJsonObject(value, label) {
+  if (value === undefined || value === null || value === '') return {};
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch (_error) {
+      throw providerError('provider_configuration_invalid', `${label} must be valid JSON.`);
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw providerError('provider_configuration_invalid', `${label} must be a JSON object.`);
+  }
+  return parsed;
+}
+
+function normalizeStringRecord(value, label, options = {}) {
+  const parsed = parseJsonObject(value, label);
+  const result = {};
+  for (const [rawKey, rawValue] of Object.entries(parsed)) {
+    const key = normalizeText(rawKey);
+    const item = String(rawValue ?? '');
+    if (!key || /[\0\r\n]/.test(key) || /[\0\r\n]/.test(item)) {
+      throw providerError('provider_configuration_invalid', `${label} contains an invalid key or value.`);
+    }
+    if (options.rejectCredentials && isCredentialLikeKey(key)) {
+      throw providerError(
+        'provider_configuration_invalid',
+        `${label} cannot contain credentials. Use the API-key authentication control instead.`
+      );
+    }
+    result[key] = item;
+  }
+  return result;
+}
+
+function normalizeBodyOverrides(value) {
+  const parsed = parseJsonObject(value, 'Request body overrides');
+  for (const blocked of ['model', 'messages', 'tools', 'stream', 'system', 'max_tokens', 'input', 'instructions']) {
+    if (Object.prototype.hasOwnProperty.call(parsed, blocked)) {
+      throw providerError('provider_configuration_invalid', `Request body overrides cannot replace ${blocked}.`);
+    }
+  }
+  if (JSON.stringify(parsed).length > 16384) {
+    throw providerError('provider_configuration_invalid', 'Request body overrides are too large.');
+  }
+  const credentialPath = findCredentialField(parsed);
+  if (credentialPath) {
+    throw providerError(
+      'provider_configuration_invalid',
+      `Request body overrides cannot contain credential field ${credentialPath}. Use the API-key authentication control instead.`
+    );
+  }
+  return parsed;
+}
+
+function findCredentialField(value, path = []) {
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const found = findCredentialField(value[index], [...path, String(index)]);
+      if (found) return found;
+    }
+    return '';
+  }
+  if (!value || typeof value !== 'object') return '';
+  for (const [key, item] of Object.entries(value)) {
+    const nextPath = [...path, key];
+    if (isCredentialLikeKey(key)) return nextPath.join('.');
+    const found = findCredentialField(item, nextPath);
+    if (found) return found;
+  }
+  return '';
+}
+
+function isCredentialLikeKey(value) {
+  const key = String(value || '').trim();
+  if (!key) return false;
+  if (/^(?:prompt[-_.]?cache[-_.]?key|idempotency[-_.]?key|cache[-_.]?key)$/i.test(key)) {
+    return false;
+  }
+  if (/^(?:authorization|proxy-authorization|cookie|set-cookie|password|passwd|credential|credentials|token|key|signature|sig)$/i.test(key)) {
+    return true;
+  }
+  return /(?:^|[-_.])(?:api[-_]?key|access[-_]?token|auth[-_]?token|bearer[-_]?token|client[-_]?secret|secret[-_]?key|private[-_]?key|access[-_]?key(?:[-_]?id)?|token|secret|password|passwd|credential|credentials|cookie|signature)(?:$|[-_.])/i.test(key);
+}
+
+function normalizeContextWindow(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return DEFAULT_CONTEXT_WINDOW;
+  return Math.min(4000000, Math.max(8192, Math.floor(number)));
+}
+
+function normalizeInputModalities(value) {
+  const values = Array.isArray(value) ? value : normalizeText(value).split(',');
+  const normalized = values
+    .map(item => normalizeText(item).toLowerCase())
+    .filter(item => ALLOWED_INPUT_MODALITIES.has(item));
+  const result = Array.from(new Set(normalized));
+  return result.includes('text') ? result : ['text', ...result];
+}
+
+function normalizeOptionalText(value, maxLength) {
+  const text = normalizeText(value);
+  return text ? text.slice(0, maxLength) : '';
+}
+
+function normalizeAnthropicThinkingMode(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  return ['budget', 'adaptive', 'none'].includes(normalized) ? normalized : 'budget';
+}
+
+function normalizeMaxOutputTokens(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 8192;
+  return Math.min(200000, Math.max(256, Math.floor(number)));
 }
 
 function normalizeRequiredText(value, code, message, maxLength) {
@@ -198,6 +382,7 @@ function providerError(code, message, details = {}) {
 module.exports = {
   computeDraftFingerprint,
   getEndpointHost,
+  isResolvedWireApi,
   normalizeProviderDraft,
   normalizeSecret,
   normalizeWireApi,

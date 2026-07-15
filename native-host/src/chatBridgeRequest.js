@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
 const {
   applyReasoningControl,
   requiresReasoningContentReplay,
@@ -14,34 +16,35 @@ function buildChatRequest({ requestBody = {}, launch = {}, historyMessages = [] 
   }
   const model = normalizeText(requestBody.model) || launch.modelId;
   const replayReasoning = requiresReasoningContentReplay(launch, model);
-  appendResponsesInput(messages, requestBody.input, { replayReasoning });
   const { tools, toolKinds } = translateTools(requestBody.tools);
+  appendResponsesInput(messages, requestBody.input, { replayReasoning, toolKinds });
   const body = {
+    ...(launch.bodyOverrides || {}),
     model,
     messages,
     stream: requestBody.stream !== false
   };
-  if (body.stream) {
+  if (body.stream && launch.supportsStreamOptions) {
     body.stream_options = { include_usage: true };
   }
   if (tools.length) {
     body.tools = tools;
   }
-  const toolChoice = translateToolChoice(requestBody.tool_choice);
+  const toolChoice = translateToolChoice(requestBody.tool_choice, toolKinds);
   if (toolChoice && supportsToolChoice(launch, model)) body.tool_choice = toolChoice;
   copyNumber(requestBody, body, 'temperature');
   copyNumber(requestBody, body, 'top_p');
   if (Number.isFinite(Number(requestBody.max_output_tokens))) {
     body.max_tokens = Math.max(1, Math.floor(Number(requestBody.max_output_tokens)));
   }
-  if (typeof requestBody.parallel_tool_calls === 'boolean') {
+  if (launch.supportsParallelToolCalls && typeof requestBody.parallel_tool_calls === 'boolean') {
     body.parallel_tool_calls = requestBody.parallel_tool_calls;
   }
   applyReasoningControl(body, requestBody, launch);
   return { body, messages, toolKinds };
 }
 
-function appendResponsesInput(messages, input, { replayReasoning = false } = {}) {
+function appendResponsesInput(messages, input, { replayReasoning = false, toolKinds = new Map() } = {}) {
   if (typeof input === 'string') {
     if (input) messages.push({ role: 'user', content: input });
     return;
@@ -68,12 +71,12 @@ function appendResponsesInput(messages, input, { replayReasoning = false } = {})
       pendingReasoning = extractReasoningText(item);
       continue;
     }
-    if (item.type === 'function_call' || item.type === 'custom_tool_call') {
-      pendingToolCalls.push(toChatToolCall(item));
+    if (item.type === 'function_call' || item.type === 'custom_tool_call' || item.type === 'tool_search_call') {
+      pendingToolCalls.push(toChatToolCall(item, toolKinds));
       continue;
     }
     flushToolCalls();
-    if (item.type === 'function_call_output' || item.type === 'custom_tool_call_output' || item.type === 'computer_call_output') {
+    if (item.type === 'function_call_output' || item.type === 'custom_tool_call_output' || item.type === 'computer_call_output' || item.type === 'tool_search_output') {
       messages.push({
         role: 'tool',
         tool_call_id: normalizeText(item.call_id) || normalizeText(item.id),
@@ -106,8 +109,9 @@ function extractReasoningText(item) {
     .join('\n');
 }
 
-function toChatToolCall(item) {
-  const isCustom = item.type === 'custom_tool_call';
+function toChatToolCall(item, toolKinds) {
+  const spec = findToolSpec(toolKinds, item);
+  const isCustom = item.type === 'custom_tool_call' || spec?.kind === 'custom';
   const rawArguments = isCustom
     ? JSON.stringify({ input: normalizeText(item.input) })
     : normalizeArguments(item.arguments);
@@ -115,7 +119,7 @@ function toChatToolCall(item) {
     id: normalizeText(item.call_id) || normalizeText(item.id),
     type: 'function',
     function: {
-      name: normalizeText(item.name),
+      name: spec?.chatName || normalizeText(item.name),
       arguments: rawArguments
     }
   };
@@ -147,14 +151,33 @@ function translateTools(values) {
   const tools = [];
   const toolKinds = new Map();
   for (const value of Array.isArray(values) ? values : []) {
-    const name = normalizeText(value?.name || value?.function?.name);
-    if (!name || toolKinds.has(name)) continue;
-    const kind = value.type === 'custom' ? 'custom' : 'function';
-    toolKinds.set(name, kind);
+    if (value?.type === 'namespace' && Array.isArray(value.tools)) {
+      for (const child of value.tools) {
+        addTool(tools, toolKinds, child, normalizeText(value.name));
+      }
+      continue;
+    }
+    addTool(tools, toolKinds, value, '');
+  }
+  return { tools, toolKinds };
+}
+
+function addTool(tools, toolKinds, value, namespace) {
+    const originalName = normalizeText(value?.name || value?.function?.name)
+      || (value?.type === 'tool_search' ? 'tool_search' : '');
+    if (!originalName) return;
+    const kind = value.type === 'custom'
+      ? 'custom'
+      : value.type === 'tool_search'
+        ? 'tool_search'
+        : 'function';
+    const chatName = uniqueChatToolName(namespace, originalName, toolKinds);
+    const spec = { kind, name: originalName, namespace, chatName };
+    toolKinds.set(chatName, spec);
     tools.push({
       type: 'function',
       function: {
-        name,
+        name: chatName,
         description: normalizeText(value.description || value.function?.description),
         parameters: kind === 'custom'
           ? {
@@ -163,17 +186,44 @@ function translateTools(values) {
               required: ['input'],
               additionalProperties: false
             }
-          : normalizeParameters(value.parameters || value.function?.parameters)
+          : kind === 'tool_search'
+            ? {
+                type: 'object',
+                properties: { query: { type: 'string' } },
+                required: ['query'],
+                additionalProperties: false
+              }
+            : normalizeParameters(value.parameters || value.function?.parameters)
       }
     });
-  }
-  return { tools, toolKinds };
 }
 
-function translateToolChoice(value) {
+function translateToolChoice(value, toolKinds) {
   if (value === 'auto' || value === 'required' || value === 'none') return value;
   const name = normalizeText(value?.name || value?.function?.name);
-  return name ? { type: 'function', function: { name } } : '';
+  const spec = name ? findToolSpec(toolKinds, { name, namespace: value?.namespace }) : null;
+  return name ? { type: 'function', function: { name: spec?.chatName || name } } : '';
+}
+
+function findToolSpec(toolKinds, item) {
+  const name = normalizeText(item?.name || item?.function?.name);
+  const namespace = normalizeText(item?.namespace);
+  for (const spec of toolKinds?.values?.() || []) {
+    if (typeof spec === 'object' && spec.name === name && (!namespace || spec.namespace === namespace)) {
+      return spec;
+    }
+  }
+  return null;
+}
+
+function uniqueChatToolName(namespace, name, toolKinds) {
+  const raw = [namespace, name].filter(Boolean).join('__').replace(/[^A-Za-z0-9_-]/g, '_');
+  const base = raw.length <= 64
+    ? raw
+    : `${raw.slice(0, 51)}_${crypto.createHash('sha256').update(raw).digest('hex').slice(0, 12)}`;
+  if (!toolKinds.has(base)) return base;
+  const suffix = crypto.createHash('sha256').update(`${namespace}\0${name}`).digest('hex').slice(0, 8);
+  return `${base.slice(0, 55)}_${suffix}`;
 }
 
 function normalizeParameters(value) {

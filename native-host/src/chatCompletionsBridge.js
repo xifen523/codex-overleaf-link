@@ -9,6 +9,7 @@ const {
   writeConvertedResponseAsSse
 } = require('./chatBridgeResponse');
 const { requiresReasoningContentReplay } = require('./providerReasoning');
+const { classifyResponsesRoute } = require('./providerBridgeRoutes');
 const { providerError } = require('./providerProfile');
 const { sanitizeProviderMessage } = require('./providerRedaction');
 
@@ -74,8 +75,9 @@ async function handleRequest({ req, res, launch, clientToken, activeRequests, hi
     });
     return;
   }
-  if (req.method !== 'POST' || !/\/responses\/?$/.test(url.pathname)) {
-    sendJsonError(res, 404, 'not_found', 'The local provider bridge only exposes Responses and Models endpoints.');
+  const responsesRoute = classifyResponsesRoute(req.method, url.pathname);
+  if (!responsesRoute) {
+    sendJsonError(res, 404, 'not_found', 'The local provider bridge only exposes Responses, Responses Compact, and Models endpoints.');
     return;
   }
   const requestBody = await readJsonBody(req);
@@ -94,9 +96,9 @@ async function handleRequest({ req, res, launch, clientToken, activeRequests, hi
   res.on('close', onClientClose);
   const timeout = setTimeout(() => controller.abort(), resolveRequestTimeoutMs(launch));
   try {
-    const upstream = await fetch(buildChatCompletionsUrl(launch.baseUrl), {
+    const upstream = await fetch(buildChatCompletionsUrl(launch.baseUrl, launch), {
       method: 'POST',
-      headers: buildUpstreamHeaders(launch.apiKey),
+      headers: buildUpstreamHeaders(launch),
       body: JSON.stringify(translated.body),
       signal: controller.signal
     });
@@ -140,11 +142,20 @@ async function handleRequest({ req, res, launch, clientToken, activeRequests, hi
   }
 }
 
-function buildChatCompletionsUrl(baseUrl) {
+function buildChatCompletionsUrl(baseUrl, launch = {}) {
   const url = new URL(baseUrl);
+  if (launch.fullEndpoint) {
+    for (const [key, value] of Object.entries(launch.queryParams || {})) {
+      url.searchParams.set(key, value);
+    }
+    return url.toString();
+  }
   let pathname = url.pathname.replace(/\/+$/, '');
   if (/\/chat\/completions$/i.test(pathname)) {
     url.pathname = pathname;
+    for (const [key, value] of Object.entries(launch.queryParams || {})) {
+      url.searchParams.set(key, value);
+    }
     return url.toString();
   }
   pathname = !pathname || pathname === '/'
@@ -153,16 +164,27 @@ function buildChatCompletionsUrl(baseUrl) {
   url.pathname = `${pathname}/chat/completions`;
   url.search = '';
   url.hash = '';
+  for (const [key, value] of Object.entries(launch.queryParams || {})) {
+    url.searchParams.set(key, value);
+  }
   return url.toString();
 }
 
-function buildUpstreamHeaders(apiKey) {
+function buildUpstreamHeaders(launch = {}) {
   const headers = {
     accept: 'application/json, text/event-stream',
     'content-type': 'application/json',
-    'user-agent': 'Codex-Overleaf-Link/provider-bridge'
+    'user-agent': 'Codex-Overleaf-Link/provider-bridge',
+    ...(launch.customHeaders || {})
   };
-  if (apiKey) headers.authorization = `Bearer ${apiKey}`;
+  if (!launch.apiKey || launch.authMode === 'none') return headers;
+  if (launch.authMode === 'x-api-key') headers['x-api-key'] = launch.apiKey;
+  else if (launch.authMode === 'api-key') headers['api-key'] = launch.apiKey;
+  else if (launch.authMode === 'custom' && launch.apiKeyHeaderName) {
+    headers[launch.apiKeyHeaderName] = launch.apiKey;
+  } else {
+    headers.authorization = `Bearer ${launch.apiKey}`;
+  }
   return headers;
 }
 
@@ -174,7 +196,12 @@ function resolveRequestTimeoutMs(launch = {}) {
 }
 
 function normalizeBridgeErrorCode(value) {
-  return value === 'provider_connection_timeout' ? value : 'provider_bridge_failed';
+  return [
+    'provider_connection_timeout',
+    'provider_response_invalid',
+    'provider_agent_tools_incompatible',
+    'provider_protocol_incompatible'
+  ].includes(value) ? value : 'provider_bridge_failed';
 }
 
 function bridgeErrorMessage(code) {
@@ -261,4 +288,4 @@ function closeServer(server) {
   });
 }
 
-module.exports = { buildChatCompletionsUrl, startChatCompletionsBridge };
+module.exports = { buildChatCompletionsUrl, buildUpstreamHeaders, startChatCompletionsBridge };

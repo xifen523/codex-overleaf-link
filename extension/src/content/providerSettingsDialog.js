@@ -227,6 +227,7 @@
               <option value="auto" ${draft.wireApiPreference === 'auto' ? 'selected' : ''}>${escapeHtml(tx('Auto (detect during test)', '自动（测试时检测）'))}</option>
               <option value="responses" ${draft.wireApiPreference === 'responses' ? 'selected' : ''}>Responses API</option>
               <option value="chat" ${draft.wireApiPreference === 'chat' ? 'selected' : ''}>Chat Completions</option>
+              <option value="anthropic" ${draft.wireApiPreference === 'anthropic' ? 'selected' : ''}>Anthropic Messages</option>
             </select>
           </label>
           <label class="codex-provider-field">
@@ -236,11 +237,37 @@
             </select>
           </label>
           <label class="codex-provider-field">
+            <span>${escapeHtml(tx('API-key authentication', 'API 密钥鉴权'))}</span>
+            <select data-provider-field="authMode">
+              <option value="bearer" ${draft.authMode === 'bearer' || !draft.authMode ? 'selected' : ''}>Authorization: Bearer</option>
+              <option value="x-api-key" ${draft.authMode === 'x-api-key' ? 'selected' : ''}>x-api-key</option>
+              <option value="api-key" ${draft.authMode === 'api-key' ? 'selected' : ''}>api-key</option>
+              <option value="custom" ${draft.authMode === 'custom' ? 'selected' : ''}>${escapeHtml(tx('Custom header', '自定义请求头'))}</option>
+              <option value="none" ${draft.authMode === 'none' ? 'selected' : ''}>${escapeHtml(tx('No authentication', '无鉴权'))}</option>
+            </select>
+          </label>
+          <label class="codex-provider-field">
+            <span>${escapeHtml(tx('Custom API-key header', '自定义密钥请求头'))}</span>
+            <input type="text" data-provider-field="apiKeyHeaderName" value="${escapeAttr(draft.apiKeyHeaderName || '')}" placeholder="X-API-Key" spellcheck="false">
+          </label>
+          <label class="codex-provider-field">
+            <span>${escapeHtml(tx('Context window', '上下文窗口'))}</span>
+            <input type="number" data-provider-field="contextWindow" min="8192" max="4000000" step="1024" value="${Number(draft.contextWindow) || 262144}">
+          </label>
+          <label class="codex-provider-field">
+            <span>${escapeHtml(tx('Input modalities', '输入模态'))}</span>
+            <select data-provider-field="inputModalities">
+              <option value="text" ${!(draft.inputModalities || []).includes('image') ? 'selected' : ''}>Text</option>
+              <option value="text,image" ${(draft.inputModalities || []).includes('image') ? 'selected' : ''}>Text + image</option>
+            </select>
+          </label>
+          <label class="codex-provider-field">
             <span>${escapeHtml(tx('Reasoning control', '推理控制'))}</span>
             <select data-provider-field="reasoningAdapter">
               <option value="auto" ${draft.reasoningAdapter === 'auto' || !draft.reasoningAdapter ? 'selected' : ''}>${escapeHtml(tx('Auto-detect', '自动检测'))}</option>
               <option value="none" ${draft.reasoningAdapter === 'none' ? 'selected' : ''}>${escapeHtml(tx('Disabled', '禁用'))}</option>
               <option value="deepseek" ${draft.reasoningAdapter === 'deepseek' ? 'selected' : ''}>DeepSeek thinking + reasoning_effort</option>
+              <option value="anthropic" ${draft.reasoningAdapter === 'anthropic' ? 'selected' : ''}>Anthropic extended thinking</option>
               <option value="reasoning_effort" ${draft.reasoningAdapter === 'reasoning_effort' ? 'selected' : ''}>reasoning_effort</option>
               <option value="openrouter" ${draft.reasoningAdapter === 'openrouter' ? 'selected' : ''}>OpenRouter reasoning.effort</option>
               <option value="enable_thinking" ${draft.reasoningAdapter === 'enable_thinking' ? 'selected' : ''}>enable_thinking</option>
@@ -256,6 +283,54 @@
               <option value="toggle" ${draft.reasoningCapability === 'toggle' ? 'selected' : ''}>${escapeHtml(tx('On / Off only', '仅开启 / 关闭'))}</option>
               <option value="none" ${draft.reasoningCapability === 'none' ? 'selected' : ''}>${escapeHtml(tx('Not supported', '不支持'))}</option>
             </select>
+          </label>
+          <label class="codex-provider-field codex-provider-field--wide">
+            <span>${escapeHtml(tx('Protocol capabilities', '协议能力'))}</span>
+            <span class="codex-provider-secret-row">
+              <label><input type="checkbox" data-provider-field="supportsParallelToolCalls" ${draft.supportsParallelToolCalls ? 'checked' : ''}> ${escapeHtml(tx('Parallel tool calls', '并行工具调用'))}</label>
+              <label><input type="checkbox" data-provider-field="supportsStreamOptions" ${draft.supportsStreamOptions ? 'checked' : ''}> stream_options</label>
+              <label><input type="checkbox" data-provider-field="fullEndpoint" ${draft.fullEndpoint ? 'checked' : ''}> ${escapeHtml(tx('Base URL is the full protocol endpoint', '基础 URL 已是完整协议端点'))}</label>
+            </span>
+          </label>
+          <label class="codex-provider-field codex-provider-field--wide">
+            <span>${escapeHtml(tx('Static headers (JSON)', '静态请求头（JSON）'))}</span>
+            <textarea data-provider-field="customHeaders" rows="2" spellcheck="false">${escapeHtml(formatJsonRecord(draft.customHeaders))}</textarea>
+          </label>
+          <label class="codex-provider-field codex-provider-field--wide">
+            <span>${escapeHtml(tx('Query parameters (JSON)', '查询参数（JSON）'))}</span>
+            <textarea data-provider-field="queryParams" rows="2" spellcheck="false">${escapeHtml(formatJsonRecord(draft.queryParams))}</textarea>
+          </label>
+          <label class="codex-provider-field codex-provider-field--wide">
+            <span>${escapeHtml(tx('Protocol request overrides (JSON)', '协议请求覆盖项（JSON）'))}</span>
+            <textarea data-provider-field="bodyOverrides" rows="2" spellcheck="false">${escapeHtml(formatJsonRecord(draft.bodyOverrides))}</textarea>
+            <small>${escapeHtml(tx('Vendor-specific fields only; core model, messages, tools, and stream fields are protected.', '仅填写服务商特有字段；model、messages、tools 和 stream 等核心字段不可覆盖。'))}</small>
+          </label>
+          <label class="codex-provider-field">
+            <span>Anthropic version</span>
+            <input type="text" data-provider-field="anthropicVersion" value="${escapeAttr(draft.anthropicVersion || '2023-06-01')}" spellcheck="false">
+          </label>
+          <label class="codex-provider-field">
+            <span>Anthropic beta</span>
+            <input type="text" data-provider-field="anthropicBeta" value="${escapeAttr(draft.anthropicBeta || '')}" placeholder="optional" spellcheck="false">
+          </label>
+          <label class="codex-provider-field">
+            <span>${escapeHtml(tx('Anthropic thinking mode', 'Anthropic 思考模式'))}</span>
+            <select data-provider-field="anthropicThinkingMode">
+              <option value="budget" ${draft.anthropicThinkingMode === 'budget' || !draft.anthropicThinkingMode ? 'selected' : ''}>${escapeHtml(tx('Token budget', 'Token 预算'))}</option>
+              <option value="adaptive" ${draft.anthropicThinkingMode === 'adaptive' ? 'selected' : ''}>Adaptive</option>
+              <option value="none" ${draft.anthropicThinkingMode === 'none' ? 'selected' : ''}>${escapeHtml(tx('Disabled', '禁用'))}</option>
+            </select>
+          </label>
+          <label class="codex-provider-field">
+            <span>${escapeHtml(tx('Maximum output tokens', '最大输出 Token'))}</span>
+            <input type="number" data-provider-field="maxOutputTokens" min="256" max="200000" step="256" value="${Number(draft.maxOutputTokens) || 8192}">
+          </label>
+          <label class="codex-provider-field codex-provider-field--wide">
+            <span>${escapeHtml(tx('Anthropic compatibility', 'Anthropic 兼容能力'))}</span>
+            <span class="codex-provider-secret-row">
+              <label><input type="checkbox" data-provider-field="anthropicPromptCaching" ${draft.anthropicPromptCaching ? 'checked' : ''}> ${escapeHtml(tx('Prompt caching markers', 'Prompt 缓存标记'))}</label>
+              <label><input type="checkbox" data-provider-field="impersonateClaudeCode" ${draft.impersonateClaudeCode ? 'checked' : ''}> ${escapeHtml(tx('Claude Code gateway identity', 'Claude Code 网关身份'))}</label>
+            </span>
           </label>
         </div>
       </details>
@@ -447,11 +522,34 @@
       name: String(get('name')?.value || '').trim(),
       baseUrl: String(get('baseUrl')?.value || '').trim(),
       wireApiPreference: get('wireApiPreference')?.value || 'auto',
-      models: modelIds.map(id => ({ id, label: id, reasoningEfforts: [] })),
+      models: modelIds.map(id => ({
+        id,
+        label: id,
+        reasoningEfforts: [],
+        contextWindow: Number(get('contextWindow')?.value || 262144),
+        supportsParallelToolCalls: Boolean(get('supportsParallelToolCalls')?.checked),
+        inputModalities: String(get('inputModalities')?.value || 'text').split(',')
+      })),
       defaultModelId,
       requestTimeoutMs: Number(get('requestTimeoutMs')?.value || 30000),
       reasoningAdapter: get('reasoningAdapter')?.value || 'auto',
-      reasoningCapability: get('reasoningCapability')?.value || 'auto'
+      reasoningCapability: get('reasoningCapability')?.value || 'auto',
+      authMode: get('authMode')?.value || 'bearer',
+      apiKeyHeaderName: String(get('apiKeyHeaderName')?.value || '').trim(),
+      fullEndpoint: Boolean(get('fullEndpoint')?.checked),
+      customHeaders: String(get('customHeaders')?.value || '').trim(),
+      queryParams: String(get('queryParams')?.value || '').trim(),
+      bodyOverrides: String(get('bodyOverrides')?.value || '').trim(),
+      contextWindow: Number(get('contextWindow')?.value || 262144),
+      supportsParallelToolCalls: Boolean(get('supportsParallelToolCalls')?.checked),
+      supportsStreamOptions: Boolean(get('supportsStreamOptions')?.checked),
+      inputModalities: String(get('inputModalities')?.value || 'text').split(',')
+      ,anthropicVersion: String(get('anthropicVersion')?.value || '2023-06-01').trim()
+      ,anthropicBeta: String(get('anthropicBeta')?.value || '').trim()
+      ,anthropicThinkingMode: get('anthropicThinkingMode')?.value || 'budget'
+      ,anthropicPromptCaching: Boolean(get('anthropicPromptCaching')?.checked)
+      ,impersonateClaudeCode: Boolean(get('impersonateClaudeCode')?.checked)
+      ,maxOutputTokens: Number(get('maxOutputTokens')?.value || 8192)
     };
     const apiKey = String(get('apiKey')?.value || '');
     const secretMutation = instance.secretAction === 'replace' && apiKey
@@ -593,6 +691,13 @@
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
+  }
+
+  function formatJsonRecord(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length) {
+      return '';
+    }
+    return JSON.stringify(value, null, 2);
   }
 
   function escapeAttr(value) {
