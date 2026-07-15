@@ -70,6 +70,97 @@ test('runs Codex against a local mirror and returns sync changes instead of oper
   }
 });
 
+test('runCodexSession retries transient network failures up to success', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-network-retry-'));
+  const events = [];
+  let attempts = 0;
+  try {
+    const result = await runCodexSession({
+      params: {
+        projectId: 'project-network-retry',
+        task: 'Update main.tex',
+        mode: 'auto',
+        project: { files: [{ path: 'main.tex', content: 'Before' }] }
+      },
+      env: {
+        ...process.env,
+        CODEX_OVERLEAF_NETWORK_RETRY_ATTEMPTS: '5',
+        CODEX_OVERLEAF_NETWORK_RETRY_BASE_MS: '0'
+      },
+      rootDir,
+      emit: event => events.push(event),
+      executeCodex: async () => {
+        attempts += 1;
+        if (attempts < 3) {
+          throw new Error('unexpected status 502 Bad Gateway: error sending request');
+        }
+        return { assistantMessage: 'Done' };
+      }
+    });
+
+    assert.equal(result.status, 'completed');
+    assert.equal(attempts, 3);
+    assert.equal(events.filter(event => event.type === 'codex.session.retry').length, 2);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession does not retry authentication failures', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-network-auth-'));
+  let attempts = 0;
+  try {
+    await assert.rejects(runCodexSession({
+      params: {
+        projectId: 'project-network-auth',
+        task: 'Inspect main.tex',
+        mode: 'ask',
+        project: { files: [{ path: 'main.tex', content: 'Before' }] }
+      },
+      env: { ...process.env, CODEX_OVERLEAF_NETWORK_RETRY_BASE_MS: '0' },
+      rootDir,
+      emit: () => {},
+      executeCodex: async () => {
+        attempts += 1;
+        throw new Error('unexpected status 401 Unauthorized: INVALID_API_KEY');
+      }
+    }), /401 Unauthorized/);
+    assert.equal(attempts, 1);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('runCodexSession stops network retries after a failed attempt changes the mirror', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-network-dirty-'));
+  const events = [];
+  let attempts = 0;
+  try {
+    await assert.rejects(runCodexSession({
+      params: {
+        projectId: 'project-network-dirty',
+        task: 'Update main.tex',
+        mode: 'auto',
+        project: { files: [{ path: 'main.tex', content: 'Before' }] }
+      },
+      env: { ...process.env, CODEX_OVERLEAF_NETWORK_RETRY_BASE_MS: '0' },
+      rootDir,
+      emit: event => events.push(event),
+      executeCodex: async ({ workspacePath }) => {
+        attempts += 1;
+        fs.writeFileSync(path.join(workspacePath, 'main.tex'), 'Changed before failure', 'utf8');
+        throw new Error('unexpected status 502 Bad Gateway');
+      }
+    }), /502 Bad Gateway/);
+    assert.equal(attempts, 1);
+    assert.equal(events.some(event => event.type === 'codex.session.retry_skipped'), true);
+    const status = getMirrorStatus('project-network-dirty', { rootDir });
+    assert.equal(status.dirty, true);
+    assert.equal(status.dirtyReason, 'codex_run_failed_with_local_changes');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
 test('runCodexSession marks mirror dirty when local changes are collected for writeback', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-session-'));
   try {

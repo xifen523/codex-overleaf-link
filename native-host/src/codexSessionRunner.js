@@ -26,6 +26,9 @@ const TURN_ATTACHMENTS_DIR = '.codex-overleaf-attachments';
 const MAX_TURN_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 const MAX_TURN_ATTACHMENTS = 8;
 const MAX_TURN_ATTACHMENT_TOTAL_BYTES = MAX_TURN_ATTACHMENT_BYTES * MAX_TURN_ATTACHMENTS;
+const DEFAULT_NETWORK_RETRY_ATTEMPTS = 5;
+const MAX_NETWORK_RETRY_ATTEMPTS = 5;
+const DEFAULT_NETWORK_RETRY_BASE_MS = 1000;
 
 async function runCodexSession({ params = {}, env = process.env, emit = () => {}, rootDir, executeCodex, signal } = {}) {
   throwIfAborted(signal);
@@ -133,31 +136,39 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
     // feature as half-available (v1.6.1 — observed in E2E).
     fs.rmSync(path.join(mirror.workspacePath, SUBAGENT_QUEUE_DIR), { recursive: true, force: true });
   }
+  const runnerInput = {
+    workspacePath: runnerWorkspacePath,
+    task: buildCodexTurnPrompt(params, mirror, projectLocalSkills, turnAttachments, codexSkillInvocationContext),
+    userTask: String(params.task || ''),
+    session: params.session || null,
+    threadId: params.threadId || '',
+    mode: params.mode || 'auto',
+    model: params.model || '',
+    reasoningEffort: params.reasoningEffort || '',
+    speedTier: normalizeSpeedTier(params.speedTier),
+    loadCodexLocalSkills: skillLoading.loadCodexLocalSkills,
+    loadCodexOverleafSkills: skillLoading.loadCodexOverleafSkills,
+    skillInvocation: effectiveSkillInvocation,
+    installCodexOverleafSkillsTarget: skillInstallTurn,
+    projectLocalSkills: null,
+    sandboxMode: settings.sandboxMode,
+    approvalPolicy: settings.approvalPolicy,
+    env,
+    emit,
+    hasExternalActivity: subagentBroker ? () => subagentBroker.hasActiveWorkers() : undefined,
+    signal
+  };
   let runnerResult;
   try {
-    runnerResult = await runner({
-      workspacePath: runnerWorkspacePath,
-      task: buildCodexTurnPrompt(params, mirror, projectLocalSkills, turnAttachments, codexSkillInvocationContext),
-      userTask: String(params.task || ''),
-      session: params.session || null,
-      threadId: params.threadId || '',
-      mode: params.mode || 'auto',
-      model: params.model || '',
-      reasoningEffort: params.reasoningEffort || '',
-      speedTier: normalizeSpeedTier(params.speedTier),
-      loadCodexLocalSkills: skillLoading.loadCodexLocalSkills,
-      loadCodexOverleafSkills: skillLoading.loadCodexOverleafSkills,
-      skillInvocation: effectiveSkillInvocation,
-      installCodexOverleafSkillsTarget: skillInstallTurn,
-      projectLocalSkills: null,
-      sandboxMode: settings.sandboxMode,
-      approvalPolicy: settings.approvalPolicy,
+    runnerResult = await runCodexWithNetworkRetries({
+      runner,
+      runnerInput,
       env,
       emit,
-      // While subagent workers are active, the parent idle watchdog resets
-      // instead of failing the run (spec P2-7 fix).
-      hasExternalActivity: subagentBroker ? () => subagentBroker.hasActiveWorkers() : undefined,
-      signal
+      signal,
+      canRetry: !skillInstallTurn && !subagentBroker,
+      projectId,
+      rootDir
     });
   } catch (error) {
     if (subagentBroker) {
@@ -273,6 +284,100 @@ async function runCodexSession({ params = {}, env = process.env, emit = () => {}
   return response;
 }
 
+async function runCodexWithNetworkRetries({
+  runner,
+  runnerInput,
+  env = process.env,
+  emit = () => {},
+  signal,
+  canRetry = true,
+  projectId,
+  rootDir
+}) {
+  const maxAttempts = Math.min(
+    parseOptionalPositiveInteger(env.CODEX_OVERLEAF_NETWORK_RETRY_ATTEMPTS) || DEFAULT_NETWORK_RETRY_ATTEMPTS,
+    MAX_NETWORK_RETRY_ATTEMPTS
+  );
+  const baseDelayMs = parseOptionalNonNegativeInteger(env.CODEX_OVERLEAF_NETWORK_RETRY_BASE_MS)
+    ?? DEFAULT_NETWORK_RETRY_BASE_MS;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    throwIfAborted(signal);
+    try {
+      return await runner(runnerInput);
+    } catch (error) {
+      const retryable = canRetry
+        && attempt < maxAttempts
+        && isTransientCodexNetworkError(error);
+      if (!retryable) {
+        throw error;
+      }
+
+      const collected = await collectMirrorChangesDetailed({ projectId, rootDir });
+      const hasLocalChanges = Boolean(collected.changes?.length || collected.unsupportedChanges?.length);
+      if (hasLocalChanges) {
+        markMirrorDirty({
+          projectId,
+          rootDir,
+          reason: 'codex_run_failed_with_local_changes'
+        });
+        emitCodexEvent(emit, 'codex.session.retry_skipped', 'Network retry skipped because the local workspace changed', {
+          attempt,
+          maxAttempts,
+          changedCount: collected.changes?.length || 0,
+          unsupportedCount: collected.unsupportedChanges?.length || 0
+        }, 'failed');
+        throw error;
+      }
+
+      const delayMs = baseDelayMs * (2 ** (attempt - 1));
+      emitCodexEvent(emit, 'codex.session.retry', `Transient Codex network failure; retrying session (${attempt + 1}/${maxAttempts})`, {
+        attempt,
+        nextAttempt: attempt + 1,
+        maxAttempts,
+        delayMs,
+        error: truncateText(error?.message || String(error), 500)
+      }, 'running');
+      await waitForRetryDelay(delayMs, signal);
+    }
+  }
+  throw new Error('Codex network retry loop exhausted unexpectedly');
+}
+
+function isTransientCodexNetworkError(error = {}) {
+  const message = String(error?.message || error || '');
+  if (/\b(?:401|403)\b|invalid api key|unauthori[sz]ed|forbidden|unsupported model/i.test(message)) {
+    return false;
+  }
+  return /\b(?:408|429|502|503|504)\b|bad gateway|gateway timeout|service unavailable|econnreset|econnrefused|etimedout|socket hang up|stream disconnected|connection (?:failed|reset|refused|closed)|error sending request|fetch failed/i.test(message);
+}
+
+function waitForRetryDelay(delayMs, signal) {
+  if (!delayMs) {
+    throwIfAborted(signal);
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(getAbortReason(signal));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function parseOptionalNonNegativeInteger(value) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
 function buildCodexTurnPrompt(params = {}, mirror = {}, projectLocalSkills, turnAttachments = [], codexSkillInvocationContext = null) {
   const prompt = buildCodexPromptParts({
     params,
