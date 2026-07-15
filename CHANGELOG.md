@@ -6,6 +6,13 @@
 - Ignore non-launchable Codex binaries exposed from `Program Files\WindowsApps`, which can exist but fail with `Access is denied` when started by the native host.
 - Keep Windows CLI discovery testable on Linux and macOS release runners.
 
+Windows Codex startup and writeback stabilization patch. Native protocol `1` remains unchanged.
+
+### Release
+
+- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking resolve to `1.10.1`.
+- Release artifacts resolve to `codex-overleaf-link-extension-v1.10.1.zip`, `codex-overleaf-native-host-v1.10.1.tar.gz`, and `codex-overleaf-link-1.10.1.tgz`.
+
 ## v1.10.0 - 2026-07-11
 
 Windows and Overleaf writeback stabilization release for the xifen523 fork.
