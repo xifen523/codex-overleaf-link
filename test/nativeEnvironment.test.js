@@ -155,6 +155,29 @@ test('resolveExecutable finds Windows PATHEXT commands from an injected Windows 
   }
 });
 
+test('resolveExecutable skips non-launchable packaged Codex app binaries on Windows', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-win-packaged-'));
+  const packagedBin = path.join(root, 'Program Files', 'WindowsApps', 'OpenAI.Codex', 'resources');
+  const managedBin = path.join(root, 'AppData', 'Local', 'OpenAI', 'Codex', 'bin', 'release');
+  fs.mkdirSync(packagedBin, { recursive: true });
+  fs.mkdirSync(managedBin, { recursive: true });
+  fs.writeFileSync(path.join(packagedBin, 'codex.exe'), 'MZ', { mode: 0o755 });
+  fs.writeFileSync(path.join(managedBin, 'codex.exe'), 'MZ', { mode: 0o755 });
+
+  try {
+    assert.equal(
+      resolveExecutable('codex', packagedBin + ';' + managedBin, {
+        platform: 'win32',
+        delimiter: ';',
+        env: { PATHEXT: '.EXE;.CMD' }
+      }),
+      path.join(managedBin, 'codex.exe')
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('native runtime env normalizes Windows Path to a single PATH key when only Path was provided', () => {
   const env = buildNativeRuntimeEnv({
     HOME: 'C:\\Users\\alice',

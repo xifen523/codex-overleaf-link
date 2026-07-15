@@ -171,9 +171,7 @@ function getWindowsCodexPathSegments(env, home) {
   // implementation also keeps injected Windows environments testable on POSIX.
   const localAppData = env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
   const codexBinRoot = path.join(localAppData, 'OpenAI', 'Codex', 'bin');
-  const candidates = [
-    path.join(localAppData, 'Microsoft', 'WindowsApps')
-  ];
+  const candidates = [];
 
   try {
     for (const entry of fs.readdirSync(codexBinRoot, { withFileTypes: true })) {
@@ -188,6 +186,8 @@ function getWindowsCodexPathSegments(env, home) {
   } catch {
     // Codex Desktop has not created its managed CLI directory on this machine.
   }
+
+  candidates.push(path.join(localAppData, 'Microsoft', 'WindowsApps'));
 
   return candidates;
 }
@@ -218,6 +218,9 @@ function resolveExecutable(name, pathValue, options = {}) {
     }
     for (const executableName of executableNames) {
       const candidate = path.join(directory, executableName);
+      if (name === 'codex' && isPackagedWindowsAppPath(candidate, options)) {
+        continue;
+      }
       try {
         fs.accessSync(candidate, fs.constants.X_OK);
         return candidate;
@@ -227,6 +230,14 @@ function resolveExecutable(name, pathValue, options = {}) {
     }
   }
   return '';
+}
+
+function isPackagedWindowsAppPath(candidate, options = {}) {
+  if (getNativeRuntimePlatform(options) !== 'win32') {
+    return false;
+  }
+  const normalized = String(candidate).replace(/\//g, '\\').toLowerCase();
+  return normalized.includes('\\program files\\windowsapps\\');
 }
 
 function summarizeNativeEnvironment(env = process.env, options = {}) {
