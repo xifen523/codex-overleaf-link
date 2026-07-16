@@ -15,12 +15,13 @@ const {
   filterRecentProjectsAcrossAccount,
   derivePrimaryStatusBadge
 } = require('../extension/src/shared/storageDb');
-const { prepareStateForStorage } = require('../extension/src/shared/sessionState');
+const { normalizeRuns, prepareStateForStorage } = require('../extension/src/shared/sessionState');
 
 test('TARGET_SCHEMA_VERSION is a positive integer', () => {
   assert.equal(typeof TARGET_SCHEMA_VERSION, 'number');
   assert.ok(TARGET_SCHEMA_VERSION > 0);
   assert.equal(TARGET_SCHEMA_VERSION, Math.floor(TARGET_SCHEMA_VERSION));
+  assert.equal(TARGET_SCHEMA_VERSION, 3, 'released IndexedDB schema versions must never move backwards');
 });
 
 test('DB_NAME is codex-overleaf', () => {
@@ -232,6 +233,40 @@ test('buildSessionRecord keeps a valid trackedChangeStatus while still dropping 
   assert.deepEqual(accepted.undoExpectedFiles, []);
   assert.equal(JSON.stringify(record).includes(rawProjectText), false);
   assert.equal('trackedChangeStatus' in invalid, false);
+});
+
+test('trusted IndexedDB session records preserve a bounded tracked-change action checkpoint across reload', () => {
+  const record = buildSessionRecord({
+    id: 'ses_reloadable_tracked_change',
+    projectId: 'proj_reloadable_tracked_change',
+    runs: [{
+      id: 'run_reloadable_tracked_change',
+      task: 'reloadable tracked change run',
+      status: 'completed',
+      trackedChangeStatus: 'pending',
+      runProjectId: 'proj_reloadable_tracked_change',
+      appliedOperations: [{
+        type: 'edit',
+        path: 'main.tex',
+        patches: [{ from: 0, to: 3, expected: 'old', insert: 'new' }],
+        verifiedContent: 'new'
+      }],
+      undoTrackedChanges: [{ key: 'tc-1', id: 'change-1', path: 'main.tex', label: 'Change 1' }],
+      undoExpectedFiles: [{ path: 'main.tex', content: 'old' }]
+    }]
+  }, { preserveRunActionPayload: true });
+
+  const persisted = record.runs[0];
+  assert.equal(persisted.trackedChangeStatus, 'pending');
+  assert.equal(persisted.appliedOperations.length, 1);
+  assert.equal(persisted.undoTrackedChanges.length, 1);
+  assert.equal(persisted.undoExpectedFiles.length, 1);
+
+  const reloaded = normalizeRuns(record.runs)[0];
+  assert.equal(reloaded.trackedChangeStatus, 'pending');
+  assert.equal(reloaded.appliedOperations.length, 1);
+  assert.equal(reloaded.undoTrackedChanges.length, 1);
+  assert.equal(reloaded.undoExpectedFiles.length, 1);
 });
 
 test('auto session titles are not persisted as raw prompt snippets while manual titles remain', () => {

@@ -1,6 +1,49 @@
 # Changelog
 
+## v2.1.0 - 2026-07-16
+
+Release candidate adding first-class third-party model providers while preserving the built-in Codex path and the v2 writeback safety model.
+
+### Added
+
+- Added a dedicated third-party provider dialog with profile-specific endpoints, models, credentials, reasoning controls, connection testing, and explicit activation from Settings.
+- Added a Native Host provider runtime with redacted profile storage, OpenAI-compatible Chat Completions bridging, provider-aware reasoning translation, model discovery, and Codex app-server launch integration.
+- Added staged project-context loading with file-tree readiness feedback, warmed ZIP snapshots, cache reuse, and resilient snapshot fallbacks.
+- Added model-scoped `Auto`, `Streaming`, and `Buffered` upstream response modes for Chat Completions providers.
+
+### Fixed
+
+- Added an independent `Use` action for saved, verified provider profiles, so any configured provider can be activated without editing or resaving it.
+- Kept long provider names and status content inside the provider sidebar, with stable ellipsis and full-name hover disclosure.
+- Activated a newly saved provider on its first use and kept model choices isolated between providers.
+- Preserved Markdown block headings such as `## Education (main.tex:56-60)` in provider responses and rendered them consistently in run conclusions.
+- Bypassed system proxies for the local provider bridge, preventing intermittent `502` failures when Codex connects to the loopback runtime.
+- Restored prompt cancellation across long asynchronous run stages and kept Edit & resend usable after provider failures.
+- Hardened custom-provider reasoning defaults and response normalization to avoid invalid DeepSeek requests and repeated streamed content.
+- Let `Auto` connection tests retry through buffered upstream responses when a gateway cannot parse streamed tool calls, while preserving Responses SSE toward Codex.
+- Detected leaked tool-call control tokens as an actionable provider compatibility failure without interpreting them as executable tools.
+
+## v2.0.0 - 2026-07-14
+
+Release candidate focused on preserving user state and making Reviewing-mode lifecycle actions reliable across reloads. The Extension and Native Host move to protocol `2` while retaining protocol `1` compatibility during the transition.
+
+### Fixed
+
+- Preserved actionable Accept and Undo payloads for recent runs when session records are migrated into IndexedDB, so a reload no longer strips lifecycle controls from otherwise recoverable runs.
+- Kept the IndexedDB schema at monotonic version `3`, preventing profiles already opened by the RC from falling back to compact storage and appearing to lose session history.
+- Added a guarded snapshot fallback when Overleaf's in-memory editor undo history disappears after refresh; the fallback verifies the persisted post-write checkpoint before restoring or replaying content.
+- Rebased exact run checkpoints when Overleaf wraps the tracked edit with unrelated prefix or suffix text, while refusing ambiguous or drifted content.
+- Waited for asynchronously rendered Reviewing markers after normal writes, removing the intermittent state where Undo appeared without Accept.
+- Propagated the run project identity through lifecycle writeback so stale tabs cannot replay Accept or Undo into another Overleaf project.
+
+### Changed
+
+- Advanced the Extension and Native Host handshake to protocol `2`; protocol `1` hosts remain accepted when they provide the required capabilities.
+- Published the candidate as GitHub prerelease `v2.0.0-rc.1`. npm publication and stable-update discovery remain withheld until long-running local signoff is complete.
+
 ## v1.10.3 - 2026-07-15
+
+Fork-only reliability release retained during the upstream v2.1 integration.
 
 ### Fixed
 
@@ -14,37 +57,16 @@
 - Skip mirror refresh and automatic compilation when any operation was skipped or the save could not be verified.
 - Emit structured `parent_folder_create_failed` and `writeback_batch_aborted` failures with actionable recovery details.
 
-Overleaf nested-file creation and fail-closed multi-file writeback patch. Native protocol `1` remains unchanged.
-
-### Release
-
-- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking resolve to `1.10.3`.
-- Release artifacts resolve to `codex-overleaf-link-extension-v1.10.3.zip`, `codex-overleaf-native-host-v1.10.3.tar.gz`, and `codex-overleaf-link-1.10.3.tgz`.
-
 ## v1.10.2 - 2026-07-15
 
 - Retry transient Codex network failures up to five full session attempts with bounded exponential backoff.
 - Retry only gateway, timeout, connection-reset, and similar transport failures; authentication, authorization, and unsupported-model errors still fail immediately.
 - Stop retrying and mark the mirror dirty if a failed attempt changed local project files, preventing duplicate edits or unsafe writeback.
 
-Codex network and writeback stabilization patch. Native protocol `1` remains unchanged.
-
-### Release
-
-- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking resolve to `1.10.2`.
-- Release artifacts resolve to `codex-overleaf-link-extension-v1.10.2.zip`, `codex-overleaf-native-host-v1.10.2.tar.gz`, and `codex-overleaf-link-1.10.2.tgz`.
 ## v1.10.1 - 2026-07-15
 
-- Fixed Windows startup after Codex Desktop updates or system restarts by discovering the managed CLI under `%LOCALAPPDATA%\OpenAI\Codex\bin\<version>\codex.exe`.
-- Ignore non-launchable Codex binaries exposed from `Program Files\WindowsApps`, which can exist but fail with `Access is denied` when started by the native host.
-- Keep Windows CLI discovery testable on Linux and macOS release runners.
-
-Windows Codex startup and writeback stabilization patch. Native protocol `1` remains unchanged.
-
-### Release
-
-- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking resolve to `1.10.1`.
-- Release artifacts resolve to `codex-overleaf-link-extension-v1.10.1.zip`, `codex-overleaf-native-host-v1.10.1.tar.gz`, and `codex-overleaf-link-1.10.1.tgz`.
+- Find Codex Desktop under `%LOCALAPPDATA%\OpenAI\Codex\bin\<version>\codex.exe` after Windows restarts or Desktop updates.
+- Ignore non-launchable Codex binaries exposed from `Program Files\WindowsApps`.
 
 ## v1.10.0 - 2026-07-11
 
@@ -54,19 +76,141 @@ Windows and Overleaf writeback stabilization release for the xifen523 fork.
 
 - Windows PowerShell guidance and generated recovery commands use `npm.cmd` when script execution policy blocks `npm.ps1`.
 - Native Codex Desktop discovery finds versioned Windows installations under `%LOCALAPPDATA%\OpenAI\Codex\bin`.
-- Overleaf writeback resolves a unique case-mismatched local path such as `Tex_content/related_work.tex` to the canonical project path `tex_content/related_work.tex`; ambiguous collisions remain blocked.
+- Overleaf writeback resolves a unique case-mismatched local path to the canonical project path while ambiguous collisions remain blocked.
 
 ### Added
 
-- GPT-5.6 model variants `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` are exposed in the model picker and native discovery fallback.
-- GitHub-only fork release assets and pinned tarball install commands for users who do not have access to the upstream npm package or signing secrets.
+- GPT-5.6 model variants `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`.
+- GitHub-only fork release assets and pinned tarball install commands for environments without the upstream npm package or signing secrets.
 
-Native protocol `1` remains unchanged. The fork does not publish `codex-overleaf-link@1.10.0` to npm and does not replace the upstream signed auto-update channel.
+## v1.9.13 - 2026-07-12
 
-### Release
+### Fixed
 
-- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking now resolve to `1.10.0`.
-- Release artifacts resolve to `codex-overleaf-link-extension-v1.10.0.zip`, `codex-overleaf-native-host-v1.10.0.tar.gz`, `codex-overleaf-link-1.10.0.tgz`, and `codex-overleaf-update-v1.10.0.tar.gz`.
+- Stable update discovery now runs once when Chrome/Chromium or the extension starts, so a newly published release is discovered without waiting for the next 24-hour periodic check.
+- Manual checks, the existing periodic check, user consent, safe-point gating, signature verification, and rollback behavior remain unchanged.
+
+## v1.9.12 - 2026-07-12
+
+### Changed
+
+- Extracted Overleaf save-state detection from the page bridge into a dedicated factory-injected page module while preserving `verified_saved`, `verified_quiet`, timeout, and unavailable semantics.
+- Extracted project instructions, governance rules, skill toggles, settings navigation, and theme coordination from the content runtime into a dedicated coordinator.
+- Extracted the active-session menu, header state, and inline rename surface from the session lifecycle manager into a dedicated view module.
+- Tightened architecture budgets around the smaller orchestration modules and updated production load order plus browser VM fixtures for the new seams.
+
+### Fixed
+
+- Removed a dormant undefined local-skill normalizer from the new settings seam after local managed-install verification exposed it as an eager startup dependency that prevented the panel from mounting.
+
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.12.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.12.zip`, `codex-overleaf-native-host-v1.9.12.tar.gz`, and `codex-overleaf-link-1.9.12.tgz`.
+- Native protocol `1` remains the compatibility contract between the Extension and Native Host.
+
+## v1.9.11 - 2026-07-12
+
+### Fixed
+
+- Added an update-only `verified_quiet` save-state proof for current Overleaf editors that no longer expose a Saved/Saving DOM indicator.
+- Required the browser to be online, the editor to be readable, the visible save indicator to be completely absent, and the editor text signature to remain stable before accepting quiet evidence.
+- Kept the existing 30-second user-activity window, three-second cross-probe stability window, busy-operation gates, and Native Host lock gate around the new proof.
+- Left writeback and compile save verification on the stricter `verified_saved` contract; the quiet fallback is opt-in only for coordinated update safety.
+
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.11.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.11.zip`, `codex-overleaf-native-host-v1.9.11.tar.gz`, and `codex-overleaf-link-1.9.11.tgz`.
+- Native protocol `1` remains the compatibility contract between the Extension and Native Host.
+
+## v1.9.10 - 2026-07-12
+
+### Fixed
+
+- Added a dedicated Software Updates icon built from a software package and coordinated update loop instead of reusing the Appearance icon.
+- Restricted save-state safety probes to real `/project/<project-id>` editors while keeping the Overleaf project homepage available as an update surface.
+- Recovered stale loaded editor tabs by reinjecting the managed runtime without reloading or bypassing save verification, and excluded Chrome-discarded tabs from active-editor gating.
+- Reloaded every loaded Overleaf surface after coordinated replacement so project homepages and editors converge on the same committed state.
+- Treated the expected message-channel disconnect during Extension restart as health verification in progress and reconciled ordinary errors against the authoritative background state before showing Retry.
+
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.10.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.10.zip`, `codex-overleaf-native-host-v1.9.10.tar.gz`, and `codex-overleaf-link-1.9.10.tgz`.
+- Native protocol `1` remains the compatibility contract between the Extension and Native Host.
+
+## v1.9.9 - 2026-07-12
+
+### Fixed
+
+- Kept update installation, safe-point progress, retry, failure, and completion controls inside the active Overleaf tab without opening a separate Update Center window.
+- Prevented clicks inside the Codex panel from resetting the editor-idle timer, and added bounded save verification with fast transient retries.
+- Serialized safe-point application attempts so the retry timer and Chrome alarm cannot apply the same staged update concurrently.
+- Reported every concrete tab, save-state, Codex, review-action, and Native Host blocker instead of a generic waiting message.
+
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.9.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.9.zip`, `codex-overleaf-native-host-v1.9.9.tar.gz`, and `codex-overleaf-link-1.9.9.tgz`.
+- Native protocol `1` remains the compatibility contract between the Extension and Native Host.
+
+## v1.9.8 - 2026-07-12
+
+### Fixed
+
+- Authorized the dedicated Update Center as an exact trusted extension surface, including the browser-window sender shape.
+- Removed duplicate update controls from the Chrome toolbar Popup and moved manual update checks into Overleaf Settings.
+- Added the exact Overleaf `/project` dashboard route to the managed runtime so update notices also appear on the project homepage.
+- Kept dashboard tabs out of editor save-state probes so an open homepage cannot block a safe update.
+
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.8.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.8.zip`, `codex-overleaf-native-host-v1.9.8.tar.gz`, and `codex-overleaf-link-1.9.8.tgz`.
+- Native protocol `1` remains the compatibility contract between the Extension and Native Host.
+
+## v1.9.7 - 2026-07-12
+
+### Added
+
+- Added a dedicated Update Center that stays open when focus moves away from the toolbar popup.
+- Added a persistent three-stage view for download verification, safe-point waiting, and restart health checks.
+
+### Changed
+
+- Routed update and retry actions from the toolbar popup into one named Update Center window.
+- Restored update progress from saved state after runtime restarts and made transient reconnects explicit.
+- Required Update Center assets in managed installs and verified release archives.
+
+### Release metadata
+
+- Release metadata alignment keeps the package, extension manifest, compatibility target, README, and tests on v1.9.7.
+- Published artifacts are `codex-overleaf-link-extension-v1.9.7.zip`, `codex-overleaf-native-host-v1.9.7.tar.gz`, and `codex-overleaf-link-1.9.7.tgz`.
+- Native protocol `1` remains the compatibility contract between the Extension and Native Host.
+
+## v1.9.6 - 2026-07-11
+
+- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking now resolve to v1.9.6; native protocol `1` remains unchanged. Release artifacts resolve to codex-overleaf-link-extension-v1.9.6.zip, codex-overleaf-native-host-v1.9.6.tar.gz, and codex-overleaf-link-1.9.6.tgz.
+
+## v1.9.5 - 2026-07-11
+
+- Consent-update validation release: runtime behavior is unchanged from v1.9.4; this version exists as the first real target for the check, prompt, authorization, progress, coordinated apply, and health-confirmation flow.
+- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking now resolve to v1.9.5; native protocol `1` remains unchanged. Release artifacts resolve to codex-overleaf-link-extension-v1.9.5.zip, codex-overleaf-native-host-v1.9.5.tar.gz, and codex-overleaf-link-1.9.5.tgz.
+
+## v1.9.4 - 2026-07-11
+
+- Consent-driven stable updates: automatic checks now stop at a signed update offer; downloading and installation require an explicit target-bound **Update now** authorization.
+- Update experience: Runtime takes over the Popup update card, adds an Overleaf panel banner, truthful phase progress, concrete safe-point blockers, a persistent action badge, and a 24-hour target-bound **Later** action.
+- Release metadata alignment and Native transaction safety: update.authorize and update.revoke bind consent to one source/target pair, serialize revoke against apply, clean staged artifacts before reporting a snooze, and retain coordinated health-confirmation rollback.
+- Package, extension manifest, compatibility target, README commands, and release tracking now resolve to v1.9.4; native protocol `1` remains unchanged. Release artifacts resolve to codex-overleaf-link-extension-v1.9.4.zip, codex-overleaf-native-host-v1.9.4.tar.gz, and codex-overleaf-link-1.9.4.tgz.
+
+## v1.9.3 - 2026-07-11
+
+- Update wait visibility: the stable-update popup now reports every concrete Overleaf and native-host idle blocker instead of showing an opaque waiting state.
+- Idempotent staging: repeated checks reuse an already verified transaction, and completed or replaced transactions remove orphan `staging-*` directories.
+- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking now resolve to `1.9.3`; native protocol `1` remains unchanged. Successful apply and rollback transactions also update both extension and native managed markers alongside the manifest and active-version pointer.
+- Release artifacts resolve to `codex-overleaf-link-extension-v1.9.3.zip`, `codex-overleaf-native-host-v1.9.3.tar.gz`, `codex-overleaf-link-1.9.3.tgz`, `codex-overleaf-update-v1.9.3.tar.gz`, and the detached signed manifest.
 
 ## v1.9.2 - 2026-07-11
 

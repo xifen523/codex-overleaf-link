@@ -537,7 +537,9 @@
       status: 'running'
     });
 
-    await callPageBridge('invalidateProjectSnapshot', {});
+    await callPageBridge('invalidateProjectSnapshot', {
+      invalidateFileList: true
+    });
     const freshProject = sanitizeRunProjectSnapshot(await callPageBridge('getProjectSnapshot', {
       force: true,
       maxAgeMs: 0,

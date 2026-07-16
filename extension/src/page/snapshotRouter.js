@@ -21,6 +21,7 @@
       ? deps.readActiveEditorText
       : () => '';
     let invalidatedAt = 0;
+    let preferredZipEndpoint = '';
 
     function getProjectId() {
       return treeOperations.getProjectId?.() || null;
@@ -100,6 +101,7 @@
             skipped: [],
             diagnostics: {
               zipEndpoint: zipSnapshot.endpoint,
+              zipTiming: zipSnapshot.diagnostics,
               docRecordCount: internalDocRecords.length,
               docRecords: internalDocRecords.slice(0, 8)
             },
@@ -123,6 +125,7 @@
               reason: zipSnapshot.reason || 'Overleaf source ZIP was unavailable'
             }],
             diagnostics: {
+              zipTiming: zipSnapshot.diagnostics,
               docRecordCount: internalDocRecords.length,
               docRecords: internalDocRecords.slice(0, 8)
             },
@@ -257,6 +260,7 @@
           skipped: zipSnapshot.skipped || [],
           diagnostics: {
             zipEndpoint: zipSnapshot.endpoint,
+            zipTiming: zipSnapshot.diagnostics,
             docRecordCount: internalDocRecords.length,
             docRecords: internalDocRecords.slice(0, 8)
           },
@@ -460,6 +464,7 @@
           skipped: zipSnapshot.skipped || [],
           diagnostics: {
             zipEndpoint: zipSnapshot.endpoint,
+            zipTiming: zipSnapshot.diagnostics,
             docRecordCount: 0,
             docRecords: []
           },
@@ -640,24 +645,60 @@
       `${window.location.origin}/project/${encodeURIComponent(projectId)}/download/zip`,
       `${window.location.origin}/download/project/${encodeURIComponent(projectId)}`
     ];
+    const orderedEndpoints = preferredZipEndpoint && endpoints.includes(preferredZipEndpoint)
+      ? [preferredZipEndpoint, ...endpoints.filter(endpoint => endpoint !== preferredZipEndpoint)]
+      : endpoints;
 
+    const startedAt = Date.now();
+    const deadline = startedAt + timeoutMs;
     const errors = [];
-    for (const endpoint of endpoints) {
+    const attempts = [];
+    for (const endpoint of orderedEndpoints) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        errors.push(`Overleaf ZIP download exhausted its ${timeoutMs}ms total timeout budget`);
+        break;
+      }
+      const attemptStartedAt = Date.now();
       try {
-        const { response, contentType, buffer } = await fetchZipEndpoint(endpoint, timeoutMs);
+        const { response, contentType, buffer, timing } = await fetchZipEndpoint(endpoint, remainingMs);
         if (!response.ok) {
+          attempts.push({
+            endpoint,
+            status: response.status,
+            elapsedMs: Date.now() - attemptStartedAt
+          });
           errors.push(`${endpoint} returned ${response.status}`);
           continue;
         }
+        const extractStartedAt = Date.now();
         const extracted = await extractFilesFromZip(buffer, {
           includeBinaryFiles: Boolean(params.includeBinaryFiles),
           includeContent: params.includeContent !== false
         });
+        const extractMs = Date.now() - extractStartedAt;
         const files = extracted.files || [];
         if (!files.length) {
+          attempts.push({
+            endpoint,
+            status: response.status,
+            elapsedMs: Date.now() - attemptStartedAt,
+            downloadMs: timing.totalMs,
+            extractMs
+          });
           errors.push(`${endpoint} returned no text files (${contentType || 'unknown content type'})`);
           continue;
         }
+        preferredZipEndpoint = endpoint;
+        attempts.push({
+          endpoint,
+          status: response.status,
+          elapsedMs: Date.now() - attemptStartedAt,
+          timeToHeadersMs: timing.timeToHeadersMs,
+          downloadMs: timing.totalMs,
+          extractMs,
+          bytes: buffer?.byteLength || 0
+        });
         return {
           ok: true,
           endpoint,
@@ -665,22 +706,42 @@
           files: files.map(file => ({
             ...file,
             source: 'overleaf-zip'
-          }))
+          })),
+          diagnostics: {
+            totalMs: Date.now() - startedAt,
+            timeoutBudgetMs: timeoutMs,
+            attempts
+          }
         };
       } catch (error) {
+        attempts.push({
+          endpoint,
+          error: error.message,
+          elapsedMs: Date.now() - attemptStartedAt
+        });
         errors.push(`${endpoint} failed: ${error.message}`);
+        if (error?.code === 'zip_timeout') {
+          errors.push(`Overleaf ZIP download exhausted its ${timeoutMs}ms total timeout budget`);
+          break;
+        }
       }
     }
 
     return {
       ok: false,
-      reason: errors.join('; ') || 'Overleaf source ZIP was unavailable'
+      reason: errors.join('; ') || 'Overleaf source ZIP was unavailable',
+      diagnostics: {
+        totalMs: Date.now() - startedAt,
+        timeoutBudgetMs: timeoutMs,
+        attempts
+      }
     };
   }
 
   function fetchZipEndpoint(endpoint, timeoutMs) {
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const request = (async () => {
+      const startedAt = Date.now();
       const response = await fetch(endpoint, {
         credentials: 'include',
         headers: {
@@ -688,12 +749,17 @@
         },
         ...(controller ? { signal: controller.signal } : {})
       });
+      const headersAt = Date.now();
       const contentType = response.headers.get('content-type') || '';
       const buffer = response.ok ? await response.arrayBuffer() : null;
       return {
         response,
         contentType,
-        buffer
+        buffer,
+        timing: {
+          timeToHeadersMs: headersAt - startedAt,
+          totalMs: Date.now() - startedAt
+        }
       };
     })();
 
@@ -706,11 +772,12 @@
     let timeoutId = null;
     const timeout = new Promise((_resolve, reject) => {
       timeoutId = window.setTimeout(() => {
+        const timeoutError = new Error(message);
+        timeoutError.code = 'zip_timeout';
+        reject(timeoutError);
         try {
           onTimeout?.();
-        } finally {
-          reject(new Error(message));
-        }
+        } catch (_error) {}
       }, timeoutMs);
     });
 

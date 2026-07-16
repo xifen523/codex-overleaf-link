@@ -12,6 +12,10 @@ const pageBridgeSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/pageBridge.js'),
   'utf8'
 );
+const saveStateSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/saveState.js'),
+  'utf8'
+);
 const pageBridgeCapabilityPath = path.join(__dirname, '../extension/src/page/pageBridgeCapability.js');
 const pageBridgeCapabilitySource = fs.existsSync(pageBridgeCapabilityPath)
   ? fs.readFileSync(pageBridgeCapabilityPath, 'utf8')
@@ -96,6 +100,87 @@ test('context file list uses the exact Overleaf ZIP file tree and caches it', as
   assert.equal(bridge.getFetchCount(), 1);
 });
 
+test('fast tree reads do not evict the cached exact ZIP file list', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'sections/intro.tex': 'Intro',
+      'figures/plot.pdf': '%PDF-test'
+    },
+    treePaths: [
+      ['main.tex']
+    ]
+  });
+
+  const exact = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    maxAgeMs: 300000
+  });
+  const tree = await bridge.call('getProjectFileList', {
+    preferExact: false,
+    maxAgeMs: 300000
+  });
+  const exactAgain = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    maxAgeMs: 300000
+  });
+
+  assert.equal(exact.capabilities.method, 'overleaf-zip-file-list');
+  assert.equal(tree.capabilities.method, 'overleaf-file-tree');
+  assert.equal(exactAgain.capabilities.method, 'overleaf-zip-file-list');
+  assert.equal(exactAgain.capabilities.diagnostics.fileListCache, 'memory');
+  assert.equal(bridge.getFetchCount(), 1);
+});
+
+test('snapshot invalidation preserves file lists unless project structure changed', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}',
+      'sections/intro.tex': 'Intro'
+    }
+  });
+
+  await bridge.call('getProjectFileList', {
+    preferExact: true,
+    maxAgeMs: 300000
+  });
+  await bridge.call('invalidateProjectSnapshot', {});
+  const afterContentEdit = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    maxAgeMs: 300000
+  });
+  await bridge.call('invalidateProjectSnapshot', { invalidateFileList: true });
+  const afterStructureChange = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    maxAgeMs: 300000
+  });
+
+  assert.equal(afterContentEdit.capabilities.diagnostics.fileListCache, 'memory');
+  assert.equal(afterStructureChange.capabilities.diagnostics.fileListCache, 'fresh');
+  assert.equal(bridge.getFetchCount(), 2);
+});
+
+test('ZIP diagnostics separate download and extraction timing', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}'
+    }
+  });
+
+  const result = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    maxAgeMs: 0
+  });
+  const timing = result.capabilities.diagnostics.zipTiming;
+
+  assert.equal(result.ok, true);
+  assert.equal(timing.timeoutBudgetMs, 30000);
+  assert.equal(timing.attempts.length, 1);
+  assert.match(timing.attempts[0].endpoint, /\/project\/[^/]+\/download\/zip$/);
+  assert.ok(timing.attempts[0].downloadMs >= 0);
+  assert.ok(timing.attempts[0].extractMs >= 0);
+});
+
 test('context file list carries ZIP byte sizes without file contents', async () => {
   const bridge = createSnapshotHarness({
     files: {
@@ -144,6 +229,29 @@ test('context file list falls back to strict project tree when ZIP is unavailabl
     'main.tex',
     'sections/intro.tex'
   ]);
+});
+
+test('ZIP endpoint fallbacks share one total timeout budget', async () => {
+  const bridge = createSnapshotHarness({
+    files: {
+      'main.tex': '\\documentclass{article}'
+    },
+    fetchMode: 'hang'
+  });
+
+  const result = await bridge.call('getProjectFileList', {
+    preferExact: true,
+    exactOnly: true,
+    zipTimeoutMs: 5,
+    maxAgeMs: 0
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.capabilities.method, 'overleaf-zip-file-list-unavailable');
+  assert.equal(bridge.getFetchCount(), 1);
+  assert.equal(result.capabilities.diagnostics.zipTiming.timeoutBudgetMs, 5);
+  assert.equal(result.capabilities.diagnostics.zipTiming.attempts.length, 1);
+  assert.match(result.reason, /timed out|timeout budget/i);
 });
 
 test('context file list does not cache ZIP fallback as the exact project tree', async () => {
@@ -1272,6 +1380,7 @@ function createSnapshotHarness({
   });
 
   vm.runInContext(overleafCapabilitiesSource, context, { filename: 'overleafCapabilities.js' });
+  vm.runInContext(saveStateSource, context, { filename: 'saveState.js' });
   vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
   vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
   vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });

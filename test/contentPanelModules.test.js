@@ -1065,14 +1065,14 @@ test('settingsPanel exposes setSkillsSummary in its module API', () => {
 });
 
 // Returns the start..end (brace-balanced) source of a named function declaration
-// so the real contentRuntime helpers can be evaluated inside a synthetic scope.
+// so the real settings-coordinator helpers can be evaluated inside a synthetic scope.
 function extractRuntimeFunction(source, name) {
   const markers = [`function ${name}(`, `async function ${name}(`];
   const start = markers
     .map(marker => source.indexOf(marker))
     .filter(index => index !== -1)
     .sort((a, b) => a - b)[0] ?? -1;
-  assert.notEqual(start, -1, `${name} should exist in contentRuntime.js`);
+  assert.notEqual(start, -1, `${name} should exist in the settings coordinator source`);
   const openBrace = source.indexOf('{', start);
   let depth = 0;
   for (let index = openBrace; index < source.length; index++) {
@@ -1087,7 +1087,7 @@ function extractRuntimeFunction(source, name) {
 
 test('skills entry-row summary tracks the enabled-skill state through the real summary path', () => {
   // This test wires the REAL settingsPanel, the REAL localSkillsPanel controller,
-  // and the REAL contentRuntime summary helpers (updateSkillsEntrySummary /
+  // and the REAL project-settings summary helpers (updateSkillsEntrySummary /
   // countEnabledCodexOverleafSkills / renderLocalSkillList / per-skill enable
   // state) together. Nothing in the summary-writing path is stubbed, so it
   // genuinely verifies that the [data-skills-entry-summary] text stays in sync.
@@ -1111,7 +1111,7 @@ test('skills entry-row summary tracks the enabled-skill state through the real s
   delete require.cache[require.resolve('../extension/src/content/localSkillsPanel')];
   const LocalSkillsPanel = require('../extension/src/content/localSkillsPanel');
 
-  const contentRuntimeSrc = read('extension/src/content/contentRuntime.js');
+  const projectSettingsSrc = read('extension/src/content/projectSettingsCoordinator.js');
   const harness = Function(
     'SettingsPanel', 'LocalSkillsPanel', 'settingsPanelInstance', 'tr', 'panel',
     `
@@ -1120,11 +1120,14 @@ test('skills entry-row summary tracks the enabled-skill state through the real s
         { id: 'skill-a', title: 'Skill A', removable: false },
         { id: 'skill-b', title: 'Skill B', removable: false }
       ],
-      codexOverleafSkillEnabled: {}
+      codexOverleafSkillEnabled: {},
+      loadCodexOverleafSkills: true
     };
-    let skillLoadingSettings = { loadCodexOverleafSkills: true };
-    function getSkillLoadingSettings() { return skillLoadingSettings; }
-    function setMasterEnabled(value) { skillLoadingSettings = { loadCodexOverleafSkills: value }; }
+    function getState() { return state; }
+    function setState(next) { state = next; }
+    function getSettingsPanelInstance() { return settingsPanelInstance; }
+    function getLocalSkillsPanel() { return localSkillsPanel; }
+    function setMasterEnabled(value) { state = { ...state, loadCodexOverleafSkills: value }; }
     function saveStateSoon() {}
     // Real localSkillsPanel controller, fed the synthetic state.
     const localSkillsPanel = LocalSkillsPanel.createLocalSkillsPanelController({
@@ -1138,12 +1141,13 @@ test('skills entry-row summary tracks the enabled-skill state through the real s
       tr,
       tx: en => en
     });
-    ${extractRuntimeFunction(contentRuntimeSrc, 'getCodexOverleafSkillEnabled')}
-    ${extractRuntimeFunction(contentRuntimeSrc, 'isCodexOverleafSkillEnabled')}
-    ${extractRuntimeFunction(contentRuntimeSrc, 'setCodexOverleafSkillEnabled')}
-    ${extractRuntimeFunction(contentRuntimeSrc, 'countEnabledCodexOverleafSkills')}
-    ${extractRuntimeFunction(contentRuntimeSrc, 'updateSkillsEntrySummary')}
-    ${extractRuntimeFunction(contentRuntimeSrc, 'renderLocalSkillList')}
+    ${extractRuntimeFunction(projectSettingsSrc, 'getSkillLoadingSettings')}
+    ${extractRuntimeFunction(projectSettingsSrc, 'getCodexOverleafSkillEnabled')}
+    ${extractRuntimeFunction(projectSettingsSrc, 'isCodexOverleafSkillEnabled')}
+    ${extractRuntimeFunction(projectSettingsSrc, 'setCodexOverleafSkillEnabled')}
+    ${extractRuntimeFunction(projectSettingsSrc, 'countEnabledCodexOverleafSkills')}
+    ${extractRuntimeFunction(projectSettingsSrc, 'updateSkillsEntrySummary')}
+    ${extractRuntimeFunction(projectSettingsSrc, 'renderLocalSkillList')}
     return {
       renderLocalSkillList,
       setMasterEnabled,

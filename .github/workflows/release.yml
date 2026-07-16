@@ -70,17 +70,25 @@ jobs:
           commit_date="$(git log -1 --date=short --format=%cd)"
           npm run verify:release -- --release-date "${commit_date}"
 
-      - name: Verify release tag matches package version
+      - name: Verify release tag matches package version or RC
         shell: bash
         run: |
           package_version="$(node -p "require('./package.json').version")"
-          expected_tag="v${package_version}"
-          if [ "${GITHUB_REF_NAME}" != "${expected_tag}" ]; then
-            echo "Release tag ${GITHUB_REF_NAME} does not match package version ${expected_tag}."
+          stable_tag="v${package_version}"
+          escaped_version="${package_version//./\\.}"
+          if [ "${GITHUB_REF_NAME}" = "${stable_tag}" ]; then
+            release_prerelease=false
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v${escaped_version}-rc\.[1-9][0-9]*$ ]]; then
+            release_prerelease=true
+          else
+            echo "Release tag ${GITHUB_REF_NAME} must be ${stable_tag} or ${stable_tag}-rc.N."
             exit 1
           fi
           echo "PACKAGE_VERSION=${package_version}" >> "${GITHUB_ENV}"
-          echo "LOCAL_TGZ=dist/releases/${expected_tag}/codex-overleaf-link-${package_version}.tgz" >> "${GITHUB_ENV}"
+          echo "RELEASE_PRERELEASE=${release_prerelease}" >> "${GITHUB_ENV}"
+          echo "RELEASE_DIR=dist/releases/${stable_tag}" >> "${GITHUB_ENV}"
+          echo "RELEASE_ASSET_TAG=${stable_tag}" >> "${GITHUB_ENV}"
+          echo "LOCAL_TGZ=dist/releases/${stable_tag}/codex-overleaf-link-${package_version}.tgz" >> "${GITHUB_ENV}"
 
       - name: Ensure release version is unpublished
         shell: bash
@@ -98,12 +106,14 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if npm view "codex-overleaf-link@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+          if [ "${RELEASE_PRERELEASE}" != "true" ] && npm view "codex-overleaf-link@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
             echo "codex-overleaf-link@${PACKAGE_VERSION} is already published; use a new patch version."
             exit 1
           fi
 
       - name: Build release artifacts
+        env:
+          CODEX_OVERLEAF_RELEASE_REF: ${{ github.ref_name }}
         run: npm run build:release
 
       - name: Sign coordinated update manifest
@@ -121,14 +131,14 @@ jobs:
         run: npm run verify:release-artifacts
 
       - name: Publish npm package
-        if: github.repository == 'Ghqqqq/codex-overleaf-link'
+        if: github.repository == 'Ghqqqq/codex-overleaf-link' && env.RELEASE_PRERELEASE != 'true'
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish "${LOCAL_TGZ}" --access public --provenance
 
       - name: Verify npm package is published
-        if: github.repository == 'Ghqqqq/codex-overleaf-link'
+        if: github.repository == 'Ghqqqq/codex-overleaf-link' && env.RELEASE_PRERELEASE != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         shell: bash
@@ -158,24 +168,24 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: false
-          prerelease: false
+          prerelease: ${{ env.RELEASE_PRERELEASE == 'true' }}
           name: ${{ github.ref_name }}
-          body_path: dist/releases/${{ github.ref_name }}/release-notes.md
+          body_path: ${{ env.RELEASE_DIR }}/release-notes.md
           files: |
-            dist/releases/${{ github.ref_name }}/codex-overleaf-link-extension-${{ github.ref_name }}.zip
-            dist/releases/${{ github.ref_name }}/codex-overleaf-native-host-${{ github.ref_name }}.tar.gz
-            dist/releases/${{ github.ref_name }}/codex-overleaf-update-${{ github.ref_name }}.tar.gz
-            dist/releases/${{ github.ref_name }}/codex-overleaf-link-${{ env.PACKAGE_VERSION }}.tgz
-            dist/releases/${{ github.ref_name }}/install.sh
-            dist/releases/${{ github.ref_name }}/install.ps1
-            dist/releases/${{ github.ref_name }}/uninstall-native-host.mjs
-            dist/releases/${{ github.ref_name }}/nativeHostPlatform.js
-            dist/releases/${{ github.ref_name }}/manifest.js
-            dist/releases/${{ github.ref_name }}/runtimeInstaller.js
-            dist/releases/${{ github.ref_name }}/release-manifest.json
-            dist/releases/${{ github.ref_name }}/release-manifest.sig
-            dist/releases/${{ github.ref_name }}/release-notes.md
-            dist/releases/${{ github.ref_name }}/SHA256SUMS
+            ${{ env.RELEASE_DIR }}/codex-overleaf-link-extension-${{ env.RELEASE_ASSET_TAG }}.zip
+            ${{ env.RELEASE_DIR }}/codex-overleaf-native-host-${{ env.RELEASE_ASSET_TAG }}.tar.gz
+            ${{ env.RELEASE_DIR }}/codex-overleaf-update-${{ env.RELEASE_ASSET_TAG }}.tar.gz
+            ${{ env.RELEASE_DIR }}/codex-overleaf-link-${{ env.PACKAGE_VERSION }}.tgz
+            ${{ env.RELEASE_DIR }}/install.sh
+            ${{ env.RELEASE_DIR }}/install.ps1
+            ${{ env.RELEASE_DIR }}/uninstall-native-host.mjs
+            ${{ env.RELEASE_DIR }}/nativeHostPlatform.js
+            ${{ env.RELEASE_DIR }}/manifest.js
+            ${{ env.RELEASE_DIR }}/runtimeInstaller.js
+            ${{ env.RELEASE_DIR }}/release-manifest.json
+            ${{ env.RELEASE_DIR }}/release-manifest.sig
+            ${{ env.RELEASE_DIR }}/release-notes.md
+            ${{ env.RELEASE_DIR }}/SHA256SUMS
           fail_on_unmatched_files: true
           overwrite_files: false
 

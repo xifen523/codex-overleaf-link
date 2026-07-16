@@ -18,6 +18,7 @@
       saveState,
       saveStateSoon,
       autosizeTaskTextarea,
+      syncComposerSendAvailability,
       applyStateToPanel,
       normalizePanelState,
       openCustomInstructionsSettings,
@@ -220,6 +221,7 @@
     input.value = task;
     getState().task = task;
     autosizeTaskTextarea();
+    syncComposerSendAvailability();
     saveStateSoon();
     input.focus();
     try {

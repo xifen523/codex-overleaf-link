@@ -5,6 +5,7 @@ const updateVersions = document.getElementById('update-versions');
 const updateDetail = document.getElementById('update-detail');
 const checkButton = document.getElementById('check-update');
 const postponeButton = document.getElementById('postpone-update');
+const UpdateStatus = globalThis.CodexOverleafUpdateStatus;
 
 checkButton.addEventListener('click', async () => {
   checkButton.disabled = true;
@@ -33,7 +34,10 @@ async function refreshUpdateState() {
   if (state.managed === false) {
     updateDetail.textContent = 'Run install-managed once to enable automatic extension and native-host updates.';
   } else if (state.state === 'waiting_for_idle') {
-    updateDetail.textContent = 'Downloaded and verified. Waiting until every Overleaf tab is saved and idle.';
+    const blockerDetail = UpdateStatus?.formatBlockers(state.blockers || [state.blocker]) || '';
+    updateDetail.textContent = blockerDetail
+      ? `Downloaded and verified. ${blockerDetail}`
+      : 'Downloaded and verified. Waiting until every Overleaf tab is saved and idle.';
   } else if (state.state === 'rolled_back') {
     updateDetail.textContent = 'The previous version was restored after a failed health check.';
   } else if (state.state === 'committed') {

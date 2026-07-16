@@ -47,11 +47,84 @@
     let contextProject = null;
     let contextLoadId = 0;
     let contextExpandedFolders = new Set();
+    let contextExactEnhancementAttempted = false;
+    let contextSyncState = 'idle';
+    let contextPrefetchTimer = null;
+    let contextPrefetchIdleHandle = null;
+
+    function cancelContextPrefetch() {
+      if (contextPrefetchTimer !== null) {
+        const clearTimer = typeof root.clearTimeout === 'function' ? root.clearTimeout.bind(root) : clearTimeout;
+        clearTimer(contextPrefetchTimer);
+        contextPrefetchTimer = null;
+      }
+      if (contextPrefetchIdleHandle !== null && typeof root.cancelIdleCallback === 'function') {
+        root.cancelIdleCallback(contextPrefetchIdleHandle);
+        contextPrefetchIdleHandle = null;
+      }
+    }
+
+    function scheduleContextPrefetch(options = {}) {
+      cancelContextPrefetch();
+      const enabled = Object.prototype.hasOwnProperty.call(options, 'enabled')
+        ? Boolean(options.enabled)
+        : getState()?.preloadProjectContext !== false;
+      const expectedProjectId = String(getCurrentProjectId() || '');
+      if (!enabled || !expectedProjectId) {
+        return;
+      }
+      const delayMs = Number.isFinite(Number(options.delayMs))
+        ? Math.max(0, Number(options.delayMs))
+        : 2500;
+      const setTimer = typeof root.setTimeout === 'function' ? root.setTimeout.bind(root) : setTimeout;
+      contextPrefetchTimer = setTimer(() => {
+        contextPrefetchTimer = null;
+        const currentProjectId = String(getCurrentProjectId() || '');
+        if (getState()?.preloadProjectContext === false || document?.visibilityState === 'hidden') {
+          return;
+        }
+        if (currentProjectId !== expectedProjectId) {
+          scheduleContextPrefetch({ delayMs: 500 });
+          return;
+        }
+        const run = () => {
+          contextPrefetchIdleHandle = null;
+          void loadContextFiles({ force: false, background: true });
+        };
+        if (typeof root.requestIdleCallback === 'function') {
+          contextPrefetchIdleHandle = root.requestIdleCallback(run, { timeout: 2000 });
+        } else {
+          run();
+        }
+      }, delayMs);
+      contextPrefetchTimer?.unref?.();
+    }
 
     function installContextDismiss() {
       if (!document) {
         return;
       }
+      document.addEventListener('change', event => {
+        const target = event?.target;
+        if (!target?.matches?.('[data-preload-project-context]')) {
+          return;
+        }
+        const enabled = Boolean(target.checked);
+        setState({ ...getState(), preloadProjectContext: enabled });
+        saveStateSoon();
+        if (enabled) {
+          scheduleContextPrefetch({ enabled: true, delayMs: 0 });
+        } else {
+          cancelContextPrefetch();
+        }
+      }, true);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState !== 'hidden') {
+          scheduleContextPrefetch();
+        }
+      });
+      scheduleContextPrefetch();
+
       document.addEventListener('click', event => {
         if (isContextTrayClickTarget(event.target)) {
           return;
@@ -126,17 +199,24 @@
       if (!list) {
         return;
       }
-      if (isExactContextFileListProject(contextProject) && !options.force) {
+      if (isContextFileListProject(contextProject) && !options.force) {
         renderContextFiles(contextProject);
+        if (isExactContextFileListProject(contextProject)) {
+          setContextSyncState('exact-ready');
+        } else if (contextSyncState !== 'partial') {
+          setContextSyncState('exact-loading');
+          void enhanceContextFilesFromExactSnapshot({ loadId: contextLoadId });
+        }
         return;
       }
 
       const loadId = ++contextLoadId;
+      setContextSyncState('tree-loading');
       setContextStatus(tr('contextLoadingFiles'));
       list.textContent = '';
 
       try {
-        const project = await requestExactContextFiles({ force: Boolean(options.force) });
+        const project = await requestContextFiles({ force: Boolean(options.force) });
         if (!project?.ok) {
           throw new Error(project?.error || project?.reason || tr('unknownReason'));
         }
@@ -144,28 +224,82 @@
           return;
         }
         contextProject = project;
+        setContextSyncState(isExactContextFileListProject(project) ? 'exact-ready' : 'exact-loading');
         renderContextFiles(project);
+        if (!isExactContextFileListProject(project)) {
+          void enhanceContextFilesFromExactSnapshot({
+            force: Boolean(options.force),
+            loadId
+          });
+        }
       } catch (error) {
         if (loadId !== contextLoadId) {
           return;
         }
+        setContextSyncState('partial');
         setContextStatus(tr('contextReadFailed', { message: error.message }));
       }
     }
 
-    async function requestExactContextFiles({ force = false } = {}) {
-      const project = await callPageBridge('getProjectSnapshot', {
+    async function requestContextFiles({ force = false } = {}) {
+      const project = await callPageBridge('getProjectFileList', {
         force,
-        preferLightweight: true,
-        allowZipFallback: false,
-        allowEditorNavigation: false,
-        requireFullProject: true,
-        zipOnly: true,
+        preferExact: false
+      });
+      if (
+        project?.ok
+        && isContextFileListProject(project)
+        && Array.isArray(project.files)
+        && project.files.length
+      ) {
+        return project;
+      }
+      return requestExactContextFiles({ force });
+    }
+
+    async function requestExactContextFiles({ force = false } = {}) {
+      return callPageBridge('getProjectFileList', {
+        force,
+        preferExact: true,
+        exactOnly: true,
         includeBinaryFiles: true,
         includeContent: false,
         zipTimeoutMs: exactFileListZipTimeoutMs
       });
-      return normalizeContextFileListFromZipSnapshot(project);
+    }
+
+    async function enhanceContextFilesFromExactSnapshot({ force = false, loadId = contextLoadId } = {}) {
+      if (isExactContextFileListProject(contextProject)) {
+        setContextSyncState('exact-ready');
+        return;
+      }
+      if (contextExactEnhancementAttempted && !force) {
+        return;
+      }
+      contextExactEnhancementAttempted = true;
+      setContextSyncState('exact-loading');
+      const expectedProjectId = String(contextProject?.id || getCurrentProjectId() || '');
+      try {
+        const project = await requestExactContextFiles({ force });
+        if (
+          loadId !== contextLoadId
+          || expectedProjectId && String(project.id || '') !== expectedProjectId
+        ) {
+          return;
+        }
+        if (!isExactContextFileListProject(project)) {
+          setContextSyncState('partial');
+          return;
+        }
+        contextProject = project;
+        setContextSyncState('exact-ready');
+        renderContextFiles(project);
+      } catch (_error) {
+        // The page file tree remains usable when the optional exact ZIP list is unavailable.
+        if (loadId === contextLoadId) {
+          setContextSyncState('partial');
+        }
+      }
     }
 
     function isExactContextFileListProject(project) {
@@ -601,6 +735,28 @@
       }
     }
 
+    function setContextSyncState(state) {
+      const indicator = getPanel()?.querySelector('[data-context-sync-status]');
+      const copy = indicator?.querySelector('[data-context-sync-copy]');
+      const stateKeys = {
+        'tree-loading': 'contextSyncTreeLoading',
+        'exact-loading': 'contextSyncExactLoading',
+        'exact-ready': 'contextSyncExactReady',
+        partial: 'contextSyncPartial'
+      };
+      contextSyncState = Object.prototype.hasOwnProperty.call(stateKeys, state) ? state : 'idle';
+      if (!indicator) {
+        return;
+      }
+      indicator.dataset.state = contextSyncState;
+      const label = contextSyncState === 'idle' ? '' : tr(stateKeys[contextSyncState]);
+      indicator.title = label;
+      indicator.setAttribute('aria-label', label);
+      if (copy) {
+        copy.textContent = label;
+      }
+    }
+
     async function persistFocusFiles(focusFiles) {
       const nextState = updateActiveSession(getState(), {
         focusFiles
@@ -630,6 +786,9 @@
     function resetContextProject() {
       contextProject = null;
       contextLoadId += 1;
+      contextExactEnhancementAttempted = false;
+      setContextSyncState('idle');
+      scheduleContextPrefetch();
     }
 
     function getContextProject() {
@@ -638,11 +797,15 @@
 
     return {
       installContextDismiss,
+      scheduleContextPrefetch,
+      cancelContextPrefetch,
       isContextTrayClickTarget,
       toggleContextTray,
       closeContextTray,
       loadContextFiles,
+      requestContextFiles,
       requestExactContextFiles,
+      enhanceContextFilesFromExactSnapshot,
       isExactContextFileListProject,
       isContextFileListProject,
       normalizeContextFileListFromZipSnapshot,
@@ -662,6 +825,7 @@
       sortContextFiles,
       getContextFileRank,
       setContextStatus,
+      setContextSyncState,
       resetContextProject,
       getContextProject
     };

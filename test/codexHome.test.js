@@ -620,8 +620,8 @@ test('plugin Codex home removes stale AGENTS.md and rules/memories left by earli
     fs.writeFileSync(path.join(userCodexHome, 'auth.json'), '{"token":"user-token"}\n', 'utf8');
     fs.mkdirSync(pluginHome, { recursive: true });
     fs.writeFileSync(path.join(pluginHome, 'AGENTS.md'), 'stale global guidance\n', 'utf8');
-    fs.symlinkSync(path.join(userCodexHome, 'rules'), path.join(pluginHome, 'rules'), 'dir');
-    fs.symlinkSync(path.join(userCodexHome, 'memories'), path.join(pluginHome, 'memories'), 'dir');
+    fs.symlinkSync(path.join(userCodexHome, 'rules'), path.join(pluginHome, 'rules'), process.platform === 'win32' ? 'junction' : 'dir');
+    fs.symlinkSync(path.join(userCodexHome, 'memories'), path.join(pluginHome, 'memories'), process.platform === 'win32' ? 'junction' : 'dir');
 
     preparePluginCodexHome({ HOME: home });
 

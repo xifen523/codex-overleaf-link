@@ -17,6 +17,7 @@ export function signReleaseManifest(options = {}) {
   const manifestPath = path.join(releaseDir, 'release-manifest.json');
   const signaturePath = path.join(releaseDir, 'release-manifest.sig');
   const manifestBytes = fs.readFileSync(manifestPath);
+  const verificationScope = getReleaseVerificationScope(manifestBytes, version);
   const privateKey = options.privateKey || readPrivateKey();
   const signature = crypto.sign(null, manifestBytes, privateKey);
   const envelope = Buffer.from(JSON.stringify({
@@ -24,10 +25,28 @@ export function signReleaseManifest(options = {}) {
     algorithm: 'Ed25519',
     signature: signature.toString('base64')
   }, null, 2) + '\n');
-  verifySignedReleaseManifest(manifestBytes, envelope);
+  verifySignedReleaseManifest(manifestBytes, envelope, verificationScope);
   fs.writeFileSync(signaturePath, envelope, { mode: 0o644 });
   rewriteChecksums(releaseDir);
   return { releaseDir, manifestPath, signaturePath, keyId: KEY_ID };
+}
+
+function getReleaseVerificationScope(manifestBytes, version) {
+  const manifest = JSON.parse(manifestBytes.toString('utf8'));
+  const stableTag = 'v' + version;
+  const rcPattern = new RegExp('^v' + escapeRegExp(version) + '-rc\\.[1-9]\\d*$');
+  const channel = manifest.tag === stableTag ? 'stable' : 'prerelease';
+  if (manifest.version !== version || (!rcPattern.test(String(manifest.tag || '')) && manifest.tag !== stableTag)) {
+    throw new Error('Release manifest version or tag does not match package.json.');
+  }
+  if (manifest.channel !== channel) {
+    throw new Error('Release manifest channel does not match its tag.');
+  }
+  return { channel, tag: manifest.tag };
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function readPrivateKey() {

@@ -29,7 +29,7 @@ test('popup shows version pair and compatible status when native host is current
   });
 
   assert.equal(harness.elements.nativeInstall.hidden, true);
-  assert.equal(harness.elements.compatStatusIcon.textContent, 'OK');
+  assert.equal(harness.elements.compatStatusIcon.textContent, '');
   assert.equal(harness.elements.compatStatusIcon.dataset.status, 'compatible');
   assert.equal(
     harness.elements.versionPair.textContent,
@@ -44,7 +44,7 @@ test('popup treats an older capability-compatible native response as update-avai
   });
 
   assert.equal(harness.elements.nativeInstall.hidden, false);
-  assert.equal(harness.elements.compatStatusIcon.textContent, '!');
+  assert.equal(harness.elements.compatStatusIcon.textContent, '');
   assert.equal(harness.elements.compatStatusIcon.dataset.status, 'update-available');
   assert.equal(harness.elements.versionPair.textContent, `Extension v${compatibility.BUILD_TARGET_VERSION} / Native v0.9.5`);
   assert.match(harness.elements.status.textContent, /Native host update available/i);
@@ -60,7 +60,7 @@ test('popup shows platform-specific Windows update command for incompatible nati
   });
 
   assert.equal(harness.elements.nativeInstall.hidden, false);
-  assert.equal(harness.elements.compatStatusIcon.textContent, 'X');
+  assert.equal(harness.elements.compatStatusIcon.textContent, '');
   assert.equal(harness.elements.compatStatusIcon.dataset.status, 'incompatible');
   assert.equal(
     harness.elements.installCommand.textContent,

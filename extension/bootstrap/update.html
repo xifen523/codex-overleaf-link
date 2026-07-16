@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Codex Overleaf Link Update</title>
+  <link rel="stylesheet" href="update.css">
+</head>
+<body>
+  <main class="update-shell" aria-labelledby="update-title">
+    <header class="update-header">
+      <div>
+        <p class="eyebrow">Codex Overleaf Link</p>
+        <p class="update-kind">Stable Update</p>
+      </div>
+      <span id="status-badge" class="status-badge" data-tone="neutral">Ready</span>
+    </header>
+
+    <section class="update-summary" aria-live="polite" aria-atomic="true">
+      <p id="version-route" class="version-route">Checking installed version</p>
+      <h1 id="update-title">Checking for updates</h1>
+      <p id="update-detail" class="update-detail">Reading the latest saved update state.</p>
+    </section>
+
+    <div id="progress-track" class="progress-track" role="progressbar" aria-label="Update progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden>
+      <span id="progress-fill" class="progress-fill"></span>
+    </div>
+
+    <ol id="update-stages" class="update-stages" aria-label="Update stages">
+      <li data-stage="download">
+        <span class="stage-marker" aria-hidden="true">1</span>
+        <span><strong>Download and verify</strong><small>Fetch the signed stable release and verify its manifest.</small></span>
+      </li>
+      <li data-stage="safe-point">
+        <span class="stage-marker" aria-hidden="true">2</span>
+        <span><strong>Wait for a safe point</strong><small>Protect active Overleaf work before changing runtime files.</small></span>
+      </li>
+      <li data-stage="restart">
+        <span class="stage-marker" aria-hidden="true">3</span>
+        <span><strong>Restart and health check</strong><small>Activate Extension and Native Host together, then verify both.</small></span>
+      </li>
+    </ol>
+
+    <p id="persistence-note" class="persistence-note">This window can stay open while work continues elsewhere. Progress is saved automatically.</p>
+
+    <details id="technical-details" class="technical-details" hidden>
+      <summary>Technical details</summary>
+      <pre id="technical-message"></pre>
+    </details>
+
+    <footer id="update-actions" class="update-actions" aria-label="Update actions"></footer>
+  </main>
+  <script src="update.js"></script>
+</body>
+</html>

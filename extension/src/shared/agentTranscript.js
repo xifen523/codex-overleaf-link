@@ -584,6 +584,132 @@
     };
   }
 
+  function translateProviderError(text, locale) {
+    const rules = [
+      {
+        pattern: /provider_revision_conflict|active provider changed|provider changed in another tab/i,
+        conclusionZh: '这轮没有启动：模型服务配置已在另一个标签页发生变化。',
+        conclusionEn: 'This run did not start: the model provider configuration changed in another tab.',
+        nextZh: '请刷新模型服务配置，然后重新运行任务。',
+        nextEn: 'Refresh the provider configuration, then run the task again.',
+        code: 'provider_revision_conflict'
+      },
+      {
+        pattern: /provider_auth_rejected|rejected the API key|denied access for this credential/i,
+        conclusionZh: '这轮没有继续：第三方模型服务拒绝了当前 API 密钥。',
+        conclusionEn: 'This run did not continue: the third-party provider rejected the current API key.',
+        nextZh: '请在 Settings 的模型服务配置中替换 API 密钥并测试连接。',
+        nextEn: 'Replace the API key in Model Providers and run Test connection.',
+        code: 'provider_auth_rejected'
+      },
+      {
+        pattern: /provider_model_not_found|configured model was not found/i,
+        conclusionZh: '这轮没有继续：第三方模型服务中找不到所选模型。',
+        conclusionEn: 'This run did not continue: the selected model was not found by the third-party provider.',
+        nextZh: '请检查模型 ID，测试连接后重试。',
+        nextEn: 'Check the model ID, test the connection, and retry.',
+        code: 'provider_model_not_found'
+      },
+      {
+        pattern: /provider_model_not_configured|selected model is not configured|at least one model ID is required/i,
+        conclusionZh: '这轮没有启动：当前模型没有配置在启用的模型服务中。',
+        conclusionEn: 'This run did not start: the current model is not configured for the active provider.',
+        nextZh: '请打开模型服务配置，添加或选择一个可用模型。',
+        nextEn: 'Open Model Providers and add or select an available model.',
+        code: 'provider_model_not_configured'
+      },
+      {
+        pattern: /provider_protocol_unverified|test connection before (activating|using)/i,
+        conclusionZh: '这轮没有启动：自动 API 协议尚未完成验证。',
+        conclusionEn: 'This run did not start: the automatic API protocol has not been verified.',
+        nextZh: '请在模型服务配置中运行“测试连接”，保存后重试。',
+        nextEn: 'Run Test connection in Model Providers, save, and retry.',
+        code: 'provider_protocol_unverified'
+      },
+      {
+        pattern: /provider_protocol_incompatible|incompatible with this API protocol/i,
+        conclusionZh: '这轮没有继续：端点与所选 API 协议不兼容。',
+        conclusionEn: 'This run did not continue: the endpoint is incompatible with the selected API protocol.',
+        nextZh: '请切换 Responses 或 Chat Completions，或使用自动检测重新测试。',
+        nextEn: 'Switch between Responses and Chat Completions, or test again with Auto detection.',
+        code: 'provider_protocol_incompatible'
+      },
+      {
+        pattern: /provider_rate_limited|rate limit was reached/i,
+        conclusionZh: '这轮没有完成：第三方模型服务触发了限流。',
+        conclusionEn: 'This run did not finish: the third-party provider rate limit was reached.',
+        nextZh: '请等待限流窗口恢复后重试。',
+        nextEn: 'Wait for the provider rate-limit window to recover, then retry.',
+        code: 'provider_rate_limited'
+      },
+      {
+        pattern: /provider_connection_timeout|provider connection.*timed out/i,
+        conclusionZh: '这轮没有完成：连接第三方模型服务超时。',
+        conclusionEn: 'This run did not finish: the third-party provider connection timed out.',
+        nextZh: '请检查端点和网络，或提高模型服务的请求超时后重试。',
+        nextEn: 'Check the endpoint and network, or increase the provider timeout before retrying.',
+        code: 'provider_connection_timeout'
+      },
+      {
+        pattern: /provider_dns_failed|hostname could not be resolved/i,
+        conclusionZh: '这轮没有启动：无法解析第三方模型服务的主机名。',
+        conclusionEn: 'This run did not start: the third-party provider hostname could not be resolved.',
+        nextZh: '请检查 Base URL 和本机 DNS 后重试。',
+        nextEn: 'Check the Base URL and local DNS, then retry.',
+        code: 'provider_dns_failed'
+      },
+      {
+        pattern: /provider_tls_failed|TLS verification failed/i,
+        conclusionZh: '这轮没有启动：第三方模型服务的 TLS 验证失败。',
+        conclusionEn: 'This run did not start: TLS verification failed for the third-party provider.',
+        nextZh: '请检查端点证书和 Base URL，修复后重试。',
+        nextEn: 'Check the endpoint certificate and Base URL, then retry.',
+        code: 'provider_tls_failed'
+      },
+      {
+        pattern: /provider_not_found|active provider no longer exists/i,
+        conclusionZh: '这轮没有启动：启用的模型服务已经不存在。',
+        conclusionEn: 'This run did not start: the active model provider no longer exists.',
+        nextZh: '请在 Settings 中选择内置 Codex 或另一个模型服务。',
+        nextEn: 'Select Built-in Codex or another provider in Settings.',
+        code: 'provider_not_found'
+      },
+      {
+        pattern: /provider_store_corrupt|provider stores are out of sync|provider store.*invalid/i,
+        conclusionZh: '这轮没有启动：本地模型服务配置存储已损坏或不同步。',
+        conclusionEn: 'This run did not start: the local provider configuration store is corrupt or out of sync.',
+        nextZh: '请打开技术详情，修复或重建本地模型服务配置。',
+        nextEn: 'Open Technical Details and repair or rebuild the local provider configuration.',
+        code: 'provider_store_corrupt'
+      },
+      {
+        pattern: /provider_store_unavailable|provider settings could not be saved/i,
+        conclusionZh: '模型服务操作失败：Native Host 无法访问本地配置存储。',
+        conclusionEn: 'The provider operation failed: the Native Host could not access local provider storage.',
+        nextZh: '请检查本地目录权限和 Native Host 状态后重试。',
+        nextEn: 'Check local directory permissions and Native Host status, then retry.',
+        code: 'provider_store_unavailable'
+      },
+      {
+        pattern: /provider_response_invalid|provider connection test failed/i,
+        conclusionZh: '这轮没有继续：第三方模型服务返回了不兼容或无效的响应。',
+        conclusionEn: 'This run did not continue: the third-party provider returned an incompatible or invalid response.',
+        nextZh: '请测试连接并确认服务兼容所选 API 协议。',
+        nextEn: 'Test the connection and confirm that the endpoint supports the selected API protocol.',
+        code: 'provider_response_invalid'
+      }
+    ];
+    const rule = rules.find(candidate => candidate.pattern.test(text));
+    if (!rule) {
+      return null;
+    }
+    return {
+      conclusion: textFor(locale, rule.conclusionZh, rule.conclusionEn),
+      nextStep: textFor(locale, rule.nextZh, rule.nextEn),
+      failureCode: rule.code
+    };
+  }
+
   function translateRawError(message, context = {}) {
     const locale = normalizeLocale(context);
     const text = String(message || '');
@@ -594,6 +720,10 @@
     // failure data alongside the human-readable text. The string text is kept
     // verbatim because it has mode-aware nuance (e.g. "No files were written"
     // vs "This run did not start") the catalog's fallback strings don't capture.
+    const providerError = translateProviderError(text, locale);
+    if (providerError) {
+      return providerError;
+    }
     if (/Mode must be "confirm" or "auto"/i.test(text)) {
       return {
         conclusion: textFor(locale, '这轮没有写入：当前是“只问不改”，但这个任务需要写入权限。', 'No files were written: this task needs write access, but the current mode is Ask.'),

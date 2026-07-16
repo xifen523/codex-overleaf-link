@@ -438,7 +438,7 @@ test('patchMirrorFiles refuses symlinked workspace parents before writing', asyn
   const entryBefore = baselineBefore.files.find(f => f.path === 'sections/main.tex');
   const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mirror-status-outside-'));
   fs.rmSync(path.join(mirror.workspacePath, 'sections'), { recursive: true, force: true });
-  fs.symlinkSync(outsideDir, path.join(mirror.workspacePath, 'sections'), 'dir');
+  fs.symlinkSync(outsideDir, path.join(mirror.workspacePath, 'sections'), process.platform === 'win32' ? 'junction' : 'dir');
 
   const result = await patchMirrorFiles({
     projectId: 'test-proj',

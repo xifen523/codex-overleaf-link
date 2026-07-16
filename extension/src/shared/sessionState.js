@@ -19,6 +19,7 @@
     locale: 'en',
     requireReviewing: true,
     autoOpen: true,
+    preloadProjectContext: true,
     loadCodexLocalSkills: true,
     loadCodexOverleafSkills: true,
     codexOverleafSkillEnabled: {},
@@ -34,7 +35,12 @@
   };
 
   const VALID_MODES = new Set(['ask', 'confirm', 'auto']);
-  const VALID_REASONING = new Set(['low', 'medium', 'high', 'xhigh']);
+  // Keep the persisted/session-level contract aligned with the model picker
+  // and native provider bridge. Custom providers can explicitly disable
+  // reasoning (`none`) or expose the lightest Codex tier (`minimal`). Dropping
+  // either value here silently restores the global `high` default after the
+  // user has selected it in the composer.
+  const VALID_REASONING = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
   const VALID_SPEED_TIERS = new Set(['standard', 'fast']);
   const VALID_LOCALES = new Set(['en', 'zh']);
   const VALID_EVENT_STATUSES = new Set(['info', 'running', 'completed', 'failed', 'warning', 'blocked', 'skipped', 'pending']);
@@ -945,6 +951,7 @@
       locale: normalizeLocale(source.locale),
       requireReviewing: active ? active.requireReviewing !== false : source.requireReviewing !== false,
       autoOpen: source.autoOpen !== false,
+      preloadProjectContext: source.preloadProjectContext !== false,
       loadCodexLocalSkills: source.loadCodexLocalSkills !== false,
       loadCodexOverleafSkills: source.loadCodexOverleafSkills !== false,
       codexOverleafSkillEnabled: normalizeCodexOverleafSkillEnabled(source.codexOverleafSkillEnabled),

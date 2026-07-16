@@ -46,6 +46,20 @@ test('verifies an exact signed stable update manifest', () => {
   assert.equal(result.version, '1.9.1');
 });
 
+test('verifies a numbered RC only when the caller explicitly scopes its channel and tag', () => {
+  const fixture = signedFixture({ channel: 'prerelease', tag: 'v1.9.1-rc.2' });
+  assert.throws(
+    () => verifySignedReleaseManifest(fixture.bytes, fixture.envelope, { publicKeys: fixture.publicKeys }),
+    error => error.code === 'update_manifest_origin_mismatch'
+  );
+  const result = verifySignedReleaseManifest(fixture.bytes, fixture.envelope, {
+    publicKeys: fixture.publicKeys,
+    channel: 'prerelease',
+    tag: 'v1.9.1-rc.2'
+  });
+  assert.equal(result.tag, 'v1.9.1-rc.2');
+});
+
 test('rejects tampered signed manifest bytes', () => {
   const fixture = signedFixture();
   assert.throws(

@@ -20,8 +20,8 @@ function nativeResponse(overrides = {}) {
       host: 'com.codex.overleaf',
       platform: 'darwin',
       version: compatibility.BUILD_TARGET_VERSION,
-      protocolVersion: 1,
-      supportedProtocol: { min: 1, max: 1 },
+      protocolVersion: 2,
+      supportedProtocol: { min: 1, max: 2 },
       capabilities: capabilityMap(),
       minExtensionVersion: compatibility.MIN_COMPATIBLE_EXTENSION_VERSION,
       environment: {
@@ -36,63 +36,65 @@ function canonicalInstallCommand(platform) {
   return compatibility.buildInstallCommand(compatibility.BUILD_TARGET_VERSION, platform);
 }
 
-test('release version metadata is aligned for v1.10.3 while native protocol stays unchanged', async () => {
-  assert.equal(packageJson.version, '1.10.3');
+test('release version metadata is aligned for v2.1.0 while the RC handshake uses protocol 2', async () => {
+  assert.equal(packageJson.version, '2.1.0');
   assert.equal(extensionManifest.version, packageJson.version);
   assert.equal(compatibility.BUILD_TARGET_VERSION, packageJson.version);
   assert.equal(compatibility.MIN_COMPATIBLE_NATIVE_VERSION, '1.0.0');
   assert.equal(compatibility.MIN_COMPATIBLE_EXTENSION_VERSION, '1.0.0');
-  assert.equal(compatibility.EXTENSION_PROTOCOL_VERSION, 1);
-  assert.deepEqual(compatibility.SUPPORTED_NATIVE_PROTOCOL, { min: 1, max: 1 });
+  assert.equal(compatibility.EXTENSION_PROTOCOL_VERSION, 2);
+  assert.deepEqual(compatibility.SUPPORTED_NATIVE_PROTOCOL, { min: 1, max: 2 });
 
   const response = await handleRequest({ id: 'metadata', method: 'bridge.ping', params: {} }, {});
 
   assert.equal(response.ok, true);
   assert.equal(response.result.version, packageJson.version);
   assert.equal(response.result.minExtensionVersion, compatibility.MIN_COMPATIBLE_EXTENSION_VERSION);
-  assert.equal(response.result.protocolVersion, 1);
-  assert.deepEqual(response.result.supportedProtocol, { min: 1, max: 1 });
+  assert.equal(response.result.protocolVersion, 2);
+  assert.deepEqual(response.result.supportedProtocol, { min: 1, max: 2 });
 });
 
-test('buildBridgePingParams returns v1.3 extension protocol metadata', () => {
-  assert.equal(compatibility.BUILD_TARGET_VERSION, '1.10.3');
-  assert.equal(compatibility.EXTENSION_PROTOCOL_VERSION, 1);
-  assert.deepEqual(compatibility.buildBridgePingParams({ version: '1.10.3' }), {
-    extensionVersion: '1.10.3',
-    extensionProtocolVersion: 1,
-    supportedNativeProtocol: { min: 1, max: 1 },
+test('buildBridgePingParams returns protocol 2 metadata with protocol 1 compatibility', () => {
+  assert.equal(compatibility.BUILD_TARGET_VERSION, '2.1.0');
+  assert.equal(compatibility.EXTENSION_PROTOCOL_VERSION, 2);
+  assert.deepEqual(compatibility.buildBridgePingParams({ version: '2.1.0' }), {
+    extensionVersion: '2.1.0',
+    extensionProtocolVersion: 2,
+    supportedNativeProtocol: { min: 1, max: 2 },
     requiredCapabilities: REQUIRED_CAPABILITIES
   });
 });
 
-test('classifyNativeCompatibility returns compatible for minimum-or-newer protocol 1 hosts with all required capabilities', () => {
-  const result = compatibility.evaluateNativeCompatibility(nativeResponse(), { version: '1.10.3' });
+test('classifyNativeCompatibility returns compatible for protocol 2 hosts with all required capabilities', () => {
+  const result = compatibility.evaluateNativeCompatibility(nativeResponse(), { version: '2.1.0' });
 
-  assert.equal(compatibility.classifyNativeCompatibility(nativeResponse(), '1.10.3'), 'compatible');
+  assert.equal(compatibility.classifyNativeCompatibility(nativeResponse(), '2.1.0'), 'compatible');
   assert.equal(result.status, 'ok');
   assert.equal(result.classification, 'compatible');
   assert.equal(result.requiredVersion, '1.0.0');
-  assert.equal(result.recommendedVersion, '1.10.3');
+  assert.equal(result.recommendedVersion, '2.1.0');
   assert.equal(result.updateAvailable, false);
   assert.equal(result.updateCommand, canonicalInstallCommand('darwin'));
-  assert.equal(result.releaseUrl, 'https://github.com/xifen523/codex-overleaf-link/releases/tag/v1.10.3');
+  assert.equal(result.releaseUrl, 'https://github.com/xifen523/codex-overleaf-link/releases/tag/v2.1.0');
 });
 
-test('classifyNativeCompatibility keeps v1.0 protocol 1 hosts with required capabilities operational under v1.3', () => {
+test('classifyNativeCompatibility keeps v1.0 protocol 1 hosts with required capabilities operational under v2.1', () => {
   const response = nativeResponse({
     version: '1.0.0',
-    minExtensionVersion: '1.0.0'
+    minExtensionVersion: '1.0.0',
+    protocolVersion: 1,
+    supportedProtocol: { min: 1, max: 1 }
   });
-  const result = compatibility.evaluateNativeCompatibility(response, { version: '1.10.3' });
+  const result = compatibility.evaluateNativeCompatibility(response, { version: '2.1.0' });
 
-  assert.equal(compatibility.classifyNativeCompatibility(response, '1.10.3'), 'compatible');
+  assert.equal(compatibility.classifyNativeCompatibility(response, '2.1.0'), 'compatible');
   assert.equal(result.status, 'ok');
   assert.equal(result.classification, 'compatible');
   assert.equal(result.minimumNativeVersion, '1.0.0');
   assert.equal(result.requiredVersion, '1.0.0');
-  assert.equal(result.recommendedVersion, '1.10.3');
+  assert.equal(result.recommendedVersion, '2.1.0');
   assert.equal(result.updateAvailable, true);
-  assert.equal(result.updateCommand, compatibility.buildInstallCommand('1.10.3', 'darwin'));
+  assert.equal(result.updateCommand, compatibility.buildInstallCommand('2.1.0', 'darwin'));
   assert.equal(compatibility.isNativeMethodAllowed('codex.run', result), true);
 });
 
@@ -142,7 +144,7 @@ test('classifyNativeCompatibility returns incompatible for missing native, unsup
     'incompatible'
   );
   assert.equal(
-    compatibility.evaluateNativeCompatibility(nativeResponse({ protocolVersion: 2, supportedProtocol: { min: 2, max: 2 } })).status,
+    compatibility.evaluateNativeCompatibility(nativeResponse({ protocolVersion: 3, supportedProtocol: { min: 3, max: 3 } })).status,
     'protocol_unsupported'
   );
   assert.equal(

@@ -1,13 +1,17 @@
 (function initStorageDb(root, factory) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = factory();
+    module.exports = factory(require('./storageRunActions'));
   } else {
-    root.CodexOverleafStorageDb = factory();
+    root.CodexOverleafStorageDb = factory(root.CodexOverleafStorageRunActions);
   }
-})(typeof globalThis !== 'undefined' ? globalThis : window, function storageDbFactory() {
+})(typeof globalThis !== 'undefined' ? globalThis : window, function storageDbFactory(StorageRunActions) {
   'use strict';
-
-  var TARGET_SCHEMA_VERSION = 2;
+  if (!StorageRunActions?.compactRunsForStorage || !StorageRunActions?.compactRunActionPayload) {
+    throw new Error('Codex Overleaf storage run-action helpers are unavailable.');
+  }
+  // IndexedDB versions are monotonic; v2.0 RC profiles have already opened v3.
+  // Lowering it hides otherwise-intact session history behind fallback state.
+  var TARGET_SCHEMA_VERSION = 3;
   var DB_NAME = 'codex-overleaf';
   var CUSTOM_INSTRUCTIONS_MAX_CHARS = 12000;
   var PROJECT_PREF_KEY_MAX_CHARS = 160;
@@ -235,7 +239,8 @@
 
   // --- Record builders ---
 
-  function buildSessionRecord(input) {
+  function buildSessionRecord(input, options) {
+    options = options || {};
     var now = new Date().toISOString();
     var titleSource = input.titleSource === 'manual' ? 'manual' : 'auto';
     var updatedAt = typeof input.updatedAt === 'string' ? input.updatedAt : now;
@@ -268,7 +273,7 @@
       status: typeof input.status === 'string' && input.status ? input.status : 'active',
       focusFiles: normalizePathList(input.focusFiles),
       history: compactHistoryForStorage(input.history),
-      runs: compactRunsForStorage(input.runs),
+      runs: compactRunsForStorage(input.runs, options),
       task: normalizeDisplayTextForStorage(input.task, SESSION_STORAGE_LIMITS.taskChars),
       mode: typeof input.mode === 'string' ? input.mode : '',
       model: typeof input.model === 'string' ? input.model : '',
@@ -628,14 +633,17 @@
       });
   }
 
-  function compactRunsForStorage(runs) {
-    return (Array.isArray(runs) ? runs : [])
-      .filter(function (run) { return run && typeof run.id === 'string'; })
-      .slice(-SESSION_STORAGE_LIMITS.maxRunsPerSession)
-      .map(compactRunForStorage);
+  function compactRunsForStorage(runs, options) {
+    return StorageRunActions.compactRunsForStorage(
+      runs,
+      options,
+      SESSION_STORAGE_LIMITS.maxRunsPerSession,
+      compactRunForStorage
+    );
   }
 
-  function compactRunForStorage(run) {
+  function compactRunForStorage(run, keepActionPayload) {
+    var actionPayload = StorageRunActions.compactRunActionPayload(run, keepActionPayload);
     var compact = {
       id: run.id,
       task: normalizeDisplayTextForStorage(run.task || 'untitled task', SESSION_STORAGE_LIMITS.taskChars),
@@ -650,11 +658,11 @@
       finishedAt: typeof run.finishedAt === 'string' ? redactSecretLikeText(run.finishedAt) : '',
       events: compactRunEventsForStorage(run.events),
       attachments: compactRunAttachmentsForStorage(run.attachments),
-      appliedOperations: [],
-      undoOperations: [],
-      undoBaseFiles: [],
-      undoTrackedChanges: [],
-      undoExpectedFiles: [],
+      appliedOperations: actionPayload.appliedOperations,
+      undoOperations: actionPayload.undoOperations,
+      undoBaseFiles: actionPayload.undoBaseFiles,
+      undoTrackedChanges: actionPayload.undoTrackedChanges,
+      undoExpectedFiles: actionPayload.undoExpectedFiles,
       undoStatus: normalizeDisplayTextForStorage(run.undoStatus, SESSION_STORAGE_LIMITS.statusTextChars)
     };
     if (VALID_TRACKED_CHANGE_STATUSES[run.trackedChangeStatus] === true) {

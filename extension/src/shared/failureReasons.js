@@ -298,6 +298,81 @@
       fallbackUserMessage: 'Local Codex returned no usable final report or operations.',
       fallbackNextAction: 'Open Technical Details and resolve the local Codex error.'
     },
+    provider_revision_conflict: {
+      stage: 'preflight', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'The active model provider changed after this tab loaded it.',
+      fallbackNextAction: 'Refresh the provider configuration and retry.'
+    },
+    provider_not_found: {
+      stage: 'preflight', severity: 'blocked', defaultRetryable: false,
+      fallbackUserMessage: 'The active model provider no longer exists.',
+      fallbackNextAction: 'Select Built-in Codex or another provider.'
+    },
+    provider_model_not_configured: {
+      stage: 'preflight', severity: 'blocked', defaultRetryable: false,
+      fallbackUserMessage: 'The selected model is not configured for the active provider.',
+      fallbackNextAction: 'Add or select a model in Model Providers.'
+    },
+    provider_protocol_unverified: {
+      stage: 'preflight', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'The provider API protocol has not been verified.',
+      fallbackNextAction: 'Run Test connection, save the provider, and retry.'
+    },
+    provider_auth_rejected: {
+      stage: 'codex', severity: 'blocked', defaultRetryable: false,
+      fallbackUserMessage: 'The provider rejected the configured API key.',
+      fallbackNextAction: 'Replace the API key and test the connection.'
+    },
+    provider_model_not_found: {
+      stage: 'codex', severity: 'blocked', defaultRetryable: false,
+      fallbackUserMessage: 'The provider could not find the configured model.',
+      fallbackNextAction: 'Correct the model ID and test the connection.'
+    },
+    provider_protocol_incompatible: {
+      stage: 'codex', severity: 'blocked', defaultRetryable: false,
+      fallbackUserMessage: 'The endpoint is incompatible with the selected API protocol.',
+      fallbackNextAction: 'Select another protocol or use Auto detection.'
+    },
+    provider_request_rejected: {
+      stage: 'codex', severity: 'blocked', defaultRetryable: false,
+      fallbackUserMessage: 'The provider rejected the protocol probe request.',
+      fallbackNextAction: 'Review the model ID, reasoning controls, tool support, and request overrides.'
+    },
+    provider_rate_limited: {
+      stage: 'codex', severity: 'error', defaultRetryable: true,
+      fallbackUserMessage: 'The provider rate limit was reached.',
+      fallbackNextAction: 'Wait for the rate-limit window to recover and retry.'
+    },
+    provider_connection_timeout: {
+      stage: 'codex', severity: 'error', defaultRetryable: true,
+      fallbackUserMessage: 'The provider connection timed out.',
+      fallbackNextAction: 'Check the endpoint and network, then retry.'
+    },
+    provider_dns_failed: {
+      stage: 'codex', severity: 'error', defaultRetryable: true,
+      fallbackUserMessage: 'The provider hostname could not be resolved.',
+      fallbackNextAction: 'Check the Base URL and DNS, then retry.'
+    },
+    provider_tls_failed: {
+      stage: 'codex', severity: 'error', defaultRetryable: true,
+      fallbackUserMessage: 'TLS verification failed for the provider endpoint.',
+      fallbackNextAction: 'Check the endpoint certificate and Base URL.'
+    },
+    provider_response_invalid: {
+      stage: 'codex', severity: 'error', defaultRetryable: true,
+      fallbackUserMessage: 'The provider returned an incompatible or invalid response.',
+      fallbackNextAction: 'Test the connection and verify protocol compatibility.'
+    },
+    provider_store_unavailable: {
+      stage: 'storage', severity: 'error', defaultRetryable: true,
+      fallbackUserMessage: 'The Native Host could not access provider configuration storage.',
+      fallbackNextAction: 'Check local permissions and Native Host status.'
+    },
+    provider_store_corrupt: {
+      stage: 'storage', severity: 'blocked', defaultRetryable: false,
+      fallbackUserMessage: 'The provider configuration store is corrupt or inconsistent.',
+      fallbackNextAction: 'Repair or rebuild the local provider configuration.'
+    },
     codex_project_locked: {
       stage: 'codex', severity: 'blocked', defaultRetryable: true,
       fallbackUserMessage: 'Another Codex task is already running for this Overleaf project.',

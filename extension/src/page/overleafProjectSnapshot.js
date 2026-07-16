@@ -14,7 +14,7 @@
   function create(deps = {}) {
     const pageWindow = deps.window || window;
     const snapshotCache = createKeyedCache();
-    const fileListCache = createCache();
+    const fileListCache = createKeyedCache();
 
     async function getProjectSnapshot(params = {}) {
       const cacheKey = getSnapshotCacheKey(params);
@@ -62,41 +62,53 @@
       const cacheKey = getProjectFileListCacheKey(params);
       const maxAgeMs = normalizeFileListMaxAge(params.maxAgeMs);
       const now = Date.now();
+      const cacheEntry = fileListCache.entries.get(cacheKey);
 
-      if (fileListCache.key === cacheKey && fileListCache.pending) {
-        return fileListCache.pending;
+      if (cacheEntry?.pending) {
+        return cacheEntry.pending;
       }
 
-      if (!params.force && fileListCache.key === cacheKey && fileListCache.value && now - fileListCache.capturedAt <= maxAgeMs) {
-        return withFileListCacheMetadata(fileListCache.value, 'memory', fileListCache.capturedAt);
+      if (!params.force && cacheEntry?.value && now - cacheEntry.capturedAt <= maxAgeMs) {
+        return withFileListCacheMetadata(cacheEntry.value, 'memory', cacheEntry.capturedAt);
       }
 
       const pending = deps.buildProjectFileList(params)
         .then(fileList => {
           const capturedAt = Date.now();
-          if (shouldCacheProjectFileList(fileList, params)) {
-            fileListCache.key = cacheKey;
-            fileListCache.value = fileList;
-            fileListCache.capturedAt = capturedAt;
-          } else if (fileListCache.key === cacheKey) {
-            fileListCache.value = null;
-            fileListCache.capturedAt = 0;
+          const currentEntry = fileListCache.entries.get(cacheKey);
+          if (currentEntry?.pending === pending) {
+            if (shouldCacheProjectFileList(fileList, params)) {
+              fileListCache.entries.set(cacheKey, {
+                value: fileList,
+                capturedAt,
+                pending: null
+              });
+            } else {
+              fileListCache.entries.delete(cacheKey);
+            }
           }
           return withFileListCacheMetadata(fileList, 'fresh', capturedAt);
         })
         .finally(() => {
-          if (fileListCache.pending === pending) {
-            fileListCache.pending = null;
+          const currentEntry = fileListCache.entries.get(cacheKey);
+          if (currentEntry?.pending === pending) {
+            currentEntry.pending = null;
           }
         });
 
-      fileListCache.key = cacheKey;
-      fileListCache.pending = pending;
+      fileListCache.entries.set(cacheKey, {
+        value: cacheEntry?.value || null,
+        capturedAt: cacheEntry?.capturedAt || 0,
+        pending
+      });
       return pending;
     }
 
-    function invalidateProjectSnapshot() {
+    function invalidateProjectSnapshot(options = {}) {
       resetKeyedCache(snapshotCache);
+      if (options.invalidateFileList === true) {
+        resetKeyedCache(fileListCache);
+      }
     }
 
     function getSnapshotCacheKey(params = {}) {
@@ -143,15 +155,6 @@
     return fileList?.capabilities?.method === 'overleaf-zip-file-list';
   }
 
-  function createCache() {
-    return {
-      key: '',
-      capturedAt: 0,
-      value: null,
-      pending: null
-    };
-  }
-
   function createKeyedCache() {
     return {
       entries: new Map()
@@ -160,13 +163,6 @@
 
   function resetKeyedCache(cache) {
     cache.entries.clear();
-  }
-
-  function resetCache(cache) {
-    cache.key = '';
-    cache.capturedAt = 0;
-    cache.value = null;
-    cache.pending = null;
   }
 
   function normalizeSnapshotMaxAge(value) {

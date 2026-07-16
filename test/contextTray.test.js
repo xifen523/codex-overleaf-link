@@ -186,7 +186,7 @@ test('context picker preserves project folder hierarchy instead of flattening by
   assert.match(contextTray, /file\.path\.split\('\/'\)/);
 });
 
-test('context picker uses the same exact ZIP source as project-read diagnostics', () => {
+test('context picker requests the cached exact ZIP file list without file contents', () => {
   const contentScript = fs.readFileSync(CONTENT_SCRIPT_PATH, 'utf8');
   const contextTray = readFileIfExists(CONTEXT_TRAY_PATH);
   const loadContextFilesBody = contextTray.match(/async function loadContextFiles\(options = \{\}\) \{[\s\S]*?\n    async function requestExactContextFiles/)?.[0] || '';
@@ -194,10 +194,12 @@ test('context picker uses the same exact ZIP source as project-read diagnostics'
   const getRunProjectSnapshotBody = contentScript.match(/async function getRunProjectSnapshot\(\) \{[\s\S]*?\n  \}/)?.[0] || '';
 
   assert.match(loadContextFilesBody, /isExactContextFileListProject\(contextProject\)/);
-  assert.match(requestExactContextFilesBody, /callPageBridge\('getProjectSnapshot'/);
-  assert.match(requestExactContextFilesBody, /zipOnly:\s*true/);
+  assert.match(requestExactContextFilesBody, /callPageBridge\('getProjectFileList'/);
+  assert.match(requestExactContextFilesBody, /preferExact:\s*true/);
+  assert.match(requestExactContextFilesBody, /exactOnly:\s*true/);
+  assert.match(requestExactContextFilesBody, /includeBinaryFiles:\s*true/);
   assert.match(requestExactContextFilesBody, /includeContent:\s*false/);
-  assert.match(requestExactContextFilesBody, /normalizeContextFileListFromZipSnapshot\(project\)/);
+  assert.doesNotMatch(requestExactContextFilesBody, /getProjectSnapshot/);
   assert.doesNotMatch(getRunProjectSnapshotBody, /contextProject\s*=\s*project/);
 });
 
@@ -341,4 +343,18 @@ test('context picker closes when clicking anywhere outside the picker and plus b
   assert.match(dismissBody, /document\.addEventListener\('click'/);
   assert.match(dismissBody, /isContextTrayClickTarget\(event\.target\)/);
   assert.doesNotMatch(dismissBody, /composer\.contains\(event\.target\)/);
+});
+
+
+test('context exact-list prefetch is delayed, default-on, and user-controllable', () => {
+  const contextTray = readFileIfExists(CONTEXT_TRAY_PATH);
+  const settingsPanel = readFileIfExists(path.join(__dirname, '../extension/src/content/settingsPanel.js'));
+
+  assert.match(contextTray, /function scheduleContextPrefetch\(/);
+  assert.match(contextTray, /requestIdleCallback/);
+  assert.match(contextTray, /visibilityState === 'hidden'/);
+  assert.match(contextTray, /preloadProjectContext !== false/);
+  assert.match(contextTray, /loadContextFiles\(\{ force: false, background: true \}\)/);
+  assert.match(contextTray, /data-preload-project-context/);
+  assert.match(settingsPanel, /data-preload-project-context/);
 });

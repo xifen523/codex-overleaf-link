@@ -27,7 +27,7 @@ test('composer discovers model options through the native codex.models endpoint'
   assert.match(modelPicker, /method:\s*'codex\.models'/);
   assert.match(modelPicker, /const modelCatalog = getModelCatalog\(\)/);
   assert.match(modelPicker, /modelCatalog\.FALLBACK_MODELS/);
-  assert.match(modelPicker, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel:\s*currentSelectedModel\s*\}\)/);
+  assert.match(modelPicker, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel:\s*retainedSelectedModel\s*\}\)/);
   assert.match(modelPicker, /function renderModelOptions\(models,\s*selectedModel\)/);
   assert.match(modelPicker, /function renderSpeedOptions\(/);
   assert.match(modelPicker, /function renderModelConfigChoices\(/);
@@ -55,8 +55,9 @@ test('composer preserves user model changes made while native discovery is pendi
   assert.notEqual(awaitIndex, -1, 'loadModelOptions should await native discovery');
   assert.notEqual(currentSelectionIndex, -1, 'loadModelOptions should re-read selection after discovery returns');
   assert.equal(awaitIndex < currentSelectionIndex, true, 'selection must be re-read after await');
-  assert.match(loadModelOptions, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel:\s*currentSelectedModel\s*\}\)/);
-  assert.match(loadModelOptions, /renderModelOptions\(normalized\.models,\s*currentSelectedModel\)/);
+  assert.match(loadModelOptions, /const retainedSelectedModel = retainSelectedModel\(sourceModels, currentSelectedModel\)/);
+  assert.match(loadModelOptions, /normalizeDiscoveredModels\(\{\s*models:\s*sourceModels,\s*selectedModel:\s*retainedSelectedModel\s*\}\)/);
+  assert.match(loadModelOptions, /renderModelOptions\(normalized\.models,\s*retainedSelectedModel\)/);
 });
 
 test('composer preserves a custom selected model before async discovery finishes', () => {

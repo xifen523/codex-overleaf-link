@@ -13,6 +13,10 @@ const pageBridgeSource = fs.readFileSync(
   path.join(__dirname, '../extension/src/pageBridge.js'),
   'utf8'
 );
+const saveStateSource = fs.readFileSync(
+  path.join(__dirname, '../extension/src/page/saveState.js'),
+  'utf8'
+);
 const pageBridgeCapabilityPath = path.join(__dirname, '../extension/src/page/pageBridgeCapability.js');
 const pageBridgeCapabilitySource = fs.existsSync(pageBridgeCapabilityPath)
   ? fs.readFileSync(pageBridgeCapabilityPath, 'utf8')
@@ -63,10 +67,11 @@ const overleafRealtimeObserverSource = fs.readFileSync(
 );
 
 test('page bridge save-state source requires tri-state positive verification', () => {
-  assert.doesNotMatch(pageBridgeSource, /assume saved/i);
-  assert.match(pageBridgeSource, /verified_saved/);
-  assert.match(pageBridgeSource, /unknown_timeout/);
-  assert.match(pageBridgeSource, /unavailable/);
+  assert.doesNotMatch(saveStateSource, /assume saved/i);
+  assert.match(saveStateSource, /verified_saved/);
+  assert.match(saveStateSource, /unknown_timeout/);
+  assert.match(saveStateSource, /unavailable/);
+  assert.match(pageBridgeSource, /CodexOverleafSaveState/);
 });
 
 test('page bridge capability helper validates tokens and locks initialization', () => {
@@ -112,6 +117,24 @@ test('page bridge maps a missing save indicator to unknown timeout', async () =>
   assert.equal(result.ok, false);
   assert.equal(result.state, 'unknown_timeout');
   assert.match(result.reason, /save/i);
+});
+
+test('page bridge can opt into stable editor evidence when the save indicator is absent', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: { 'main.tex': 'stable content' }
+  });
+
+  const result = await bridge.call('waitForSaveState', {
+    deadlineMs: 20,
+    pollIntervalMs: 1,
+    allowQuietEditorFallback: true,
+    quietFallbackMs: 1
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'verified_quiet');
+  assert.equal(result.evidence, 'stable_editor_snapshot_without_save_indicator');
 });
 
 test('page bridge only returns ok true for a verified saved indicator', async () => {
@@ -1286,6 +1309,39 @@ test('page bridge records and rejects Overleaf tracked changes for Reviewing wri
   assert.equal(bridge.getRejectClickCount(), 1);
 });
 
+test('page bridge waits for delayed Overleaf tracked-change markers after a Reviewing write', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    reviewingOk: true,
+    trackChangesOnDispatch: true,
+    trackedChangeRenderDelayMs: 250,
+    files: {
+      'main.tex': 'alpha beta gamma'
+    }
+  });
+
+  const write = await bridge.call('applyOperations', {
+    requireReviewing: true,
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha beta gamma' }
+    ],
+    operations: [
+      {
+        type: 'edit',
+        path: 'main.tex',
+        patches: [
+          { from: 6, to: 10, expected: 'beta', insert: 'delta' }
+        ]
+      }
+    ]
+  });
+
+  assert.equal(write.ok, true, write.error || JSON.stringify(write));
+  assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma');
+  assert.equal(write.trackedChanges.length, 1);
+  assert.equal(write.trackedChanges[0].path, 'main.tex');
+});
+
 test('page bridge routes acceptTrackedChanges to the writeback router: editor-undo then untracked replay', async () => {
   // Accept All no longer hunts per-change Accept controls. It editor-undoes the
   // run's tracked writeback back to its pre-write content, then re-applies the
@@ -1352,10 +1408,11 @@ test('page bridge routes acceptTrackedChanges to the writeback router: editor-un
   assert.equal(bridge.isReviewingActive(), false);
 });
 
-test('page bridge acceptTrackedChanges bails without re-writing when editor content has drifted', async () => {
-  // The editor-undo cannot reach the pre-write content (the user manually
-  // edited after the run). Accept All must bail WITHOUT re-writing so it never
-  // makes the document worse — same safety stance as Undo.
+test('page bridge acceptTrackedChanges preserves a unique unrelated suffix while replaying the run', async () => {
+  // The editor-undo cannot reach the pre-write content after a reload or a
+  // later edit. When the exact post-write checkpoint still occurs once, the
+  // snapshot fallback may safely preserve its surrounding prefix/suffix while
+  // accepting only this run's change.
   const bridge = createPageBridgeHarness({
     activePath: 'main.tex',
     reviewingOk: true,
@@ -1386,8 +1443,8 @@ test('page bridge acceptTrackedChanges bails without re-writing when editor cont
   });
   assert.equal(write.ok, true, write.error || JSON.stringify(write));
 
-  // The user edits the document after the run; the post-write content the run
-  // hands Accept All no longer matches what is in the editor.
+  // The user appends unrelated content after the run. The run checkpoint is
+  // still present exactly once, so it can be rebased without guessing.
   bridge.setFile('main.tex', 'alpha delta gamma plus user edit');
 
   const accept = await bridge.call('acceptTrackedChanges', {
@@ -1400,10 +1457,11 @@ test('page bridge acceptTrackedChanges bails without re-writing when editor cont
     ]
   });
 
-  assert.equal(accept.ok, false, JSON.stringify(accept));
-  // The drifted document is left untouched — no re-write.
+  assert.equal(accept.ok, true, JSON.stringify(accept));
+  assert.equal(accept.skipped.length, 0, JSON.stringify(accept));
+  // The tracked run edit is replayed untracked while the later suffix remains.
   assert.equal(bridge.getFile('main.tex'), 'alpha delta gamma plus user edit');
-  assert.equal(bridge.getEditorUndoClickCount(), 0, 'a drifted post-write content is detected before any undo');
+  assert.equal(bridge.getEditorUndoClickCount(), 0, 'snapshot fallback is used when native undo cannot prove the checkpoint');
 });
 
 test('page bridge rejects unsafe tracked-change paths before clicking reject controls', async () => {
@@ -2708,6 +2766,7 @@ function createPageBridgeHarness({
   saveIndicatorNodes = null,
   dispatchApplies = true,
   trackChangesOnDispatch = false,
+  trackedChangeRenderDelayMs = 0,
   realtimeObserverFactory = null,
   rerenderTrackedChangeIdsOnReject = false,
   editorUndoTargets = {},
@@ -2732,6 +2791,7 @@ function createPageBridgeHarness({
 }) {
   const fileMap = new Map(Object.entries(files));
   const trackedChanges = [];
+  let nextTrackedChangeId = 1;
   let selectedPath = activePath;
   let editorPath = initialEditorPath;
   let listener = null;
@@ -2873,6 +2933,7 @@ function createPageBridgeHarness({
 
   vm.runInContext(otTextSource, context, { filename: 'otText.js' });
   vm.runInContext(overleafCapabilitiesSource, context, { filename: 'overleafCapabilities.js' });
+  vm.runInContext(saveStateSource, context, { filename: 'saveState.js' });
   vm.runInContext(compileBridgeSource, context, { filename: 'compileBridge.js' });
   vm.runInContext(overleafEditorSource, context, { filename: 'overleafEditor.js' });
   vm.runInContext(overleafProjectSnapshotSource, context, { filename: 'overleafProjectSnapshot.js' });
@@ -3058,12 +3119,17 @@ function createPageBridgeHarness({
           const before = fileMap.get(editorPath) || '';
           fileMap.set(editorPath, applyEditorChanges(fileMap.get(editorPath) || '', transaction.changes));
           if (reviewingActive && trackChangesOnDispatch) {
-            trackedChanges.push({
-              id: `change-${trackedChanges.length + 1}`,
+            const trackedChange = {
+              id: `change-${nextTrackedChangeId++}`,
               path: editorPath,
               before,
               after: fileMap.get(editorPath) || ''
-            });
+            };
+            if (trackedChangeRenderDelayMs > 0) {
+              setTimeout(() => trackedChanges.push(trackedChange), trackedChangeRenderDelayMs);
+            } else {
+              trackedChanges.push(trackedChange);
+            }
           }
         }
       }

@@ -480,7 +480,11 @@
       existing.dataset.streamRole = event.streamRole || '';
       const text = existing.querySelector('[data-stream-text]');
       if (text) {
-        renderMarkdownInlineText(text, event.title || '');
+        if (event.streamRole === 'assistant') {
+          renderMarkdownBlockText(text, event.title || '');
+        } else {
+          renderMarkdownInlineText(text, event.title || '');
+        }
       }
       return;
     }
@@ -498,7 +502,11 @@
     const text = document.createElement('div');
     text.className = 'run-stream-text';
     text.dataset.streamText = '';
-    renderMarkdownInlineText(text, event.title || '');
+    if (event.streamRole === 'assistant') {
+      renderMarkdownBlockText(text, event.title || '');
+    } else {
+      renderMarkdownInlineText(text, event.title || '');
+    }
 
     row.append(text);
     return row;
@@ -727,9 +735,7 @@
       main.className = 'run-final-answer';
       const mainSections = [];
       if (structured.conclusion) {
-        mainSections.push(getLocale() === 'zh'
-          ? `结论：${structured.conclusion}`
-          : `Conclusion: ${structured.conclusion}`);
+        mainSections.push(formatConclusionMarkdown(structured.conclusion));
       }
       if (structured.body) {
         mainSections.push(structured.body);
@@ -762,6 +768,19 @@
     appendCompletionMetaBlock(report, split.meta);
     appendRecoveryActionForFailure(report, event, run);
     return report;
+  }
+
+  function formatConclusionMarkdown(value) {
+    const conclusion = String(value || '');
+    const label = getLocale() === 'zh' ? '结论：' : 'Conclusion:';
+    return hasLeadingMarkdownBlock(conclusion)
+      ? `${label}\n${conclusion}`
+      : `${label} ${conclusion}`;
+  }
+
+  function hasLeadingMarkdownBlock(value) {
+    const firstLine = String(value || '').trimStart().split(/\r?\n/, 1)[0];
+    return /^(?:#{1,6}\s+\S|```|~~~|(?:[-+*]|\d+[.)])\s+\S|\*\*[^*]+\*\*:?\s*$)/.test(firstLine);
   }
 
   // For failure codes that have an actionable recovery path the user can

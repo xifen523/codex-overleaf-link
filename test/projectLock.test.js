@@ -114,6 +114,26 @@ function createDelayedSyncRunner() {
   };
 }
 
+function createLockTestEnv(rootDir) {
+  return {
+    CODEX_OVERLEAF_MIRROR_ROOT: rootDir,
+    CODEX_OVERLEAF_PROVIDER_STORE_DIR: path.join(rootDir, 'provider-store'),
+    CODEX_OVERLEAF_AGENT_CMD: undefined
+  };
+}
+
+function seedUnavailableActiveProvider(env) {
+  fs.mkdirSync(env.CODEX_OVERLEAF_PROVIDER_STORE_DIR, { recursive: true });
+  fs.writeFileSync(
+    path.join(env.CODEX_OVERLEAF_PROVIDER_STORE_DIR, 'providers.json'),
+    JSON.stringify({ schemaVersion: 1, storeRevision: 0, activeProviderId: 'missing-provider', profiles: [] })
+  );
+  fs.writeFileSync(
+    path.join(env.CODEX_OVERLEAF_PROVIDER_STORE_DIR, 'provider-secrets.json'),
+    JSON.stringify({ schemaVersion: 1, storeRevision: 0, secrets: {} })
+  );
+}
+
 function loadTaskRunnerWithFakeModules({ fakeRunner, fakeSync }) {
   const runnerPath = require.resolve('../native-host/src/codexSessionRunner');
   const mirrorPath = require.resolve('../native-host/src/mirrorWorkspace');
@@ -146,7 +166,8 @@ function loadTaskRunnerWithFakeModules({ fakeRunner, fakeSync }) {
 
 test('codex.run is rejected while mirror.sync holds the same project lock', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
-  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
+  const env = createLockTestEnv(rootDir);
+  seedUnavailableActiveProvider(env);
   const syncRunner = createDelayedSyncRunner();
   const runnerCalls = [];
   const taskRunner = loadTaskRunnerWithFakeModules({
@@ -197,7 +218,7 @@ test('codex.run is rejected while mirror.sync holds the same project lock', asyn
 
 test('mirror.sync is rejected while codex.run holds the project lock', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
-  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
+  const env = createLockTestEnv(rootDir);
   const runner = createBlockingRunner();
   const taskRunner = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
   const { handleRequest } = taskRunner;
@@ -252,7 +273,7 @@ test('mirror.sync is rejected while codex.run holds the project lock', async () 
 
 test('mirror.sync works for a different project while codex.run is active', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
-  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
+  const env = createLockTestEnv(rootDir);
   const runner = createBlockingRunner();
   const taskRunner = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
   const { handleRequest } = taskRunner;
@@ -294,7 +315,7 @@ test('mirror.sync works for a different project while codex.run is active', asyn
 
 test('codex.run is rejected while another codex.run holds the same project lock', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
-  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
+  const env = createLockTestEnv(rootDir);
   const runner = createBlockingRunner();
   const taskRunner = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
   const { handleRequest } = taskRunner;
@@ -340,7 +361,7 @@ test('codex.run is rejected while another codex.run holds the same project lock'
 
 test('codex.cancel aborts an active codex.run and releases the project lock', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-lock-'));
-  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir, CODEX_OVERLEAF_AGENT_CMD: undefined };
+  const env = createLockTestEnv(rootDir);
   const runner = createAbortAwareRunner();
   const taskRunner = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
   const { handleRequest } = taskRunner;
@@ -403,7 +424,7 @@ test('codex.cancel by projectKey aborts a still-running run even without the ori
   const runner = createAbortAwareRunner();
   const taskRunner = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-lock-cancel-pkey-'));
-  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir };
+  const env = createLockTestEnv(rootDir);
   try {
     const { handleRequest } = taskRunner;
 
@@ -450,7 +471,7 @@ test('codex.cancel with force=true releases a zombie project lock when no contro
   const runner = createAbortAwareRunner();
   const taskRunner = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-lock-zombie-'));
-  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir };
+  const env = createLockTestEnv(rootDir);
   try {
     const { handleRequest } = taskRunner;
 
@@ -515,7 +536,7 @@ test('codex.cancel returns "no active run" when neither requestId nor projectKey
   const runner = createAbortAwareRunner();
   const taskRunner = loadTaskRunnerWithFakeRunner(runner.runCodexSession);
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-lock-no-match-'));
-  const env = { CODEX_OVERLEAF_MIRROR_ROOT: rootDir };
+  const env = createLockTestEnv(rootDir);
   try {
     const { handleRequest } = taskRunner;
     const response = await handleRequest({

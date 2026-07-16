@@ -6,22 +6,41 @@ const UPDATE_STATE_KEY = 'codex-overleaf-managed-update-state-v1';
 const UPDATE_RELOAD_TABS_KEY = 'codex-overleaf-managed-update-tabs-v1';
 const CHECK_ALARM = 'codex-overleaf-stable-update-check';
 const IDLE_ALARM = 'codex-overleaf-staged-update-idle';
-const OVERLEAF_MATCHES = [
+const OVERLEAF_EDITOR_MATCHES = [
   'https://www.overleaf.com/project/*',
   'https://overleaf.com/project/*'
 ];
+const OVERLEAF_MATCHES = [
+  'https://www.overleaf.com/project',
+  'https://overleaf.com/project',
+  ...OVERLEAF_EDITOR_MATCHES
+];
 const APPLYING_STATES = new Set(['applying', 'awaiting_health', 'rolling_back']);
+const FAST_IDLE_RETRY_BLOCKERS = new Set(['recent_user_activity', 'save_state_not_stable']);
+const FAST_IDLE_RETRY_MS = 4000;
+const SLOW_IDLE_RETRY_MS = 15000;
+const IDLE_RETRY_ALARM_MINUTES = 0.5;
+const RUNTIME_RECOVERY_SETTLE_MS = 250;
+
+let idleRetryTimer = null;
+let idleApplyPromise = null;
+let managedRuntimeAssets = null;
 
 let runtimeLoadError = null;
 try {
   globalThis.__CODEX_OVERLEAF_RUNTIME_BASE__ = 'runtime';
   importScripts(
+    chrome.runtime.getURL('bootstrap/updateStatus.js'),
     chrome.runtime.getURL('runtime/src/shared/compatibility.js'),
     chrome.runtime.getURL('runtime/src/background.js')
   );
 } catch (error) {
   runtimeLoadError = error;
 }
+
+globalThis.CodexOverleafManagedUpdateExecutor = Object.freeze({
+  installAuthorizedUpdate: () => checkAndStage({ manual: true })
+});
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'codex-overleaf/update-get-state') {
@@ -75,7 +94,7 @@ async function initializeBootstrap() {
   chrome.alarms.create(CHECK_ALARM, { delayInMinutes: 0.5, periodInMinutes: 24 * 60 });
   const state = await getUpdateState();
   if (state.state === 'staged' || state.state === 'waiting_for_idle') {
-    chrome.alarms.create(IDLE_ALARM, { delayInMinutes: 0.1 });
+    scheduleIdleRetry(state.blockers);
   }
 }
 
@@ -86,6 +105,10 @@ async function registerManagedRuntime() {
   }
   const manifest = await response.json();
   validateRuntimeManifest(manifest);
+  managedRuntimeAssets = {
+    js: ['bootstrap/runtimeContext.js', ...manifest.js.map(value => 'runtime/' + value)],
+    css: manifest.css.map(value => 'runtime/' + value)
+  };
   const registered = await chrome.scripting.getRegisteredContentScripts({ ids: [RUNTIME_SCRIPT_ID] });
   if (registered.length) {
     await chrome.scripting.unregisterContentScripts({ ids: [RUNTIME_SCRIPT_ID] });
@@ -93,8 +116,8 @@ async function registerManagedRuntime() {
   await chrome.scripting.registerContentScripts([{
     id: RUNTIME_SCRIPT_ID,
     matches: manifest.matches,
-    js: ['bootstrap/runtimeContext.js', ...manifest.js.map(value => 'runtime/' + value)],
-    css: manifest.css.map(value => 'runtime/' + value),
+    js: managedRuntimeAssets.js,
+    css: managedRuntimeAssets.css,
     runAt: manifest.runAt || 'document_idle',
     persistAcrossSessions: true
   }]);
@@ -118,10 +141,13 @@ async function checkAndStage(options = {}) {
   if (APPLYING_STATES.has(current.state)) {
     return current;
   }
+  if (['staged', 'waiting_for_idle'].includes(current.state) && current.transactionId) {
+    return tryApplyStagedUpdate();
+  }
   if (!options.manual && Number(current.postponeUntil || 0) > Date.now()) {
     return current;
   }
-  await setUpdateState({ ...current, state: 'checking', code: '', message: '' });
+  await setUpdateState({ ...current, state: 'checking', blocker: '', blockers: [], code: '', message: '' });
   const checked = await requestInternal({
     method: 'update.check',
     params: {
@@ -170,37 +196,57 @@ async function checkAndStage(options = {}) {
     currentVersion: chrome.runtime.getManifest().version,
     latestVersion: staged.result.targetVersion,
     transactionId: staged.result.transactionId,
-    stagedAt: Date.now()
+    stagedAt: Date.now(),
+    blocker: '',
+    blockers: []
   });
   await broadcastUpdateState('staged');
-  chrome.alarms.create(IDLE_ALARM, { delayInMinutes: 0.1 });
   return tryApplyStagedUpdate();
 }
 
-async function tryApplyStagedUpdate() {
+function tryApplyStagedUpdate() {
+  if (idleApplyPromise) return idleApplyPromise;
+  idleApplyPromise = tryApplyStagedUpdateCore().finally(() => {
+    idleApplyPromise = null;
+  });
+  return idleApplyPromise;
+}
+
+async function tryApplyStagedUpdateCore() {
+  cancelIdleRetryTimer();
   const state = await getUpdateState();
   if (!['staged', 'waiting_for_idle'].includes(state.state)) {
+    await clearIdleRetry();
     return state;
   }
   if (Number(state.postponeUntil || 0) > Date.now()) {
     return state;
   }
-  const tabs = await chrome.tabs.query({ url: OVERLEAF_MATCHES });
-  const probes = await Promise.all(tabs.map(tab => probeTabIdle(tab)));
-  const tabBlocker = probes.find(probe => probe.idle !== true);
-  const nativeGate = await requestInternal({ method: 'update.canApply', params: {} });
-  if (tabBlocker || !nativeGate?.ok || nativeGate.result?.idle !== true) {
+  const surfaceTabs = await chrome.tabs.query({ url: OVERLEAF_MATCHES });
+  const activeTabs = surfaceTabs.filter(tab => isEditorProjectTab(tab) && !tab.discarded && tab.status !== 'unloaded');
+  const refreshTabs = surfaceTabs.filter(tab => !tab.discarded && tab.status !== 'unloaded');
+  const probes = await Promise.all(activeTabs.map(tab => probeTabIdle(tab)));
+  const nativeGate = await requestInternal({ method: 'update.canApply', params: {} }).catch(error => ({
+    ok: false,
+    error: { code: safeCode(error), message: safeMessage(error) }
+  }));
+  const blockers = globalThis.CodexOverleafUpdateStatus?.collectBlockers(probes, nativeGate)
+    || ['busy'];
+  if (blockers.length) {
     const waiting = await setUpdateState({
       ...state,
       state: 'waiting_for_idle',
-      blocker: tabBlocker?.blockers?.[0] || nativeGate?.result?.blockers?.[0] || 'busy'
+      blocker: blockers[0],
+      blockers
     });
-    chrome.alarms.create(IDLE_ALARM, { delayInMinutes: 1 });
+    await broadcastUpdateState('waiting_for_idle');
+    scheduleIdleRetry(blockers);
     return waiting;
   }
 
-  await chrome.storage.local.set({ [UPDATE_RELOAD_TABS_KEY]: tabs.map(tab => tab.id).filter(Number.isInteger) });
-  await setUpdateState({ ...state, state: 'applying', blocker: '' });
+  await clearIdleRetry();
+  await chrome.storage.local.set({ [UPDATE_RELOAD_TABS_KEY]: refreshTabs.map(tab => tab.id).filter(Number.isInteger) });
+  await setUpdateState({ ...state, state: 'applying', blocker: '', blockers: [] });
   await broadcastUpdateState('applying');
   const applied = await requestInternal({
     method: 'update.apply',
@@ -214,18 +260,83 @@ async function tryApplyStagedUpdate() {
   return { state: 'awaiting_health' };
 }
 
+function scheduleIdleRetry(blockers = []) {
+  cancelIdleRetryTimer();
+  const values = Array.isArray(blockers) ? blockers.filter(Boolean) : [];
+  const onlyFastBlockers = values.length > 0 && values.every(value => FAST_IDLE_RETRY_BLOCKERS.has(value));
+  const delayMs = onlyFastBlockers ? FAST_IDLE_RETRY_MS : SLOW_IDLE_RETRY_MS;
+  idleRetryTimer = setTimeout(() => {
+    idleRetryTimer = null;
+    tryApplyStagedUpdate().catch(() => {});
+  }, delayMs);
+  chrome.alarms.create(IDLE_ALARM, { delayInMinutes: IDLE_RETRY_ALARM_MINUTES });
+}
+
+function cancelIdleRetryTimer() {
+  if (idleRetryTimer !== null) {
+    clearTimeout(idleRetryTimer);
+    idleRetryTimer = null;
+  }
+}
+
+async function clearIdleRetry() {
+  cancelIdleRetryTimer();
+  await chrome.alarms.clear(IDLE_ALARM).catch(() => {});
+}
+
 async function probeTabIdle(tab) {
   if (!Number.isInteger(tab?.id)) {
     return { idle: false, blockers: ['tab_unavailable'] };
   }
+  if (!isEditorProjectTab(tab)) {
+    return { idle: true, saved: true, ignored: true, blockers: [] };
+  }
+  if (tab.discarded || tab.status === 'unloaded') {
+    return { idle: true, saved: true, ignored: true, blockers: [] };
+  }
+  const firstProbe = await sendTabIdleProbe(tab.id);
+  if (firstProbe) return firstProbe;
+  if (await injectManagedRuntimeIntoTab(tab.id)) {
+    const recoveredProbe = await sendTabIdleProbe(tab.id);
+    if (recoveredProbe) return recoveredProbe;
+  }
+  return { idle: false, blockers: ['tab_probe_unavailable'] };
+}
+
+function isEditorProjectTab(tab) {
+  try {
+    const url = new URL(tab?.url || '');
+    return url.protocol === 'https:' &&
+      (url.hostname === 'www.overleaf.com' || url.hostname === 'overleaf.com') &&
+      /^\/project\/[^/]+(?:\/|$)/.test(url.pathname);
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function sendTabIdleProbe(tabId) {
   try {
     return await withTimeout(
-      chrome.tabs.sendMessage(tab.id, { type: 'codex-overleaf/update-idle-probe' }),
+      chrome.tabs.sendMessage(tabId, { type: 'codex-overleaf/update-idle-probe' }),
       3500,
       { idle: false, blockers: ['tab_probe_timeout'] }
     );
   } catch (_error) {
-    return { idle: false, blockers: ['tab_probe_unavailable'] };
+    return null;
+  }
+}
+
+async function injectManagedRuntimeIntoTab(tabId) {
+  if (!managedRuntimeAssets) return false;
+  try {
+    if (managedRuntimeAssets.css.length) {
+      await chrome.scripting.insertCSS({ target: { tabId }, files: managedRuntimeAssets.css });
+    }
+    await chrome.scripting.executeScript({ target: { tabId }, files: managedRuntimeAssets.js });
+    await new Promise(resolve => setTimeout(resolve, RUNTIME_RECOVERY_SETTLE_MS));
+    return true;
+  } catch (_error) {
+    return false;
   }
 }
 
@@ -353,6 +464,9 @@ async function getUpdateState() {
 }
 
 async function setUpdateState(next) {
+  const blockers = globalThis.CodexOverleafUpdateStatus?.normalizeBlockers(
+    Array.isArray(next.blockers) ? next.blockers : (next.blocker ? [next.blocker] : [])
+  ) || [];
   const value = {
     state: next.state || 'idle',
     managed: next.managed !== false,
@@ -363,7 +477,8 @@ async function setUpdateState(next) {
     stagedAt: Number(next.stagedAt || 0),
     postponeUntil: Number(next.postponeUntil || 0),
     transactionId: next.transactionId || '',
-    blocker: next.blocker || '',
+    blocker: blockers[0] || '',
+    blockers,
     code: next.code || '',
     message: String(next.message || '').slice(0, 300)
   };

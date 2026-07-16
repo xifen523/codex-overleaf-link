@@ -10,7 +10,8 @@
       history: '<path d="M4.2 3.4h7.6"/><path d="M4.2 8h7.6"/><path d="M4.2 12.6h4.6"/><path d="M2.2 3.4h.1"/><path d="M2.2 8h.1"/><path d="M2.2 12.6h.1"/>',
       lock: '<rect x="3.6" y="7" width="8.8" height="6.2" rx="1.2"/><path d="M5.6 7V5.3a2.4 2.4 0 0 1 4.8 0V7"/><path d="M8 9.6v1.2"/>',
       pen: '<path d="M3.2 12.8 4 9.7l6.6-6.6a1.4 1.4 0 0 1 2 2L6 11.7z"/><path d="m9.6 4.1 2.3 2.3"/>',
-      shield: '<path d="M8 2.1 12.4 4v3.5c0 2.9-1.8 5.1-4.4 6.4-2.6-1.3-4.4-3.5-4.4-6.4V4z"/><path d="M6.1 8.1 7.5 9.5 10.2 6.6"/>'
+      shield: '<path d="M8 2.1 12.4 4v3.5c0 2.9-1.8 5.1-4.4 6.4-2.6-1.3-4.4-3.5-4.4-6.4V4z"/><path d="M6.1 8.1 7.5 9.5 10.2 6.6"/>',
+      software: '<rect x="5.1" y="5.1" width="5.8" height="5.8" rx="1.2"/><path d="M12.9 7.1A5.2 5.2 0 0 0 4.1 4.2"/><path d="M4.1 2.2v2h2"/><path d="M3.1 8.9a5.2 5.2 0 0 0 8.8 2.9"/><path d="M11.9 13.8v-2h-2"/>'
     };
     const safeName = Object.prototype.hasOwnProperty.call(icons, name) ? name : 'appearance';
     return `<span class="codex-icon codex-icon-${safeName}" aria-hidden="true"><svg viewBox="0 0 16 16" focusable="false">${icons[safeName]}</svg></span>`;
@@ -146,6 +147,35 @@
               <p class="codex-set-row-help" data-i18n="languageHelp">Panel display language.</p>
             </div>
           </details>
+          <details class="codex-set-group" data-set-group="providers" open>
+            <summary class="codex-set-group-head">
+              <span class="codex-set-group-title">${codexSetIcon('bolt')}<span data-i18n="providerSettingsTitle">Model providers</span></span>
+            </summary>
+            <div class="codex-set-card codex-provider-settings-entry">
+              <div class="codex-provider-settings-entry-copy">
+                <p class="codex-set-row-help" data-i18n="providerSettingsHelp">Configure third-party model APIs used by Codex runs.</p>
+                <p class="codex-provider-settings-summary" data-provider-settings-summary data-tone="ok" data-i18n="providerSettingsBuiltin">Built-in Codex is active</p>
+              </div>
+              <button type="button" class="codex-set-btn" data-provider-settings-open data-i18n="providerSettingsConfigure">Configure</button>
+            </div>
+          </details>
+          <details class="codex-set-group" data-set-group="updates" open>
+            <summary class="codex-set-group-head">
+              <span class="codex-set-group-title">${codexSetIcon('software')}<span data-i18n="softwareUpdatesTitle">Software updates</span></span>
+            </summary>
+            <div class="codex-set-card" data-update-settings>
+              <div class="codex-set-row">
+                <label class="codex-project-settings-row codex-project-settings-row--switch">
+                  <span class="codex-project-settings-row-label" data-i18n="preloadProjectContextTitle">Preload project context</span>
+                  <input type="checkbox" class="codex-switch" data-preload-project-context>
+                </label>
+                <p class="codex-set-row-help" data-i18n="preloadProjectContextDescription">Fetch the exact project file list in the background after an Overleaf project becomes idle.</p>
+                <p class="codex-set-row-help" data-update-settings-summary data-i18n="softwareUpdatesHelp">Automatically checks signed stable releases for the Extension and Native Host.</p>
+                <p class="codex-set-note" data-update-settings-state aria-live="polite" hidden></p>
+                <button type="button" class="codex-set-btn" data-check-updates data-i18n="checkForUpdates">Check for updates</button>
+              </div>
+            </div>
+          </details>
           <details class="codex-set-group" data-set-group="storage" data-storage-card>
             <summary class="codex-set-group-head">
               <span class="codex-set-group-title">${codexSetIcon('database')}<span data-i18n="storageTitle">History &amp; storage</span></span>
@@ -198,6 +228,7 @@
     container.querySelector('[data-settings-back]')?.addEventListener('click', () => instance.callbacks.onBack?.());
     container.querySelector('[data-skills-back]')?.addEventListener('click', () => instance.callbacks.onSkillsBack?.());
     container.querySelector('[data-skills-entry]')?.addEventListener('click', () => instance.callbacks.onSkillsOpen?.());
+    container.querySelector('[data-provider-settings-open]')?.addEventListener('click', () => instance.callbacks.onProvidersOpen?.());
     container.querySelector('[data-clear-all-history]')?.addEventListener('click', () => instance.callbacks.onClearAllHistory?.());
     container.querySelector('[data-history-card]')?.addEventListener('toggle', event => {
       if (event.target.open) {
@@ -217,7 +248,7 @@
       flashSaved(instance, event);
     });
     // Governance and skill fields: auto-save on change and input for immediate response.
-    for (const selector of ['[data-governance-readonly-patterns]', '[data-governance-writable-patterns]', '[data-sensitive-check-enabled]', '[data-sensitive-confirm-allowed]', '[data-load-codex-local-skills]', '[data-load-codex-overleaf-skills]', '[data-theme-select]', '[data-language-select]']) {
+    for (const selector of ['[data-governance-readonly-patterns]', '[data-governance-writable-patterns]', '[data-sensitive-check-enabled]', '[data-sensitive-confirm-allowed]', '[data-preload-project-context]', '[data-load-codex-local-skills]', '[data-load-codex-overleaf-skills]', '[data-theme-select]', '[data-language-select]']) {
       const element = container.querySelector(selector);
       element?.addEventListener?.('change', event => {
         instance.callbacks.onInputChange?.(event);
@@ -241,6 +272,7 @@
       setStatus: (text, status) => setStatus(instance, text, status),
       clearStatus: () => clearStatus(instance),
       setSkillsSummary: text => setSkillsSummary(instance, text),
+      setProviderSummary: summary => setProviderSummary(instance, summary),
       refreshNotes: () => updateGovernanceNotes(instance),
       destroy: () => destroy(instance),
       _instance: instance
@@ -315,6 +347,7 @@
       // shared container, so query that instead of a single screen root.
       const scope = instance?.container || root;
       const toggles = state.skillToggles || {};
+      setChecked(scope, '[data-preload-project-context]', toggles.preloadProjectContext !== false);
       setChecked(scope, '[data-load-codex-local-skills]', toggles.loadCodexLocalSkills !== false);
       setChecked(scope, '[data-load-codex-overleaf-skills]', toggles.loadCodexOverleafSkills !== false);
       setValue(scope, '[data-theme-select]', state.theme || 'dark');
@@ -336,6 +369,7 @@
         sensitiveConfirmAllowed: root?.querySelector('[data-sensitive-confirm-allowed]')?.checked === true
       },
       skillToggles: {
+        preloadProjectContext: scope?.querySelector('[data-preload-project-context]')?.checked !== false,
         loadCodexLocalSkills: scope?.querySelector('[data-load-codex-local-skills]')?.checked !== false,
         loadCodexOverleafSkills: scope?.querySelector('[data-load-codex-overleaf-skills]')?.checked !== false
       },
@@ -454,6 +488,15 @@
     }
   }
 
+  function setProviderSummary(instance, value = {}) {
+    const element = instance?.container?.querySelector('[data-provider-settings-summary]');
+    if (!element) {
+      return;
+    }
+    element.textContent = typeof value === 'string' ? value : value.summary || '';
+    element.dataset.tone = typeof value === 'object' && value.tone ? value.tone : 'ok';
+  }
+
   // Collapse memory: card open/closed state persists per browser profile.
   const GROUP_STORE_KEY = 'codexOverleafSettingsGroups';
 
@@ -522,6 +565,7 @@
     isVisible,
     setStatus,
     clearStatus,
-    setSkillsSummary
+    setSkillsSummary,
+    setProviderSummary
   };
 })();

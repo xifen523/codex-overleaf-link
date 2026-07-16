@@ -53,6 +53,7 @@ const RUNTIME_STUBS = {
   readSelectedModelInput: "function readSelectedModelInput() { return ''; }",
   readSelectedSpeedInput: "function readSelectedSpeedInput() { return 'standard'; }",
   getRenderedModelEntries: 'function getRenderedModelEntries() { return []; }',
+  renderReasoningOptions: 'function renderReasoningOptions() {}',
   renderSpeedOptions: 'function renderSpeedOptions() {}',
   renderModelConfigChoices: 'function renderModelConfigChoices() {}',
   updateModelDisplay: 'function updateModelDisplay() {}',

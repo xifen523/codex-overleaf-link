@@ -16,10 +16,14 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     maxLines: 4500
   },
   {
-    // v1.3.9 added cancelActiveWrite + writeCancellationSequence; bumped
-    // 2200 → 2250 to fit (~26 lines). Still well under the 2400 v1.3.8 shim.
+    // v1.9.12 moved save-state detection into page/saveState.js and locks the
+    // orchestration shell below 2000 lines.
     path: 'extension/src/pageBridge.js',
-    maxLines: 2250
+    maxLines: 2000
+  },
+  {
+    path: 'extension/src/page/saveState.js',
+    maxLines: 350
   },
   {
     // Elephant. 12341 lines is unhealthy but a real split needs its own
@@ -58,8 +62,18 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // selection wiring, and composer-attachment refresh persistence.
     // v1.8.1 raised 8830 -> 8900: dashboard shell mount, debounced dashboard
     // refresh with interaction preservation, and the in-run activity bump.
+    // v1.9.12 moved project-scoped settings, governance, skill toggles and
+    // theme coordination into projectSettingsCoordinator.js.
     path: 'extension/src/content/contentRuntime.js',
-    maxLines: 8900
+    maxLines: 8700
+  },
+  {
+    path: 'extension/src/content/projectSettingsCoordinator.js',
+    maxLines: 420
+  },
+  {
+    path: 'extension/src/content/sessionMenuView.js',
+    maxLines: 280
   },
   {
     // Carved from contentRuntime in v1.8.0 (phase 8): recovery handlers +
@@ -98,7 +112,7 @@ export const ARCHITECTURE_FILE_BUDGETS = Object.freeze([
     // 460 -> 490 in v1.7.5 for the eviction-consent and running-run switch
     // confirms.
     path: 'extension/src/content/sessionManager.js',
-    maxLines: 490
+    maxLines: 320
   },
   {
     // Carved from contentRuntime in v1.4.7: apply-result / failure-reason

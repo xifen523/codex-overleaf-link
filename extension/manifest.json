@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Codex Overleaf Link",
-  "version": "1.10.3",
+  "version": "2.1.0",
   "description": "Connect the active Overleaf project to a local Codex bridge.",
   "icons": {
     "16": "assets/icons/icon16.png",
@@ -11,10 +11,13 @@
   },
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAlvUmSiwPTRFSmr9fVJ8HTtlCaYP34o4zrLvqqJV3Ha4+QWQuBTkLmbONvDm7heCh8sDqUzMBA7yPtLu5kGtx85FnHBxWcasgLMmdSfGKcfApVyQGfEJ9WoRYsr1QVG9xTdAmtIa5zdFFHdfLN3OrBgxLDSt2jjpiEZbs9w3VLlsJlVY2y+98L86RywHQzk/l2OEwIJ2Waa7ef0mRnNMQ0k7S1xJNFV5YOMHEc06+OkCg32zJlfGhHY+NVzpxgCYvJEPB/SR2JLLi1U43jvIStCXBZeQ1cT10tXvgwV1F7RPbA9cjelzyamW9yhK3XlyD7TnPiYfvOOYxDByP9s8H7QIDAQAB",
   "permissions": [
+    "alarms",
     "nativeMessaging",
     "storage"
   ],
   "host_permissions": [
+    "https://www.overleaf.com/project",
+    "https://overleaf.com/project",
     "https://www.overleaf.com/project/*",
     "https://overleaf.com/project/*"
   ],
@@ -24,6 +27,8 @@
   "content_scripts": [
     {
       "matches": [
+        "https://www.overleaf.com/project",
+        "https://overleaf.com/project",
         "https://www.overleaf.com/project/*",
         "https://overleaf.com/project/*"
       ],
@@ -38,9 +43,11 @@
         "src/shared/otText.js",
         "src/shared/i18n.js",
         "src/shared/models.js",
+        "src/shared/providerProfiles.js",
         "src/shared/sessionState.js",
         "src/shared/storageKeys.js",
         "src/shared/staleGuard.js",
+        "src/shared/storageRunActions.js",
         "src/shared/storageDb.js",
         "src/shared/storageMigration.js",
         "src/shared/compileAdapter.js",
@@ -61,20 +68,26 @@
         "src/content/panelRenderer.js",
         "src/content/sessionPanel.js",
         "src/content/settingsPanel.js",
+        "src/content/providerSettingsDialog.js",
+        "src/content/providerSettingsCoordinator.js",
         "src/content/diagnosticsPanel.js",
         "src/content/composerPanel.js",
         "src/content/themeController.js",
         "src/content/markdownText.js",
         "src/content/diagnosticsController.js",
         "src/content/runTimelineView.js",
+        "src/content/projectSettingsCoordinator.js",
+        "src/content/sessionMenuView.js",
         "src/content/sessionManager.js",
         "src/content/applyResultFormatters.js",
+        "src/content/modelPickerSupport.js",
         "src/content/modelPicker.js",
         "src/content/recentProjects.js",
         "src/content/otWarmMirror.js",
         "src/content/writebackOrchestrator.js",
         "src/content/panelMaintenance.js",
         "src/content/updateIdle.js",
+        "src/content/updateNotice.js",
         "src/content/contentRuntime.js",
         "src/contentScript.js"
       ],
@@ -99,6 +112,7 @@
         "src/shared/sensitiveScan.js",
         "src/shared/auditRecords.js",
         "src/page/overleafCapabilities.js",
+        "src/page/saveState.js",
         "src/page/compileBridge.js",
         "src/page/overleafEditor.js",
         "src/page/overleafProjectSnapshot.js",

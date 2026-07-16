@@ -23,20 +23,20 @@ const {
 } = require('../native-host/src/nativeHostPlatform');
 const extensionManifest = require('../extension/manifest.json');
 
-test('release metadata is prepared for v1.10.3', () => {
-  assert.equal(packageJson.version, '1.10.3');
+test('release metadata is prepared for v2.1.0', () => {
+  assert.equal(packageJson.version, '2.1.0');
   assert.equal(extensionManifest.version, packageJson.version);
 });
 
-test('release docs carry exact v1.10.3 badge and changelog heading', () => {
+test('release docs carry exact v2.1.0 badge and changelog heading', () => {
   const readme = fs.readFileSync(path.join(__dirname, '../README.md'), 'utf8');
   const changelog = fs.readFileSync(path.join(__dirname, '../CHANGELOG.md'), 'utf8');
   const escapedVersion = packageJson.version.replace(/\./g, '\\.');
 
   assert.match(readme, new RegExp(`version-${escapedVersion}-blue`));
   assert.doesNotMatch(readme, /version-1\.0\.0-blue/);
-  assert.match(changelog, new RegExp(`^## v${escapedVersion} - 2026-07-15$`, 'm'));
-  assert.doesNotMatch(changelog, new RegExp(`^## \\[${escapedVersion}\\] - 2026-07-15$`, 'm'));
+  assert.match(changelog, new RegExp(`^## v${escapedVersion} - 2026-07-16$`, 'm'));
+  assert.doesNotMatch(changelog, new RegExp(`^## \\[${escapedVersion}\\] - 2026-07-16$`, 'm'));
   assert.doesNotMatch(changelog, /^## v1\.0\.0 - 2026-05-07[\s\S]*version-1\.1\.0-blue/m);
 });
 
@@ -55,6 +55,16 @@ test('loads line reference shared module immediately after project files', () =>
   assert.equal(lineReferencesIndex, projectFilesIndex + 1);
   assert.equal(lineReferencesIndex < sessionStateIndex, true);
   assert.equal(lineReferencesIndex < contentRuntimeIndex, true);
+});
+
+test('loads storage run-action helpers immediately before storageDb', () => {
+  const js = extensionManifest.content_scripts[0].js;
+  const runActionsIndex = js.indexOf('src/shared/storageRunActions.js');
+  const storageDbIndex = js.indexOf('src/shared/storageDb.js');
+
+  assert.notEqual(runActionsIndex, -1);
+  assert.notEqual(storageDbIndex, -1);
+  assert.equal(storageDbIndex, runActionsIndex + 1);
 });
 
 test('pins the Native Messaging host name', () => {
@@ -346,6 +356,15 @@ test('page bridge capability guard loads before the page bridge from web accessi
   assert.ok(capabilityIndex > -1, 'page bridge capability guard should be web accessible');
   assert.ok(pageBridgeIndex > -1, 'page bridge should be web accessible');
   assert.ok(capabilityIndex < pageBridgeIndex, 'page bridge capability guard should load before pageBridge.js');
+});
+
+test('carved settings, session-menu, and save-state modules load before their consumers', () => {
+  const scripts = extensionManifest.content_scripts[0].js;
+  const resources = extensionManifest.web_accessible_resources[0].resources;
+  assert.ok(scripts.indexOf('src/content/projectSettingsCoordinator.js') < scripts.indexOf('src/content/contentRuntime.js'));
+  assert.ok(scripts.indexOf('src/content/sessionMenuView.js') < scripts.indexOf('src/content/sessionManager.js'));
+  assert.ok(resources.includes('src/page/saveState.js'));
+  assert.ok(resources.indexOf('src/page/saveState.js') < resources.indexOf('src/pageBridge.js'));
 });
 
 test('manifest loads and exposes read-only OT page dependencies', () => {

@@ -565,7 +565,7 @@ test('project settings expose governed rules and local skills without Overleaf a
   assert.match(settingsSource, /data-load-codex-overleaf-skills/);
   assert.match(settingsSource, /data-local-skill-list/);
   assert.match(contentScript, /CodexOverleafLocalSkillsPanel/);
-  assert.match(contentScript, /localSkillsPanel\.refreshLocalSkills/);
+  assert.match(contentScript, /getLocalSkillsPanel\(\)\.refreshLocalSkills/);
   assert.match(localSkillsPanel, /codexOverleafSkills/);
   assert.match(localSkillsPanel, /function getCodexOverleafSkillsForSettings/);
   assert.match(localSkillsPanel, /function removeCodexOverleafSkill/);
@@ -577,7 +577,7 @@ test('project settings expose governed rules and local skills without Overleaf a
   assert.doesNotMatch(contentScript, /uploadSelectedAssets/);
   assert.doesNotMatch(contentScript, /getAssetUploadBaseline/);
   assert.match(contentScript, /function normalizeGovernanceRulesByProject/);
-  assert.match(contentScript, /function normalizeSelectedLocalSkillIdsByProject/);
+  assert.doesNotMatch(contentScript, /function normalizeSelectedLocalSkillIdsByProject/);
   assert.match(contentScript, /function readSkillLoadingSettingsFromSettings/);
   assert.match(contentScript, /loadCodexLocalSkills/);
   assert.match(contentScript, /loadCodexOverleafSkills/);
@@ -788,7 +788,7 @@ test('composer slash menu offers Codex Overleaf skill installation and installed
   assert.match(selectBody, /activateCodexOverleafSkillComposerContext/);
   assert.match(runTaskBody, /const submittedSkillInvocation = getComposerSkillInvocationForRun\(\)/);
   assert.match(runTaskBody, /submittedSkillInvocation\?\.id === 'skill-installer'[\s\S]*runSkillInstallerTask/);
-  assert.match(runTaskBody, /try\s*\{\s*if \(submittedSkillInvocation\?\.id === 'skill-installer'\)[\s\S]*runSkillInstallerTask/);
+  assert.match(runTaskBody, /try\s*\{[\s\S]*?if \(submittedSkillInvocation\?\.id === 'skill-installer'\)[\s\S]*runSkillInstallerTask/);
   assert.match(runTaskBody, /finally\s*\{[\s\S]*setRunning\(false\)[\s\S]*nativeChannel\.clearActiveRequest\(\)/);
   assert.match(runTaskBody, /skillInvocation:\s*submittedSkillInvocation/);
   assert.match(contentScript, /skipMirrorSync:\s*true/);
@@ -1214,8 +1214,8 @@ test('send waits for in-flight mirror prefetch before starting codex run', () =>
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  async function preflightWriteSafety/)?.[0] || '';
   const helperBody = contentScript.match(/async function settleMirrorPrefetchBeforeRun\(\) \{[\s\S]*?\n  function/)?.[0] || '';
 
-  assert.match(runTaskBody, /await settleMirrorPrefetchBeforeRun\(\)/);
-  assert.ok(runTaskBody.indexOf('await settleMirrorPrefetchBeforeRun()') < runTaskBody.indexOf("method: 'codex.run'"));
+  assert.match(runTaskBody, /await awaitRunStep\(settleMirrorPrefetchBeforeRun\(\)\)/);
+  assert.ok(runTaskBody.indexOf('await awaitRunStep(settleMirrorPrefetchBeforeRun())') < runTaskBody.indexOf("method: 'codex.run'"));
   assert.match(helperBody, /mirrorPrefetchState\.timer/);
   assert.match(helperBody, /window\.clearTimeout\(mirrorPrefetchState\.timer\)/);
   assert.match(helperBody, /mirrorPrefetchState\.inFlight/);
@@ -2051,7 +2051,7 @@ test('completion report is structured around user outcomes rather than a one-lin
   assert.match(agentTranscript, /下一步/);
   assert.doesNotMatch(contentScript, /nextStep: response\.error\.message/);
   assert.doesNotMatch(contentScript, /本地 Codex 返回错误/);
-  assert.doesNotMatch(contentScript, /Summary:/);
+  assert.doesNotMatch(extractFromContentScript('appendCompletionReport'), /Summary:/);
 });
 
 test('writeback completion report keeps Codex final summary as the conclusion', () => {
@@ -2592,7 +2592,7 @@ test('@compile-log context is preserved across Codex run retries', () => {
   const runTaskBody = contentScript.match(/async function runTask\(\) \{[\s\S]*?\n  function buildCodexRunParams/)?.[0] || '';
 
   assert.match(contentScript, /function buildCodexRunParams\(/);
-  assert.match(runTaskBody, /compileLogContext = await resolveCompileLogContext\(\)/);
+  assert.match(runTaskBody, /compileLogContext = await awaitRunStep\(resolveCompileLogContext\(\)\)/);
   assert.match(runTaskBody, /mirror_stale[\s\S]*buildCodexRunParams\([\s\S]*compileLogContext/);
   assert.match(runTaskBody, /thread_resume_failed[\s\S]*buildCodexRunParams\([\s\S]*compileLogContext/);
 });
@@ -2640,6 +2640,9 @@ test('content script run-param wrapper uses explicit custom instructions before 
       buildCodexRunParams(params) {
         return params;
       }
+    };
+    const providerSettingsCoordinator = {
+      getRunSelection() { return null; }
     };
     const state = {
       mode: 'auto',
@@ -2696,7 +2699,7 @@ test('warm mirror stale retry fetches a real snapshot before full-sync retry', (
   const contentScript = getContentScriptSource();
   const staleRetryBody = contentScript.match(/if \(!response\.ok && response\.error\?\.code === 'mirror_stale' && useExistingMirror\) \{[\s\S]*?\n      \}/)?.[0] || '';
 
-  assert.match(staleRetryBody, /const staleRetry = await prepareMirrorStaleRetry/);
+  assert.match(staleRetryBody, /const staleRetry = await awaitRunStep\(prepareMirrorStaleRetry/);
   assert.match(staleRetryBody, /project = staleRetry\.project/);
   assert.match(staleRetryBody, /getRunProjectSnapshot\(\)/);
   assert.ok(
@@ -3548,6 +3551,11 @@ test('project custom instructions editor auto-saves on change and restores by pr
     const panelRendererInstance = {
       setView(v) { panel.dataset.view = v; }
     };
+    function getPanel() { return panel; }
+    function getState() { return state; }
+    function setState(next) { state = next; }
+    function getSettingsPanelInstance() { return settingsPanelInstance; }
+    function getPanelRendererInstance() { return panelRendererInstance; }
     function getCurrentProjectId() { return currentProjectId; }
     let lastExperimentalOtProjectId = '';
     function getSkillLoadingSettings() {
@@ -3676,6 +3684,11 @@ test('project settings gear toggles the settings panel closed when already open'
       loadState() {}
     };
     const panelRendererInstance = null;
+    function getPanel() { return panel; }
+    function getState() { return state; }
+    function setState(next) { state = next; }
+    function getSettingsPanelInstance() { return settingsPanelInstance; }
+    function getPanelRendererInstance() { return panelRendererInstance; }
     function getCurrentProjectId() { return currentProjectId; }
     // Stub the route-aware branch of closeCustomInstructionsSettings; this
     // toggle test pins the in-project flow (per-project session view).
@@ -3768,6 +3781,11 @@ test('project settings transient status is cleared when reopening the panel', ()
       loadState() {}
     };
     const panelRendererInstance = null;
+    function getPanel() { return panel; }
+    function getState() { return state; }
+    function setState(next) { state = next; }
+    function getSettingsPanelInstance() { return settingsPanelInstance; }
+    function getPanelRendererInstance() { return panelRendererInstance; }
     function getCurrentProjectId() { return currentProjectId; }
     // The transient-status test pins the in-project flow (registry stubs keep
     // isProjectEditorRoute true so closeCustomInstructionsSettings exercises
@@ -4157,6 +4175,42 @@ test('markdown links only allow http and https URLs', () => {
   assert.match(hrefBody, /protocol === 'http:' \|\| parsed\.protocol === 'https:'/);
   assert.doesNotMatch(hrefBody, /file:\/\//);
   assert.doesNotMatch(hrefBody, /return target/);
+});
+
+test('markdown renderer recognizes multi-character headings with project line ranges', () => {
+  const harness = loadMarkdownRendererHarness([{ path: 'resume-zh_CN.tex', kind: 'text' }]);
+  const target = createMinimalDocument().createElement('div');
+
+  harness.renderMarkdownBlockText(target, [
+    '## 教育背景 (resume-zh_CN.tex:56-60)',
+    '',
+    '后续正文。'
+  ].join('\n'));
+
+  const headings = collectElements(target, node => node.className === 'run-final-heading');
+  assert.equal(headings.length, 1);
+  assert.equal(collectElementText(headings[0]), '教育背景 (resume-zh_CN.tex:56-60)');
+  assert.equal(target.children[0], headings[0]);
+  assert.equal(collectElementText(target.children[1]), '后续正文。');
+});
+
+test('completion reports keep leading markdown headings at logical line start', () => {
+  const contentScript = getContentScriptSource();
+  const source = [
+    extractFunction(contentScript, 'hasLeadingMarkdownBlock'),
+    extractFunction(contentScript, 'formatConclusionMarkdown')
+  ].join('\n');
+  const formatConclusionMarkdown = Function('getLocale', `
+    ${source}
+    return formatConclusionMarkdown;
+  `)(() => 'en');
+
+  assert.equal(
+    formatConclusionMarkdown('## 教育背景 (resume-zh_CN.tex:56-60)'),
+    'Conclusion:\n## 教育背景 (resume-zh_CN.tex:56-60)'
+  );
+  assert.equal(formatConclusionMarkdown('- first\n- second'), 'Conclusion:\n- first\n- second');
+  assert.equal(formatConclusionMarkdown('Plain answer.'), 'Conclusion: Plain answer.');
 });
 
 test('markdown renderer turns resolvable plain line references into safe jump buttons', async () => {

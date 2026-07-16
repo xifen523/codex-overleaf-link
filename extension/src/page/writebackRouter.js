@@ -786,19 +786,17 @@
     }
     const trackedChanges = [];
     if (observeTrackedChanges) {
-      const trackedDiff = forbidTrackedChanges
-        ? await waitForTrackedChangeDiff(trackedBefore, operationPaths, {
-          waitMs: 3600,
-          intervalMs: 180
-        })
-        : (() => null)();
-      if (trackedDiff) {
-        trackedChanges.push(...trackedDiff.trackedChanges);
-      } else {
-        await delay(120);
-        const trackedAfter = collectTrackedChangeRefsForPaths(operationPaths);
-        trackedChanges.push(...diffTrackedChangeRefs(trackedBefore, trackedAfter));
-      }
+      // Overleaf renders review markers asynchronously after the editor text
+      // has already changed. A single 120 ms snapshot intermittently missed
+      // those markers, leaving a Reviewing write with Undo but no Accept.
+      // Poll both paths: normal Reviewing writes get a shorter capture window,
+      // while Accept replay keeps the longer safety window used to prove that
+      // it did not create fresh tracked changes.
+      const trackedDiff = await waitForTrackedChangeDiff(trackedBefore, operationPaths, {
+        waitMs: forbidTrackedChanges ? 3600 : 1800,
+        intervalMs: 180
+      });
+      trackedChanges.push(...trackedDiff.trackedChanges);
       if (forbidTrackedChanges && trackedChanges.length > 0) {
         return {
           ok: false,
@@ -1722,20 +1720,6 @@
     return normalized;
   }
 
-
-  function diffTrackedChangeRefs(before = [], after = []) {
-    const beforeKeys = new Set((before || []).map(ref => ref.key).filter(Boolean));
-    const seen = new Set();
-    const added = [];
-    for (const ref of after || []) {
-      if (!ref?.key || beforeKeys.has(ref.key) || seen.has(ref.key)) {
-        continue;
-      }
-      seen.add(ref.key);
-      added.push(ref);
-    }
-    return added;
-  }
 
   function mergeTrackedChangeRefs(refs = []) {
     return normalizeTrackedChangeRefs(refs);

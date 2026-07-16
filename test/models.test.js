@@ -58,6 +58,7 @@ test('normalize preserves selected custom models as unverified', () => {
       id: 'gpt-5.5',
       label: 'GPT-5.5',
       reasoningEfforts: [],
+      reasoningPresentation: '',
       speedTiers: ['standard']
     },
     {
@@ -105,6 +106,7 @@ test('normalize trims ids, dedupes by id, and keeps reasoning metadata', () => {
       label: ' Latest ',
       defaultReasoningEffort: 'high',
       reasoningEfforts: ['medium', 'high'],
+      reasoningPresentation: '',
       speedTiers: ['standard', 'fast'],
       defaultSpeedTier: 'standard'
     },
@@ -112,6 +114,7 @@ test('normalize trims ids, dedupes by id, and keeps reasoning metadata', () => {
       id: 'gpt-5.4-mini',
       label: 'gpt-5.4-mini',
       reasoningEfforts: [],
+      reasoningPresentation: '',
       speedTiers: ['standard']
     }
   ]);

@@ -6,7 +6,11 @@
     let stableSavedSince = 0;
     let applying = false;
     const documentRef = options.document || root.document;
-    const noteActivity = () => { lastUserActivityAt = Date.now(); stableSavedSince = 0; };
+    const noteActivity = event => {
+      if (event?.target?.closest?.('#codex-overleaf-panel')) return;
+      lastUserActivityAt = Date.now();
+      stableSavedSince = 0;
+    };
     for (const eventName of ['input', 'keydown', 'pointerdown']) {
       documentRef?.addEventListener?.(eventName, noteActivity, true);
     }
@@ -37,7 +41,7 @@
       } catch (_error) {
         saveResult = { ok: false, state: 'unavailable' };
       }
-      const saved = saveResult?.ok === true && saveResult?.state === 'verified_saved';
+      const saved = saveResult?.ok === true && ['verified_saved', 'verified_quiet'].includes(saveResult?.state);
       if (saved) {
         stableSavedSince = stableSavedSince || Date.now();
       } else {
