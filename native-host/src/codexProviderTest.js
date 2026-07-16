@@ -78,6 +78,13 @@ function runProviderConnectionTestProcess({ launch, env = process.env, signal } 
     child.stderr.on('data', chunk => appendOutput('stderr', chunk));
     child.on('error', error => finish(providerError('provider_test_spawn_failed', 'Codex could not start the provider connection test.', { cause: error })));
     child.on('close', code => {
+      if (hasLeakedToolControlTokens(`${stdout}\n${stderr}`)) {
+        finish(providerError(
+          'provider_stream_tool_parse_failed',
+          'The provider leaked unparsed tool-call control tokens while streaming.'
+        ));
+        return;
+      }
       if (code === 0 && stdout.includes(verificationToken)) {
         finish(null, {
           durationMs: Date.now() - startedAt,
@@ -124,6 +131,9 @@ function runProviderConnectionTestProcess({ launch, env = process.env, signal } 
 
 function classifyProviderFailure(text, exitCode) {
   const message = String(text || '');
+  if (hasLeakedToolControlTokens(message) || /provider_stream_tool_parse_failed/i.test(message)) {
+    return providerError('provider_stream_tool_parse_failed', 'The provider failed to parse streaming tool calls.');
+  }
   if (/\b401\b|unauthori[sz]ed|invalid api key|incorrect api key|authentication/i.test(message)) {
     return providerError('provider_auth_rejected', 'The provider rejected the API key.');
   }
@@ -152,6 +162,10 @@ function classifyProviderFailure(text, exitCode) {
     return providerError('provider_connection_timeout', 'The provider connection timed out.');
   }
   return providerError('provider_response_invalid', `Provider connection test failed with exit code ${exitCode}.`);
+}
+
+function hasLeakedToolControlTokens(value) {
+  return /<\|tool_call_(?:begin|argument_begin|end)\|>/i.test(String(value || ''));
 }
 
 function terminateProcessTree(child) {

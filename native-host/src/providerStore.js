@@ -80,6 +80,15 @@ function upsertProviderUnlocked(params = {}, env = process.env) {
   const resolvedWireApi = draft.wireApiPreference === 'auto'
     ? verifiedWireApi
     : draft.wireApiPreference;
+  const verifiedByCurrentTest = fingerprint === String(params.verifiedDraftFingerprint || '');
+  const verifiedUpstreamResponseMode = verifiedByCurrentTest
+    && ['streaming', 'buffered'].includes(String(params.verifiedUpstreamResponseMode || '').trim().toLowerCase())
+    ? String(params.verifiedUpstreamResponseMode).trim().toLowerCase()
+    : '';
+  const models = draft.models.map(model => model.id === draft.defaultModelId && verifiedUpstreamResponseMode
+    ? { ...model, resolvedUpstreamResponseMode: verifiedUpstreamResponseMode }
+    : model);
+  const verifiedModel = models.find(model => model.id === draft.defaultModelId);
   const endpointHost = getEndpointHost(draft.baseUrl);
   const destinationUnchanged = Boolean(existing && existing.baseUrl === draft.baseUrl);
   let endpointDisclosureHost = destinationUnchanged && existing?.endpointDisclosureHost === endpointHost
@@ -110,6 +119,7 @@ function upsertProviderUnlocked(params = {}, env = process.env) {
     id,
     revision,
     ...draft,
+    models,
     resolvedWireApi,
     endpointDisclosureHost,
     endpointDisclosureBaseUrl,
@@ -121,6 +131,8 @@ function upsertProviderUnlocked(params = {}, env = process.env) {
           at: now,
           modelId: draft.defaultModelId,
           wireApi: verifiedWireApi || draft.wireApiPreference,
+          upstreamResponseMode: verifiedModel?.resolvedUpstreamResponseMode
+            || (verifiedModel?.upstreamResponseMode === 'buffered' ? 'buffered' : 'streaming'),
           draftFingerprint: fingerprint
         }
       : null,

@@ -8,8 +8,14 @@ const PROVIDER_CONFIG_ID = 'codex_overleaf_custom';
 const PROVIDER_API_KEY_ENV = 'CODEX_OVERLEAF_PROVIDER_API_KEY';
 const LOOPBACK_NO_PROXY_HOSTS = ['127.0.0.1', 'localhost', '::1'];
 
-function createProviderLaunch({ profile, secret = '', modelId, wireApi, reasoningEffort = '' }) {
+function createProviderLaunch({ profile, secret = '', modelId, wireApi, reasoningEffort = '', upstreamResponseMode = '' }) {
   const model = profile.models.find(item => item.id === modelId) || {};
+  const requestedResponseMode = ['streaming', 'buffered'].includes(upstreamResponseMode)
+    ? upstreamResponseMode
+    : model.upstreamResponseMode || 'auto';
+  const resolvedResponseMode = requestedResponseMode === 'auto'
+    ? (model.resolvedUpstreamResponseMode || 'streaming')
+    : requestedResponseMode;
   return Object.freeze({
     providerId: profile.id,
     providerRevision: profile.revision,
@@ -17,6 +23,7 @@ function createProviderLaunch({ profile, secret = '', modelId, wireApi, reasonin
     baseUrl: profile.baseUrl,
     modelId,
     wireApi,
+    upstreamResponseMode: resolvedResponseMode === 'buffered' ? 'buffered' : 'streaming',
     requestTimeoutMs: profile.requestTimeoutMs,
     reasoningAdapter: profile.reasoningAdapter || 'auto',
     reasoningCapability: profile.reasoningCapability || 'auto',
@@ -174,6 +181,7 @@ function buildProviderSnapshot(launch) {
     providerKind: 'custom',
     modelId: launch.modelId,
     wireApi: launch.routedWireApi || launch.wireApi,
+    upstreamResponseMode: launch.upstreamResponseMode || 'streaming',
     requestTimeoutMs: launch.requestTimeoutMs
   };
 }

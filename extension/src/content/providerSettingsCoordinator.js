@@ -120,7 +120,8 @@
         activate: action.activate === true,
         disclosureHost: context.disclosureHost,
         verifiedDraftFingerprint: context.verification?.draftFingerprint || '',
-        verifiedWireApi: context.verification?.resolvedWireApi || ''
+        verifiedWireApi: context.verification?.resolvedWireApi || '',
+        verifiedUpstreamResponseMode: context.verification?.resolvedUpstreamResponseMode || ''
       });
       applyCatalog(instance, result, {
         updateDialog: true,
@@ -270,6 +271,7 @@
       provider_protocol_incompatible: instance.tx('The endpoint is incompatible with the selected API protocol.', '端点与所选 API 协议不兼容。'),
       provider_request_rejected: instance.tx('The provider rejected the probe request. Review the model and compatibility settings.', '模型服务拒绝了探测请求，请检查模型和兼容设置。'),
       provider_agent_tools_incompatible: instance.tx('The model answered, but it could not complete the Codex tool-call loop.', '模型能够回答，但无法完成 Codex 工具调用闭环。'),
+      provider_stream_tool_parse_failed: instance.tx('Streaming tool calls were malformed. Test again with Auto or Buffered upstream responses.', '流式工具调用解析异常，请使用“自动”或“缓冲上游响应”后重新测试。'),
       provider_response_invalid: instance.tx('The provider completed without usable text or tool calls.', '模型服务结束了请求，但没有返回可用文本或工具调用。'),
       provider_configuration_invalid: instance.tx('Review the endpoint, authentication, headers, and compatibility settings.', '请检查端点、鉴权、请求头和兼容设置。'),
       provider_connection_timeout: instance.tx('The provider connection timed out.', '连接模型服务超时。'),

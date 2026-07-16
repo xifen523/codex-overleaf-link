@@ -78,7 +78,8 @@
             revision: normalizeInteger(value.lastVerified.revision),
             at: normalizeInteger(value.lastVerified.at),
             modelId: normalizeText(value.lastVerified.modelId),
-            wireApi: normalizeWireApi(value.lastVerified.wireApi, false)
+            wireApi: normalizeWireApi(value.lastVerified.wireApi, false),
+            upstreamResponseMode: normalizeUpstreamResponseMode(value.lastVerified.upstreamResponseMode, false)
           }
         : null,
       createdAt: normalizeInteger(value.createdAt),
@@ -104,6 +105,8 @@
         reasoningEfforts: Array.isArray(value?.reasoningEfforts)
           ? value.reasoningEfforts.map(normalizeText).filter(Boolean)
           : [],
+        upstreamResponseMode: normalizeUpstreamResponseMode(value?.upstreamResponseMode, true),
+        resolvedUpstreamResponseMode: normalizeUpstreamResponseMode(value?.resolvedUpstreamResponseMode, false),
         contextWindow: normalizeInteger(value?.contextWindow) || 262144,
         supportsParallelToolCalls: value?.supportsParallelToolCalls === true,
         inputModalities: normalizeInputModalities(value?.inputModalities),
@@ -194,6 +197,14 @@
   function normalizeReasoningCapability(value) {
     const normalized = normalizeText(value).toLowerCase();
     return ['auto', 'none', 'toggle', 'effort'].includes(normalized) ? normalized : 'auto';
+  }
+
+  function normalizeUpstreamResponseMode(value, allowAuto) {
+    const normalized = normalizeText(value).toLowerCase();
+    if (normalized === 'streaming' || normalized === 'buffered' || (allowAuto && normalized === 'auto')) {
+      return normalized;
+    }
+    return allowAuto ? 'auto' : '';
   }
 
   function normalizeAuthMode(value) {

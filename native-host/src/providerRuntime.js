@@ -30,6 +30,10 @@ const PROVIDER_METHODS = new Set([
 const AUTO_PROTOCOL_FALLBACK_CODES = new Set([
   'provider_protocol_incompatible'
 ]);
+const AUTO_RESPONSE_MODE_FALLBACK_CODES = new Set([
+  'provider_agent_tools_incompatible',
+  'provider_stream_tool_parse_failed'
+]);
 const activeTests = new Map();
 
 function isProviderMethod(method) {
@@ -77,32 +81,48 @@ async function testProvider(params, env) {
   try {
     let lastError;
     for (const wireApi of protocols) {
-      const launch = createProviderLaunch({
-        profile: { id: params.profileId || 'draft', revision: params.expectedRevision || 0, ...draft },
-        secret,
-        modelId: draft.defaultModelId,
-        wireApi
-      });
-      try {
-        const result = await runProviderConnectionTest({ launch, env, signal: controller.signal });
-        return {
-          ok: true,
-          operationId,
-          draftFingerprint: fingerprint,
-          resolvedWireApi: wireApi,
-          testedModelId: draft.defaultModelId,
-          durationMs: result.durationMs,
-          capabilities: result.capabilities || { text: true, agentTools: true }
-        };
-      } catch (error) {
-        lastError = error;
-        const canTryNextProtocol = draft.wireApiPreference === 'auto'
-          && wireApi !== protocols[protocols.length - 1]
-          && AUTO_PROTOCOL_FALLBACK_CODES.has(error.code);
-        if (!canTryNextProtocol) {
-          throw error;
+      const model = draft.models.find(item => item.id === draft.defaultModelId) || {};
+      const requestedMode = model.upstreamResponseMode || 'auto';
+      const responseModes = wireApi === 'chat' && requestedMode === 'auto'
+        ? ['streaming', 'buffered']
+        : [requestedMode === 'buffered' ? 'buffered' : 'streaming'];
+      let protocolError;
+      for (let index = 0; index < responseModes.length; index += 1) {
+        const upstreamResponseMode = responseModes[index];
+        const launch = createProviderLaunch({
+          profile: { id: params.profileId || 'draft', revision: params.expectedRevision || 0, ...draft },
+          secret,
+          modelId: draft.defaultModelId,
+          wireApi,
+          upstreamResponseMode
+        });
+        try {
+          const result = await runProviderConnectionTest({ launch, env, signal: controller.signal });
+          return {
+            ok: true,
+            operationId,
+            draftFingerprint: fingerprint,
+            resolvedWireApi: wireApi,
+            resolvedUpstreamResponseMode: upstreamResponseMode,
+            testedModelId: draft.defaultModelId,
+            durationMs: result.durationMs,
+            capabilities: {
+              ...(result.capabilities || { text: true, agentTools: true }),
+              upstreamStreaming: upstreamResponseMode === 'streaming'
+            }
+          };
+        } catch (error) {
+          protocolError = error;
+          const canTryBuffered = responseModes[index + 1] === 'buffered'
+            && AUTO_RESPONSE_MODE_FALLBACK_CODES.has(error.code);
+          if (!canTryBuffered) break;
         }
       }
+      lastError = protocolError;
+      const canTryNextProtocol = draft.wireApiPreference === 'auto'
+        && wireApi !== protocols[protocols.length - 1]
+        && AUTO_PROTOCOL_FALLBACK_CODES.has(protocolError?.code);
+      if (!canTryNextProtocol) throw protocolError;
     }
     throw lastError || providerError('provider_protocol_incompatible', 'No compatible provider protocol was found.');
   } catch (error) {

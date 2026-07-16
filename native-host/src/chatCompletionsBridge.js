@@ -200,6 +200,7 @@ function normalizeBridgeErrorCode(value) {
     'provider_connection_timeout',
     'provider_response_invalid',
     'provider_agent_tools_incompatible',
+    'provider_stream_tool_parse_failed',
     'provider_protocol_incompatible'
   ].includes(value) ? value : 'provider_bridge_failed';
 }

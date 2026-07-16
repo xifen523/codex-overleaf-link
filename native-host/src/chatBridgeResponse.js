@@ -6,6 +6,7 @@ const { requiresReasoningContentReplay } = require('./providerReasoning');
 function convertChatResponse(chat = {}, context = {}) {
   const choice = Array.isArray(chat.choices) ? chat.choices[0] || {} : {};
   const message = choice.message || {};
+  assertNoLeakedToolControlTokens(message);
   const split = splitReasoning(message.content, extractReasoning(message));
   const output = [];
   if (split.reasoning) output.push(buildReasoningItem(split.reasoning));
@@ -52,7 +53,10 @@ async function streamChatResponse({ upstream, res, context = {}, onComplete = ()
         done = true;
         break;
       }
-      if (data) processChatChunk(state, res, parseJson(data));
+      if (data) {
+        assertNoLeakedToolControlTokens(data);
+        processChatChunk(state, res, parseJson(data));
+      }
       boundary = findSseBoundary(buffer);
     }
     if (done) break;
@@ -60,7 +64,10 @@ async function streamChatResponse({ upstream, res, context = {}, onComplete = ()
   if (!done) {
     buffer += decoder.decode();
     const data = parseSseData(buffer);
-    if (data && data !== '[DONE]') processChatChunk(state, res, parseJson(data));
+    if (data && data !== '[DONE]') {
+      assertNoLeakedToolControlTokens(data);
+      processChatChunk(state, res, parseJson(data));
+    }
   }
   const completed = completeStream(state, res);
   onComplete(completed);
@@ -405,6 +412,14 @@ function responseError(message) {
   const error = new Error(message);
   error.code = 'provider_response_invalid';
   return error;
+}
+
+function assertNoLeakedToolControlTokens(value) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value || {});
+  if (!/<\|tool_call_(?:begin|argument_begin|end)\|>/i.test(text)) return;
+  const error = new Error('The provider leaked unparsed tool-call control tokens while streaming. Use buffered upstream responses for this model.');
+  error.code = 'provider_stream_tool_parse_failed';
+  throw error;
 }
 
 function normalizeUsage(value = {}) {

@@ -8,6 +8,7 @@ const {
 
 const ALLOWED_WIRE_APIS = new Set(['auto', 'responses', 'chat', 'anthropic']);
 const ALLOWED_REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+const ALLOWED_UPSTREAM_RESPONSE_MODES = new Set(['auto', 'streaming', 'buffered']);
 const ALLOWED_AUTH_MODES = new Set(['bearer', 'x-api-key', 'api-key', 'custom', 'none']);
 const ALLOWED_INPUT_MODALITIES = new Set(['text', 'image']);
 const DEFAULT_CONTEXT_WINDOW = 262144;
@@ -89,6 +90,8 @@ function normalizeModels(values) {
       id,
       label: label.slice(0, 200),
       reasoningEfforts: Array.from(new Set(reasoningEfforts)),
+      upstreamResponseMode: normalizeUpstreamResponseMode(value?.upstreamResponseMode, true),
+      resolvedUpstreamResponseMode: normalizeUpstreamResponseMode(value?.resolvedUpstreamResponseMode, false),
       contextWindow: normalizeContextWindow(value?.contextWindow),
       supportsParallelToolCalls: value?.supportsParallelToolCalls === true,
       inputModalities: normalizeInputModalities(value?.inputModalities),
@@ -150,8 +153,12 @@ function normalizeSecret(value) {
 
 function computeDraftFingerprint(draft, secret) {
   const normalized = normalizeProviderDraft(draft);
+  const fingerprintDraft = {
+    ...normalized,
+    models: normalized.models.map(({ resolvedUpstreamResponseMode: _resolvedMode, ...model }) => model)
+  };
   const secretDigest = crypto.createHash('sha256').update(normalizeSecret(secret)).digest('hex');
-  return crypto.createHash('sha256').update(JSON.stringify({ normalized, secretDigest })).digest('hex');
+  return crypto.createHash('sha256').update(JSON.stringify({ normalized: fingerprintDraft, secretDigest })).digest('hex');
 }
 
 function getEndpointHost(baseUrl) {
@@ -202,7 +209,8 @@ function sanitizeProfile(profile, hasSecret) {
           revision: profile.lastVerified.revision,
           at: profile.lastVerified.at,
           modelId: profile.lastVerified.modelId,
-          wireApi: profile.lastVerified.wireApi
+          wireApi: profile.lastVerified.wireApi,
+          upstreamResponseMode: normalizeUpstreamResponseMode(profile.lastVerified.upstreamResponseMode, false)
         }
       : null,
     createdAt: profile.createdAt || 0,
@@ -341,6 +349,14 @@ function normalizeOptionalText(value, maxLength) {
 function normalizeAnthropicThinkingMode(value) {
   const normalized = normalizeText(value).toLowerCase();
   return ['budget', 'adaptive', 'none'].includes(normalized) ? normalized : 'budget';
+}
+
+function normalizeUpstreamResponseMode(value, allowAuto) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (ALLOWED_UPSTREAM_RESPONSE_MODES.has(normalized) && (allowAuto || normalized !== 'auto')) {
+    return normalized;
+  }
+  return allowAuto ? 'auto' : '';
 }
 
 function normalizeMaxOutputTokens(value) {

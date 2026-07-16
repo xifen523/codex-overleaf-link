@@ -22,7 +22,7 @@ function buildChatRequest({ requestBody = {}, launch = {}, historyMessages = [] 
     ...(launch.bodyOverrides || {}),
     model,
     messages,
-    stream: requestBody.stream !== false
+    stream: requestBody.stream !== false && launch.upstreamResponseMode !== 'buffered'
   };
   if (body.stream && launch.supportsStreamOptions) {
     body.stream_options = { include_usage: true };

@@ -9,6 +9,7 @@ Release candidate adding first-class third-party model providers while preservin
 - Added a dedicated third-party provider dialog with profile-specific endpoints, models, credentials, reasoning controls, connection testing, and explicit activation from Settings.
 - Added a Native Host provider runtime with redacted profile storage, OpenAI-compatible Chat Completions bridging, provider-aware reasoning translation, model discovery, and Codex app-server launch integration.
 - Added staged project-context loading with file-tree readiness feedback, warmed ZIP snapshots, cache reuse, and resilient snapshot fallbacks.
+- Added model-scoped `Auto`, `Streaming`, and `Buffered` upstream response modes for Chat Completions providers.
 
 ### Fixed
 
@@ -19,6 +20,8 @@ Release candidate adding first-class third-party model providers while preservin
 - Bypassed system proxies for the local provider bridge, preventing intermittent `502` failures when Codex connects to the loopback runtime.
 - Restored prompt cancellation across long asynchronous run stages and kept Edit & resend usable after provider failures.
 - Hardened custom-provider reasoning defaults and response normalization to avoid invalid DeepSeek requests and repeated streamed content.
+- Let `Auto` connection tests retry through buffered upstream responses when a gateway cannot parse streamed tool calls, while preserving Responses SSE toward Codex.
+- Detected leaked tool-call control tokens as an actionable provider compatibility failure without interpreting them as executable tools.
 
 ## v2.0.0 - 2026-07-14
 

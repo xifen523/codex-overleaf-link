@@ -167,6 +167,7 @@
     }
     const tx = instance.tx;
     const draft = instance.draft || provider;
+    const defaultModel = (draft.models || []).find(model => model.id === draft.defaultModelId) || {};
     const additionalModels = (draft.models || [])
       .map(model => model.id)
       .filter(id => id !== draft.defaultModelId)
@@ -229,6 +230,15 @@
               <option value="chat" ${draft.wireApiPreference === 'chat' ? 'selected' : ''}>Chat Completions</option>
               <option value="anthropic" ${draft.wireApiPreference === 'anthropic' ? 'selected' : ''}>Anthropic Messages</option>
             </select>
+          </label>
+          <label class="codex-provider-field">
+            <span>${escapeHtml(tx('Upstream response mode', '上游响应模式'))}</span>
+            <select data-provider-field="upstreamResponseMode">
+              <option value="auto" ${defaultModel.upstreamResponseMode === 'auto' || !defaultModel.upstreamResponseMode ? 'selected' : ''}>${escapeHtml(tx('Auto (test streaming, then buffered)', '自动（先测流式，再测缓冲）'))}</option>
+              <option value="streaming" ${defaultModel.upstreamResponseMode === 'streaming' ? 'selected' : ''}>${escapeHtml(tx('Streaming', '流式'))}</option>
+              <option value="buffered" ${defaultModel.upstreamResponseMode === 'buffered' ? 'selected' : ''}>${escapeHtml(tx('Buffered', '缓冲'))}</option>
+            </select>
+            <small>${escapeHtml(tx('Applied to the default model. Buffered keeps Codex streaming locally while the provider returns one complete response.', '应用于默认模型。缓冲模式仍向 Codex 本地流式输出，但等待服务商返回完整响应。'))}</small>
           </label>
           <label class="codex-provider-field">
             <span>${escapeHtml(tx('Request timeout', '请求超时'))}</span>
@@ -559,18 +569,28 @@
     const modelIds = [defaultModelId, ...String(get('additionalModels')?.value || '').split(/\r?\n/)]
       .map(value => value.trim())
       .filter((value, index, values) => value && values.indexOf(value) === index);
+    const existingModels = new Map((provider.models || []).map(model => [model.id, model]));
+    const upstreamResponseMode = get('upstreamResponseMode')?.value || 'auto';
     const draft = {
       name: String(get('name')?.value || '').trim(),
       baseUrl: String(get('baseUrl')?.value || '').trim(),
       wireApiPreference: get('wireApiPreference')?.value || 'auto',
-      models: modelIds.map(id => ({
-        id,
-        label: id,
-        reasoningEfforts: [],
-        contextWindow: Number(get('contextWindow')?.value || 262144),
-        supportsParallelToolCalls: Boolean(get('supportsParallelToolCalls')?.checked),
-        inputModalities: String(get('inputModalities')?.value || 'text').split(',')
-      })),
+      models: modelIds.map(id => {
+        const existing = existingModels.get(id) || {};
+        return {
+          ...existing,
+          id,
+          label: existing.label || id,
+          reasoningEfforts: Array.isArray(existing.reasoningEfforts) ? existing.reasoningEfforts : [],
+          upstreamResponseMode: id === defaultModelId
+            ? upstreamResponseMode
+            : existing.upstreamResponseMode || 'auto',
+          resolvedUpstreamResponseMode: existing.resolvedUpstreamResponseMode || '',
+          contextWindow: Number(get('contextWindow')?.value || 262144),
+          supportsParallelToolCalls: Boolean(get('supportsParallelToolCalls')?.checked),
+          inputModalities: String(get('inputModalities')?.value || 'text').split(',')
+        };
+      }),
       defaultModelId,
       requestTimeoutMs: Number(get('requestTimeoutMs')?.value || 30000),
       reasoningAdapter: get('reasoningAdapter')?.value || 'auto',
@@ -661,7 +681,13 @@
     setStatus(instance, {
       tone: 'success',
       title: instance.tx('Connection verified.', '连接验证成功。'),
-      detail: verification.resolvedWireApi ? `${verification.resolvedWireApi} · ${verification.durationMs || 0}ms` : ''
+      detail: [
+        verification.resolvedWireApi,
+        verification.resolvedUpstreamResponseMode
+          ? `${verification.resolvedUpstreamResponseMode} upstream`
+          : '',
+        `${verification.durationMs || 0}ms`
+      ].filter(Boolean).join(' · ')
     });
     const state = instance.root.querySelector('[data-provider-test-state]');
     if (state) {
@@ -703,7 +729,10 @@
       return instance.tx('Verified for this draft', '当前草稿已验证');
     }
     if (provider.lastVerified?.revision === provider.revision) {
-      return instance.tx('Verified', '已验证');
+      const mode = provider.lastVerified.upstreamResponseMode;
+      return mode
+        ? `${instance.tx('Verified', '已验证')} · ${mode}`
+        : instance.tx('Verified', '已验证');
     }
     return instance.tx('Not tested', '尚未测试');
   }
