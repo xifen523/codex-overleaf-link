@@ -22,6 +22,7 @@ Release candidate adding first-class third-party model providers while preservin
 - Hardened custom-provider reasoning defaults and response normalization to avoid invalid DeepSeek requests and repeated streamed content.
 - Let `Auto` connection tests retry through buffered upstream responses when a gateway cannot parse streamed tool calls, while preserving Responses SSE toward Codex.
 - Detected leaked tool-call control tokens as an actionable provider compatibility failure without interpreting them as executable tools.
+- Refresh a stale versioned Codex Desktop executable path before every run when an app update moves `codex.exe`.
 
 ## v2.0.0 - 2026-07-14
 

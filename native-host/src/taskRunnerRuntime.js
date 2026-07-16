@@ -9,6 +9,7 @@ const {
   SUPPORTED_NATIVE_PROTOCOL
 } = require('../../extension/src/shared/compatibility');
 const { runCodexSession } = require('./codexSessionRunner');
+const { resolveCodexCommand } = require('./codexCommand');
 const { resolveCodexModels } = require('./codexModels');
 const {
   handleProviderRequest,
@@ -517,10 +518,7 @@ function shouldPassthroughCodexRunError(error = {}) {
 }
 
 function isCodexMissing(env = process.env) {
-  return (
-    env.CODEX_OVERLEAF_ENV_READY === '1' ||
-    Object.prototype.hasOwnProperty.call(env, 'CODEX_OVERLEAF_CODEX_PATH')
-  ) && !env.CODEX_OVERLEAF_CODEX_PATH;
+  return !resolveCodexCommand(env);
 }
 
 async function handleMirrorSync(request, env) {
