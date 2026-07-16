@@ -17,6 +17,7 @@
     const writebackOpenSettleMs = Number.isFinite(Number(deps.writebackOpenSettleMs))
       ? Math.max(0, Number(deps.writebackOpenSettleMs))
       : 1200;
+    const treeMutationVerifyTimeoutMs = Math.max(0, Number.isFinite(Number(deps.treeMutationVerifyTimeoutMs)) ? Number(deps.treeMutationVerifyTimeoutMs) : 12000);
     const diagnosticsRevision = String(deps.diagnosticsRevision || '');
     // Cross-world cancel signal reader. Returns the current page-bridge
     // sequence number, which monotonically increments when content-side
@@ -97,6 +98,15 @@
 
     function projectPathExists(filePath) {
       return treeOperations.projectPathExists?.(filePath) === true;
+    }
+
+    async function waitForTreeCondition(predicate) {
+      const attempts = Math.max(1, Math.ceil(treeMutationVerifyTimeoutMs / 180));
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        if (predicate()) return true;
+        if (attempt + 1 < attempts) await delay(180);
+      }
+      return false;
     }
 
     function resolveExistingProjectPath(filePath) {
@@ -1178,8 +1188,7 @@
         } else {
           await method.call(manager, operation.path, file);
         }
-        await delay(120);
-        if (!projectPathExists(operation.path)) {
+        if (!await waitForTreeCondition(() => projectPathExists(operation.path))) {
           return {
             ok: false,
             code: 'binary_asset_verification_failed',
@@ -1435,9 +1444,13 @@
   }
 
   async function verifyFileTreeOperation(operation) {
-    await delay(120);
     const sourcePath = operation.path;
     const targetPath = operation.to;
+    await waitForTreeCondition(() => operation.type === 'delete'
+      ? !projectPathExists(sourcePath)
+      : (operation.type === 'rename' || operation.type === 'move')
+        ? Boolean(targetPath && projectPathExists(targetPath) && !projectPathExists(sourcePath))
+        : projectPathExists(sourcePath));
 
     if (operation.type === 'create') {
       if (!projectPathExists(sourcePath)) {
@@ -1448,7 +1461,7 @@
         if (!opened.ok) {
           return fileTreeVerificationFailed(operation, `${sourcePath} 创建后无法打开验证内容。`);
         }
-        const verified = await verifyActiveEditorText(operation.content, sourcePath, 600);
+        const verified = await verifyActiveEditorText(operation.content, sourcePath, 3000);
         if (!verified.ok) {
           return fileTreeVerificationFailed(operation, `${sourcePath} 创建后内容没有和 Codex 预期一致。`);
         }

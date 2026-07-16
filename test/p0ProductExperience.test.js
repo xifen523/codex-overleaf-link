@@ -5288,16 +5288,16 @@ test('runCodexTask catch passes codexReturned signal to translateRawError', () =
 // left a zombie write running on the page side. Verify the carve-out.
 // ---------------------------------------------------------------------------
 
-test('getPageBridgeTimeoutMs gives applyOperations 30s to accommodate the slow openFile path', () => {
+test('getPageBridgeTimeoutMs gives applyOperations 120s for delayed tree visibility', () => {
   const src = getContentScriptSource();
   const body = extractFromContentScript('getPageBridgeTimeoutMs');
   assert.match(body, /method === 'applyOperations'/,
     'applyOperations must have a dedicated branch (not the 8000 default)');
-  // The carve-out branch must return at least 30000.
+  // The carve-out branch must return at least 120000.
   const applyMatch = body.match(/method === 'applyOperations'[\s\S]*?return\s+(\d+)/);
   assert.ok(applyMatch, 'applyOperations branch must return a numeric timeout');
-  assert.ok(Number(applyMatch[1]) >= 30000,
-    `applyOperations timeout must be >= 30000ms, got ${applyMatch[1]}`);
+  assert.ok(Number(applyMatch[1]) >= 120000,
+    `applyOperations timeout must be >= 120000ms, got ${applyMatch[1]}`);
 });
 
 // ---------------------------------------------------------------------------

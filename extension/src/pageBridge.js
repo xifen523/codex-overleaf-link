@@ -2,7 +2,7 @@
   'use strict';
 
   const PAGE_BRIDGE_INSTALL_VERSION = window.CodexOverleafCompatibility?.BUILD_TARGET_VERSION || 'dev';
-  const PAGE_BRIDGE_INSTALL_REVISION = '2026-07-16-upstream-v21-folder-writeback-v12';
+  const PAGE_BRIDGE_INSTALL_REVISION = '2026-07-16-upstream-v21-tree-visibility-v13';
   if (window.__codexOverleafPageBridgeInstalledVersion === PAGE_BRIDGE_INSTALL_VERSION
     && window.__codexOverleafPageBridgeInstalledRevision === PAGE_BRIDGE_INSTALL_REVISION) {
     return;

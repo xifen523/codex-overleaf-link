@@ -197,3 +197,188 @@ test('folder writeback creates a missing parent before creating and populating a
   assert.equal(requests.length, 2);
   assert.equal(editorText, '\\begin{table}evidence\\end{table}');
 });
+
+test('folder writeback retries a transient server failure without duplicating the folder', async () => {
+  const rootFolder = { _id: 'root', name: '', folders: [], docs: [] };
+  let requests = 0;
+  const api = FolderWriteback.create({
+    window: {
+      _ide: { project: { rootFolder: [rootFolder] } },
+      location: { origin: 'https://www.overleaf.com', pathname: '/project/project-1' },
+      metaAttributesCache: new Map([['ol-csrfToken', 'csrf-token']]),
+      setTimeout
+    },
+    document: { head: { querySelector: () => null } },
+    normalizePath: value => String(value || '').replace(/\\/g, '/'),
+    delay: () => Promise.resolve(),
+    treeOperations: {
+      getProjectId: () => 'project-1',
+      folderPathExists: folderPath => Boolean(findFolder(rootFolder, folderPath))
+    },
+    async fetch() {
+      requests += 1;
+      if (requests === 1) return response({ message: 'temporary' }, 503);
+      const folder = { _id: 'figures-id', name: 'figures', folders: [], docs: [] };
+      rootFolder.folders.push(folder);
+      return response(folder, 200);
+    }
+  });
+
+  const result = await api.ensureParentFolders('figures/overview.png');
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(requests, 2);
+  assert.equal(rootFolder.folders.filter(folder => folder.name === 'figures').length, 1);
+});
+
+test('folder writeback recovers an ambiguous network error when Overleaf already created the folder', async () => {
+  const rootFolder = { _id: 'root', name: '', folders: [], docs: [] };
+  let requests = 0;
+  const api = FolderWriteback.create({
+    window: {
+      _ide: { project: { rootFolder: [rootFolder] } },
+      location: { origin: 'https://www.overleaf.com', pathname: '/project/project-1' },
+      metaAttributesCache: new Map([['ol-csrfToken', 'csrf-token']]),
+      setTimeout
+    },
+    document: { head: { querySelector: () => null } },
+    normalizePath: value => String(value || '').replace(/\\/g, '/'),
+    delay: () => Promise.resolve(),
+    treeOperations: {
+      getProjectId: () => 'project-1',
+      folderPathExists: folderPath => Boolean(findFolder(rootFolder, folderPath))
+    },
+    async fetch() {
+      requests += 1;
+      rootFolder.folders.push({ _id: 'figures-id', name: 'figures', folders: [], docs: [] });
+      throw new Error('connection closed after request');
+    }
+  });
+
+  const result = await api.ensureParentFolders('figures/overview.png');
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(requests, 1, 'an observed folder is reused instead of posting a duplicate');
+  assert.equal(rootFolder.folders.filter(folder => folder.name === 'figures').length, 1);
+});
+
+test('text file creation retries a transient response and verifies the populated editor', async () => {
+  const rootFolder = { _id: 'root', name: '', folders: [], docs: [] };
+  let requests = 0;
+  let created = false;
+  let editorText = '';
+  const api = FolderWriteback.create({
+    window: {
+      _ide: { project: { rootFolder: [rootFolder] } },
+      location: { origin: 'https://www.overleaf.com', pathname: '/project/project-1' },
+      metaAttributesCache: new Map([['ol-csrfToken', 'csrf-token']]),
+      setTimeout
+    },
+    document: { head: { querySelector: () => null } },
+    normalizePath: value => String(value || '').replace(/\\/g, '/'),
+    delay: () => Promise.resolve(),
+    treeOperations: {
+      getProjectId: () => 'project-1',
+      projectPathExists: () => created,
+      openFileByPath: async () => ({ ok: true })
+    },
+    readActiveEditorText: () => editorText,
+    replaceActiveEditorText(value) { editorText = value; return { ok: true }; },
+    async fetch() {
+      requests += 1;
+      if (requests === 1) return response({ message: 'temporary' }, 503);
+      created = true;
+      return response({ _id: 'doc-1', name: 'retry.tex' }, 200);
+    }
+  });
+
+  const result = await api.createTextFile('retry.tex', 'verified content');
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(requests, 2);
+  assert.equal(editorText, 'verified content');
+});
+
+
+test('folder writeback observes delayed ambiguous folder creation before retrying', async () => {
+  const rootFolder = { _id: 'root', name: '', folders: [], docs: [] };
+  let requests = 0;
+  let delayCalls = 0;
+  const api = FolderWriteback.create({
+    window: {
+      _ide: { project: { rootFolder: [rootFolder] } },
+      location: { origin: 'https://www.overleaf.com', pathname: '/project/project-1' },
+      metaAttributesCache: new Map([['ol-csrfToken', 'csrf-token']]),
+      setTimeout
+    },
+    document: { head: { querySelector: () => null } },
+    normalizePath: value => String(value || '').replace(/\\/g, '/'),
+    async delay() {
+      delayCalls += 1;
+      if (delayCalls === 8) {
+        rootFolder.folders.push({ _id: 'figures-id', name: 'figures', folders: [], docs: [] });
+      }
+    },
+    treeOperations: {
+      getProjectId: () => 'project-1',
+      folderPathExists: folderPath => Boolean(findFolder(rootFolder, folderPath))
+    },
+    async fetch() {
+      requests += 1;
+      throw new Error('connection closed after request');
+    }
+  });
+
+  const result = await api.ensureParentFolders('figures/overview.png');
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(requests, 1, 'the first ambiguous request is observed long enough to avoid a duplicate POST');
+  assert.ok(delayCalls >= 8);
+});
+
+test('folder writeback waits for delayed successful folder and document tree hydration', async () => {
+  const rootFolder = { _id: 'root', name: '', folders: [], docs: [] };
+  let folderVisible = false;
+  let documentVisible = false;
+  let delayCalls = 0;
+  let editorText = '';
+  const createdFolder = { _id: 'tables-id', name: 'tables', folders: [], docs: [] };
+  const api = FolderWriteback.create({
+    window: {
+      _ide: { project: { rootFolder: [rootFolder] } },
+      location: { origin: 'https://www.overleaf.com', pathname: '/project/project-1' },
+      metaAttributesCache: new Map([['ol-csrfToken', 'csrf-token']]),
+      setTimeout
+    },
+    document: { head: { querySelector: () => null } },
+    normalizePath: value => String(value || '').replace(/\\/g, '/'),
+    async delay() {
+      delayCalls += 1;
+      if (!folderVisible && delayCalls === 4) {
+        folderVisible = true;
+        rootFolder.folders.push(createdFolder);
+      }
+      if (folderVisible && !documentVisible && delayCalls === 8) {
+        documentVisible = true;
+      }
+    },
+    treeOperations: {
+      getProjectId: () => 'project-1',
+      folderPathExists: folderPath => Boolean(findFolder(rootFolder, folderPath)),
+      projectPathExists: filePath => documentVisible && filePath === 'tables/evidence.tex',
+      openFileByPath: async filePath => ({ ok: filePath === 'tables/evidence.tex' })
+    },
+    readActiveEditorText: () => editorText,
+    replaceActiveEditorText(value) { editorText = value; return { ok: true }; },
+    async fetch(url) {
+      if (url.endsWith('/folder')) return response(createdFolder, 200);
+      return response({ _id: 'doc-1', name: 'evidence.tex' }, 200);
+    }
+  });
+
+  const result = await api.createTextFile('tables/evidence.tex', 'verified content');
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(editorText, 'verified content');
+  assert.ok(delayCalls >= 8);
+});

@@ -76,7 +76,7 @@
     undefined,
     getCurrentExtensionId()
   ) || 'curl -fsSL https://raw.githubusercontent.com/xifen523/codex-overleaf-link/main/install.sh | bash -s -- --extension-id <chrome-extension-id>';
-  const PAGE_BRIDGE_SCRIPT_REVISION = '2026-07-16-upstream-v21-folder-writeback-v12';
+  const PAGE_BRIDGE_SCRIPT_REVISION = '2026-07-16-upstream-v21-tree-visibility-v13';
   const PAGE_BRIDGE_CAPABILITY = createPageBridgeCapability();
   const pageBridgeReady = injectPageBridge();
   const {
@@ -5854,16 +5854,15 @@
       return 120000;
     }
     if (method === 'applyOperations') {
-      // Each per-op step inside writebackRouter.applyOperationsCore can wait
-      // up to 5s for openFileByPath (treeOperations.js:230, :259) plus up to
-      // 5s for waitForActiveEditorText plus reviewing/save-state polling.
-      // A multi-op write on a freshly-loaded Overleaf editor can run 15-30s
-      // in the wild. The pre-fix default of 8000ms timed out mid-write and
+      // Each per-op step can wait for editor hydration and up to 12s for an
+      // asynchronous Overleaf file-tree mutation to become visible. A multi-op
+      // write on a freshly-loaded editor can therefore exceed 30s. The old
+      // 8000ms timeout could expire mid-write and
       // left the page-side promise running uncontrolled — a 'zombie' write
-      // could still land after the content-side reported failure. 30s is a
-      // sane upper bound that covers the realistic slow path without
-      // letting a genuinely hung dispatch tie up the UI indefinitely.
-      return 30000;
+      // could still land after the content-side reported failure. 120s is a
+      // conservative bound that covers the verified slow path without leaving a page-side
+      // write running after the content side has already reported failure.
+      return 120000;
     }
     return 8000;
   }

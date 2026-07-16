@@ -16,6 +16,10 @@
     const fetchImpl = deps.fetch || window.fetch?.bind(window);
     const readActiveEditorText = deps.readActiveEditorText || (() => '');
     const replaceActiveEditorText = deps.replaceActiveEditorText || (() => ({ ok: false }));
+    const createRequestAttempts = 3;
+    const writebackVisibilityTimeoutMs = 12000;
+    const ambiguousCreateObservationMs = 5000;
+    const rejectedCreateObservationMs = 720;
 
     async function ensureParentFolders(filePath) {
       const normalizedPath = normalizeSafeProjectPath(filePath);
@@ -57,7 +61,7 @@
         createdFolders.push(folderPath);
       }
 
-      if (createdFolders.length && !await waitForFolderPath(folderPath, 5000)) {
+      if (createdFolders.length && !await waitForFolderPath(folderPath, writebackVisibilityTimeoutMs)) {
         return folderFailure(`${folderPath} was created by Overleaf but did not appear in the project tree before timeout.`, {
           filePath: normalizedPath,
           folderPath,
@@ -78,29 +82,16 @@
         return fileFailure(`Cannot create ${normalizedPath}; Overleaf request metadata is unavailable.`, false);
       }
 
-      try {
-        const response = await fetchImpl(`${window.location.origin}/project/${encodeURIComponent(projectId)}/doc`, {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            'X-Csrf-Token': csrfToken
-          },
-          body: JSON.stringify({ parent_folder_id: ready.parentFolderId, name })
-        });
-        const data = await parseResponseBody(response);
-        if (!response?.ok) {
-          return fileFailure(`Overleaf rejected creation of ${normalizedPath} (HTTP ${response?.status || 'unknown'}).`, false, {
-            status: response?.status || 0,
-            serverMessage: readServerMessage(data)
-          });
-        }
-      } catch (error) {
-        return fileFailure(`Creating ${normalizedPath} failed: ${error?.message || String(error || '')}`, false);
-      }
+      const creation = await createDocumentRecord({
+        normalizedPath,
+        projectId,
+        csrfToken,
+        parentFolderId: ready.parentFolderId,
+        name
+      });
+      if (!creation.ok) return creation;
 
-      if (!await waitForProjectPath(normalizedPath, 5000)) {
+      if (!await waitForProjectPath(normalizedPath, writebackVisibilityTimeoutMs)) {
         return fileFailure(`${normalizedPath} was created but did not appear in the Overleaf file tree.`, true);
       }
       const opened = await treeOperations.openFileByPath?.(normalizedPath, { force: true });
@@ -132,6 +123,41 @@
       };
     }
 
+    async function createDocumentRecord({ normalizedPath, projectId, csrfToken, parentFolderId, name }) {
+      let lastFailure = null;
+      for (let attempt = 1; attempt <= createRequestAttempts; attempt += 1) {
+        try {
+          const response = await fetchImpl(`${window.location.origin}/project/${encodeURIComponent(projectId)}/doc`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+              'X-Csrf-Token': csrfToken
+            },
+            body: JSON.stringify({ parent_folder_id: parentFolderId, name })
+          });
+          const data = await parseResponseBody(response);
+          if (response?.ok) return { ok: true };
+          if (await observeProjectPath(normalizedPath, rejectedCreateObservationMs)) return { ok: true, recovered: true };
+          const status = response?.status || 0;
+          lastFailure = fileFailure(`Overleaf rejected creation of ${normalizedPath} (HTTP ${status || 'unknown'}).`, false, {
+            status,
+            serverMessage: readServerMessage(data),
+            attempts: attempt
+          });
+          if (!isTransientCreateStatus(status)) return lastFailure;
+        } catch (error) {
+          if (await observeProjectPath(normalizedPath, ambiguousCreateObservationMs)) return { ok: true, recovered: true };
+          lastFailure = fileFailure(`Creating ${normalizedPath} failed: ${error?.message || String(error || '')}`, false, {
+            attempts: attempt
+          });
+        }
+        if (attempt < createRequestAttempts) await delay(150 * attempt);
+      }
+      return lastFailure || fileFailure(`Creating ${normalizedPath} failed after retries.`, false);
+    }
+
     async function waitForProjectPath(filePath, timeoutMs) {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() <= deadline) {
@@ -161,34 +187,72 @@
         });
       }
 
-      try {
-        const response = await fetchImpl(`${window.location.origin}/project/${encodeURIComponent(projectId)}/folder`, {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            'X-Csrf-Token': csrfToken
-          },
-          body: JSON.stringify({ parent_folder_id: parentFolderId, name })
-        });
-        const data = await parseResponseBody(response);
-        if (!response?.ok) {
-          return folderFailure(`Overleaf rejected creation of ${folderPath} (HTTP ${response?.status || 'unknown'}).`, {
+      let lastFailure = null;
+      for (let attempt = 1; attempt <= createRequestAttempts; attempt += 1) {
+        try {
+          const response = await fetchImpl(`${window.location.origin}/project/${encodeURIComponent(projectId)}/folder`, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+              Accept: 'application/json',
+              'Content-Type': 'application/json',
+              'X-Csrf-Token': csrfToken
+            },
+            body: JSON.stringify({ parent_folder_id: parentFolderId, name })
+          });
+          const data = await parseResponseBody(response);
+          if (response?.ok) {
+            const folder = data?.folder || data;
+            const folderId = readEntityId(folder);
+            if (folderId) return { ok: true, folder, folderId };
+          }
+          const observed = await observeFolderEntity(
             folderPath,
-            status: response?.status || 0,
-            serverMessage: readServerMessage(data)
+            response?.ok ? ambiguousCreateObservationMs : rejectedCreateObservationMs
+          );
+          if (observed) return { ok: true, folder: observed, folderId: readEntityId(observed), recovered: true };
+          const status = response?.status || 0;
+          lastFailure = folderFailure(
+            response?.ok
+              ? `Overleaf created ${folderPath} without returning its folder id.`
+              : `Overleaf rejected creation of ${folderPath} (HTTP ${status || 'unknown'}).`,
+            { folderPath, status, serverMessage: readServerMessage(data), attempts: attempt }
+          );
+          if (response?.ok || !isTransientCreateStatus(status)) return lastFailure;
+        } catch (error) {
+          const observed = await observeFolderEntity(folderPath, ambiguousCreateObservationMs);
+          if (observed) return { ok: true, folder: observed, folderId: readEntityId(observed), recovered: true };
+          lastFailure = folderFailure(`Creating ${folderPath} failed: ${error?.message || String(error || '')}`, {
+            folderPath,
+            attempts: attempt
           });
         }
-        const folder = data?.folder || data;
-        const folderId = readEntityId(folder);
-        if (!folderId) {
-          return folderFailure(`Overleaf created ${folderPath} without returning its folder id.`, { folderPath });
-        }
-        return { ok: true, folder, folderId };
-      } catch (error) {
-        return folderFailure(`Creating ${folderPath} failed: ${error?.message || String(error || '')}`, { folderPath });
+        if (attempt < createRequestAttempts) await delay(150 * attempt);
       }
+      return lastFailure || folderFailure(`Creating ${folderPath} failed after retries.`, { folderPath });
+    }
+
+    async function observeFolderEntity(folderPath, timeoutMs) {
+      const attempts = Math.max(1, Math.ceil(timeoutMs / 120));
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const folder = findFolderByPath(getRootFolder(), folderPath);
+        if (folder && readEntityId(folder)) return folder;
+        if (attempt + 1 < attempts) await delay(120);
+      }
+      return null;
+    }
+
+    async function observeProjectPath(filePath, timeoutMs) {
+      const attempts = Math.max(1, Math.ceil(timeoutMs / 120));
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        if (treeOperations.projectPathExists?.(filePath) === true) return true;
+        if (attempt + 1 < attempts) await delay(120);
+      }
+      return false;
+    }
+
+    function isTransientCreateStatus(status) {
+      return status === 408 || status === 425 || status === 429 || status >= 500;
     }
 
     async function waitForFolderPath(folderPath, timeoutMs) {
