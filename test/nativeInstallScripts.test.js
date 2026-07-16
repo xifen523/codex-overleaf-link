@@ -950,6 +950,7 @@ test('native install runtime includes package metadata required by bridge ping',
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-runtime-test-'));
   const runtimeRoot = path.join(tempDir, 'runtime');
   const bridgePath = path.join(tempDir, 'codex-overleaf-bridge');
+  const registryEnv = writeFakeRegistryCommand(tempDir);
   try {
     const result = spawnSync(process.execPath, [
       path.join(__dirname, '../scripts/install-native-host.mjs'),
@@ -962,7 +963,10 @@ test('native install runtime includes package metadata required by bridge ping',
     ], {
       env: {
         ...process.env,
-        HOME: tempDir
+        ...registryEnv,
+        HOME: tempDir,
+        LOCALAPPDATA: getTestWindowsLocalAppData(tempDir),
+        REG_LOG: path.join(tempDir, 'reg.log')
       },
       encoding: 'utf8'
     });
