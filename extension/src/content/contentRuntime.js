@@ -6085,6 +6085,7 @@
     await injectScriptOnce('src/page/overleafProjectSnapshot.js', 'codex-overleaf-project-snapshot-script');
     await injectOptionalOtDependencies();
     await injectScriptOnce('src/page/pageBridgeCapability.js', 'codex-overleaf-page-bridge-capability-script');
+    await injectScriptOnce('src/page/folderWriteback.js', 'codex-overleaf-folder-writeback-script', { force: true });
     await injectScriptOnce('src/page/treeOperations.js', 'codex-overleaf-tree-operations-script', { force: true });
     await injectScriptOnce('src/page/snapshotRouter.js', 'codex-overleaf-snapshot-router-script');
     await injectScriptOnce('src/page/writeGuard.js', 'codex-overleaf-write-guard-script', { force: true });

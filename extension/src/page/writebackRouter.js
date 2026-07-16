@@ -10,6 +10,7 @@
   function create(deps = {}) {
     const window = deps.window || (typeof globalThis !== 'undefined' ? globalThis : {});
     const treeOperations = deps.treeOperations || {};
+    const folderWriteback = deps.folderWriteback || null;
     const compileBridge = deps.compileBridge || { markSourceEdited() {} };
     const projectSnapshotBridge = deps.projectSnapshotBridge || {};
     const normalizeSafeProjectPath = deps.normalizeSafeProjectPath || fallbackNormalizeSafeProjectPath;
@@ -583,7 +584,8 @@
       const pathSafety = validateOperationProjectPaths(operation);
       if (!pathSafety.ok) {
         skipped.push({ operation, result: pathSafety });
-        continue;
+        appendBatchAbortSkips(skipped, operations, rawOperation, operation, pathSafety);
+        break;
       }
       let raceResult;
       if (operation.type === 'edit') {
@@ -596,14 +598,10 @@
       } else if (['create', 'rename', 'move', 'delete'].includes(operation.type)) {
         raceResult = await raceOpAgainstCancellation(applyFileTreeOperation(operation, { baseFileLookup }));
       } else {
-        skipped.push({
-          operation,
-          result: {
-            ok: false,
-            reason: `Unsupported operation type: ${operation.type}`
-          }
-        });
-        continue;
+        const unsupported = { ok: false, reason: `Unsupported operation type: ${operation.type}` };
+        skipped.push({ operation, result: unsupported });
+        appendBatchAbortSkips(skipped, operations, rawOperation, operation, unsupported);
+        break;
       }
       // Cancellation race winner: skip current op + the rest of the queue.
       // The op promise above keeps running in background; its eventual
@@ -622,12 +620,14 @@
         trackedChanges.push(...result.trackedChanges);
       }
       (result.ok ? applied : skipped).push({ operation, result });
+      if (!result.ok) {
+        appendBatchAbortSkips(skipped, operations, rawOperation, operation, result);
+        break;
+      }
     }
-
     if (applied.length > 0) {
       compileBridge.markSourceEdited();
     }
-
     return {
       ok: skipped.length === 0,
       applied,
@@ -635,31 +635,18 @@
       trackedChanges: mergeTrackedChangeRefs(trackedChanges)
     };
   }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+  function appendBatchAbortSkips(skipped, operations, failedRawOperation, failedOperation, failedResult) {
+    for (const rawOperation of operations.slice(operations.indexOf(failedRawOperation) + 1)) {
+      const operation = normalizeOperationPaths(rawOperation);
+      const file = operation.path || operation.to || '';
+      const failure = {
+        code: 'writeback_batch_aborted', stage: 'write', severity: 'blocked', retryable: true, userMessage: 'Codex stopped the remaining writeback operations after an earlier operation failed.',
+        nextAction: 'Resolve the first reported failure, then rerun the task.', terminalState: 'blocked', changedDocument: false, file, operationType: operation.type || '',
+        technicalMessage: failedResult?.reason || '', evidence: { failedPath: failedOperation.path || '', failedCode: failedResult?.code || '' }
+      };
+      skipped.push({ operation, result: { ok: false, code: failure.code, reason: `${file || 'Operation'} was not attempted because ${failedOperation.path || failedOperation.type || 'an earlier operation'} failed.`, failure } });
+    }
+  }
   async function applyEditOperation(operation, options = {}) {
     const currentPath = getActiveFilePath();
     const editorReady = await ensureEditorReadyForOperation(operation, options.baseFileLookup, currentPath);
@@ -1169,6 +1156,10 @@
     if (!freshness.ok) {
       return freshness;
     }
+    if (operation.type === 'binary-create' && folderWriteback) {
+      const parentReady = await folderWriteback.ensureParentFolders(operation.path);
+      if (!parentReady.ok) return parentReady;
+    }
 
     const bytes = decodeBase64Bytes(operation.contentBase64);
     if (!bytes.ok) {
@@ -1385,6 +1376,11 @@
     if (!freshness.ok) {
       return freshness;
     }
+    let parentReady = null;
+    if (operation.type === 'create' && folderWriteback) {
+      parentReady = await folderWriteback.ensureParentFolders(operation.path);
+      if (!parentReady.ok) return parentReady;
+    }
 
     const manager = findFileTreeManager();
     const methodNames = fileTreeMethodNames(operation.type);
@@ -1429,6 +1425,11 @@
       }
     }
 
+    if (operation.type === 'create' && folderWriteback?.createTextFile) {
+      const result = await folderWriteback.createTextFile(operation.path, operation.content || '', parentReady);
+      if (result.ok) recordFileTreeOperationSuccess(operation, options.baseFileLookup);
+      return result;
+    }
     return {
       ok: false,
       reason: 'No supported Overleaf file-tree method was detected'

@@ -2,7 +2,7 @@
   'use strict';
 
   const PAGE_BRIDGE_INSTALL_VERSION = window.CodexOverleafCompatibility?.BUILD_TARGET_VERSION || 'dev';
-  const PAGE_BRIDGE_INSTALL_REVISION = '2026-05-21-editor-readiness-v10';
+  const PAGE_BRIDGE_INSTALL_REVISION = '2026-07-15-folder-writeback-v11';
   if (window.__codexOverleafPageBridgeInstalledVersion === PAGE_BRIDGE_INSTALL_VERSION
     && window.__codexOverleafPageBridgeInstalledRevision === PAGE_BRIDGE_INSTALL_REVISION) {
     return;
@@ -50,6 +50,15 @@
     readActiveEditorText,
     window
   });
+  const folderWriteback = window.CodexOverleafFolderWriteback?.create({
+    document,
+    normalizePath: normalizeSafeProjectPath,
+    readActiveEditorText,
+    replaceActiveEditorText,
+    treeOperations,
+    window
+  }) || null;
+
   snapshotRouter = requirePageModule('CodexOverleafSnapshotRouter').create({
     normalizePath: normalizeSafeProjectPath,
     readActiveEditorText,
@@ -78,6 +87,7 @@
     diagnosticsRevision: PAGE_BRIDGE_INSTALL_REVISION,
     ensureEditing,
     ensureReviewing,
+    folderWriteback,
     // Cross-world cancel: the router's per-op loop polls this each iteration
     // and aborts remaining ops when the value bumps. content-side cancel
     // invokes pageBridge.cancelActiveWrite which calls bumpWriteCancellationSequence.

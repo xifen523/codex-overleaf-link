@@ -295,3 +295,22 @@ test('unsupported local changes are localized in English', () => {
   assert.match(summary, /- unknown\.bin: This file type is not supported for automatic writeback yet\./);
   assert.doesNotMatch(summary, /[\u4e00-\u9fff]/);
 });
+
+test('writeback planning creates dependencies before editing bibliography and main document', () => {
+  const operations = WritebackController.buildSyncApplyOperations([
+    { type: 'write', path: 'main.tex', previousContent: 'old main', content: 'new main' },
+    { type: 'write', path: 'reference.bib', previousContent: 'old refs', content: 'new refs' },
+    { type: 'write', path: 'tables/conference_evidence.tex', content: 'table body' }
+  ], {
+    files: [
+      { path: 'main.tex', content: 'old main' },
+      { path: 'reference.bib', content: 'old refs' }
+    ]
+  });
+
+  assert.deepEqual(operations.map(operation => [operation.type, operation.path]), [
+    ['create', 'tables/conference_evidence.tex'],
+    ['edit', 'reference.bib'],
+    ['edit', 'main.tex']
+  ]);
+});

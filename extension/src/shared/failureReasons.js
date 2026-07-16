@@ -163,6 +163,16 @@
       fallbackUserMessage: 'Some operations wrote, some were skipped.',
       fallbackNextAction: 'Review written files; use Undo written parts if needed.'
     },
+    writeback_batch_aborted: {
+      stage: 'write', severity: 'blocked', defaultRetryable: true,
+      fallbackUserMessage: 'Codex stopped the remaining writeback operations after an earlier operation failed.',
+      fallbackNextAction: 'Resolve the first reported failure, then rerun the task.'
+    },
+    parent_folder_create_failed: {
+      stage: 'write', severity: 'error', defaultRetryable: true,
+      fallbackUserMessage: 'Codex could not create a parent folder required by a new file.',
+      fallbackNextAction: 'Check write permission and the folder path, then retry.'
+    },
 
     // 9.0+ — write-safety primitive (welcome-panel + writeback project-ID guard)
     aborted_project_changed: {

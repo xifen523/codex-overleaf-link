@@ -3592,3 +3592,28 @@ test('compileBridge fetch wrapper is install-once via a page-window sentinel (B7
   assert.match(src, /if \(state\.wrappedFetch && pageWindow\.fetch === state\.wrappedFetch\)\s*\{[\s\S]*?return/,
     'interceptCompileRequests must bail when our wrapper is already installed');
 });
+
+test('writeback batch stops after the first failed operation instead of writing later files', async () => {
+  const bridge = createPageBridgeHarness({
+    activePath: 'main.tex',
+    files: { 'main.tex': 'alpha', 'reference.bib': 'old refs' }
+  });
+
+  const result = await bridge.call('applyOperations', {
+    baseFiles: [
+      { path: 'main.tex', content: 'alpha' },
+      { path: 'reference.bib', content: 'old refs' }
+    ],
+    operations: [
+      { type: 'edit', path: 'missing.tex', replaceAll: 'missing body' },
+      { type: 'edit', path: 'reference.bib', replaceAll: 'new refs' }
+    ]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.applied.length, 0);
+  assert.equal(result.skipped.length, 2);
+  assert.equal(result.skipped[0].result.code, 'path_not_found');
+  assert.equal(result.skipped[1].result.code, 'writeback_batch_aborted');
+  assert.equal(bridge.getFile('reference.bib'), 'old refs');
+});

@@ -9,7 +9,7 @@
 
   function buildSyncApplyOperations(syncChanges = [], project = {}) {
     const existingPaths = new Set((project.files || []).map(file => file.path));
-    return (syncChanges || []).map(change => {
+    const operations = (syncChanges || []).map(change => {
       if (change.type === 'binary-create' || change.type === 'overwrite-binary') {
         return {
           type: change.type,
@@ -61,6 +61,32 @@
         reason: 'Synced a new file from the local Codex workspace.'
       };
     }).filter(operation => operation.path);
+    return sortWritebackOperations(operations);
+  }
+
+  function sortWritebackOperations(operations = []) {
+    return operations
+      .map((operation, index) => ({ operation, index }))
+      .sort((left, right) => (
+        writebackOperationPriority(left.operation) - writebackOperationPriority(right.operation)
+        || left.index - right.index
+      ))
+      .map(entry => entry.operation);
+  }
+
+  function writebackOperationPriority(operation = {}) {
+    if (operation.type === 'create' || operation.type === 'binary-create') return 10;
+    if (operation.type === 'rename' || operation.type === 'move') return 20;
+    if (operation.type === 'edit') {
+      const path = String(operation.path || '').toLowerCase();
+      if (/\.(?:bib|sty|cls|bst|bbx|cbx|lbx|cfg|def|clo|ist)$/.test(path)) return 30;
+      if (path.includes('/')) return 40;
+      if (path === 'main.tex') return 60;
+      return 50;
+    }
+    if (operation.type === 'overwrite-binary') return 70;
+    if (operation.type === 'delete') return 90;
+    return 80;
   }
 
   function getSyncChangePatches(change = {}) {

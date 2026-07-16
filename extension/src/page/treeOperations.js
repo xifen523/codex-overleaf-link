@@ -694,6 +694,13 @@
     const prefix = `${folderPath}/`;
     return collectDomProjectPaths().some(path => path.startsWith(prefix));
   }
+  function folderPathExists(folderPath) {
+    const normalizedPath = normalizeSafeProjectPath(folderPath);
+    if (!normalizedPath) return false;
+    return Boolean(findFolderTreeNode(normalizedPath))
+      || collectProjectTextPaths().some(path => path.startsWith(`${normalizedPath}/`));
+  }
+
 
   function projectPathExists(filePath) {
     if (!filePath) {
@@ -1583,6 +1590,7 @@
       navigateToFile,
       openFileByPath,
       projectPathExists,
+      folderPathExists,
       resolveProjectPath,
       readProjectPathFromNode,
       renameFile,

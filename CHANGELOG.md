@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.10.3 - 2026-07-15
+
+### Fixed
+
+- Capture final assistant responses from the current Codex app-server `turn/completed.params.turn.items` payload.
+- Reject failed or interrupted Codex turns with their upstream error instead of reporting a successful turn with no usable result.
+- Create missing Overleaf parent folders recursively before creating nested text or binary files.
+- Verify every created folder and file appears in the Overleaf project tree before continuing.
+- Write new files and dependencies before subdocuments, and write `main.tex` last.
+- Stop the remaining writeback batch after the first failed operation so an entry document cannot reference a missing dependency.
+- Retry positive Overleaf save confirmation up to five times.
+- Skip mirror refresh and automatic compilation when any operation was skipped or the save could not be verified.
+- Emit structured `parent_folder_create_failed` and `writeback_batch_aborted` failures with actionable recovery details.
+
+Overleaf nested-file creation and fail-closed multi-file writeback patch. Native protocol `1` remains unchanged.
+
+### Release
+
+- Release metadata alignment: package, extension manifest, compatibility target, README commands, and release tracking resolve to `1.10.3`.
+- Release artifacts resolve to `codex-overleaf-link-extension-v1.10.3.zip`, `codex-overleaf-native-host-v1.10.3.tar.gz`, and `codex-overleaf-link-1.10.3.tgz`.
+
 ## v1.10.2 - 2026-07-15
 
 - Retry transient Codex network failures up to five full session attempts with bounded exponential backoff.

@@ -982,7 +982,8 @@ function runCodexAppServerSession(input) {
           params: message.params || {}
         }, inferNotificationStatus(message));
         if (message.method === 'turn/completed' && (!activeTurnId || message.params?.turn?.id === activeTurnId || message.params?.turnId === activeTurnId)) {
-          succeed();
+          const turn = message.params?.turn || {};
+          turn.status && turn.status !== 'completed' ? fail(new Error(turn.error?.message || `Codex turn ${turn.status}`)) : succeed();
         }
         if (message.method === 'error' && isTransientCodexAppServerError(message.params)) {
           return;
@@ -1030,9 +1031,9 @@ function runCodexAppServerSession(input) {
         setAssistantMessage(itemId, next);
         return;
       }
-      if (item.type === 'agentMessage' && typeof item.text === 'string' && item.text.trim()) {
-        const itemId = String(item.id || params.itemId || 'current');
-        setAssistantMessage(itemId, item.text);
+      const items = method === 'turn/completed' && Array.isArray(params.turn?.items) ? params.turn.items : [item];
+      for (const candidate of items) {
+        if (candidate?.type === 'agentMessage' && typeof candidate.text === 'string' && candidate.text.trim()) setAssistantMessage(String(candidate.id || params.itemId || 'current'), candidate.text);
       }
     }
 

@@ -356,6 +356,8 @@
         pendingMirrorRefresh = null;
       });
     const compileSummary = appliedPaths.length
+      && skippedEntries.length === 0
+      && saveVerification?.state === 'verified_saved'
       ? await autoRecompileAfterWriteback(appliedPaths, saveVerification).catch(error => {
         appendRunEvent({
           title: tx(`Post-write compile failed: ${error.message}`, `写后编译出错：${error.message}`),
@@ -432,43 +434,34 @@
   }
 
   async function verifyPostWriteSaveState() {
-    try {
-      const result = await callPageBridge('waitForSaveState', {
-        deadlineMs: 5000,
-        requirePositiveSignal: true
-      });
-      if (result?.state === 'verified_saved') {
-        return {
+    let lastResult = { ok: false, state: 'unavailable', reason: 'Save verification did not run.' };
+    for (let attempt = 1; attempt <= 5; attempt += 1) {
+      try {
+        const result = await callPageBridge('waitForSaveState', {
+          deadlineMs: 5000,
+          requirePositiveSignal: true
+        });
+        if (result?.state === 'verified_saved' || (result?.ok === true && !result?.state)) {
+          return { ...result, ok: true, state: 'verified_saved', attempts: attempt };
+        }
+        lastResult = {
           ...result,
-          ok: true,
-          state: 'verified_saved'
+          ok: false,
+          state: ['unknown_timeout', 'unavailable'].includes(result?.state)
+            ? result.state
+            : 'unknown_timeout',
+          attempts: attempt
+        };
+      } catch (error) {
+        lastResult = {
+          ok: false,
+          state: 'unavailable',
+          reason: error.message,
+          attempts: attempt
         };
       }
-      if (result?.ok === true && !result?.state) {
-        return {
-          ...result,
-          ok: true,
-          state: 'verified_saved'
-        };
-      }
-      if (result?.state === 'unknown_timeout' || result?.state === 'unavailable') {
-        return {
-          ...result,
-          ok: false
-        };
-      }
-      return {
-        ...result,
-        ok: false,
-        state: 'unknown_timeout'
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        state: 'unavailable',
-        reason: error.message
-      };
     }
+    return lastResult;
   }
 
   function appendPostWriteSaveVerificationWarning(saveVerification = {}) {
@@ -615,6 +608,7 @@
 
   async function autoRecompileAfterWriteback(writtenPaths = [], saveVerification = {}) {
     if (getState().autoRecompile === false) return null;
+    if (saveVerification?.state !== 'verified_saved') return null;
     if (getState().mode === 'ask') return null;
 
     const CompileAdapter = window.CodexOverleafCompileAdapter;
@@ -640,7 +634,7 @@
       const result = await callPageBridge('triggerCompile', {
         preferUiClick: true,
         waitForSaveMs: 5000,
-        requireVerifiedSave: saveVerification?.state === 'verified_saved'
+        requireVerifiedSave: true
       });
       if (result?.ok) {
         let logResult = null;

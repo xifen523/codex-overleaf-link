@@ -296,7 +296,7 @@ test('codex app-server exit before turn completion rejects instead of hanging', 
   }
 });
 
-test('codex app-server transient reconnect notification does not fail the turn', async () => {
+test('codex app-server captures a completion-only final message after transient reconnect', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-reconnect-'));
   const events = [];
   try {
@@ -329,6 +329,22 @@ test('codex app-server transient reconnect notification does not fail the turn',
       ),
       true
     );
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('codex app-server rejects a failed turn with the upstream error', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-app-server-failed-turn-'));
+  try {
+    const fakeCodex = writeFakeCodexTransientReconnect(tempDir, {
+      id: 'turn-1', status: 'failed', items: [], error: { message: 'proxy upstream failed' }
+    });
+    await assert.rejects(runCodexAppServerSession({
+      task: 'test',
+      env: { CODEX_OVERLEAF_ENV_READY: '1', CODEX_OVERLEAF_CODEX_PATH: fakeCodex, PATH: process.env.PATH },
+      emit: () => {}
+    }), /proxy upstream failed/);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -429,7 +445,9 @@ function writeFakeCodexExit(tempDir, code) {
   return commandPath;
 }
 
-function writeFakeCodexTransientReconnect(tempDir) {
+function writeFakeCodexTransientReconnect(tempDir, turn = {
+  id: 'turn-1', status: 'completed', items: [{ id: 'msg-1', type: 'agentMessage', text: 'Recovered answer' }]
+}) {
   const scriptPath = path.join(tempDir, 'fake-codex-reconnect.js');
   fs.writeFileSync(scriptPath, [
     "const readline = require('node:readline');",
@@ -452,8 +470,7 @@ function writeFakeCodexTransientReconnect(tempDir) {
     "    send({ id: message.id, result: { turn: { id: 'turn-1' } } });",
     "    send({ method: 'turn/started', params: { turn: { id: 'turn-1' } } });",
     "    send({ method: 'error', params: { error: { message: 'Reconnecting... 2/5' } } });",
-    "    send({ method: 'item/agentMessage/delta', params: { itemId: 'msg-1', delta: 'Recovered answer' } });",
-    "    send({ method: 'turn/completed', params: { turn: { id: 'turn-1' } } });",
+    `    send(${JSON.stringify({ method: 'turn/completed', params: { turn } })});`,
     "  }",
     "});",
     "process.on('SIGTERM', () => process.exit(0));",

@@ -1072,10 +1072,12 @@ test('post-write side effects wait for verified Overleaf save state', () => {
   assert.ok(refreshIndex > verifyIndex, 'mirror refresh happens after save verification');
   assert.ok(recompileIndex > verifyIndex, 'auto compile happens after save verification');
   assert.match(verifyBody, /callPageBridge\('waitForSaveState', \{\s*deadlineMs:\s*5000,\s*requirePositiveSignal:\s*true\s*\}\)/);
+  assert.match(verifyBody, /attempt\s*=\s*1;\s*attempt\s*<=\s*5/);
   assert.match(verifyBody, /state:\s*'verified_saved'/);
-  assert.match(verifyBody, /state:\s*'unknown_timeout'/);
+  assert.match(verifyBody, /unknown_timeout/);
   assert.match(verifyBody, /state:\s*'unavailable'/);
   assert.match(applyBody, /appendPostWriteSaveVerificationWarning\(saveVerification\)/);
+  assert.match(applyBody, /skippedEntries\.length === 0[\s\S]*saveVerification\?\.state === 'verified_saved'[\s\S]*autoRecompileAfterWriteback/);
 });
 
 test('empty or malformed apply results do not trigger save verification', () => {
@@ -1135,7 +1137,7 @@ test('post-write mirror refresh waits for verified save but auto compile still d
   assert.match(refreshBody, /async function refreshProjectMirrorAfterWriteback\(project = \{\}, applied = \{\}, saveVerification = \{\}\)/);
   assert.match(autoCompileBody, /async function autoRecompileAfterWriteback\(writtenPaths = \[\], saveVerification = \{\}\)/);
   assert.match(refreshBody, /saveVerification\?\.state !== 'verified_saved'[\s\S]*?return;/);
-  assert.doesNotMatch(autoCompileBody, /saveVerification\?\.state !== 'verified_saved'[\s\S]*?return;/);
+  assert.match(autoCompileBody, /saveVerification\?\.state !== 'verified_saved'[\s\S]*?return null;/);
   assert.ok(
     refreshBody.indexOf("saveVerification?.state !== 'verified_saved'") < refreshBody.indexOf("callPageBridge('invalidateProjectSnapshot'"),
     'mirror refresh checks verified save before invalidating snapshot cache'
@@ -1148,8 +1150,11 @@ test('post-write mirror refresh waits for verified save but auto compile still d
     refreshBody.indexOf("saveVerification?.state !== 'verified_saved'") < refreshBody.indexOf("method: 'mirror.sync'"),
     'mirror refresh checks verified save before syncing native mirror'
   );
-  assert.match(autoCompileBody, /callPageBridge\('triggerCompile', \{[\s\S]*requireVerifiedSave:\s*saveVerification\?\.state === 'verified_saved'/);
-  assert.match(autoCompileBody, /saveVerification\?\.state !== 'verified_saved'[\s\S]*Overleaf save was not verified, but Auto Compile is on/);
+  assert.match(autoCompileBody, /callPageBridge\('triggerCompile', \{[\s\S]*requireVerifiedSave:\s*true/);
+  assert.ok(
+    autoCompileBody.indexOf("if (saveVerification?.state !== 'verified_saved') return null") < autoCompileBody.indexOf("callPageBridge('triggerCompile'"),
+    'auto compile exits before dispatch when save is unverified'
+  );
   assert.doesNotMatch(saveWarningBody, /auto compile (?:was|were) skipped/);
 });
 
@@ -5385,6 +5390,8 @@ test('every page-world module writebackRouter dereferences is actually injected 
   const body = extractFromContentScript('injectPageBridge');
   const lifecycleAt = body.indexOf("src/page/trackedChangesLifecycle.js");
   const routerAt = body.indexOf("src/page/writebackRouter.js");
+  const folderAt = body.indexOf("src/page/folderWriteback.js");
+  assert.ok(folderAt !== -1 && folderAt < routerAt, 'folder writeback must load before the router');
   assert.ok(lifecycleAt !== -1, 'trackedChangesLifecycle.js must be injected');
   assert.ok(routerAt !== -1, 'writebackRouter.js must be injected');
   assert.ok(lifecycleAt < routerAt, 'lifecycle must load before the router that dereferences it');
