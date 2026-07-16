@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   computeDraftFingerprint,
@@ -23,6 +24,7 @@ const { classifyProviderFailure } = require('../native-host/src/codexProviderTes
 const { classifyResponsesRoute } = require('../native-host/src/providerBridgeRoutes');
 const {
   getProviderStorePaths,
+  activateProvider,
   listProviders,
   loadProviderState,
   upsertProvider
@@ -67,6 +69,13 @@ function saveVerifiedProvider(env, draft, options = {}) {
     activate: options.activate === true,
     disclosureHost: options.activate === true ? new URL(draft.baseUrl).hostname : ''
   }, env);
+}
+
+function loadProviderDialogContract() {
+  const source = fs.readFileSync(path.join(__dirname, '../extension/src/content/providerSettingsDialog.js'), 'utf8');
+  const context = { window: {} };
+  vm.runInNewContext(source, context);
+  return context.window.CodexOverleafProviderSettingsDialog;
 }
 
 test('custom runs require the provider revision displayed by the current tab', () => {
@@ -114,6 +123,63 @@ test('provider state recovers a stale inter-process lock and keeps stores aligne
     assert.equal(state.public.storeRevision, state.secrets.storeRevision);
     assert.equal(fs.existsSync(paths.lockFile), false);
   });
+});
+
+test('three saved providers can activate the third profile without another upsert', () => {
+  withProviderStore(env => {
+    let catalog;
+    for (let index = 1; index <= 3; index += 1) {
+      catalog = saveVerifiedProvider(env, makeDraft({
+        name: `Provider ${index}`,
+        baseUrl: `https://api${index}.example.com/v1`,
+        models: [{ id: `model-${index}`, label: `Model ${index}`, reasoningEfforts: [] }],
+        defaultModelId: `model-${index}`
+      }));
+    }
+    const third = catalog.providers.find(provider => provider.name === 'Provider 3');
+    const activated = activateProvider({
+      providerId: third.id,
+      expectedRevision: third.revision,
+      disclosureHost: 'api3.example.com'
+    }, env);
+    assert.equal(activated.activeProviderId, third.id);
+    assert.equal(activated.providers.filter(provider => provider.kind === 'custom').length, 3);
+    const active = activated.providers.find(provider => provider.id === third.id);
+    assert.equal(active.revision, third.revision + 1);
+    assert.equal(active.lastVerified.revision, active.revision);
+  });
+});
+
+test('provider footer separates saved activation from draft save actions', () => {
+  const { getFooterActionState } = loadProviderDialogContract();
+  const newDraft = getFooterActionState({ isNew: true, canSave: true });
+  assert.equal(newDraft.showSave, true);
+  assert.equal(newDraft.showSaveAndUse, true);
+  assert.equal(newDraft.showUse, false);
+
+  const savedInactive = getFooterActionState({ canActivate: true });
+  assert.equal(savedInactive.showSave, false);
+  assert.equal(savedInactive.showSaveAndUse, false);
+  assert.equal(savedInactive.showUse, true);
+  assert.equal(savedInactive.useEnabled, true);
+
+  const dirtyInactive = getFooterActionState({ dirty: true, canSave: false });
+  assert.equal(dirtyInactive.showSave, true);
+  assert.equal(dirtyInactive.showSaveAndUse, true);
+  assert.equal(dirtyInactive.showUse, false);
+  assert.equal(dirtyInactive.saveEnabled, false);
+
+  const active = getFooterActionState({ active: true, canActivate: true });
+  assert.equal(active.showUse, false);
+  assert.equal(active.showSaveAndUse, false);
+});
+
+test('provider rows stay inside the sidebar and expose clipped names', () => {
+  const dialogSource = fs.readFileSync(path.join(__dirname, '../extension/src/content/providerSettingsDialog.js'), 'utf8');
+  const panelCss = fs.readFileSync(path.join(__dirname, '../extension/styles/panel.css'), 'utf8');
+  assert.match(dialogSource, /codex-provider-row-main" title="\$\{escapeAttr\(provider\.name\)\}"/);
+  assert.match(panelCss, /\.codex-provider-row,[\s\S]*?box-sizing:\s*border-box;[\s\S]*?max-width:\s*100%;[\s\S]*?overflow:\s*hidden;/);
+  assert.match(panelCss, /\.codex-provider-row-main\s*\{[^}]*width:\s*100%;[^}]*text-overflow:\s*ellipsis;/);
 });
 
 test('provider errors redact the exact API key even when it is unlabelled', () => {

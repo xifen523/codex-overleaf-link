@@ -123,9 +123,13 @@
 
 .codex-provider-row,
 .codex-provider-add {
+  box-sizing: border-box;
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 3px;
   padding: 10px 11px;
   border: 0;
@@ -133,13 +137,14 @@
   background: transparent;
   color: inherit;
   text-align: left;
+  overflow: hidden;
   cursor: pointer;
 }
 
 .codex-provider-row:hover,
 .codex-provider-row[aria-current="true"] { background: rgba(255, 255, 255, 0.07); }
 .codex-provider-row[aria-current="true"] { box-shadow: inset 2px 0 var(--provider-accent); }
-.codex-provider-row-main { overflow: hidden; text-overflow: ellipsis; font-weight: 650; white-space: nowrap; }
+.codex-provider-row-main { display: block; width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 13px; font-weight: 650; white-space: nowrap; }
 .codex-provider-row-status { color: var(--provider-muted); font-size: 11px; }
 .codex-provider-row-status[data-tone="active"] { color: var(--provider-accent); }
 .codex-provider-add { margin-top: 8px; color: var(--provider-accent); }

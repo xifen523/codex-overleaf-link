@@ -21,6 +21,7 @@
         onTest: context => testProvider(instance, context),
         onCancelTest: () => cancelProviderTest(instance),
         onSave: (context, action) => saveProvider(instance, context, action),
+        onActivate: context => activateProvider(instance, context),
         onDelete: context => deleteProvider(instance, context),
         onActivateBuiltin: () => activateBuiltin(instance)
       }
@@ -152,6 +153,30 @@
       instance.dialog.setStatus({ tone: 'success', title: instance.tx('Provider deleted.', '模型服务已删除。') });
     } catch (error) {
       instance.dialog.setBusy('failed', formatError(instance, error));
+    }
+  }
+
+  async function activateProvider(instance, context) {
+    instance.dialog.setBusy('saving', instance.tx('Activating provider…', '正在启用模型服务…'));
+    try {
+      const result = await request(instance, 'codex.providers.activate', {
+        providerId: context.profileId,
+        expectedRevision: context.expectedRevision,
+        disclosureHost: context.disclosureHost
+      });
+      applyCatalog(instance, result, {
+        updateDialog: true,
+        selectedId: context.profileId
+      });
+      await notifyChanged(instance);
+      instance.dialog.setBusy('', '');
+      instance.dialog.setStatus({
+        tone: 'success',
+        title: instance.tx('Provider activated.', '模型服务已启用。')
+      });
+    } catch (error) {
+      instance.dialog.setBusy('failed', formatError(instance, error));
+      instance.dialog.setStatus({ tone: 'failed', title: formatError(instance, error) });
     }
   }
 

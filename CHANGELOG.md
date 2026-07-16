@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.1.0 - 2026-07-15
+## v2.1.0 - 2026-07-16
 
 Release candidate adding first-class third-party model providers while preserving the built-in Codex path and the v2 writeback safety model.
 
@@ -12,6 +12,8 @@ Release candidate adding first-class third-party model providers while preservin
 
 ### Fixed
 
+- Added an independent `Use` action for saved, verified provider profiles, so any configured provider can be activated without editing or resaving it.
+- Kept long provider names and status content inside the provider sidebar, with stable ellipsis and full-name hover disclosure.
 - Activated a newly saved provider on its first use and kept model choices isolated between providers.
 - Preserved Markdown block headings such as `## Education (main.tex:56-60)` in provider responses and rendered them consistently in run conclusions.
 - Bypassed system proxies for the local provider bridge, preventing intermittent `502` failures when Codex connects to the loopback runtime.

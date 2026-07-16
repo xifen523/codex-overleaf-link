@@ -141,7 +141,7 @@
             : '';
       return `
         <button type="button" class="codex-provider-row" data-provider-row="${escapeAttr(provider.id)}" aria-current="${selected ? 'true' : 'false'}">
-          <span class="codex-provider-row-main">${escapeHtml(provider.name)}</span>
+          <span class="codex-provider-row-main" title="${escapeAttr(provider.name)}">${escapeHtml(provider.name)}</span>
           ${status ? `<span class="codex-provider-row-status" data-tone="${active ? 'active' : 'muted'}">${escapeHtml(status)}</span>` : ''}
         </button>
       `;
@@ -380,14 +380,36 @@
     }
     const active = provider.id && provider.id === instance.catalog.activeProviderId;
     const isNew = !provider.id;
-    const saveDisabled = canSaveCurrentDraft(instance) ? '' : ' disabled aria-disabled="true"';
+    const actionState = getFooterActionState({
+      isNew,
+      active,
+      dirty: instance.dirty,
+      canSave: canSaveCurrentDraft(instance),
+      canActivate: canActivateCurrentProvider(instance)
+    });
+    const saveDisabled = actionState.saveEnabled ? '' : ' disabled aria-disabled="true"';
+    const useDisabled = actionState.useEnabled ? '' : ' disabled aria-disabled="true"';
     actions.innerHTML = `
       ${provider.id ? `<button type="button" class="codex-provider-danger-button" data-provider-action="delete">${escapeHtml(tx('Delete', '删除'))}</button>` : ''}
       <span class="codex-provider-footer-spacer"></span>
       <button type="button" class="codex-provider-secondary-button" data-provider-action="close">${escapeHtml(tx('Cancel', '取消'))}</button>
-      ${isNew ? '' : `<button type="button" class="codex-provider-secondary-button" data-provider-action="save"${saveDisabled}>${escapeHtml(tx('Save', '保存'))}</button>`}
-      ${active ? '' : `<button type="button" class="codex-provider-primary-button" data-provider-action="save-use"${saveDisabled}>${escapeHtml(tx('Save and use', '保存并使用'))}</button>`}
+      ${actionState.showSave ? `<button type="button" class="codex-provider-secondary-button" data-provider-action="save"${saveDisabled}>${escapeHtml(tx('Save', '保存'))}</button>` : ''}
+      ${actionState.showSaveAndUse ? `<button type="button" class="codex-provider-primary-button" data-provider-action="save-use"${saveDisabled}>${escapeHtml(tx('Save and use', '保存并使用'))}</button>` : ''}
+      ${actionState.showUse ? `<button type="button" class="codex-provider-primary-button" data-provider-action="use"${useDisabled}>${escapeHtml(tx('Use', '使用'))}</button>` : ''}
     `;
+  }
+
+  function getFooterActionState(options = {}) {
+    const isNew = options.isNew === true;
+    const active = options.active === true;
+    const dirty = options.dirty === true;
+    return {
+      showSave: isNew || dirty,
+      showSaveAndUse: !active && (isNew || dirty),
+      showUse: !isNew && !active && !dirty,
+      saveEnabled: options.canSave === true,
+      useEnabled: options.canActivate === true
+    };
   }
 
   function handleClick(instance, event) {
@@ -435,6 +457,25 @@
     if (action === 'test') {
       invalidateVerification(instance, false);
       instance.callbacks.onTest?.(readContext(instance));
+      return;
+    }
+    if (action === 'use') {
+      if (!canActivateCurrentProvider(instance)) {
+        setStatus(instance, {
+          tone: 'failed',
+          title: instance.tx('Test and save this provider before using it.', '使用前请先测试并保存此模型服务。')
+        });
+        return;
+      }
+      const context = readContext(instance);
+      if (!instance.root.querySelector('[data-provider-disclosure]')?.checked) {
+        setStatus(instance, {
+          tone: 'failed',
+          title: instance.tx('Confirm the endpoint disclosure before activating this provider.', '启用此服务前，请先确认端点披露说明。')
+        });
+        return;
+      }
+      instance.callbacks.onActivate?.(context);
       return;
     }
     if (action === 'save' || action === 'save-use') {
@@ -594,12 +635,15 @@
   function applyBusyState(instance) {
     const busy = Boolean(instance.busy && instance.busy !== 'failed');
     const canSave = canSaveCurrentDraft(instance);
+    const canActivate = canActivateCurrentProvider(instance);
     instance.root.dataset.busy = instance.busy || '';
     for (const element of instance.root.querySelectorAll('input, select, textarea, button')) {
       if (element.matches('[data-provider-action="close"]')) {
         element.disabled = false;
       } else if (element.matches('[data-provider-action="save"], [data-provider-action="save-use"]')) {
         element.disabled = busy || !canSave;
+      } else if (element.matches('[data-provider-action="use"]')) {
+        element.disabled = busy || !canActivate;
       } else {
         element.disabled = busy;
       }
@@ -643,6 +687,15 @@
   function canSaveCurrentDraft(instance) {
     const provider = getSelectedProvider(instance);
     return Boolean(instance.verification || (!instance.dirty && provider?.lastVerified));
+  }
+
+  function canActivateCurrentProvider(instance) {
+    const provider = getSelectedProvider(instance);
+    return Boolean(
+      provider?.id &&
+      !instance.dirty &&
+      provider.lastVerified?.revision === provider.revision
+    );
   }
 
   function formatVerification(instance, provider) {
@@ -709,5 +762,5 @@
     instance.root = null;
   }
 
-  window.CodexOverleafProviderSettingsDialog = { create };
+  window.CodexOverleafProviderSettingsDialog = { create, getFooterActionState };
 })();
