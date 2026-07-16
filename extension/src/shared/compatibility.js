@@ -238,13 +238,17 @@
   }
 
   function reportsSupportedProtocol(native) {
-    if (!Number.isInteger(native.protocolVersion) ||
-        native.protocolVersion < SUPPORTED_NATIVE_PROTOCOL.min ||
-        native.protocolVersion > SUPPORTED_NATIVE_PROTOCOL.max) {
+    if (!Number.isInteger(native.protocolVersion)) {
       return false;
     }
     if (native.supportedProtocol === undefined || native.supportedProtocol === null) {
-      return true;
+      return native.protocolVersion >= SUPPORTED_NATIVE_PROTOCOL.min &&
+        native.protocolVersion <= SUPPORTED_NATIVE_PROTOCOL.max;
+    }
+    if (!isProtocolRange(native.supportedProtocol) ||
+        native.protocolVersion < native.supportedProtocol.min ||
+        native.protocolVersion > native.supportedProtocol.max) {
+      return false;
     }
     return protocolRangesOverlap(SUPPORTED_NATIVE_PROTOCOL, native.supportedProtocol);
   }

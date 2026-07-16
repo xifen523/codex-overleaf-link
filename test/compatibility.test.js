@@ -98,6 +98,18 @@ test('classifyNativeCompatibility keeps v1.0 protocol 1 hosts with required capa
   assert.equal(compatibility.isNativeMethodAllowed('codex.run', result), true);
 });
 
+test('classifyNativeCompatibility accepts a newer preferred protocol when the advertised range overlaps', () => {
+  const response = nativeResponse({
+    protocolVersion: 3,
+    supportedProtocol: { min: 1, max: 3 }
+  });
+
+  const result = compatibility.evaluateNativeCompatibility(response, { version: '2.1.0' });
+
+  assert.equal(result.status, 'ok');
+  assert.equal(result.classification, 'compatible');
+});
+
 test('classifyNativeCompatibility returns update-available for older protocol 1 hosts with the allowed-method capability subset', () => {
   const response = nativeResponse({
     version: '0.9.5',

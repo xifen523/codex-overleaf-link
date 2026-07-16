@@ -162,6 +162,21 @@ test('bridge.ping returns bridge metadata', async () => {
   assert.deepEqual(response.result.environment.latex.available, ['latexmk']);
 });
 
+test('bridge.ping negotiates protocol 1 for a legacy extension during an upgrade', async () => {
+  const response = await handleRequest({
+    id: 'legacy-protocol',
+    method: 'bridge.ping',
+    params: {
+      extensionProtocolVersion: 1,
+      supportedNativeProtocol: { min: 1, max: 1 }
+    }
+  }, {});
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.protocolVersion, 1);
+  assert.deepEqual(response.result.supportedProtocol, { min: 1, max: 2 });
+});
+
 test('bridge.ping reports injected platform metadata from the native host environment', async () => {
   const response = await handleRequest({ id: 'platform', method: 'bridge.ping', params: {} }, {
     CODEX_OVERLEAF_PLATFORM: 'linux'

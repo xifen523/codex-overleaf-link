@@ -56,7 +56,7 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
     return okResponse(request.id, {
       host: HOST_NAME,
       platform: getNativeRuntimePlatform({ env }),
-      protocolVersion: 2,
+      protocolVersion: negotiateProtocolVersion(request.params),
       supportedProtocol: { ...SUPPORTED_NATIVE_PROTOCOL },
       capabilities: Object.fromEntries(REQUIRED_CAPABILITIES.map(capability => [capability, true])),
       minExtensionVersion: MIN_COMPATIBLE_EXTENSION_VERSION,
@@ -134,6 +134,28 @@ async function handleRequest(request, env = process.env, emit = () => {}) {
   }
 
   return errorResponse(request.id, 'method_not_found', `Unknown method: ${request.method}`);
+}
+
+function negotiateProtocolVersion(params) {
+  const clientRange = params?.supportedNativeProtocol;
+  if (!isProtocolRange(clientRange)) {
+    return SUPPORTED_NATIVE_PROTOCOL.max;
+  }
+
+  const highestCommonVersion = Math.min(SUPPORTED_NATIVE_PROTOCOL.max, clientRange.max);
+  const lowestCommonVersion = Math.max(SUPPORTED_NATIVE_PROTOCOL.min, clientRange.min);
+  return lowestCommonVersion <= highestCommonVersion
+    ? highestCommonVersion
+    : SUPPORTED_NATIVE_PROTOCOL.max;
+}
+
+function isProtocolRange(range) {
+  return Boolean(
+    range &&
+    Number.isInteger(range.min) &&
+    Number.isInteger(range.max) &&
+    range.min <= range.max
+  );
 }
 
 function quotaErrorResponse(id, violation) {
