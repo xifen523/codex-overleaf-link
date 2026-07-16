@@ -768,7 +768,7 @@ test('confirmWritebackFiles re-hashes written workspace files in place and refre
   }
 });
 
-test('confirmWritebackFiles refuses dirty mirrors, unknown files and missing baselines (v1.8.0)', async () => {
+test('confirmWritebackFiles handles unknown files and missing baselines (v1.8.0)', async () => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
   try {
     // No baseline yet -> refuse (caller falls back to the full resync).
@@ -794,11 +794,71 @@ test('confirmWritebackFiles refuses dirty mirrors, unknown files and missing bas
     const empty = await confirmWritebackFiles({ projectId: 'confirm-guards', paths: [], rootDir });
     assert.equal(empty.ok, false);
 
-    // Dirty mirror -> refuse.
-    markMirrorDirty({ projectId: 'confirm-guards', rootDir, reason: 'test_dirty' });
-    const dirty = await confirmWritebackFiles({ projectId: 'confirm-guards', paths: ['main.tex'], rootDir });
-    assert.equal(dirty.ok, false);
-    assert.equal(dirty.reason, 'dirty_mirror');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('confirmWritebackFiles adopts applied paths while preserving other pending local changes', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-overleaf-mirror-'));
+  try {
+    await syncOverleafToMirror({
+      projectId: 'confirm-partial',
+      project: {
+        files: [
+          { path: 'main.tex', content: 'original main\n' },
+          { path: 'sections/other.tex', content: 'original other\n' }
+        ],
+        capabilities: { fullProjectSnapshot: true }
+      },
+      rootDir
+    });
+    const mirror = getProjectMirror('confirm-partial', { rootDir });
+    fs.writeFileSync(path.join(mirror.workspacePath, 'main.tex'), 'written main\n', 'utf8');
+    fs.writeFileSync(path.join(mirror.workspacePath, 'sections', 'other.tex'), 'pending other\n', 'utf8');
+    fs.mkdirSync(path.join(mirror.workspacePath, 'figures'), { recursive: true });
+    fs.writeFileSync(path.join(mirror.workspacePath, 'figures', 'pending.png'), Buffer.from([1, 2, 3]));
+    markMirrorDirty({ projectId: 'confirm-partial', rootDir, reason: 'codex_run_local_changes' });
+
+    const partial = await confirmWritebackFiles({
+      projectId: 'confirm-partial',
+      paths: ['main.tex'],
+      rootDir
+    });
+    assert.equal(partial.ok, true);
+    assert.deepEqual(partial.pendingPaths, ['figures/pending.png', 'sections/other.tex']);
+    let status = getMirrorStatus('confirm-partial', { rootDir });
+    assert.equal(status.dirty, true);
+    assert.equal(status.dirtyReason, 'writeback_pending_changes');
+    assert.equal(fs.existsSync(path.join(mirror.workspacePath, 'figures', 'pending.png')), true);
+
+    await syncOverleafToMirror({
+      projectId: 'confirm-partial',
+      project: {
+        files: [
+          { path: 'main.tex', content: 'written main\n' },
+          { path: 'sections/other.tex', content: 'original other\n' }
+        ],
+        capabilities: { fullProjectSnapshot: true }
+      },
+      rootDir
+    });
+    assert.equal(
+      fs.readFileSync(path.join(mirror.workspacePath, 'sections', 'other.tex'), 'utf8'),
+      'pending other\n',
+      'the next full Overleaf snapshot does not overwrite a pending text writeback'
+    );
+    assert.equal(
+      fs.existsSync(path.join(mirror.workspacePath, 'figures', 'pending.png')),
+      true,
+      'the next full Overleaf snapshot does not remove a pending new asset'
+    );
+    const pending = await collectMirrorChangesDetailed({ projectId: 'confirm-partial', rootDir });
+    assert.deepEqual(
+      pending.changes.map(change => change.path).sort(),
+      ['figures/pending.png', 'sections/other.tex'],
+      'pending changes are offered for writeback again on the next run'
+    );
   } finally {
     fs.rmSync(rootDir, { recursive: true, force: true });
   }

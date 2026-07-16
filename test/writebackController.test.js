@@ -314,3 +314,50 @@ test('writeback planning creates dependencies before editing bibliography and ma
     ['edit', 'main.tex']
   ]);
 });
+
+test('text changes that reference a skipped new asset are blocked before writeback', () => {
+  const operations = WritebackController.buildSyncApplyOperations([
+    {
+      type: 'binary-create',
+      path: 'figures/overview.png',
+      contentBase64: Buffer.from('png').toString('base64')
+    },
+    {
+      type: 'write',
+      path: 'main.tex',
+      previousContent: '\\section{Old}\n',
+      content: '\\section{New}\n\\includegraphics{figures/overview}\n'
+    }
+  ], {
+    files: [{ path: 'main.tex', content: '\\section{Old}\n' }]
+  });
+  const binary = operations.find(operation => operation.type === 'binary-create');
+  const remaining = operations.filter(operation => operation !== binary);
+  const decision = WritebackController.blockOperationsDependingOnSkippedCreates(remaining, [{
+    operation: binary,
+    result: { code: 'binary_confirmation_rejected' }
+  }], {
+    files: [{ path: 'main.tex', content: '\\section{Old}\n' }]
+  });
+
+  assert.deepEqual(decision.operations, []);
+  assert.equal(decision.skipped.length, 1);
+  assert.equal(decision.skipped[0].operation.path, 'main.tex');
+  assert.equal(decision.skipped[0].result.code, 'dependency_write_blocked');
+  assert.match(decision.skipped[0].result.reason, /figures\/overview\.png/);
+});
+
+test('unrelated text changes remain writable when a new asset is skipped', () => {
+  const operation = {
+    type: 'edit',
+    path: 'abstract.tex',
+    patches: [{ from: 0, to: 0, expected: '', insert: 'Updated abstract.' }]
+  };
+  const decision = WritebackController.blockOperationsDependingOnSkippedCreates([operation], [{
+    operation: { type: 'binary-create', path: 'figures/overview.png' },
+    result: { code: 'binary_confirmation_rejected' }
+  }], { files: [{ path: 'abstract.tex', content: '' }] });
+
+  assert.deepEqual(decision.operations, [operation]);
+  assert.deepEqual(decision.skipped, []);
+});

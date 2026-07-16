@@ -41,6 +41,9 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
   const nextPaths = new Set(files.map(file => file.path));
   const previous = readBaseline(mirror.baselinePath);
   const fullProjectSnapshot = project?.capabilities?.fullProjectSnapshot !== false;
+  const preservedPendingPaths = fullProjectSnapshot && previous.dirtyReason === 'writeback_pending_changes'
+    ? new Set(findPendingWorkspacePaths(mirror.workspacePath, previous.files || []))
+    : new Set();
 
   const mirrorRoot = path.dirname(mirror.projectRoot);
   assertSafeMirrorPathBeforeCreate(mirror.workspacePath, mirrorRoot);
@@ -52,7 +55,7 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
 
   if (fullProjectSnapshot) {
     for (const filePath of listWorkspaceFiles(mirror.workspacePath)) {
-      if (nextPaths.has(filePath)) {
+      if (nextPaths.has(filePath) || preservedPendingPaths.has(filePath)) {
         continue;
       }
       const target = resolveWorkspacePath(mirror.workspacePath, filePath);
@@ -70,6 +73,9 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
   for (const file of files) {
     const target = resolveWorkspacePath(mirror.workspacePath, file.path);
     assertSafeWorkspaceTarget(mirror.workspacePath, target, file.path);
+    if (preservedPendingPaths.has(file.path) && fs.existsSync(target)) {
+      continue;
+    }
     const prev = previousByPath.get(file.path);
     const nextHash = hashProjectFile(file);
     if (prev && prev.hash === nextHash && workspaceFileMatchesBaseline(target, prev)) {
@@ -84,6 +90,10 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
   const nextBaselineFiles = fullProjectSnapshot
     ? files.map(file => buildBaselineFile(file))
     : mergePartialBaselineFiles(previous.files || [], files);
+  const remainingPendingPaths = fullProjectSnapshot && preservedPendingPaths.size
+    ? findPendingWorkspacePaths(mirror.workspacePath, nextBaselineFiles)
+    : [];
+  const hasPendingWriteback = remainingPendingPaths.length > 0;
 
   writeBaseline(mirror.baselinePath, {
     ...previous,
@@ -93,9 +103,13 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
     lastPartialSyncAt: fullProjectSnapshot ? previous.lastPartialSyncAt : now,
     lastSyncSource: fullProjectSnapshot ? (project?.capabilities?.method || 'snapshot') : previous.lastSyncSource,
     lastFileCount: files.length,
-    dirty: fullProjectSnapshot ? false : previous.dirty === true,
-    dirtyReason: fullProjectSnapshot ? '' : previous.dirtyReason || '',
-    dirtyAt: fullProjectSnapshot ? '' : previous.dirtyAt || '',
+    dirty: fullProjectSnapshot ? hasPendingWriteback : previous.dirty === true,
+    dirtyReason: fullProjectSnapshot
+      ? (hasPendingWriteback ? 'writeback_pending_changes' : '')
+      : previous.dirtyReason || '',
+    dirtyAt: fullProjectSnapshot
+      ? (hasPendingWriteback ? (previous.dirtyAt || now) : '')
+      : previous.dirtyAt || '',
     files: nextBaselineFiles
   });
 
@@ -104,6 +118,7 @@ async function syncOverleafToMirror({ projectId, project, rootDir }) {
     fileCount: files.length,
     writtenCount,
     skippedFiles,
+    pendingWritebackPaths: remainingPendingPaths,
     partialSnapshot: !fullProjectSnapshot
   };
 }
@@ -794,9 +809,6 @@ async function confirmWritebackFiles({ projectId, paths, rootDir }) {
   if (!baseline.lastFullSyncAt) {
     return { ok: false, reason: 'no_baseline' };
   }
-  if (baseline.dirty === true) {
-    return { ok: false, reason: 'dirty_mirror' };
-  }
   const filesByPath = new Map((baseline.files || []).map(file => [file.path, file]));
   const confirmed = [];
   for (const rawPath of Array.isArray(paths) ? paths : []) {
@@ -831,13 +843,48 @@ async function confirmWritebackFiles({ projectId, paths, rootDir }) {
     return { ok: false, reason: 'no_paths' };
   }
   const now = new Date().toISOString();
+  const pendingPaths = findPendingWorkspacePaths(mirror.workspacePath, Array.from(filesByPath.values()));
+  const hasPendingChanges = pendingPaths.length > 0;
   writeBaseline(mirror.baselinePath, {
     ...baseline,
     lastFullSyncAt: now,
     lastSyncSource: 'writeback-confirm',
+    dirty: hasPendingChanges,
+    dirtyReason: hasPendingChanges ? 'writeback_pending_changes' : '',
+    dirtyAt: hasPendingChanges ? (baseline.dirtyAt || now) : '',
     files: Array.from(filesByPath.values())
   });
-  return { ok: true, confirmed, lastFullSyncAt: now };
+  return { ok: true, confirmed, pendingPaths, lastFullSyncAt: now };
+}
+
+function findPendingWorkspacePaths(workspacePath, baselineFiles = []) {
+  const baselineByPath = new Map((baselineFiles || []).map(file => [file.path, file]));
+  const currentPaths = listWorkspaceFiles(workspacePath);
+  const currentPathSet = new Set(currentPaths);
+  const pending = [];
+
+  for (const filePath of currentPaths) {
+    const baselineFile = baselineByPath.get(filePath);
+    if (!baselineFile) {
+      if (!isGeneratedArtifactPath(filePath, baselineByPath)) {
+        pending.push(filePath);
+      }
+      continue;
+    }
+    const target = resolveWorkspacePath(workspacePath, filePath);
+    const matches = baselineFile.kind === 'binary'
+      ? hashBytes(fs.readFileSync(target)) === baselineFile.hash
+      : hashText(fs.readFileSync(target, 'utf8')) === baselineFile.hash;
+    if (!matches) {
+      pending.push(filePath);
+    }
+  }
+  for (const baselineFile of baselineFiles || []) {
+    if (baselineFile?.path && !currentPathSet.has(baselineFile.path)) {
+      pending.push(baselineFile.path);
+    }
+  }
+  return Array.from(new Set(pending)).sort();
 }
 
 async function patchMirrorFiles({ projectId, files, rootDir, source = 'ot' }) {

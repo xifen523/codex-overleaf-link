@@ -163,6 +163,72 @@
     return Array.isArray(applied?.applied) ? applied.applied : [];
   }
 
+  function blockOperationsDependingOnSkippedCreates(operations = [], skippedEntries = [], project = {}) {
+    const existingPaths = new Set((project.files || []).map(file => file?.path).filter(Boolean));
+    const missingDependencies = [];
+    for (const entry of skippedEntries || []) {
+      const operation = entry?.operation || {};
+      if ((operation.type === 'create' || operation.type === 'binary-create')
+        && operation.path
+        && !existingPaths.has(operation.path)) {
+        missingDependencies.push(operation.path);
+      }
+    }
+    if (!missingDependencies.length) {
+      return { operations, skipped: [] };
+    }
+
+    const safe = [];
+    const skipped = [];
+    for (const operation of operations || []) {
+      const payload = getOperationInsertedText(operation);
+      const dependency = missingDependencies.find(filePath => textReferencesProjectPath(payload, filePath));
+      if (!dependency) {
+        safe.push(operation);
+        continue;
+      }
+      skipped.push({
+        operation,
+        result: {
+          ok: false,
+          code: 'dependency_write_blocked',
+          reason: `${operation.path || 'This text change'} was not written because it references ${dependency}, which was not written. Approve or restore the dependency before retrying.`
+        }
+      });
+    }
+    return { operations: safe, skipped };
+  }
+
+  function getOperationInsertedText(operation = {}) {
+    const parts = [];
+    for (const field of ['content', 'replaceAll', 'replace']) {
+      if (typeof operation[field] === 'string') {
+        parts.push(operation[field]);
+      }
+    }
+    for (const patch of Array.isArray(operation.patches) ? operation.patches : []) {
+      if (typeof patch?.insert === 'string') {
+        parts.push(patch.insert);
+      }
+    }
+    return parts.join('\n');
+  }
+
+  function textReferencesProjectPath(text, projectPath) {
+    if (!text || !projectPath) {
+      return false;
+    }
+    const normalizedPath = String(projectPath).replace(/\\/g, '/');
+    const candidates = [normalizedPath];
+    if (/\.(?:png|jpe?g|pdf|eps|svg|tex|bib)$/i.test(normalizedPath)) {
+      candidates.push(normalizedPath.replace(/\.[^./]+$/, ''));
+    }
+    return candidates.some(candidate => {
+      const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp(`(^|[\\s{'(=,])${escaped}(?=$|[\\s}'),;])`).test(text);
+    });
+  }
+
   function mergeVerifiedAppliedFiles(freshProject = {}, originalProject = {}, applied = {}) {
     const filesByPath = new Map((freshProject.files || []).map(file => [file.path, { ...file }]));
     const originalByPath = new Map((originalProject.files || []).map(file => [file.path, file]));
@@ -314,6 +380,7 @@
   }
 
   return {
+    blockOperationsDependingOnSkippedCreates,
     buildSyncApplyOperations,
     computeSingleTextPatch,
     formatUnsupportedLocalChangeSummary,

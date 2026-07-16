@@ -229,6 +229,13 @@
     const binaryDecision = await confirmBinaryOperations(operations);
     operations = binaryDecision.operations;
     additionalSkippedEntries.push(...binaryDecision.skipped);
+    const dependencyDecision = writebackController.blockOperationsDependingOnSkippedCreates(
+      operations,
+      additionalSkippedEntries,
+      project
+    );
+    operations = dependencyDecision.operations;
+    additionalSkippedEntries.push(...dependencyDecision.skipped);
 
     if (!operations.length) {
       appendRunEvent({
@@ -507,9 +514,11 @@
           paths: Array.from(new Set(paths))
         }
       });
-      return response?.ok === true && response?.result?.ok === true;
+      return response?.ok === true && response?.result?.ok === true
+        ? response.result
+        : null;
     } catch (error) {
-      return false;
+      return null;
     }
   }
 
@@ -521,13 +530,33 @@
       return;
     }
 
-    if (await tryConfirmMirrorWriteback(applied)) {
+    const mirrorConfirmation = await tryConfirmMirrorWriteback(applied);
+    if (mirrorConfirmation) {
+      const pendingPaths = Array.isArray(mirrorConfirmation.pendingPaths)
+        ? mirrorConfirmation.pendingPaths
+        : [];
+      appendRunEvent({
+        title: pendingPaths.length
+          ? tx(
+            `${pendingPaths.length} local change(s) are still pending writeback. They were preserved for the next retry.`,
+            `仍有 ${pendingPaths.length} 项本地改动等待写回；这些内容已保留，下一次可继续重试。`
+          )
+          : tx(
+            'Local Codex workspace confirmed in place (no project re-download needed). The next run starts from the latest content.',
+            '本地 Codex workspace 已就地确认（无需重新下载项目），下一轮将从最新内容开始。'
+          ),
+        status: pendingPaths.length ? 'warning' : 'completed'
+      });
+      return;
+    }
+
+    if (getSkippedEntries(applied).length) {
       appendRunEvent({
         title: tx(
-          'Local Codex workspace confirmed in place (no project re-download needed). The next run starts from the latest content.',
-          '本地 Codex workspace 已就地确认（无需重新下载项目），下一轮将从最新内容开始。'
+          'Some writeback items are still pending. Codex preserved the local workspace and skipped the full project refresh so those files are not lost.',
+          '仍有写回项目待处理。Codex 已保留本地 workspace，并跳过完整项目刷新，避免未写入文件丢失。'
         ),
-        status: 'completed'
+        status: 'warning'
       });
       return;
     }
