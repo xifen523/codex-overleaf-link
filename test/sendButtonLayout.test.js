@@ -91,7 +91,7 @@ test('composer sends through a form submit path with a guarded run handler', () 
   assert.match(composerPanel, /<form class="codex-composer" data-composer-form>/);
   assert.match(composerPanel, /<button type="submit" data-run title="Send" aria-label="Send">↑<\/button>/);
   assert.match(composerPanel, /'submit'/);
-  assert.match(composerPanel, /event\.preventDefault\(\);\s*instance\.callbacks\.onSubmit\?\.\(\);/);
+  assert.match(composerPanel, /event\.preventDefault\(\);[\s\S]*instance\.callbacks\.onSubmit\?\.\(\);/);
   assert.match(composerPanel, /requestSubmit\?\.\(\)/);
   assert.match(contentScript, /onSubmit:\s*\(\) => safeRunTask\(\)/);
   assert.match(contentScript, /function safeRunTask\(\)/);
@@ -150,6 +150,18 @@ test('clicking the running spinner requests cancellation instead of being disabl
   assert.match(contentScript, /method:\s*'codex\.cancel'/);
   assert.doesNotMatch(setRunningBody, /\[data-run\]'\)\.disabled = running/);
   assert.match(setRunningBody, /aria-label', running \? tr\('cancelRun'\) : tr\('send'\)/);
+});
+
+test('composer ignores an immediate second send-button interaction before it can become cancel', () => {
+  const composerPanel = fs.readFileSync(
+    path.join(__dirname, '../extension/src/content/composerPanel.js'),
+    'utf8'
+  );
+
+  assert.match(composerPanel, /const RUN_TOGGLE_GRACE_MS = 400/);
+  assert.match(composerPanel, /runToggleLockedUntil:\s*0/);
+  assert.match(composerPanel, /instance\.runToggleLockedUntil = now \+ RUN_TOGGLE_GRACE_MS/);
+  assert.match(composerPanel, /if \(Date\.now\(\) < instance\.runToggleLockedUntil\) \{\s*return;/);
 });
 
 test('task failures after a user cancellation request render as interrupted', () => {

@@ -1,6 +1,8 @@
 (function initCodexOverleafComposerPanel() {
   'use strict';
 
+  const RUN_TOGGLE_GRACE_MS = 400;
+
   function create(options = {}) {
     const container = options.container;
     if (!container) {
@@ -11,6 +13,7 @@
       callbacks: options.callbacks || {},
       i18n: options.i18n || {},
       attachmentController: options.attachmentController || null,
+      runToggleLockedUntil: 0,
       listeners: []
     };
 
@@ -130,6 +133,11 @@
     const task = instance.container.querySelector('[data-task]');
     bind(instance, form, 'submit', event => {
       event.preventDefault();
+      const now = Date.now();
+      if (now < instance.runToggleLockedUntil) {
+        return;
+      }
+      instance.runToggleLockedUntil = now + RUN_TOGGLE_GRACE_MS;
       instance.callbacks.onSubmit?.();
     });
     bind(instance, task, 'paste', event => instance.callbacks.onPaste?.(event));
@@ -138,6 +146,9 @@
     bind(instance, form, 'drop', event => instance.callbacks.onDrop?.(event));
     bind(instance, instance.container.querySelector('[data-run]'), 'click', event => {
       event.preventDefault();
+      if (Date.now() < instance.runToggleLockedUntil) {
+        return;
+      }
       if (instance.callbacks.isRunning?.()) {
         instance.callbacks.onCancel?.();
         return;
